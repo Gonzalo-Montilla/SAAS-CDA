@@ -1,7 +1,7 @@
 """
 Modelo de Usuario
 """
-from sqlalchemy import Column, String, Boolean, DateTime, Enum as SQLEnum
+from sqlalchemy import Column, String, Boolean, DateTime, Enum as SQLEnum, ForeignKey
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
@@ -24,6 +24,7 @@ class Usuario(Base):
     __tablename__ = "usuarios"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     email = Column(String(255), unique=True, nullable=False, index=True)
     hashed_password = Column(String(255), nullable=False)
     nombre_completo = Column(String(200), nullable=False)
@@ -35,6 +36,7 @@ class Usuario(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     
     # Relaciones
+    tenant = relationship("Tenant", back_populates="usuarios")
     reset_tokens = relationship("PasswordResetToken", back_populates="usuario", cascade="all, delete-orphan")
     
     def __repr__(self):

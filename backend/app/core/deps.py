@@ -41,10 +41,15 @@ def get_current_user(
     user_id: Optional[str] = payload.get("sub")
     if user_id is None:
         raise credentials_exception
+
+    token_tenant_id: Optional[str] = payload.get("tenant_id")
+    if token_tenant_id is None:
+        raise credentials_exception
     
     # Buscar usuario en base de datos
     try:
         user_uuid = UUID(user_id)
+        token_tenant_uuid = UUID(token_tenant_id)
     except ValueError:
         raise credentials_exception
     
@@ -57,6 +62,13 @@ def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Usuario inactivo"
+        )
+
+    if user.tenant_id != token_tenant_uuid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Contexto de tenant inválido",
+            headers={"WWW-Authenticate": "Bearer"},
         )
     
     return user

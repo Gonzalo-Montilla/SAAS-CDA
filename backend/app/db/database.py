@@ -1,9 +1,10 @@
 """
 Configuración de base de datos PostgreSQL
 """
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from uuid import UUID
 from app.core.config import settings
 
 # Motor de base de datos
@@ -19,6 +20,106 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Base para modelos
 Base = declarative_base()
+
+
+def ensure_tenant_baseline_schema(db):
+    """
+    Asegura baseline multitenant sin romper instalaciones existentes.
+    """
+    default_tenant_id = settings.SAAS_DEFAULT_TENANT_ID
+    default_tenant_slug = settings.SAAS_DEFAULT_TENANT_SLUG
+    default_tenant_name = settings.SAAS_DEFAULT_TENANT_NAME
+
+    # Validar formato UUID del tenant default configurado
+    UUID(default_tenant_id)
+
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS tenants (
+                id UUID PRIMARY KEY,
+                nombre VARCHAR(200) NOT NULL,
+                slug VARCHAR(120) UNIQUE NOT NULL,
+                activo BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE
+            )
+            """
+        )
+    )
+
+    db.execute(
+        text(
+            """
+            INSERT INTO tenants (id, nombre, slug, activo, created_at)
+            VALUES (:tenant_id, :tenant_name, :tenant_slug, TRUE, NOW())
+            ON CONFLICT (slug) DO NOTHING
+            """
+        ),
+        {
+            "tenant_id": default_tenant_id,
+            "tenant_name": default_tenant_name,
+            "tenant_slug": default_tenant_slug,
+        },
+    )
+
+    tenant_column_exists = db.execute(
+        text(
+            """
+            SELECT 1
+            FROM information_schema.columns
+            WHERE table_name = 'usuarios' AND column_name = 'tenant_id'
+            """
+        )
+    ).scalar()
+
+    if not tenant_column_exists:
+        db.execute(text("ALTER TABLE usuarios ADD COLUMN tenant_id UUID"))
+
+    db.execute(
+        text(
+            """
+            UPDATE usuarios
+            SET tenant_id = :tenant_id
+            WHERE tenant_id IS NULL
+            """
+        ),
+        {"tenant_id": default_tenant_id},
+    )
+
+    db.execute(text("ALTER TABLE usuarios ALTER COLUMN tenant_id SET NOT NULL"))
+
+    fk_exists = db.execute(
+        text(
+            """
+            SELECT 1
+            FROM pg_constraint
+            WHERE conname = 'fk_usuarios_tenant_id'
+            """
+        )
+    ).scalar()
+    if not fk_exists:
+        db.execute(
+            text(
+                """
+                ALTER TABLE usuarios
+                ADD CONSTRAINT fk_usuarios_tenant_id
+                FOREIGN KEY (tenant_id) REFERENCES tenants(id)
+                """
+            )
+        )
+
+    idx_exists = db.execute(
+        text(
+            """
+            SELECT 1
+            FROM pg_indexes
+            WHERE tablename = 'usuarios' AND indexname = 'ix_usuarios_tenant_id'
+            """
+        )
+    ).scalar()
+    if not idx_exists:
+        db.execute(text("CREATE INDEX ix_usuarios_tenant_id ON usuarios(tenant_id)"))
 
 
 def get_db():
@@ -37,6 +138,7 @@ def init_db():
     Inicializar base de datos: crear tablas y datos iniciales
     """
     from app.models.usuario import Usuario
+    from app.models.tenant import Tenant
     from app.models.tarifa import Tarifa, ComisionSOAT
     from app.models.caja import Caja, MovimientoCaja
     from app.models.vehiculo import VehiculoProceso
@@ -49,6 +151,14 @@ def init_db():
     db = SessionLocal()
     
     try:
+        ensure_tenant_baseline_schema(db)
+
+        default_tenant = db.query(Tenant).filter(
+            Tenant.slug == settings.SAAS_DEFAULT_TENANT_SLUG
+        ).first()
+        if not default_tenant:
+            raise RuntimeError("No se pudo inicializar tenant default")
+
         # Verificar si ya existe usuario admin
         admin_exists = db.query(Usuario).filter(Usuario.email == "admin@cdalaflorida.com").first()
         
@@ -57,6 +167,7 @@ def init_db():
             
             # Crear usuario administrador
             admin = Usuario(
+                tenant_id=default_tenant.id,
                 email="admin@cdalaflorida.com",
                 hashed_password=get_password_hash("admin123"),
                 nombre_completo="Administrador CDA",

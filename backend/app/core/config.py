@@ -23,6 +23,11 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 30
     REFRESH_TOKEN_EXPIRE_DAYS: int = 7
+
+    # Baseline multitenant (Fase 1)
+    SAAS_DEFAULT_TENANT_ID: str = "00000000-0000-0000-0000-000000000001"
+    SAAS_DEFAULT_TENANT_SLUG: str = "default"
+    SAAS_DEFAULT_TENANT_NAME: str = "Tenant Default CDA"
     
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = ["*"]

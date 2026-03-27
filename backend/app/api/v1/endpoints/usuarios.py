@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
 from typing import List, Optional
-from datetime import datetime
+from datetime import datetime, timezone
 
 from app.core.deps import get_db, get_current_user, get_admin
 from app.models.usuario import Usuario, RolEnum
@@ -70,7 +70,7 @@ def listar_usuarios(
     """
     Listar todos los usuarios del sistema (solo Admin)
     """
-    query = db.query(Usuario)
+    query = db.query(Usuario).filter(Usuario.tenant_id == current_user.tenant_id)
     
     # Filtro de búsqueda
     if buscar:
@@ -117,15 +117,21 @@ def obtener_estadisticas_usuarios(
     """
     Estadísticas de usuarios del sistema
     """
-    total_usuarios = db.query(func.count(Usuario.id)).scalar()
-    usuarios_activos = db.query(func.count(Usuario.id)).filter(Usuario.activo == True).scalar()
+    total_usuarios = db.query(func.count(Usuario.id)).filter(Usuario.tenant_id == current_user.tenant_id).scalar()
+    usuarios_activos = db.query(func.count(Usuario.id)).filter(
+        Usuario.tenant_id == current_user.tenant_id,
+        Usuario.activo == True
+    ).scalar()
     usuarios_inactivos = total_usuarios - usuarios_activos
     
     # Contar por rol (solo roles que existen en la base de datos)
     usuarios_por_rol = {}
     for rol in RolEnum:
         try:
-            count = db.query(func.count(Usuario.id)).filter(Usuario.rol == rol).scalar()
+            count = db.query(func.count(Usuario.id)).filter(
+                Usuario.tenant_id == current_user.tenant_id,
+                Usuario.rol == rol
+            ).scalar()
             usuarios_por_rol[rol.value] = count
         except Exception as e:
             # Si el rol no existe en el enum de la BD, poner 0
@@ -148,7 +154,10 @@ def obtener_usuario(
     """
     Obtener detalles de un usuario específico
     """
-    usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    usuario = db.query(Usuario).filter(
+        Usuario.id == usuario_id,
+        Usuario.tenant_id == current_user.tenant_id
+    ).first()
     
     if not usuario:
         raise HTTPException(
@@ -179,7 +188,10 @@ def crear_usuario(
     Crear un nuevo usuario (solo Admin)
     """
     # Verificar que el email no exista
-    existing_user = db.query(Usuario).filter(Usuario.email == usuario_data.email).first()
+    existing_user = db.query(Usuario).filter(
+        Usuario.email == usuario_data.email,
+        Usuario.tenant_id == current_user.tenant_id
+    ).first()
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -188,6 +200,7 @@ def crear_usuario(
     
     # Crear usuario
     nuevo_usuario = Usuario(
+        tenant_id=current_user.tenant_id,
         email=usuario_data.email,
         hashed_password=get_password_hash(usuario_data.password),
         nombre_completo=usuario_data.nombre_completo,
@@ -236,7 +249,10 @@ def actualizar_usuario(
     """
     Actualizar información de un usuario (solo Admin)
     """
-    usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    usuario = db.query(Usuario).filter(
+        Usuario.id == usuario_id,
+        Usuario.tenant_id == current_user.tenant_id
+    ).first()
     
     if not usuario:
         raise HTTPException(
@@ -246,7 +262,10 @@ def actualizar_usuario(
     
     # Verificar email único si se está cambiando
     if usuario_data.email and usuario_data.email != usuario.email:
-        existing_user = db.query(Usuario).filter(Usuario.email == usuario_data.email).first()
+        existing_user = db.query(Usuario).filter(
+            Usuario.email == usuario_data.email,
+            Usuario.tenant_id == current_user.tenant_id
+        ).first()
         if existing_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -306,7 +325,10 @@ def cambiar_password(
     """
     Cambiar contraseña de un usuario (solo Admin)
     """
-    usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    usuario = db.query(Usuario).filter(
+        Usuario.id == usuario_id,
+        Usuario.tenant_id == current_user.tenant_id
+    ).first()
     
     if not usuario:
         raise HTTPException(
@@ -345,7 +367,10 @@ def toggle_estado_usuario(
     """
     Activar/Desactivar un usuario (solo Admin)
     """
-    usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    usuario = db.query(Usuario).filter(
+        Usuario.id == usuario_id,
+        Usuario.tenant_id == current_user.tenant_id
+    ).first()
     
     if not usuario:
         raise HTTPException(
@@ -384,7 +409,10 @@ def eliminar_usuario(
     Eliminar un usuario (solo Admin)
     ADVERTENCIA: Esto eliminará permanentemente el usuario
     """
-    usuario = db.query(Usuario).filter(Usuario.id == usuario_id).first()
+    usuario = db.query(Usuario).filter(
+        Usuario.id == usuario_id,
+        Usuario.tenant_id == current_user.tenant_id
+    ).first()
     
     if not usuario:
         raise HTTPException(

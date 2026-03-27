@@ -1,6 +1,7 @@
 // Usuarios y Auth
 export interface Usuario {
   id: string;
+  tenant_id: string;
   email: string;
   nombre_completo: string;
   rol: 'administrador' | 'cajero' | 'recepcionista';

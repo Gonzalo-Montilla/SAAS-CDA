@@ -33,6 +33,7 @@ class UsuarioUpdate(BaseModel):
 class UsuarioResponse(BaseModel):
     """Respuesta de usuario"""
     id: UUID
+    tenant_id: UUID
     email: EmailStr
     nombre_completo: str
     rol: str

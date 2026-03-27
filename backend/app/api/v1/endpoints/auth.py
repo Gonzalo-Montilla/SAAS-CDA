@@ -5,8 +5,9 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, EmailStr
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import secrets
+from uuid import UUID
 
 from app.core.deps import get_db, get_current_user, get_admin
 from app.core.security import verify_password, get_password_hash, create_access_token, create_refresh_token, decode_token
@@ -42,6 +43,7 @@ def register(
     # Crear usuario
     hashed_password = get_password_hash(user_data.password)
     new_user = Usuario(
+        tenant_id=admin.tenant_id,
         email=user_data.email,
         hashed_password=hashed_password,
         nombre_completo=user_data.nombre_completo,
@@ -54,10 +56,10 @@ def register(
     
     # Generar tokens
     access_token = create_access_token(
-        data={"sub": str(new_user.id), "rol": new_user.rol}
+        data={"sub": str(new_user.id), "rol": new_user.rol, "tenant_id": str(new_user.tenant_id)}
     )
     refresh_token = create_refresh_token(
-        data={"sub": str(new_user.id)}
+        data={"sub": str(new_user.id), "tenant_id": str(new_user.tenant_id)}
     )
     
     return Token(
@@ -112,10 +114,10 @@ def login(
     
     # Generar tokens
     access_token = create_access_token(
-        data={"sub": str(user.id), "rol": user.rol}
+        data={"sub": str(user.id), "rol": user.rol, "tenant_id": str(user.tenant_id)}
     )
     refresh_token = create_refresh_token(
-        data={"sub": str(user.id)}
+        data={"sub": str(user.id), "tenant_id": str(user.tenant_id)}
     )
     
     return Token(
@@ -149,7 +151,13 @@ def refresh_token(
         )
     
     user_id = payload.get("sub")
+    token_tenant_id = payload.get("tenant_id")
     if user_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token inválido"
+        )
+    if token_tenant_id is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token inválido"
@@ -162,13 +170,25 @@ def refresh_token(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Usuario no encontrado o inactivo"
         )
+
+    try:
+        if user.tenant_id != UUID(token_tenant_id):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token inválido para este tenant"
+            )
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token inválido"
+        )
     
     # Generar nuevos tokens
     access_token = create_access_token(
-        data={"sub": str(user.id), "rol": user.rol}
+        data={"sub": str(user.id), "rol": user.rol, "tenant_id": str(user.tenant_id)}
     )
     new_refresh_token = create_refresh_token(
-        data={"sub": str(user.id)}
+        data={"sub": str(user.id), "tenant_id": str(user.tenant_id)}
     )
     
     return Token(
