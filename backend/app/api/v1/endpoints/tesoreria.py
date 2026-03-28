@@ -35,14 +35,15 @@ router = APIRouter()
 
 # ==================== FUNCIONES AUXILIARES ====================
 
-def _calcular_desglose_disponible(db: Session) -> dict:
+def _calcular_desglose_disponible(db: Session, tenant_id) -> dict:
     """
     Calcula el desglose de denominaciones actualmente disponible en caja.
     Retorna un diccionario con las cantidades de cada denominación.
     """
     # Obtener todos los movimientos en efectivo con su desglose
     movimientos_efectivo = db.query(MovimientoTesoreria).filter(
-        MovimientoTesoreria.metodo_pago == "efectivo"
+        MovimientoTesoreria.metodo_pago == "efectivo",
+        MovimientoTesoreria.tenant_id == tenant_id
     ).all()
     
     # Inicializar contadores
@@ -170,7 +171,7 @@ def crear_movimiento(
         # Validar disponibilidad de denominaciones para EGRESOS
         if movimiento_data.tipo == "egreso":
             desglose_solicitado = movimiento_data.desglose_efectivo
-            desglose_disponible = _calcular_desglose_disponible(db)
+            desglose_disponible = _calcular_desglose_disponible(db, current_user.tenant_id)
             
             # Validar cada denominación
             denominaciones_faltantes = []
@@ -223,6 +224,7 @@ def crear_movimiento(
     
     # Crear movimiento
     nuevo_movimiento = MovimientoTesoreria(
+        tenant_id=current_user.tenant_id,
         tipo=TipoMovimientoTesoreria(movimiento_data.tipo),
         categoria_ingreso=CategoriaIngresoTesoreria(movimiento_data.categoria_ingreso) if movimiento_data.categoria_ingreso else None,
         categoria_egreso=CategoriaEgresoTesoreria(movimiento_data.categoria_egreso) if movimiento_data.categoria_egreso else None,
@@ -241,6 +243,7 @@ def crear_movimiento(
     # Si es efectivo y hay desglose, guardarlo
     if movimiento_data.metodo_pago == "efectivo" and movimiento_data.desglose_efectivo:
         desglose = DesgloseEfectivoTesoreria(
+            tenant_id=current_user.tenant_id,
             movimiento_id=nuevo_movimiento.id,
             **movimiento_data.desglose_efectivo.model_dump()
         )
@@ -266,7 +269,9 @@ def listar_movimientos(
     """
     Listar movimientos de tesorería con filtros (solo administrador)
     """
-    query = db.query(MovimientoTesoreria)
+    query = db.query(MovimientoTesoreria).filter(
+        MovimientoTesoreria.tenant_id == current_user.tenant_id
+    )
     
     # Aplicar filtros
     if tipo:
@@ -302,7 +307,8 @@ def obtener_movimiento(
     Obtener detalle de un movimiento específico
     """
     movimiento = db.query(MovimientoTesoreria).filter(
-        MovimientoTesoreria.id == movimiento_id
+        MovimientoTesoreria.id == movimiento_id,
+        MovimientoTesoreria.tenant_id == current_user.tenant_id
     ).first()
     
     if not movimiento:
@@ -325,7 +331,9 @@ def obtener_saldo_actual(
     Obtener saldo actual de la caja fuerte
     """
     # Sumar todos los movimientos (positivos y negativos)
-    saldo = db.query(func.sum(MovimientoTesoreria.monto)).scalar() or Decimal(0)
+    saldo = db.query(func.sum(MovimientoTesoreria.monto)).filter(
+        MovimientoTesoreria.tenant_id == current_user.tenant_id
+    ).scalar() or Decimal(0)
     
     return {
         "saldo_actual": float(saldo),
@@ -360,6 +368,7 @@ def obtener_resumen(
     # Obtener movimientos del período
     movimientos = db.query(MovimientoTesoreria).filter(
         and_(
+            MovimientoTesoreria.tenant_id == current_user.tenant_id,
             MovimientoTesoreria.fecha_movimiento >= fecha_desde_dt,
             MovimientoTesoreria.fecha_movimiento <= fecha_hasta_dt
         )
@@ -387,10 +396,14 @@ def obtener_resumen(
             egresos_por_categoria[cat] = egresos_por_categoria.get(cat, Decimal(0)) + abs(mov.monto)
     
     # Saldo actual (todos los movimientos históricos)
-    saldo_actual = db.query(func.sum(MovimientoTesoreria.monto)).scalar() or Decimal(0)
+    saldo_actual = db.query(func.sum(MovimientoTesoreria.monto)).filter(
+        MovimientoTesoreria.tenant_id == current_user.tenant_id
+    ).scalar() or Decimal(0)
     
     # Obtener configuración de alertas
-    config = db.query(ConfiguracionTesoreria).first()
+    config = db.query(ConfiguracionTesoreria).filter(
+        ConfiguracionTesoreria.tenant_id == current_user.tenant_id
+    ).first()
     umbral_minimo = config.saldo_minimo_alerta if config else Decimal(100000)
     saldo_bajo_umbral = saldo_actual < umbral_minimo
     
@@ -420,6 +433,8 @@ def obtener_desglose_saldo(
     resultados = db.query(
         MovimientoTesoreria.metodo_pago,
         func.sum(MovimientoTesoreria.monto).label('saldo')
+    ).filter(
+        MovimientoTesoreria.tenant_id == current_user.tenant_id
     ).group_by(MovimientoTesoreria.metodo_pago).all()
     
     desglose = {}
@@ -447,7 +462,8 @@ def obtener_desglose_efectivo(
     """
     # Obtener todos los movimientos en efectivo con su desglose
     movimientos_efectivo = db.query(MovimientoTesoreria).filter(
-        MovimientoTesoreria.metodo_pago == "efectivo"
+        MovimientoTesoreria.metodo_pago == "efectivo",
+        MovimientoTesoreria.tenant_id == current_user.tenant_id
     ).all()
     
     # Inicializar contadores
@@ -513,6 +529,7 @@ def obtener_estadisticas(
     """
     movimientos = db.query(MovimientoTesoreria).filter(
         and_(
+            MovimientoTesoreria.tenant_id == current_user.tenant_id,
             MovimientoTesoreria.fecha_movimiento >= fecha_desde,
             MovimientoTesoreria.fecha_movimiento <= fecha_hasta
         )
@@ -539,6 +556,7 @@ def obtener_estadisticas(
     
     # Saldo inicial (antes del período)
     saldo_inicial = db.query(func.sum(MovimientoTesoreria.monto)).filter(
+        MovimientoTesoreria.tenant_id == current_user.tenant_id,
         MovimientoTesoreria.fecha_movimiento < fecha_desde
     ).scalar() or Decimal(0)
     
@@ -567,11 +585,14 @@ def obtener_configuracion(
     """
     Obtener configuración de tesorería
     """
-    config = db.query(ConfiguracionTesoreria).first()
+    config = db.query(ConfiguracionTesoreria).filter(
+        ConfiguracionTesoreria.tenant_id == current_user.tenant_id
+    ).first()
     
     # Si no existe, crear una por defecto
     if not config:
         config = ConfiguracionTesoreria(
+            tenant_id=current_user.tenant_id,
             saldo_minimo_alerta=Decimal(100000),
             notificar_saldo_bajo=True,
             updated_by=current_user.id
@@ -592,11 +613,14 @@ def actualizar_configuracion(
     """
     Actualizar configuración de tesorería
     """
-    config = db.query(ConfiguracionTesoreria).first()
+    config = db.query(ConfiguracionTesoreria).filter(
+        ConfiguracionTesoreria.tenant_id == current_user.tenant_id
+    ).first()
     
     if not config:
         # Crear si no existe
         config = ConfiguracionTesoreria(
+            tenant_id=current_user.tenant_id,
             updated_by=current_user.id
         )
         db.add(config)
@@ -647,7 +671,10 @@ async def descargar_comprobante_egreso(
     try:
         payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
         user_id = payload.get("sub")
+        token_tenant_id = payload.get("tenant_id")
         if not user_id:
+            raise HTTPException(status_code=401, detail="Token inválido")
+        if not token_tenant_id:
             raise HTTPException(status_code=401, detail="Token inválido")
     except JWTError:
         raise HTTPException(status_code=401, detail="Token inválido")
@@ -656,10 +683,13 @@ async def descargar_comprobante_egreso(
     current_user = db.query(Usuario).filter(Usuario.id == user_id).first()
     if not current_user or not current_user.activo:
         raise HTTPException(status_code=401, detail="Usuario no activo")
+    if str(current_user.tenant_id) != str(token_tenant_id):
+        raise HTTPException(status_code=401, detail="Token inválido")
     
     # Obtener movimiento
     movimiento = db.query(MovimientoTesoreria).filter(
-        MovimientoTesoreria.id == movimiento_id
+        MovimientoTesoreria.id == movimiento_id,
+        MovimientoTesoreria.tenant_id == current_user.tenant_id
     ).first()
     
     if not movimiento:

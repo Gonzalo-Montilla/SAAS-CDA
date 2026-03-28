@@ -1,6 +1,6 @@
 """
 Script para cargar tarifas 2025 de todos los tipos de vehículos
-CDA La Florida
+CDASOFT
 """
 import sys
 import os
@@ -224,16 +224,17 @@ def main():
     db = SessionLocal()
     try:
         print("Cargando tarifas 2025...")
+        tenant_id = settings.SAAS_DEFAULT_TENANT_ID
         
         for tarifa_data in tarifas_2025:
             # Insertar usando SQL directo para evitar problemas de relaciones
             sql = text("""
                 INSERT INTO tarifas (
-                    id, ano_vigencia, vigencia_inicio, vigencia_fin, tipo_vehiculo,
+                    id, tenant_id, ano_vigencia, vigencia_inicio, vigencia_fin, tipo_vehiculo,
                     antiguedad_min, antiguedad_max, valor_rtm, valor_terceros, 
                     valor_total, activa, created_at
                 ) VALUES (
-                    gen_random_uuid(), :ano_vigencia, :vigencia_inicio, :vigencia_fin, :tipo_vehiculo,
+                    gen_random_uuid(), :tenant_id, :ano_vigencia, :vigencia_inicio, :vigencia_fin, :tipo_vehiculo,
                     :antiguedad_min, :antiguedad_max, :valor_rtm, :valor_terceros,
                     :valor_total, :activa, NOW()
                 )
@@ -242,6 +243,7 @@ def main():
             # Remover descripcion_antiguedad (es una propiedad calculada)
             data = {k: v for k, v in tarifa_data.items() if k != 'descripcion_antiguedad'}
             data['activa'] = True
+            data['tenant_id'] = tenant_id
             
             db.execute(sql, data)
             print(f"✓ {tarifa_data['tipo_vehiculo']} - {tarifa_data['descripcion_antiguedad']}: ${tarifa_data['valor_total']}")

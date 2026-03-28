@@ -24,6 +24,7 @@ class NotificacionCierreCaja(Base):
     __tablename__ = "notificaciones_cierre_caja"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     caja_id = Column(UUID(as_uuid=True), ForeignKey("cajas.id"), nullable=False)
     
     # Información del cierre

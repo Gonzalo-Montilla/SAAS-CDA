@@ -34,6 +34,7 @@ def obtener_tarifas_vigentes(
     tarifas = db.query(Tarifa).filter(
         and_(
             Tarifa.activa == True,
+            Tarifa.tenant_id == current_user.tenant_id,
             Tarifa.vigencia_inicio <= hoy,
             Tarifa.vigencia_fin >= hoy
         )
@@ -52,7 +53,8 @@ def obtener_tarifas_por_ano(
     Obtener tarifas de un año específico
     """
     tarifas = db.query(Tarifa).filter(
-        Tarifa.ano_vigencia == ano
+        Tarifa.ano_vigencia == ano,
+        Tarifa.tenant_id == current_user.tenant_id
     ).order_by(Tarifa.tipo_vehiculo, Tarifa.antiguedad_min).all()
     
     return TarifasPorAno(
@@ -74,6 +76,7 @@ def crear_tarifa(
     conflicto = db.query(Tarifa).filter(
         and_(
             Tarifa.ano_vigencia == tarifa_data.ano_vigencia,
+            Tarifa.tenant_id == admin.tenant_id,
             Tarifa.tipo_vehiculo == tarifa_data.tipo_vehiculo,
             Tarifa.antiguedad_min == tarifa_data.antiguedad_min,
             Tarifa.activa == True
@@ -87,6 +90,7 @@ def crear_tarifa(
         )
     
     nueva_tarifa = Tarifa(
+        tenant_id=admin.tenant_id,
         ano_vigencia=tarifa_data.ano_vigencia,
         vigencia_inicio=tarifa_data.vigencia_inicio,
         vigencia_fin=tarifa_data.vigencia_fin,
@@ -117,7 +121,10 @@ def actualizar_tarifa(
     """
     Actualizar tarifa existente (solo administrador)
     """
-    tarifa = db.query(Tarifa).filter(Tarifa.id == tarifa_id).first()
+    tarifa = db.query(Tarifa).filter(
+        Tarifa.id == tarifa_id,
+        Tarifa.tenant_id == admin.tenant_id
+    ).first()
     
     if not tarifa:
         raise HTTPException(
@@ -153,6 +160,7 @@ def obtener_comisiones_soat(
     comisiones = db.query(ComisionSOAT).filter(
         and_(
             ComisionSOAT.activa == True,
+            ComisionSOAT.tenant_id == current_user.tenant_id,
             ComisionSOAT.vigencia_inicio <= hoy,
             (ComisionSOAT.vigencia_fin >= hoy) | (ComisionSOAT.vigencia_fin == None)
         )
@@ -171,6 +179,7 @@ def crear_comision_soat(
     Crear nueva comisión SOAT (solo administrador)
     """
     nueva_comision = ComisionSOAT(
+        tenant_id=admin.tenant_id,
         tipo_vehiculo=comision_data.tipo_vehiculo,
         valor_comision=comision_data.valor_comision,
         vigencia_inicio=comision_data.vigencia_inicio,
@@ -196,7 +205,10 @@ def actualizar_comision_soat(
     """
     Actualizar comisión SOAT existente (solo administrador)
     """
-    comision = db.query(ComisionSOAT).filter(ComisionSOAT.id == comision_id).first()
+    comision = db.query(ComisionSOAT).filter(
+        ComisionSOAT.id == comision_id,
+        ComisionSOAT.tenant_id == admin.tenant_id
+    ).first()
     
     if not comision:
         raise HTTPException(
@@ -225,7 +237,10 @@ def eliminar_comision_soat(
     """
     Eliminar comisión SOAT (solo administrador)
     """
-    comision = db.query(ComisionSOAT).filter(ComisionSOAT.id == comision_id).first()
+    comision = db.query(ComisionSOAT).filter(
+        ComisionSOAT.id == comision_id,
+        ComisionSOAT.tenant_id == admin.tenant_id
+    ).first()
     
     if not comision:
         raise HTTPException(
@@ -247,7 +262,9 @@ def listar_todas_tarifas(
     """
     Listar todas las tarifas (solo administrador)
     """
-    tarifas = db.query(Tarifa).order_by(
+    tarifas = db.query(Tarifa).filter(
+        Tarifa.tenant_id == admin.tenant_id
+    ).order_by(
         Tarifa.ano_vigencia.desc(),
         Tarifa.tipo_vehiculo,
         Tarifa.antiguedad_min

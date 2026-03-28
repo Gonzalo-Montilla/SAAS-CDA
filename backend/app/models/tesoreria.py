@@ -51,6 +51,7 @@ class MovimientoTesoreria(Base):
     __tablename__ = "movimientos_tesoreria"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     
     # Tipo de movimiento
     tipo = Column(SQLEnum(TipoMovimientoTesoreria), nullable=False)
@@ -89,6 +90,7 @@ class DesgloseEfectivoTesoreria(Base):
     __tablename__ = "desglose_efectivo_tesoreria"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     movimiento_id = Column(UUID(as_uuid=True), ForeignKey("movimientos_tesoreria.id"), nullable=False, unique=True)
     
     # Billetes
@@ -140,6 +142,7 @@ class ConfiguracionTesoreria(Base):
     __tablename__ = "configuracion_tesoreria"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     
     # Alertas
     saldo_minimo_alerta = Column(Numeric(12, 2), default=100000)  # Alerta si saldo < $100,000

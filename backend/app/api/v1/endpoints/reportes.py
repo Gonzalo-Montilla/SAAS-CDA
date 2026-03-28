@@ -39,6 +39,7 @@ def obtener_dashboard_general(
     # Ingresos de Caja (todos los montos positivos)
     ingresos_caja = db.query(func.sum(MovimientoCaja.monto)).filter(
         and_(
+            MovimientoCaja.tenant_id == current_user.tenant_id,
             MovimientoCaja.created_at >= fecha_inicio,
             MovimientoCaja.created_at <= fecha_fin,
             MovimientoCaja.monto > 0
@@ -48,6 +49,7 @@ def obtener_dashboard_general(
     # Ingresos de Tesorería (todos los montos positivos)
     ingresos_tesoreria = db.query(func.sum(MovimientoTesoreria.monto)).filter(
         and_(
+            MovimientoTesoreria.tenant_id == current_user.tenant_id,
             MovimientoTesoreria.fecha_movimiento >= fecha_inicio,
             MovimientoTesoreria.fecha_movimiento <= fecha_fin,
             MovimientoTesoreria.monto > 0
@@ -61,6 +63,7 @@ def obtener_dashboard_general(
     # Egresos de Caja (todos los montos negativos)
     egresos_caja = db.query(func.sum(MovimientoCaja.monto)).filter(
         and_(
+            MovimientoCaja.tenant_id == current_user.tenant_id,
             MovimientoCaja.created_at >= fecha_inicio,
             MovimientoCaja.created_at <= fecha_fin,
             MovimientoCaja.monto < 0
@@ -70,6 +73,7 @@ def obtener_dashboard_general(
     # Egresos de Tesorería (todos los montos negativos)
     egresos_tesoreria = db.query(func.sum(MovimientoTesoreria.monto)).filter(
         and_(
+            MovimientoTesoreria.tenant_id == current_user.tenant_id,
             MovimientoTesoreria.fecha_movimiento >= fecha_inicio,
             MovimientoTesoreria.fecha_movimiento <= fecha_fin,
             MovimientoTesoreria.monto < 0
@@ -81,10 +85,14 @@ def obtener_dashboard_general(
     # ==================== SALDO TOTAL DISPONIBLE ====================
     
     # Saldo en todas las cajas
-    saldo_cajas = db.query(func.sum(MovimientoCaja.monto)).scalar() or Decimal(0)
+    saldo_cajas = db.query(func.sum(MovimientoCaja.monto)).filter(
+        MovimientoCaja.tenant_id == current_user.tenant_id
+    ).scalar() or Decimal(0)
     
     # Saldo en tesorería
-    saldo_tesoreria = db.query(func.sum(MovimientoTesoreria.monto)).scalar() or Decimal(0)
+    saldo_tesoreria = db.query(func.sum(MovimientoTesoreria.monto)).filter(
+        MovimientoTesoreria.tenant_id == current_user.tenant_id
+    ).scalar() or Decimal(0)
     
     saldo_total = float(saldo_cajas + saldo_tesoreria)
     
@@ -92,6 +100,7 @@ def obtener_dashboard_general(
     
     tramites_dia = db.query(func.count(VehiculoProceso.id)).filter(
         and_(
+            VehiculoProceso.tenant_id == current_user.tenant_id,
             VehiculoProceso.fecha_registro >= fecha_inicio,
             VehiculoProceso.fecha_registro <= fecha_fin
         )
@@ -108,6 +117,7 @@ def obtener_dashboard_general(
         # Ingresos de caja del día
         ing_caja = db.query(func.sum(MovimientoCaja.monto)).filter(
             and_(
+                MovimientoCaja.tenant_id == current_user.tenant_id,
                 MovimientoCaja.created_at >= dia_inicio,
                 MovimientoCaja.created_at <= dia_fin,
                 MovimientoCaja.monto > 0
@@ -117,6 +127,7 @@ def obtener_dashboard_general(
         # Ingresos de tesorería del día
         ing_tesoreria = db.query(func.sum(MovimientoTesoreria.monto)).filter(
             and_(
+                MovimientoTesoreria.tenant_id == current_user.tenant_id,
                 MovimientoTesoreria.fecha_movimiento >= dia_inicio,
                 MovimientoTesoreria.fecha_movimiento <= dia_fin,
                 MovimientoTesoreria.monto > 0
@@ -190,6 +201,7 @@ def obtener_movimientos_detallados(
     # ==================== MOVIMIENTOS DE CAJA ====================
     movimientos_caja = db.query(MovimientoCaja).filter(
         and_(
+            MovimientoCaja.tenant_id == current_user.tenant_id,
             MovimientoCaja.created_at >= fecha_inicio_dt,
             MovimientoCaja.created_at <= fecha_fin_dt
         )
@@ -224,6 +236,7 @@ def obtener_movimientos_detallados(
     # ==================== MOVIMIENTOS DE TESORERÍA ====================
     movimientos_tesoreria = db.query(MovimientoTesoreria).filter(
         and_(
+            MovimientoTesoreria.tenant_id == current_user.tenant_id,
             MovimientoTesoreria.fecha_movimiento >= fecha_inicio_dt,
             MovimientoTesoreria.fecha_movimiento <= fecha_fin_dt
         )
@@ -308,6 +321,7 @@ def obtener_desglose_conceptos(
     for tipo in TipoMovimiento:
         total = db.query(func.sum(MovimientoCaja.monto)).filter(
             and_(
+                MovimientoCaja.tenant_id == current_user.tenant_id,
                 MovimientoCaja.created_at >= fecha_inicio_dt,
                 MovimientoCaja.created_at <= fecha_fin_dt,
                 MovimientoCaja.tipo == tipo,
@@ -323,6 +337,7 @@ def obtener_desglose_conceptos(
     for cat in CategoriaIngresoTesoreria:
         total = db.query(func.sum(MovimientoTesoreria.monto)).filter(
             and_(
+                MovimientoTesoreria.tenant_id == current_user.tenant_id,
                 MovimientoTesoreria.fecha_movimiento >= fecha_inicio_dt,
                 MovimientoTesoreria.fecha_movimiento <= fecha_fin_dt,
                 MovimientoTesoreria.categoria_ingreso == cat,
@@ -340,6 +355,7 @@ def obtener_desglose_conceptos(
     for tipo in TipoMovimiento:
         total = db.query(func.sum(MovimientoCaja.monto)).filter(
             and_(
+                MovimientoCaja.tenant_id == current_user.tenant_id,
                 MovimientoCaja.created_at >= fecha_inicio_dt,
                 MovimientoCaja.created_at <= fecha_fin_dt,
                 MovimientoCaja.tipo == tipo,
@@ -355,6 +371,7 @@ def obtener_desglose_conceptos(
     for cat in CategoriaEgresoTesoreria:
         total = db.query(func.sum(MovimientoTesoreria.monto)).filter(
             and_(
+                MovimientoTesoreria.tenant_id == current_user.tenant_id,
                 MovimientoTesoreria.fecha_movimiento >= fecha_inicio_dt,
                 MovimientoTesoreria.fecha_movimiento <= fecha_fin_dt,
                 MovimientoTesoreria.categoria_egreso == cat,
@@ -407,6 +424,7 @@ def obtener_desglose_medios_pago(
         func.sum(MovimientoCaja.monto).label("total")
     ).filter(
         and_(
+            MovimientoCaja.tenant_id == current_user.tenant_id,
             MovimientoCaja.created_at >= fecha_inicio_dt,
             MovimientoCaja.created_at <= fecha_fin_dt,
             MovimientoCaja.metodo_pago.isnot(None)
@@ -429,6 +447,7 @@ def obtener_desglose_medios_pago(
         func.sum(MovimientoTesoreria.monto).label("total")
     ).filter(
         and_(
+            MovimientoTesoreria.tenant_id == current_user.tenant_id,
             MovimientoTesoreria.fecha_movimiento >= fecha_inicio_dt,
             MovimientoTesoreria.fecha_movimiento <= fecha_fin_dt
         )
@@ -475,6 +494,7 @@ def obtener_tramites_detallados(
     # Obtener vehículos del rango
     vehiculos = db.query(VehiculoProceso).filter(
         and_(
+            VehiculoProceso.tenant_id == current_user.tenant_id,
             VehiculoProceso.fecha_registro >= fecha_inicio_dt,
             VehiculoProceso.fecha_registro <= fecha_fin_dt
         )
@@ -549,6 +569,7 @@ def obtener_resumen_mensual(
     # Ingresos del mes
     ingresos_caja = db.query(func.sum(MovimientoCaja.monto)).filter(
         and_(
+            MovimientoCaja.tenant_id == current_user.tenant_id,
             MovimientoCaja.created_at >= fecha_inicio,
             MovimientoCaja.created_at <= fecha_fin,
             MovimientoCaja.monto > 0
@@ -557,6 +578,7 @@ def obtener_resumen_mensual(
     
     ingresos_tesoreria = db.query(func.sum(MovimientoTesoreria.monto)).filter(
         and_(
+            MovimientoTesoreria.tenant_id == current_user.tenant_id,
             MovimientoTesoreria.fecha_movimiento >= fecha_inicio,
             MovimientoTesoreria.fecha_movimiento <= fecha_fin,
             MovimientoTesoreria.monto > 0
@@ -568,6 +590,7 @@ def obtener_resumen_mensual(
     # Egresos del mes
     egresos_caja = db.query(func.sum(MovimientoCaja.monto)).filter(
         and_(
+            MovimientoCaja.tenant_id == current_user.tenant_id,
             MovimientoCaja.created_at >= fecha_inicio,
             MovimientoCaja.created_at <= fecha_fin,
             MovimientoCaja.monto < 0
@@ -576,6 +599,7 @@ def obtener_resumen_mensual(
     
     egresos_tesoreria = db.query(func.sum(MovimientoTesoreria.monto)).filter(
         and_(
+            MovimientoTesoreria.tenant_id == current_user.tenant_id,
             MovimientoTesoreria.fecha_movimiento >= fecha_inicio,
             MovimientoTesoreria.fecha_movimiento <= fecha_fin,
             MovimientoTesoreria.monto < 0
@@ -587,6 +611,7 @@ def obtener_resumen_mensual(
     # Trámites del mes
     tramites_mes = db.query(func.count(VehiculoProceso.id)).filter(
         and_(
+            VehiculoProceso.tenant_id == current_user.tenant_id,
             VehiculoProceso.fecha_registro >= fecha_inicio,
             VehiculoProceso.fecha_registro <= fecha_fin
         )

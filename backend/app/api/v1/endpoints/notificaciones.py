@@ -43,7 +43,8 @@ def obtener_notificaciones_pendientes(
     Obtener notificaciones de cierre de caja pendientes (solo para administradores)
     """
     notificaciones = db.query(NotificacionCierreCaja).filter(
-        NotificacionCierreCaja.estado == EstadoNotificacion.PENDIENTE
+        NotificacionCierreCaja.estado == EstadoNotificacion.PENDIENTE,
+        NotificacionCierreCaja.tenant_id == current_user.tenant_id
     ).order_by(NotificacionCierreCaja.created_at.desc()).all()
     
     return [
@@ -75,7 +76,8 @@ def marcar_notificacion_como_leida(
     Marcar una notificación como leída
     """
     notificacion = db.query(NotificacionCierreCaja).filter(
-        NotificacionCierreCaja.id == notificacion_id
+        NotificacionCierreCaja.id == notificacion_id,
+        NotificacionCierreCaja.tenant_id == current_user.tenant_id
     ).first()
     
     if not notificacion:
@@ -103,7 +105,8 @@ def archivar_notificacion(
     Archivar/eliminar una notificación
     """
     notificacion = db.query(NotificacionCierreCaja).filter(
-        NotificacionCierreCaja.id == notificacion_id
+        NotificacionCierreCaja.id == notificacion_id,
+        NotificacionCierreCaja.tenant_id == current_user.tenant_id
     ).first()
     
     if not notificacion:

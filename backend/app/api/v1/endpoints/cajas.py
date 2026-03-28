@@ -62,6 +62,7 @@ def abrir_caja(
     
     # Crear nueva caja
     nueva_caja = Caja(
+        tenant_id=current_user.tenant_id,
         usuario_id=current_user.id,
         monto_inicial=apertura_data.monto_inicial,
         turno=TurnoEnum(apertura_data.turno),
@@ -100,6 +101,7 @@ def obtener_caja_activa(
     caja = db.query(Caja).filter(
         and_(
             Caja.usuario_id == current_user.id,
+            Caja.tenant_id == current_user.tenant_id,
             Caja.estado == EstadoCaja.ABIERTA
         )
     ).first()
@@ -124,6 +126,7 @@ def obtener_resumen_caja(
     caja = db.query(Caja).filter(
         and_(
             Caja.usuario_id == current_user.id,
+            Caja.tenant_id == current_user.tenant_id,
             Caja.estado == EstadoCaja.ABIERTA
         )
     ).first()
@@ -183,6 +186,8 @@ def obtener_resumen_caja(
     # Contar vehículos cobrados
     vehiculos_cobrados = db.query(func.count(VehiculoProceso.id)).filter(
         VehiculoProceso.caja_id == caja.id
+        ,
+        VehiculoProceso.tenant_id == current_user.tenant_id
     ).scalar()
     
     return CajaResumen(
@@ -217,6 +222,7 @@ def cerrar_caja(
     caja = db.query(Caja).filter(
         and_(
             Caja.usuario_id == current_user.id,
+            Caja.tenant_id == current_user.tenant_id,
             Caja.estado == EstadoCaja.ABIERTA
         )
     ).first()
@@ -231,6 +237,7 @@ def cerrar_caja(
     vehiculos_pendientes = db.query(VehiculoProceso).filter(
         and_(
             VehiculoProceso.caja_id == caja.id,
+            VehiculoProceso.tenant_id == current_user.tenant_id,
             VehiculoProceso.estado == EstadoVehiculo.REGISTRADO
         )
     ).count()
@@ -271,6 +278,7 @@ def cerrar_caja(
         
         # Guardar desglose de efectivo
         desglose = DesgloseEfectivoCierre(
+            tenant_id=current_user.tenant_id,
             caja_id=caja.id,
             billetes_100000=cierre_data.desglose_efectivo.billetes_100000,
             billetes_50000=cierre_data.desglose_efectivo.billetes_50000,
@@ -290,6 +298,7 @@ def cerrar_caja(
         # Crear notificación para administradores
         from app.models.notificacion_cierre import NotificacionCierreCaja
         notificacion = NotificacionCierreCaja(
+            tenant_id=current_user.tenant_id,
             caja_id=caja.id,
             turno=caja.turno.value,
             cajera_nombre=current_user.nombre_completo,
@@ -345,6 +354,7 @@ def crear_movimiento(
     caja = db.query(Caja).filter(
         and_(
             Caja.usuario_id == current_user.id,
+            Caja.tenant_id == current_user.tenant_id,
             Caja.estado == EstadoCaja.ABIERTA
         )
     ).first()
@@ -357,6 +367,7 @@ def crear_movimiento(
     
     # Crear movimiento
     movimiento = MovimientoCaja(
+        tenant_id=current_user.tenant_id,
         caja_id=caja.id,
         tipo=TipoMovimiento(movimiento_data.tipo),
         monto=movimiento_data.monto,
@@ -408,6 +419,7 @@ def obtener_vehiculos_por_metodo(
     caja = db.query(Caja).filter(
         and_(
             Caja.usuario_id == current_user.id,
+            Caja.tenant_id == current_user.tenant_id,
             Caja.estado == EstadoCaja.ABIERTA
         )
     ).first()
@@ -427,6 +439,8 @@ def obtener_vehiculos_por_metodo(
         VehiculoProceso.fecha_pago
     ).filter(
         VehiculoProceso.caja_id == caja.id
+        ,
+        VehiculoProceso.tenant_id == current_user.tenant_id
     ).order_by(VehiculoProceso.fecha_pago.desc()).all()
     
     # Agrupar por método de pago
@@ -464,6 +478,7 @@ def listar_movimientos(
     caja = db.query(Caja).filter(
         and_(
             Caja.usuario_id == current_user.id,
+            Caja.tenant_id == current_user.tenant_id,
             Caja.estado == EstadoCaja.ABIERTA
         )
     ).first()
@@ -492,6 +507,7 @@ def obtener_ultima_caja_cerrada(
     ultima_caja = db.query(Caja).filter(
         and_(
             Caja.usuario_id == current_user.id,
+            Caja.tenant_id == current_user.tenant_id,
             Caja.estado == EstadoCaja.CERRADA
         )
     ).order_by(Caja.fecha_cierre.desc()).first()
@@ -522,7 +538,7 @@ def obtener_historial_cajas(
     """
     Obtener historial de cajas (admin ve todas, cajero solo las suyas)
     """
-    query = db.query(Caja)
+    query = db.query(Caja).filter(Caja.tenant_id == current_user.tenant_id)
     
     # Si no es admin, solo ver sus propias cajas
     if current_user.rol != "administrador":
@@ -542,7 +558,10 @@ def obtener_detalle_caja(
     """
     Obtener detalle completo de una caja
     """
-    caja = db.query(Caja).filter(Caja.id == caja_id).first()
+    caja = db.query(Caja).filter(
+        Caja.id == caja_id,
+        Caja.tenant_id == current_user.tenant_id
+    ).first()
     
     if not caja:
         raise HTTPException(
@@ -585,7 +604,8 @@ def obtener_detalle_caja(
     
     # Contar vehículos
     vehiculos_cobrados = db.query(func.count(VehiculoProceso.id)).filter(
-        VehiculoProceso.caja_id == caja.id
+        VehiculoProceso.caja_id == caja.id,
+        VehiculoProceso.tenant_id == current_user.tenant_id
     ).scalar()
     
     # Crear CajaResponse con propiedades calculadas
@@ -627,7 +647,10 @@ def descargar_comprobante_cierre(
     """
     Descargar comprobante de cierre de caja en PDF
     """
-    caja = db.query(Caja).filter(Caja.id == caja_id).first()
+    caja = db.query(Caja).filter(
+        Caja.id == caja_id,
+        Caja.tenant_id == current_user.tenant_id
+    ).first()
     
     if not caja:
         raise HTTPException(
@@ -698,7 +721,8 @@ def descargar_comprobante_cierre(
     
     # Contar vehículos
     vehiculos_cobrados = db.query(func.count(VehiculoProceso.id)).filter(
-        VehiculoProceso.caja_id == caja.id
+        VehiculoProceso.caja_id == caja.id,
+        VehiculoProceso.tenant_id == current_user.tenant_id
     ).scalar() or 0
     
     # Preparar desglose como diccionario

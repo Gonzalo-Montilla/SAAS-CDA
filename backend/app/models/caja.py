@@ -39,6 +39,7 @@ class Caja(Base):
     __tablename__ = "cajas"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     
     # Usuario responsable
     usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False)
@@ -97,6 +98,7 @@ class MovimientoCaja(Base):
     __tablename__ = "movimientos_caja"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     
     # Relaciones
     caja_id = Column(UUID(as_uuid=True), ForeignKey("cajas.id"), nullable=False)
@@ -130,6 +132,7 @@ class DesgloseEfectivoCierre(Base):
     __tablename__ = "desglose_efectivo_cierre"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     caja_id = Column(UUID(as_uuid=True), ForeignKey("cajas.id"), nullable=False, unique=True)
     
     # Billetes

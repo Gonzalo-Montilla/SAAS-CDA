@@ -122,6 +122,144 @@ def ensure_tenant_baseline_schema(db):
         db.execute(text("CREATE INDEX ix_usuarios_tenant_id ON usuarios(tenant_id)"))
 
 
+def ensure_tenant_domain_schema(db):
+    """
+    Asegura columnas tenant_id en tablas de dominio para fase 2.
+    """
+    db.execute(text("ALTER TABLE cajas ADD COLUMN IF NOT EXISTS tenant_id UUID"))
+    db.execute(text("ALTER TABLE movimientos_caja ADD COLUMN IF NOT EXISTS tenant_id UUID"))
+    db.execute(text("ALTER TABLE desglose_efectivo_cierre ADD COLUMN IF NOT EXISTS tenant_id UUID"))
+    db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS tenant_id UUID"))
+    db.execute(text("ALTER TABLE tarifas ADD COLUMN IF NOT EXISTS tenant_id UUID"))
+    db.execute(text("ALTER TABLE comisiones_soat ADD COLUMN IF NOT EXISTS tenant_id UUID"))
+    db.execute(text("ALTER TABLE movimientos_tesoreria ADD COLUMN IF NOT EXISTS tenant_id UUID"))
+    db.execute(text("ALTER TABLE desglose_efectivo_tesoreria ADD COLUMN IF NOT EXISTS tenant_id UUID"))
+    db.execute(text("ALTER TABLE configuracion_tesoreria ADD COLUMN IF NOT EXISTS tenant_id UUID"))
+    db.execute(text("ALTER TABLE notificaciones_cierre_caja ADD COLUMN IF NOT EXISTS tenant_id UUID"))
+
+    db.execute(
+        text(
+            """
+            UPDATE cajas c
+            SET tenant_id = u.tenant_id
+            FROM usuarios u
+            WHERE c.tenant_id IS NULL AND c.usuario_id = u.id
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            UPDATE movimientos_caja m
+            SET tenant_id = c.tenant_id
+            FROM cajas c
+            WHERE m.tenant_id IS NULL AND m.caja_id = c.id
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            UPDATE desglose_efectivo_cierre d
+            SET tenant_id = c.tenant_id
+            FROM cajas c
+            WHERE d.tenant_id IS NULL AND d.caja_id = c.id
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            UPDATE vehiculos_proceso v
+            SET tenant_id = u.tenant_id
+            FROM usuarios u
+            WHERE v.tenant_id IS NULL AND v.registrado_por = u.id
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            UPDATE vehiculos_proceso v
+            SET tenant_id = c.tenant_id
+            FROM cajas c
+            WHERE v.tenant_id IS NULL AND v.caja_id = c.id
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            UPDATE tarifas t
+            SET tenant_id = u.tenant_id
+            FROM usuarios u
+            WHERE t.tenant_id IS NULL AND t.created_by = u.id
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            UPDATE comisiones_soat c
+            SET tenant_id = u.tenant_id
+            FROM usuarios u
+            WHERE c.tenant_id IS NULL AND c.created_by = u.id
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            UPDATE movimientos_tesoreria m
+            SET tenant_id = u.tenant_id
+            FROM usuarios u
+            WHERE m.tenant_id IS NULL AND m.created_by = u.id
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            UPDATE desglose_efectivo_tesoreria d
+            SET tenant_id = m.tenant_id
+            FROM movimientos_tesoreria m
+            WHERE d.tenant_id IS NULL AND d.movimiento_id = m.id
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            UPDATE configuracion_tesoreria c
+            SET tenant_id = u.tenant_id
+            FROM usuarios u
+            WHERE c.tenant_id IS NULL AND c.updated_by = u.id
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            UPDATE notificaciones_cierre_caja n
+            SET tenant_id = c.tenant_id
+            FROM cajas c
+            WHERE n.tenant_id IS NULL AND n.caja_id = c.id
+            """
+        )
+    )
+
+    db.execute(text("UPDATE cajas SET tenant_id = :tenant_id WHERE tenant_id IS NULL"), {"tenant_id": settings.SAAS_DEFAULT_TENANT_ID})
+    db.execute(text("UPDATE movimientos_caja SET tenant_id = :tenant_id WHERE tenant_id IS NULL"), {"tenant_id": settings.SAAS_DEFAULT_TENANT_ID})
+    db.execute(text("UPDATE desglose_efectivo_cierre SET tenant_id = :tenant_id WHERE tenant_id IS NULL"), {"tenant_id": settings.SAAS_DEFAULT_TENANT_ID})
+    db.execute(text("UPDATE vehiculos_proceso SET tenant_id = :tenant_id WHERE tenant_id IS NULL"), {"tenant_id": settings.SAAS_DEFAULT_TENANT_ID})
+    db.execute(text("UPDATE tarifas SET tenant_id = :tenant_id WHERE tenant_id IS NULL"), {"tenant_id": settings.SAAS_DEFAULT_TENANT_ID})
+    db.execute(text("UPDATE comisiones_soat SET tenant_id = :tenant_id WHERE tenant_id IS NULL"), {"tenant_id": settings.SAAS_DEFAULT_TENANT_ID})
+    db.execute(text("UPDATE movimientos_tesoreria SET tenant_id = :tenant_id WHERE tenant_id IS NULL"), {"tenant_id": settings.SAAS_DEFAULT_TENANT_ID})
+    db.execute(text("UPDATE desglose_efectivo_tesoreria SET tenant_id = :tenant_id WHERE tenant_id IS NULL"), {"tenant_id": settings.SAAS_DEFAULT_TENANT_ID})
+    db.execute(text("UPDATE configuracion_tesoreria SET tenant_id = :tenant_id WHERE tenant_id IS NULL"), {"tenant_id": settings.SAAS_DEFAULT_TENANT_ID})
+    db.execute(text("UPDATE notificaciones_cierre_caja SET tenant_id = :tenant_id WHERE tenant_id IS NULL"), {"tenant_id": settings.SAAS_DEFAULT_TENANT_ID})
+
+
 def get_db():
     """
     Dependency para obtener sesión de base de datos
@@ -159,8 +297,10 @@ def init_db():
         if not default_tenant:
             raise RuntimeError("No se pudo inicializar tenant default")
 
+        ensure_tenant_domain_schema(db)
+
         # Verificar si ya existe usuario admin
-        admin_exists = db.query(Usuario).filter(Usuario.email == "admin@cdalaflorida.com").first()
+        admin_exists = db.query(Usuario).filter(Usuario.email == "admin@cdasoft.com").first()
         
         if not admin_exists:
             print("📝 Creando usuario administrador inicial...")
@@ -168,7 +308,7 @@ def init_db():
             # Crear usuario administrador
             admin = Usuario(
                 tenant_id=default_tenant.id,
-                email="admin@cdalaflorida.com",
+                email="admin@cdasoft.com",
                 hashed_password=get_password_hash("admin123"),
                 nombre_completo="Administrador CDA",
                 rol="administrador",
@@ -178,7 +318,7 @@ def init_db():
             db.flush()
             
             print("✅ Usuario administrador creado")
-            print("   Email: admin@cdalaflorida.com")
+            print("   Email: admin@cdasoft.com")
             print("   Password: admin123")
             
             # Crear tarifas 2025 para motos
@@ -187,9 +327,11 @@ def init_db():
             tarifas_2025 = [
                 # 0-2 años (modelos 2023-2025)
                 Tarifa(
+                    tenant_id=default_tenant.id,
                     ano_vigencia=2025,
                     vigencia_inicio=date(2025, 1, 1),
                     vigencia_fin=date(2025, 12, 31),
+                    tipo_vehiculo="moto",
                     antiguedad_min=0,
                     antiguedad_max=2,
                     valor_rtm=181596,
@@ -200,9 +342,11 @@ def init_db():
                 ),
                 # 3-7 años (modelos 2018-2022)
                 Tarifa(
+                    tenant_id=default_tenant.id,
                     ano_vigencia=2025,
                     vigencia_inicio=date(2025, 1, 1),
                     vigencia_fin=date(2025, 12, 31),
+                    tipo_vehiculo="moto",
                     antiguedad_min=3,
                     antiguedad_max=7,
                     valor_rtm=181896,
@@ -213,9 +357,11 @@ def init_db():
                 ),
                 # 8-16 años (modelos 2009-2017)
                 Tarifa(
+                    tenant_id=default_tenant.id,
                     ano_vigencia=2025,
                     vigencia_inicio=date(2025, 1, 1),
                     vigencia_fin=date(2025, 12, 31),
+                    tipo_vehiculo="moto",
                     antiguedad_min=8,
                     antiguedad_max=16,
                     valor_rtm=182196,
@@ -226,9 +372,11 @@ def init_db():
                 ),
                 # 17+ años (modelos 2008 hacia atrás)
                 Tarifa(
+                    tenant_id=default_tenant.id,
                     ano_vigencia=2025,
                     vigencia_inicio=date(2025, 1, 1),
                     vigencia_fin=date(2025, 12, 31),
+                    tipo_vehiculo="moto",
                     antiguedad_min=17,
                     antiguedad_max=None,
                     valor_rtm=181896,
@@ -249,6 +397,7 @@ def init_db():
             
             comisiones = [
                 ComisionSOAT(
+                    tenant_id=default_tenant.id,
                     tipo_vehiculo="moto",
                     valor_comision=30000,
                     vigencia_inicio=date(2025, 1, 1),
@@ -257,6 +406,7 @@ def init_db():
                     created_by=admin.id
                 ),
                 ComisionSOAT(
+                    tenant_id=default_tenant.id,
                     tipo_vehiculo="carro",
                     valor_comision=50000,
                     vigencia_inicio=date(2025, 1, 1),

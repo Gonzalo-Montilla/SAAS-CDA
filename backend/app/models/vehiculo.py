@@ -37,6 +37,7 @@ class VehiculoProceso(Base):
     __tablename__ = "vehiculos_proceso"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     
     # Datos del vehículo
     placa = Column(String(10), nullable=False, index=True)

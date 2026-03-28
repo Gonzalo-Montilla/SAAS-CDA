@@ -15,6 +15,7 @@ class Tarifa(Base):
     __tablename__ = "tarifas"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     
     # Vigencia
     ano_vigencia = Column(Integer, nullable=False, index=True)  # 2025, 2026, etc
@@ -69,6 +70,7 @@ class ComisionSOAT(Base):
     __tablename__ = "comisiones_soat"
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
     tipo_vehiculo = Column(String(50), nullable=False)  # 'moto', 'carro'
     valor_comision = Column(Numeric(10, 2), nullable=False)
     vigencia_inicio = Column(Date, nullable=False)
