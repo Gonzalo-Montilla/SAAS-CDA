@@ -1,6 +1,6 @@
 -- Migración: Agregar campo tipo_vehiculo a tabla tarifas
 -- Fecha: 2024-12-29
--- Proyecto: CDA La Florida
+-- Proyecto: CDASOFT
 
 -- 1. Agregar columna tipo_vehiculo
 ALTER TABLE tarifas 

@@ -3,7 +3,7 @@
 ## ✅ Estado: **READY TO DEPLOY**
 
 Fecha: 2025-01-10  
-Sistema: CDA La Florida - Sistema de Gestión de Inspecciones Vehiculares  
+Sistema: CDASOFT - Sistema de Gestión de Inspecciones Vehiculares  
 Servidor destino: 31.97.144.9 (VPS Hostinger)
 
 ---
@@ -65,7 +65,7 @@ Servidor destino: 31.97.144.9 (VPS Hostinger)
 
 ```powershell
 # 1. Ir al directorio del proyecto
-cd C:\Users\USUARIO\Documents\cda-la-florida
+cd c:\Proyectos\SAAS-CDA
 
 # 2. Ejecutar script de deployment
 .\deploy.ps1
@@ -80,7 +80,7 @@ El script te guiará paso a paso.
 #### 1. Crear backup en servidor
 ```bash
 ssh root@31.97.144.9
-cd /var/www/cda-la-florida
+cd /var/www/cdasoft
 cp -r frontend frontend.backup_$(date +%Y%m%d_%H%M%S)
 cp -r backend backend.backup_$(date +%Y%m%d_%H%M%S)
 ```
@@ -88,7 +88,7 @@ cp -r backend backend.backup_$(date +%Y%m%d_%H%M%S)
 #### 2. Verificar/Crear comisiones SOAT en BD
 ```bash
 # En el servidor
-psql -U cda_user -d cda_la_florida_prod
+psql -U cda_user -d cdasoft_prod
 
 # Copiar y ejecutar el contenido de:
 # backend/scripts/verificar_comisiones_soat.sql
@@ -97,11 +97,11 @@ psql -U cda_user -d cda_la_florida_prod
 #### 3. Subir archivos (usando Git Bash o WSL)
 ```bash
 # Frontend
-rsync -avz --delete frontend/dist/ root@31.97.144.9:/var/www/cda-la-florida/frontend/
+rsync -avz --delete frontend/dist/ root@31.97.144.9:/var/www/cdasoft/frontend/
 
 # Backend
 rsync -avz --exclude='__pycache__' --exclude='*.pyc' --exclude='venv' \
-  backend/ root@31.97.144.9:/var/www/cda-la-florida/backend/
+  backend/ root@31.97.144.9:/var/www/cdasoft/backend/
 ```
 
 #### 4. Reiniciar servicios en servidor
@@ -164,7 +164,7 @@ Si algo falla en producción:
 ```bash
 # 1. Conectar al servidor
 ssh root@31.97.144.9
-cd /var/www/cda-la-florida
+cd /var/www/cdasoft
 
 # 2. Restaurar versión anterior
 # (Reemplazar FECHA con la del backup)

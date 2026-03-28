@@ -4,7 +4,7 @@ from app.core.config import settings
 
 async def apply_migration():
     # Extraer parámetros de la URL de conexión
-    # DATABASE_URL=postgresql://postgres:postgres@localhost:5432/cda_la_florida
+    # DATABASE_URL=postgresql://postgres:postgres@localhost:5432/cdasoft
     db_url = settings.DATABASE_URL
     parts = db_url.replace("postgresql://", "").split("@")
     user_pass = parts[0].split(":")

@@ -1,5 +1,5 @@
 """
-Aplicación principal FastAPI - CDA La Florida
+Aplicación principal FastAPI - CDASOFT
 """
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware

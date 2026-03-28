@@ -34,11 +34,11 @@ El sistema está **completamente implementado** pero el envío de emails está *
 
 ### Paso 1: Generar Contraseña de Aplicación en Gmail
 
-1. Inicia sesión en Gmail: `cdalaflorida@gmail.com`
+1. Inicia sesión en Gmail: `cdasoft@gmail.com`
 2. Ve a: https://myaccount.google.com/security
 3. Activa "Verificación en 2 pasos" (si no está activada)
 4. Busca "Contraseñas de aplicaciones"
-5. Genera contraseña para "CDA La Florida Sistema"
+5. Genera contraseña para "CDASOFT Sistema"
 6. Copia la contraseña de 16 caracteres
 
 ### Paso 2: Actualizar Configuración
@@ -46,7 +46,7 @@ El sistema está **completamente implementado** pero el envío de emails está *
 Edita `backend/.env`:
 
 ```env
-SMTP_USER=cdalaflorida@gmail.com
+SMTP_USER=cdasoft@gmail.com
 SMTP_PASSWORD=tu_contraseña_de_16_caracteres_aqui
 ```
 
@@ -63,7 +63,7 @@ python run.py
 1. Ve al login
 2. Haz clic en "¿Olvidaste tu contraseña?"
 3. Ingresa un email de usuario existente
-4. Revisa el email en `cdalaflorida@gmail.com`
+4. Revisa el email en `cdasoft@gmail.com`
 5. Haz clic en el enlace
 6. Cambia la contraseña
 

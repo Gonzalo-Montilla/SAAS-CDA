@@ -1,14 +1,14 @@
-# Script de Deployment a Producción - CDA La Florida
+# Script de Deployment a Producción - CDASOFT
 # Ejecutar con: .\deploy.ps1
 
 Write-Host "================================================" -ForegroundColor Cyan
-Write-Host "  DEPLOYMENT A PRODUCCIÓN - CDA LA FLORIDA" -ForegroundColor Cyan
+Write-Host "  DEPLOYMENT A PRODUCCIÓN - CDASOFT" -ForegroundColor Cyan
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host ""
 
 # Configuración
 $SERVER = "root@31.97.144.9"
-$REMOTE_PATH = "/var/www/cda-la-florida"
+$REMOTE_PATH = "/var/www/cdasoft"
 $BACKUP_DATE = Get-Date -Format "yyyyMMdd_HHmmss"
 
 # Verificar que estamos en el directorio correcto
@@ -63,7 +63,7 @@ Write-Host "🗄️  Verificando script SQL de comisiones SOAT..." -ForegroundCo
 if (Test-Path ".\backend\scripts\verificar_comisiones_soat.sql") {
     Write-Host "✅ Script SQL encontrado" -ForegroundColor Green
     Write-Host "⚠️  RECUERDA: Ejecutar este script en la BD de producción" -ForegroundColor Yellow
-    Write-Host "   psql -U cda_user -d cda_la_florida_prod -f backend/scripts/verificar_comisiones_soat.sql" -ForegroundColor White
+    Write-Host "   psql -U cda_user -d cdasoft_prod -f backend/scripts/verificar_comisiones_soat.sql" -ForegroundColor White
 } else {
     Write-Host "⚠️  Script SQL no encontrado (opcional)" -ForegroundColor Yellow
 }

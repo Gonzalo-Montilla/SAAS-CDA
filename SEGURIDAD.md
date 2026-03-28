@@ -100,13 +100,13 @@ def crear_usuario(
 
 #### Desarrollo (.env)
 ```bash
-DATABASE_URL=postgresql://postgres:postgres@localhost:5432/cda_la_florida
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/cdasoft
 SECRET_KEY=clave-de-desarrollo-cambiar-en-produccion
 ```
 
 #### Producción (.env.production)
 ```bash
-DATABASE_URL=postgresql://usuario_prod:password_complejo@localhost:5432/cda_la_florida_prod
+DATABASE_URL=postgresql://usuario_prod:password_complejo@localhost:5432/cdasoft_prod
 SECRET_KEY=<generar con: python -c "import secrets; print(secrets.token_urlsafe(64))">
 BACKEND_CORS_ORIGINS=["https://tu-dominio.com"]
 DEBUG=False
@@ -158,8 +158,8 @@ Todas las operaciones críticas se registran en la tabla `audit_logs`.
 ```json
 {
   "action": "login",
-  "description": "Login exitoso: admin@cdalaflorida.com",
-  "usuario_email": "admin@cdalaflorida.com",
+  "description": "Login exitoso: admin@cdasoft.com",
+  "usuario_email": "admin@cdasoft.com",
   "usuario_rol": "administrador",
   "ip_address": "192.168.1.100",
   "user_agent": "Mozilla/5.0...",
@@ -175,7 +175,7 @@ SELECT * FROM audit_logs ORDER BY created_at DESC LIMIT 100;
 
 -- Acciones de un usuario específico
 SELECT * FROM audit_logs 
-WHERE usuario_email = 'cajero@cdalaflorida.com'
+WHERE usuario_email = 'cajero@cdasoft.com'
 ORDER BY created_at DESC;
 
 -- Intentos de login fallidos
@@ -237,7 +237,7 @@ cp .env.production.example .env.production
 nano .env.production  # Editar con valores reales
 
 # 3. Ejecutar migraciones
-psql -U usuario_prod -d cda_la_florida_prod -f migrations/create_audit_logs.sql
+psql -U usuario_prod -d cdasoft_prod -f migrations/create_audit_logs.sql
 
 # 4. Iniciar con Uvicorn
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --env-file .env.production
@@ -258,13 +258,13 @@ VITE_API_URL=https://api.tu-dominio.com
 npm run build
 
 # 4. Servir con Nginx
-# Los archivos de dist/ van a /var/www/cda-la-florida/
+# Los archivos de dist/ van a /var/www/cdasoft/
 ```
 
 ### Nginx Configuración
 
 ```nginx
-# /etc/nginx/sites-available/cda-la-florida
+# /etc/nginx/sites-available/cdasoft
 
 # Backend API
 server {
@@ -291,7 +291,7 @@ server {
     ssl_certificate /etc/letsencrypt/live/tu-dominio.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/tu-dominio.com/privkey.pem;
     
-    root /var/www/cda-la-florida;
+    root /var/www/cdasoft;
     index index.html;
     
     location / {
@@ -307,7 +307,7 @@ server {
 ### Backups Recomendados
 ```bash
 # Script de backup diario (crontab)
-0 2 * * * pg_dump -U usuario_prod cda_la_florida_prod | gzip > /backups/cda_$(date +\%Y\%m\%d).sql.gz
+0 2 * * * pg_dump -U usuario_prod cdasoft_prod | gzip > /backups/cda_$(date +\%Y\%m\%d).sql.gz
 ```
 
 ### Monitoreo

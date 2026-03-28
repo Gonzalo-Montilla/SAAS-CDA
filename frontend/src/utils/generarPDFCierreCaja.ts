@@ -58,7 +58,7 @@ export async function generarPDFCierreCaja(datos: DatosCierrePDF) {
   
   doc.setFontSize(14);
   doc.setFont('helvetica', 'bold');
-  doc.text('CDA LA FLORIDA', pageWidth / 2, y, { align: 'center' });
+  doc.text('CDASOFT', pageWidth / 2, y, { align: 'center' });
   y += 6;
   
   doc.setFontSize(11);

@@ -1,4 +1,4 @@
-# 🎨 Cambio de Paleta de Colores - CDA LA FLORIDA
+# 🎨 Cambio de Paleta de Colores - CDASOFT
 
 **Fecha:** 29 de Diciembre de 2024  
 **Estado:** ✅ Completado
@@ -7,13 +7,13 @@
 
 ## 📋 **RESUMEN DEL CAMBIO**
 
-Se actualizó la paleta de colores del proyecto para reflejar la identidad visual del **logo oficial de CDA La Florida**.
+Se actualizó la paleta de colores del proyecto para reflejar la identidad visual del **logo oficial de CDASOFT**.
 
 ### **Colores ANTES (CDA Piendamó):**
 - 🔵 **Azul Cyan/Sky Blue** (#0ea5e9, #0284c7, #0369a1)
 - Paleta de tonos azul claro y brillante
 
-### **Colores DESPUÉS (CDA La Florida):**
+### **Colores DESPUÉS (CDASOFT):**
 - 🔵 **Azul Navy** (#0a1d3d) - Color dominante del logo
 - 🟡 **Amarillo Dorado** (#f59e0b) - Color de acento del logo
 - Refleja exactamente los colores del logo oficial
@@ -213,7 +213,7 @@ Estos colores NO cambiaron y deben seguir usándose para:
 ### **Problema: Los colores se ven mal/muy oscuros**
 **Solución:**
 - Es normal, el navy es mucho más oscuro que el cyan anterior
-- Es fiel al logo oficial de CDA La Florida
+- Es fiel al logo oficial de CDASOFT
 - Proporciona más contraste y profesionalismo
 
 ### **Problema: Algunos elementos quedaron muy oscuros**
@@ -251,7 +251,7 @@ primary: {
 
 ## 📊 **ANTES vs DESPUÉS**
 
-| Aspecto | ANTES (Piendamó) | DESPUÉS (La Florida) |
+| Aspecto | ANTES (Piendamó) | DESPUÉS (CDASOFT) |
 |---------|------------------|---------------------|
 | Color principal | Azul cyan claro | Azul navy oscuro |
 | Inspiración | Genérico | Logo oficial |
@@ -280,7 +280,7 @@ primary: {
 ## 🎉 **RESULTADO ESPERADO**
 
 Una aplicación que:
-- ✅ Refleja la identidad visual del logo de CDA La Florida
+- ✅ Refleja la identidad visual del logo de CDASOFT
 - ✅ Usa colores navy y dorado consistentemente
 - ✅ Mantiene excelente contraste y legibilidad
 - ✅ Se diferencia visualmente de CDA Piendamó

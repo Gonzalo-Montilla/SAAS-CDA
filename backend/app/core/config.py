@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     """Configuración de la aplicación desde variables de entorno"""
     
     # Información de la aplicación
-    APP_NAME: str = "CDA La Florida"
+    APP_NAME: str = "CDASOFT"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = False
     ENVIRONMENT: str = "production"

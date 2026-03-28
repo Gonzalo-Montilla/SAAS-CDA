@@ -1,10 +1,10 @@
-# Cambio de Paleta de Colores - CDA La Florida
+# Cambio de Paleta de Colores - CDASOFT
 
 ## Fecha de implementación
 Diciembre 2024
 
 ## Contexto
-El proyecto CDA La Florida estaba usando colores del proyecto anterior CDA Piendamó (cyan/sky blue). Se realizó un cambio completo de la paleta de colores para que coincida con los colores oficiales del logo de CDA La Florida.
+El proyecto CDASOFT estaba usando colores del proyecto anterior CDA Piendamó (cyan/sky blue). Se realizó un cambio completo de la paleta de colores para que coincida con los colores oficiales del logo de CDASOFT.
 
 ## Análisis del Logo
 **Archivo:** `frontend/src/assets/LOGO CDA_LA_FLORIDA.png`
@@ -172,7 +172,7 @@ Ctrl + Shift + R (hard refresh)
    - Fix de bug de comisiones
 
 ## Estado Final
-✅ **COMPLETADO** - Todos los componentes principales han sido actualizados con la nueva paleta de colores basada en el logo oficial de CDA La Florida.
+✅ **COMPLETADO** - Todos los componentes principales han sido actualizados con la nueva paleta de colores basada en el logo oficial de CDASOFT.
 
 ## Notas para Futuro Desarrollo
 - Al crear nuevos componentes, usar `primary-*` para azul marino y `secondary-*` para amarillo dorado

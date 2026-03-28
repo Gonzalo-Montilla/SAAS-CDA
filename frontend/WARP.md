@@ -187,7 +187,7 @@ The backend is a **FastAPI** application running at `http://localhost:8000` (dev
 
 ### Testing Authentication
 Default credentials (created by backend on first run):
-- **Email**: `admin@cdalaflorida.com`
+- **Email**: `admin@cdasoft.com`
 - **Password**: `admin123`
 
 ### Working with Forms

@@ -69,9 +69,9 @@ export default function ResetPassword() {
           <div className="bg-blue-100 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
             <span className="text-4xl">🔧</span>
           </div>
-          <h1 className="text-2xl font-bold text-gray-800">CDA LA FLORIDA</h1>
-          <p className="text-sm text-gray-600">Sistema de Punto de Venta</p>
-          <p className="text-sm text-gray-500 mt-2">Revisión Técnico-Mecánica</p>
+          <h1 className="text-2xl font-bold text-gray-800">CDASOFT</h1>
+          <p className="text-sm text-gray-600">sistema integral para administracion de cda</p>
+          <p className="text-sm text-gray-500 mt-2">Sistema de Punto de Venta · Revisión Técnico-Mecánica</p>
         </div>
 
         {/* Título */}
@@ -161,7 +161,7 @@ export default function ResetPassword() {
 
         {/* Footer */}
         <div className="text-center mt-6 text-xs text-gray-500">
-          <p>© 2025 CDA La Florida</p>
+          <p>© 2026 CDASOFT</p>
           <p>Versión 1.0.0</p>
         </div>
       </div>

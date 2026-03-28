@@ -1,7 +1,7 @@
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import { Home, LogOut, User } from 'lucide-react';
-import logo from '../assets/LOGO CDA_LA_FLORIDA.png';
+import logo from '../assets/LOGO_CDA_SOFT-SIN FONDO.png';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -29,11 +29,10 @@ export default function Layout({ children, title }: LayoutProps) {
             >
               <img 
                 src={logo} 
-                alt="CDA La Florida" 
+                alt="CDASOFT" 
                 className="h-20 rounded-2xl shadow-md"
               />
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">CDA LA FLORIDA</h1>
                 <p className="text-sm text-primary-600 font-medium">{title}</p>
               </div>
             </button>

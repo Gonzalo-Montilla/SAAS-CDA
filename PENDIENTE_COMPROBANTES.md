@@ -144,7 +144,7 @@ app.add_middleware(
   - ✅ Validación correcta de denominaciones
   - ✅ Lógica de inventario de billetes/monedas correcta
   
-- La paleta de colores CDA La Florida está completa:
+- La paleta de colores CDASOFT está completa:
   - Primary: Azul marino (#0a1d3d)
   - Secondary: Amarillo dorado (#f59e0b)
 

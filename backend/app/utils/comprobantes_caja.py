@@ -129,7 +129,7 @@ def generar_comprobante_cierre_caja(
     
     # Encabezado compacto
     elementos.append(Paragraph("COMPROBANTE DE CIERRE DE CAJA", titulo_style))
-    elementos.append(Paragraph("CDA La Florida", subtitulo_style))
+    elementos.append(Paragraph("CDASOFT", subtitulo_style))
     elementos.append(Spacer(1, 0.1*inch))
     
     # Información de la caja

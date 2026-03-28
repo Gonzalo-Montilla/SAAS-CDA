@@ -11,7 +11,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from sqlalchemy import create_engine, text
 
 # Database URL
-DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/cda_La Florida"
+DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/cdasoft"
 
 # Crear engine
 engine = create_engine(DATABASE_URL)

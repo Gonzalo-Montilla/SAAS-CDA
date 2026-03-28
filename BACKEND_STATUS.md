@@ -75,7 +75,7 @@ backend/
 
 Al ejecutar por primera vez, se crean automáticamente:
 
-- ✅ Usuario administrador: `admin@cdalaflorida.com` / `admin123`
+- ✅ Usuario administrador: `admin@cdasoft.com` / `admin123`
 - ✅ 4 tarifas 2025 (por rangos de antigüedad)
 - ✅ 2 comisiones SOAT (moto y carro)
 
@@ -146,7 +146,7 @@ pip install -r requirements.txt
 
 ```bash
 # Crear base de datos en PostgreSQL
-createdb cda_la_florida
+createdb cdasoft
 
 # Copiar y editar .env
 copy .env.example .env
@@ -166,7 +166,7 @@ Ir a: `http://localhost:8000/docs`
 ### 5. Probar Flow Completo
 
 1. **Login**: POST `/api/v1/auth/login`
-   - username: `admin@cdalaflorida.com`
+   - username: `admin@cdasoft.com`
    - password: `admin123`
 
 2. **Authorize**: Copiar access_token y autorizar en Swagger

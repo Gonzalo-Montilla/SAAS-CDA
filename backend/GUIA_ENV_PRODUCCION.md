@@ -47,19 +47,19 @@ SECRET_KEY=tu_clave_generada_aqui
 psql -U postgres
 
 -- Crear base de datos
-CREATE DATABASE cda_laflorida_prod;
+CREATE DATABASE cdasoft_prod;
 
 -- Crear usuario con password fuerte
 CREATE USER cda_app_user WITH ENCRYPTED PASSWORD 'TuPasswordSeguroAqui123!@#';
 
 -- Otorgar permisos
-GRANT ALL PRIVILEGES ON DATABASE cda_laflorida_prod TO cda_app_user;
+GRANT ALL PRIVILEGES ON DATABASE cdasoft_prod TO cda_app_user;
 GRANT ALL ON SCHEMA public TO cda_app_user;
 ```
 
 **Configurar en .env:**
 ```bash
-DATABASE_URL=postgresql://cda_app_user:TuPasswordSeguroAqui123!@#@localhost:5432/cda_laflorida_prod
+DATABASE_URL=postgresql://cda_app_user:TuPasswordSeguroAqui123!@#@localhost:5432/cdasoft_prod
 ```
 
 ---
@@ -71,14 +71,14 @@ DATABASE_URL=postgresql://cda_app_user:TuPasswordSeguroAqui123!@#@localhost:5432
 
 **Configurar en .env:**
 ```bash
-# Si tu dominio es cdalaflorida.com
-BACKEND_CORS_ORIGINS=["https://cdalaflorida.com","https://www.cdalaflorida.com"]
+# Si tu dominio es cdasoft.com
+BACKEND_CORS_ORIGINS=["https://cdasoft.com","https://www.cdasoft.com"]
 
 # Si usas subdominios
-BACKEND_CORS_ORIGINS=["https://app.cdalaflorida.com"]
+BACKEND_CORS_ORIGINS=["https://app.cdasoft.com"]
 
 # Desarrollo local + Producción (durante testing)
-BACKEND_CORS_ORIGINS=["https://cdalaflorida.com","http://localhost:5173"]
+BACKEND_CORS_ORIGINS=["https://cdasoft.com","http://localhost:5173"]
 ```
 
 ---
@@ -110,14 +110,14 @@ BACKEND_CORS_ORIGINS=["https://cdalaflorida.com","http://localhost:5173"]
 2. Activar "Verificación en 2 pasos"
 3. Ir a "Contraseñas de aplicaciones"
 4. Seleccionar "Correo" y "Otro"
-5. Nombrar "CDA La Florida Backend"
+5. Nombrar "CDASOFT Backend"
 6. Copiar la contraseña de 16 dígitos generada
 
 **Configurar en .env:**
 ```bash
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
-SMTP_USER=cda.laflorida@gmail.com
+SMTP_USER=cdasoft@gmail.com
 SMTP_PASSWORD=abcd efgh ijkl mnop
 ```
 
@@ -133,10 +133,10 @@ SMTP_PASSWORD=abcd efgh ijkl mnop
 **Configurar en .env:**
 ```bash
 # Producción
-FRONTEND_URL=https://cdalaflorida.com
+FRONTEND_URL=https://cdasoft.com
 
 # O con subdominio
-FRONTEND_URL=https://app.cdalaflorida.com
+FRONTEND_URL=https://app.cdasoft.com
 ```
 
 ---
@@ -165,17 +165,17 @@ DEBUG=False
 
 ## 📝 Archivo .env Completo para Producción
 
-Crear archivo `/var/www/cda-la-florida/backend/.env`:
+Crear archivo `/var/www/cdasoft/backend/.env`:
 
 ```bash
 # ==================== APLICACIÓN ====================
-APP_NAME=CDA La Florida
+APP_NAME=CDASOFT
 APP_VERSION=1.0.0
 ENVIRONMENT=production
 DEBUG=False
 
 # ==================== BASE DE DATOS ====================
-DATABASE_URL=postgresql://cda_app_user:TuPasswordSeguro123!@#@localhost:5432/cda_laflorida_prod
+DATABASE_URL=postgresql://cda_app_user:TuPasswordSeguro123!@#@localhost:5432/cdasoft_prod
 
 # ==================== SEGURIDAD ====================
 SECRET_KEY=tu_clave_generada_con_secrets_aqui_64_caracteres
@@ -184,16 +184,16 @@ ACCESS_TOKEN_EXPIRE_MINUTES=30
 REFRESH_TOKEN_EXPIRE_DAYS=7
 
 # ==================== CORS ====================
-BACKEND_CORS_ORIGINS=["https://cdalaflorida.com","https://www.cdalaflorida.com"]
+BACKEND_CORS_ORIGINS=["https://cdasoft.com","https://www.cdasoft.com"]
 
 # ==================== SMTP (EMAIL) ====================
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
-SMTP_USER=cda.laflorida@gmail.com
+SMTP_USER=cdasoft@gmail.com
 SMTP_PASSWORD=abcd efgh ijkl mnop
 
 # ==================== FRONTEND ====================
-FRONTEND_URL=https://cdalaflorida.com
+FRONTEND_URL=https://cdasoft.com
 
 # ==================== TIMEZONE ====================
 TIMEZONE=America/Bogota
@@ -234,7 +234,7 @@ Después de configurar, verificar que todo funciona:
 
 ```bash
 # Ir al directorio del backend
-cd /var/www/cda-la-florida/backend
+cd /var/www/cdasoft/backend
 
 # Activar entorno virtual
 source venv/bin/activate
@@ -248,7 +248,7 @@ python -c "from app.core.config import settings; print('✅ Configuración carga
 ✅ Configuración cargada correctamente
 Environment: production
 Debug: False
-CORS: ['https://cdalaflorida.com', 'https://www.cdalaflorida.com']
+CORS: ['https://cdasoft.com', 'https://www.cdasoft.com']
 ```
 
 ---

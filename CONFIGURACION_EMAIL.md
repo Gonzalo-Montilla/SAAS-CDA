@@ -4,7 +4,7 @@ Este documento explica cómo configurar el envío de emails usando Gmail para la
 
 ## Requisitos
 
-- Cuenta de Gmail: `cdalaflorida@gmail.com` (o la que uses)
+- Cuenta de Gmail: `cdasoft@gmail.com` (o la que uses)
 - Acceso a la configuración de seguridad de Google
 
 ## Pasos para Configurar
@@ -15,14 +15,14 @@ Google no permite usar tu contraseña normal para aplicaciones. Debes crear una 
 
 #### Opción A: Si tienes verificación en 2 pasos activada
 
-1. Inicia sesión en Gmail con `cdalaflorida@gmail.com`
+1. Inicia sesión en Gmail con `cdasoft@gmail.com`
 2. Ve a: https://myaccount.google.com/security
 3. En "Cómo inicias sesión en Google", busca "Contraseñas de aplicaciones"
 4. Haz clic en "Contraseñas de aplicaciones"
 5. Selecciona:
    - **App**: Correo
    - **Dispositivo**: Otro (nombre personalizado)
-   - Nombre: "CDA La Florida Sistema"
+   - Nombre: "CDASOFT Sistema"
 6. Haz clic en "Generar"
 7. Google te mostrará una contraseña de 16 caracteres (ej: `abcd efgh ijkl mnop`)
 8. **IMPORTANTE**: Copia esta contraseña, la necesitarás para el `.env`
@@ -43,7 +43,7 @@ Edita el archivo `backend/.env` y agrega estas líneas:
 # Configuración SMTP para envío de emails
 SMTP_HOST=smtp.gmail.com
 SMTP_PORT=587
-SMTP_USER=cdalaflorida@gmail.com
+SMTP_USER=cdasoft@gmail.com
 SMTP_PASSWORD=xxxx xxxx xxxx xxxx
 FRONTEND_URL=http://localhost:5173
 ```
@@ -59,7 +59,7 @@ Ejecuta la migración SQL para crear la tabla de tokens:
 
 ```bash
 # Conéctate a PostgreSQL
-psql -U postgres -d cda_la_florida
+psql -U postgres -d cdasoft
 
 # Ejecuta la migración
 \i backend/migrations/create_password_reset_tokens.sql

@@ -1,6 +1,6 @@
-# CDA La Florida - Sistema de Punto de Venta
+# CDASOFT - Sistema de Punto de Venta
 
-Sistema completo de gestión y punto de venta para Centro de Diagnóstico Automotor La Florida.
+Sistema completo de gestión y punto de venta. CDASOFT — sistema integral para administracion de cda.
 
 ## 🚀 Características
 
@@ -42,7 +42,7 @@ Sistema completo de gestión y punto de venta para Centro de Diagnóstico Automo
 
 ```bash
 git clone <repository-url>
-cd cda-la-florida
+cd SAAS-CDA
 ```
 
 ### 2. Configurar Backend
@@ -73,7 +73,7 @@ cp .env.example .env    # Linux/Mac
 
 ```sql
 -- En PostgreSQL
-CREATE DATABASE cda_la_florida;
+CREATE DATABASE cdasoft;
 ```
 
 ### 4. Iniciar Backend
@@ -97,7 +97,7 @@ Abre tu navegador en `http://localhost:8000/docs` y verás la documentación int
 **Endpoints principales:**
 
 1. **POST /api/v1/auth/login** - Iniciar sesión
-   - Username: `admin@cdalaflorida.com`
+   - Username: `admin@cdasoft.com`
    - Password: `admin123`
    - Copiar el `access_token` de la respuesta
 
@@ -137,7 +137,7 @@ El frontend estará disponible en `http://localhost:5173`
 Al iniciar por primera vez, se crea automáticamente un usuario administrador:
 
 ```
-Email: admin@cdalaflorida.com
+Email: admin@cdasoft.com
 Password: admin123
 ```
 
@@ -238,7 +238,7 @@ Ver `DEPLOY.md` para instrucciones detalladas de despliegue en VPS.
 ### Estructura del Proyecto
 
 ```
-cda-la-florida/
+SAAS-CDA/
 ├── backend/
 │   ├── app/
 │   │   ├── api/v1/endpoints/     # Endpoints REST
@@ -265,11 +265,11 @@ cda-la-florida/
 
 ## 🤝 Contribuir
 
-Este es un proyecto privado para CDA La Florida. Contactar al administrador para contribuciones.
+Este es un proyecto privado para CDASOFT. Contactar al administrador para contribuciones.
 
 ## 📄 Licencia
 
-Propietario: Centro de Diagnóstico Automotor La Florida
+Propietario: CDASOFT, sistema integral para administracion de cda
 Todos los derechos reservados.
 
 ## 📞 Soporte

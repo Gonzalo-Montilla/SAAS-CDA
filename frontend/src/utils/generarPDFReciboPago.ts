@@ -65,7 +65,7 @@ export async function generarPDFReciboPago(datos: DatosReciboPagoPDF): Promise<s
   
   doc.setFontSize(18);
   doc.setFont('helvetica', 'bold');
-  doc.text('CDA LA FLORIDA', pageWidth / 2, y, { align: 'center' });
+  doc.text('CDASOFT', pageWidth / 2, y, { align: 'center' });
   y += 8;
   
   doc.setFontSize(14);
@@ -249,7 +249,7 @@ export async function generarPDFReciboPago(datos: DatosReciboPagoPDF): Promise<s
   doc.setFontSize(7);
   doc.setFont('helvetica', 'italic');
   doc.setTextColor(100, 100, 100);
-  doc.text('Centro de Diagnóstico Automotor La Florida - Sistema de Gestión POS', pageWidth / 2, footerY + 5, { align: 'center' });
+  doc.text('CDASOFT — sistema integral para administracion de cda · Sistema de Gestión POS', pageWidth / 2, footerY + 5, { align: 'center' });
   doc.text(`Generado: ${new Date().toLocaleString('es-CO')}`, pageWidth / 2, footerY + 9, { align: 'center' });
   
   // Generar nombre de archivo

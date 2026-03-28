@@ -131,7 +131,7 @@ frontend/src/pages/
 
 ### **Backend**:
 ```powershell
-cd C:\Users\USUARIO\Documents\cda-la-florida\backend
+cd c:\Proyectos\SAAS-CDA\backend
 .\venv\Scripts\Activate.ps1
 python run.py
 # Servidor: http://127.0.0.1:8000
@@ -139,13 +139,13 @@ python run.py
 
 ### **Frontend**:
 ```powershell
-cd C:\Users\USUARIO\Documents\cda-la-florida\frontend
+cd c:\Proyectos\SAAS-CDA\frontend
 npm run dev
 # Aplicación: http://localhost:5173 o 5174
 ```
 
 ### **Base de Datos**:
-PostgreSQL en `localhost:5432/cda_la_florida`
+PostgreSQL en `localhost:5432/cdasoft`
 
 ---
 

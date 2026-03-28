@@ -1,4 +1,4 @@
-# 📦 Guía del Módulo de Caja - CDA LA FLORIDA
+# 📦 Guía del Módulo de Caja - CDASOFT
 
 ## ✅ Estado Actual: FUNCIONAL
 

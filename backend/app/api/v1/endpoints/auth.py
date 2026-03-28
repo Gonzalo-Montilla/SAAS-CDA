@@ -294,7 +294,7 @@ def forgot_password(
     
     envio_exitoso = enviar_email(
         destinatario=usuario.email,
-        asunto="Recuperación de Contraseña - CDA La Floridá",
+        asunto="Recuperación de Contraseña - CDASOFT",
         cuerpo_html=cuerpo_email
     )
     

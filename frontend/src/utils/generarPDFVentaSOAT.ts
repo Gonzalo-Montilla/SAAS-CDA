@@ -59,7 +59,7 @@ export async function generarPDFVentaSOAT(datos: DatosVentaSOATPDF): Promise<str
   
   doc.setFontSize(18);
   doc.setFont('helvetica', 'bold');
-  doc.text('CDA LA FLORIDA', pageWidth / 2, y, { align: 'center' });
+  doc.text('CDASOFT', pageWidth / 2, y, { align: 'center' });
   y += 8;
   
   doc.setFontSize(14);
@@ -192,7 +192,7 @@ export async function generarPDFVentaSOAT(datos: DatosVentaSOATPDF): Promise<str
   doc.setFont('helvetica', 'italic');
   doc.text('NOTA: Este recibo certifica únicamente el pago de la comisión por intermediación', leftMargin + 5, y + 6);
   doc.text('en la venta del SOAT. El seguro debe ser tramitado directamente con la aseguradora.', leftMargin + 5, y + 11);
-  doc.text('CDA LA FLORIDA NO es responsable de la validez o vigencia del seguro.', leftMargin + 5, y + 16);
+  doc.text('CDASOFT NO es responsable de la validez o vigencia del seguro.', leftMargin + 5, y + 16);
   y += 24;
   
   // FIRMA DEL CLIENTE
@@ -222,7 +222,7 @@ export async function generarPDFVentaSOAT(datos: DatosVentaSOATPDF): Promise<str
   doc.setFontSize(7);
   doc.setFont('helvetica', 'italic');
   doc.setTextColor(100, 100, 100);
-  doc.text('Centro de Diagnóstico Automotor La Florida - Sistema de Gestión POS', pageWidth / 2, footerY + 5, { align: 'center' });
+  doc.text('CDASOFT — sistema integral para administracion de cda · Sistema de Gestión POS', pageWidth / 2, footerY + 5, { align: 'center' });
   doc.text(`Generado: ${new Date().toLocaleString('es-CO')}`, pageWidth / 2, footerY + 9, { align: 'center' });
   
   // Generar nombre de archivo

@@ -1,4 +1,4 @@
-# Auditor\u00eda Pre-Producci\u00f3n - CDA La Florida
+# Auditor\u00eda Pre-Producci\u00f3n - CDASOFT
 **Fecha**: 2 de Enero 2026  
 **Estado**: En Progreso
 
@@ -39,8 +39,8 @@
 ```python
 # En producci\u00f3n, especificar dominios espec\u00edficos:
 BACKEND_CORS_ORIGINS: List[str] = [
-    \"https://cdalaflorida.com\",
-    \"https://www.cdalaflorida.com\"
+    \"https://cdasoft.com\",
+    \"https://www.cdasoft.com\"
 ]
 ```
 
@@ -77,7 +77,7 @@ python -c \"import secrets; print(secrets.token_urlsafe(64))\"
 
 **Recomendaci\u00f3n para producci\u00f3n**:
 ```
-DATABASE_URL=postgresql://usuario_prod:password_seguro@localhost:5432/cda_laflorida_prod
+DATABASE_URL=postgresql://usuario_prod:password_seguro@localhost:5432/cdasoft_prod
 ```
 
 **Consideraciones**:

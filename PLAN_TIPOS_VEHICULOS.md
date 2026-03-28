@@ -1,8 +1,8 @@
-# 🚗 PLAN: Implementar Múltiples Tipos de Vehículos - CDA La Florida
+# 🚗 PLAN: Implementar Múltiples Tipos de Vehículos - CDASOFT
 
 **Fecha:** 28 de Diciembre 2024  
 **Estado:** En Análisis - Pendiente Implementación  
-**Proyecto:** CDA La Florida (clonado de CDA Piendamó)
+**Proyecto:** CDASOFT (clonado de CDA Piendamó)
 
 ---
 
@@ -10,7 +10,7 @@
 
 ### Situación Actual
 - **CDA Piendamó**: Solo atiende motocicletas (hardcoded)
-- **CDA La Florida**: Debe atender múltiples tipos de vehículos (motos, livianos, taxis, buses, camiones, etc.)
+- **CDASOFT**: Debe atender múltiples tipos de vehículos (motos, livianos, taxis, buses, camiones, etc.)
 - Sistema actual calcula tarifas **solo por antigüedad**, sin considerar tipo de vehículo
 
 ### Problema Identificado
@@ -193,7 +193,7 @@ TIPO: Taxi
 5. Agregar iconos dinámicos según tipo
 
 ### Fase 4: Datos Iniciales
-1. Crear script para insertar todas las tarifas de La Florida
+1. Crear script para insertar todas las tarifas del CDA
 2. Actualizar comisiones SOAT si es necesario
 3. Probar flujo completo de registro
 
@@ -229,8 +229,8 @@ TIPO: Taxi
 - [x] Análisis completo del sistema de tarifas
 - [x] Análisis del módulo de recepción
 - [x] Identificación de todos los archivos a modificar
-- [x] Rebrand completo a CDA La Florida
-- [x] Base de datos `cda_la_florida` creada
+- [x] Rebrand completo a CDASOFT
+- [x] Base de datos `cdasoft` creada
 - [x] Sistema funcionando con usuario admin
 
 ### Pendiente ⏳

@@ -1,11 +1,11 @@
-// Logo de CDA LA FLORIDA convertido a Base64
+// Logo CDASOFT convertido a Base64
 // Este archivo se genera automáticamente al cargar la imagen del logo
-// Ubicación original: src/assets/LOGO CDA_LA_FLORIDA.png
+// Asset: LOGO_CDA_SOFT-SIN FONDO.png
 
 export async function cargarLogoCDA(): Promise<string> {
   try {
     // Importar dinámicamente la imagen
-    const logoModule = await import('../assets/LOGO CDA_LA_FLORIDA.png');
+    const logoModule = await import('../assets/LOGO_CDA_SOFT-SIN FONDO.png');
     const logoUrl = logoModule.default;
     
     // Convertir a Base64

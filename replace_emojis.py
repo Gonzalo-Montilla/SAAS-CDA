@@ -86,7 +86,7 @@ def scan_directory(directory):
     return results
 
 if __name__ == '__main__':
-    frontend_dir = r'C:\Users\USUARIO\Documents\cda-la-florida\frontend\src'
+    frontend_dir = r'c:\Proyectos\SAAS-CDA\frontend\src'
     
     print("🔍 Escaneando archivos TSX...")
     results = scan_directory(frontend_dir)

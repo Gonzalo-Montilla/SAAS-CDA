@@ -9,7 +9,7 @@ Se implementó un sistema completo para generar **comprobantes de egreso en PDF*
 ## Características
 
 ### 1. Generación Automática de PDF
-- **Formato profesional** con logo y colores de CDA La Florida
+- **Formato profesional** con logo y colores de CDASOFT
 - **Numeración única** para cada comprobante
 - **Información completa**:
   - Número de comprobante
@@ -147,7 +147,7 @@ const conceptoCompleto = tipoMovimiento === 'egreso' && formData.beneficiario
 
 ### Encabezado
 - Título: "COMPROBANTE DE EGRESO"
-- Subtítulo: "CDA La Florida"
+- Subtítulo: "CDASOFT"
 - Número de comprobante
 - Fecha y hora
 
@@ -221,7 +221,7 @@ Desglose:
 
 ## Próximas Mejoras (Opcionales)
 
-- [ ] Agregar logo de CDA La Florida en el encabezado
+- [ ] Agregar logo de CDASOFT en el encabezado
 - [ ] Comprobantes de ingreso (similar formato)
 - [ ] Envío automático por email
 - [ ] Almacenamiento en servidor de comprobantes

@@ -11,7 +11,7 @@ import {
   CheckCircle2,
   Shield
 } from 'lucide-react';
-import logo from '../assets/LOGO CDA_LA_FLORIDA.png';
+import logo from '../assets/LOGO_CDA_SOFT-SIN FONDO.png';
 
 export default function Dashboard() {
   const { user, logout } = useAuth();
@@ -30,13 +30,10 @@ export default function Dashboard() {
           <div className="flex items-center gap-4">
             <img 
               src={logo} 
-              alt="CDA La Florida" 
+              alt="CDASOFT" 
               className="h-32 rounded-2xl shadow-lg"
             />
-            <div>
-              <h1 className="text-2xl font-bold text-gray-900">CDA LA FLORIDA</h1>
-              <p className="text-sm text-gray-600">Sistema de Punto de Venta</p>
-            </div>
+            <p className="text-xs text-gray-500 mt-0.5">Sistema de Punto de Venta</p>
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right">

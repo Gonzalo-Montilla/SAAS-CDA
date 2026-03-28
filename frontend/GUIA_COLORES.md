@@ -1,7 +1,7 @@
-# 🎨 Guía de Colores - CDA LA FLORIDA
+# 🎨 Guía de Colores - CDASOFT
 
 **Actualización:** 29 de Diciembre de 2024  
-**Basado en:** Logo oficial CDA La Florida
+**Basado en:** Logo oficial CDASOFT
 
 ---
 
@@ -126,7 +126,7 @@ className="border-2 border-secondary-500 text-secondary-700 hover:bg-secondary-5
 ```tsx
 <div className="bg-primary-700 text-white">
   <h1 className="text-4xl font-bold">
-    CDA La Florida
+    CDASOFT
   </h1>
   <button className="bg-secondary-500 hover:bg-secondary-600 text-white px-6 py-3">
     Comenzar
@@ -165,7 +165,7 @@ className="border-2 border-secondary-500 text-secondary-700 hover:bg-secondary-5
 ```tsx
 <aside className="bg-primary-800 text-white h-screen">
   <div className="bg-primary-900 p-4">
-    <h2 className="font-bold">CDA La Florida</h2>
+    <h2 className="font-bold">CDASOFT</h2>
   </div>
   <nav>
     <a className="flex items-center gap-2 p-3 hover:bg-primary-700 border-l-4 border-transparent hover:border-secondary-500">

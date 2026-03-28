@@ -53,7 +53,7 @@ tipo_vehiculo = 'carro' → valor_comision = 50000
 ```bash
 # Conectar a la base de datos de producción
 ssh root@31.97.144.9
-psql -U cda_user -d cda_la_florida_prod
+psql -U cda_user -d cdasoft_prod
 
 # Ejecutar verificación
 \i /ruta/al/script/verificar_comisiones_soat.sql
@@ -103,10 +103,10 @@ python -m pytest tests/ -v
 ```bash
 # 1. Subir código al servidor
 rsync -avz --exclude='node_modules' --exclude='__pycache__' \
-  frontend/dist/ root@31.97.144.9:/var/www/cda-la-florida/frontend/
+  frontend/dist/ root@31.97.144.9:/var/www/cdasoft/frontend/
 
 rsync -avz --exclude='__pycache__' --exclude='*.pyc' \
-  backend/ root@31.97.144.9:/var/www/cda-la-florida/backend/
+  backend/ root@31.97.144.9:/var/www/cdasoft/backend/
 
 # 2. Reiniciar servicios en el servidor
 ssh root@31.97.144.9
@@ -209,7 +209,7 @@ systemctl restart nginx
 4. **Las comisiones SOAT son configurables** desde el módulo de Tarifas
 5. **Backup recomendado** antes del deployment:
    ```bash
-   pg_dump -U cda_user cda_la_florida_prod > backup_pre_deployment_$(date +%Y%m%d).sql
+   pg_dump -U cda_user cdasoft_prod > backup_pre_deployment_$(date +%Y%m%d).sql
    ```
 
 ---
@@ -220,7 +220,7 @@ Si algo falla después del deployment:
 
 ```bash
 # En el servidor
-cd /var/www/cda-la-florida
+cd /var/www/cdasoft
 
 # Restaurar frontend anterior
 cp -r frontend.backup frontend/
@@ -253,4 +253,4 @@ systemctl restart nginx
 
 **Preparado por:** AI Assistant
 **Fecha:** $(date)
-**Versión del sistema:** CDA La Florida v2.0
+**Versión del sistema:** CDASOFT v2.0

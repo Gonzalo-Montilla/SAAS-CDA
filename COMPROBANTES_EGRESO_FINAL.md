@@ -14,14 +14,14 @@ Sistema completo para generar comprobantes de egreso en PDF profesionales con de
 ### 1. Generación de PDF Profesional ✅
 - **Biblioteca:** ReportLab 4.0.9
 - **Formato:** Tamaño carta (letter)
-- **Colores:** Paleta oficial CDA La Florida
+- **Colores:** Paleta oficial CDASOFT
   - Azul marino (#0a1d3d) para encabezados
   - Rojo (#dc2626) para monto de egreso destacado
   - Amarillo suave (#fffbeb) para desglose de efectivo
 
 ### 2. Contenido del Comprobante ✅
 - ✅ Encabezado "COMPROBANTE DE EGRESO"
-- ✅ Nombre de la empresa "CDA La Florida"
+- ✅ Nombre de la empresa "CDASOFT"
 - ✅ Número de comprobante único
 - ✅ Fecha y hora del egreso
 - ✅ Beneficiario (pagado a)
@@ -250,7 +250,7 @@ npm run dev
 
 ## Próximas Mejoras Opcionales
 
-- [ ] Agregar logo de CDA La Florida en el encabezado del PDF
+- [ ] Agregar logo de CDASOFT en el encabezado del PDF
 - [ ] Comprobantes de ingreso (formato similar)
 - [ ] Envío automático por email
 - [ ] Almacenamiento permanente de PDFs en servidor

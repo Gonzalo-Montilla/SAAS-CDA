@@ -95,7 +95,7 @@ def generar_comprobante_egreso(
     
     # Encabezado
     elementos.append(Paragraph("COMPROBANTE DE EGRESO", titulo_style))
-    elementos.append(Paragraph("CDA La Florida", subtitulo_style))
+    elementos.append(Paragraph("CDASOFT", subtitulo_style))
     elementos.append(Spacer(1, 0.2*inch))
     
     # Información del comprobante
