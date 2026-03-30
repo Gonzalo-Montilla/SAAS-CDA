@@ -2,10 +2,12 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { apiClient } from '../api/client';
+import { useBrand } from '../contexts/BrandContext';
 
 export default function ResetPassword() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const brand = useBrand();
   const token = searchParams.get('token');
 
   const [password, setPassword] = useState('');
@@ -62,108 +64,105 @@ export default function ResetPassword() {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-500 to-blue-700 flex items-center justify-center p-4">
-      <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-8">
-        {/* Logo */}
-        <div className="text-center mb-6">
-          <div className="bg-blue-100 rounded-full w-20 h-20 flex items-center justify-center mx-auto mb-4">
-            <span className="text-4xl">🔧</span>
+    <div className="min-h-screen bg-slate-100 flex flex-col">
+      <div className="flex-1 flex items-center justify-center p-4">
+        <div className="w-full max-w-md rounded-2xl bg-white border border-slate-200 shadow-sm px-7 py-8">
+          <div className="mb-8 flex flex-col items-center text-center">
+            <img
+              src={brand.logoSrc}
+              alt={brand.nombreComercial}
+              className="h-44 w-auto mb-5 object-contain"
+            />
+            <p className="text-[13px] text-slate-500">Sistema de Gestión</p>
           </div>
-          <h1 className="text-2xl font-bold text-gray-800">CDASOFT</h1>
-          <p className="text-sm text-gray-600">sistema integral para administracion de cda</p>
-          <p className="text-sm text-gray-500 mt-2">Sistema de Punto de Venta · Revisión Técnico-Mecánica</p>
-        </div>
 
-        {/* Título */}
-        <div className="text-center mb-6">
-          <h2 className="text-2xl font-bold text-gray-800">Restablecer Contraseña</h2>
-          <p className="text-sm text-gray-600 mt-2">Ingresa tu nueva contraseña</p>
-        </div>
-
-        {/* Mensajes */}
-        {mensaje && (
-          <div className="mb-4 p-4 bg-green-50 border-2 border-green-200 rounded-lg text-green-800 text-sm">
-            {mensaje}
+          <div className="text-center mb-6">
+            <h2 className="text-2xl font-bold text-slate-800">Restablecer Contraseña</h2>
+            <p className="text-sm text-slate-600 mt-2">Ingresa tu nueva contraseña</p>
           </div>
-        )}
 
-        {error && (
-          <div className="mb-4 p-4 bg-red-50 border-2 border-red-200 rounded-lg text-red-800 text-sm">
-            {error}
-          </div>
-        )}
-
-        {/* Formulario */}
-        {token && !mensaje && (
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Nueva Contraseña */}
-            <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">
-                Nueva Contraseña *
-              </label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                placeholder="Mínimo 6 caracteres"
-                required
-                minLength={6}
-              />
+          {mensaje && (
+            <div className="mb-4 p-3 bg-green-50 border border-green-200 rounded-lg text-green-800 text-sm">
+              {mensaje}
             </div>
+          )}
 
-            {/* Confirmar Contraseña */}
-            <div>
-              <label className="block text-sm font-bold text-gray-700 mb-2">
-                Confirmar Contraseña *
-              </label>
-              <input
-                type="password"
-                value={confirmPassword}
-                onChange={(e) => setConfirmPassword(e.target.value)}
-                className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
-                placeholder="Repite la contraseña"
-                required
-                minLength={6}
-              />
+          {error && (
+            <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded-lg text-red-800 text-sm">
+              {error}
             </div>
+          )}
 
-            {/* Botones */}
-            <button
-              type="submit"
-              disabled={resetPasswordMutation.isLoading}
-              className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white py-3 rounded-xl font-bold shadow-lg transition-all hover:scale-105 disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              {resetPasswordMutation.isLoading ? '⏳ Actualizando...' : '🔒 Actualizar Contraseña'}
-            </button>
+          {token && !mensaje && (
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-2">
+                  Nueva Contraseña
+                </label>
+                <input
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Mínimo 6 caracteres"
+                  required
+                  minLength={6}
+                />
+              </div>
 
-            <button
-              type="button"
-              onClick={() => navigate('/login')}
-              className="w-full bg-gray-200 hover:bg-gray-300 text-gray-800 py-3 rounded-xl font-bold transition-all"
-            >
-              Volver al Login
-            </button>
-          </form>
-        )}
+              <div>
+                <label className="block text-xs font-medium text-slate-700 mb-2">
+                  Confirmar Contraseña
+                </label>
+                <input
+                  type="password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  className="w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder="Repite la contraseña"
+                  required
+                  minLength={6}
+                />
+              </div>
 
-        {/* Sin token válido */}
-        {!token && (
-          <div className="text-center">
-            <button
-              onClick={() => navigate('/login')}
-              className="w-full bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white py-3 rounded-xl font-bold shadow-lg transition-all hover:scale-105"
-            >
-              Ir al Login
-            </button>
+              <button
+                type="submit"
+                disabled={resetPasswordMutation.isLoading}
+                className="w-full rounded-md text-white text-sm font-semibold py-2.5 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{ backgroundColor: brand.colorPrimario }}
+              >
+                {resetPasswordMutation.isLoading ? 'Actualizando...' : 'Actualizar Contraseña'}
+              </button>
+
+              <button
+                type="button"
+                onClick={() => navigate('/login')}
+                className="w-full rounded-md bg-slate-200 hover:bg-slate-300 text-slate-800 text-sm font-semibold py-2.5 transition"
+              >
+                Volver al Login
+              </button>
+            </form>
+          )}
+
+          {!token && (
+            <div className="text-center">
+              <button
+                onClick={() => navigate('/login')}
+                className="w-full rounded-md text-white text-sm font-semibold py-2.5 transition"
+                style={{ backgroundColor: brand.colorPrimario }}
+              >
+                Ir al Login
+              </button>
+            </div>
+          )}
+
+          <div className="mt-7 border-t border-slate-200 pt-5 text-center text-[11px] text-slate-500">
+            <p>{brand.nombreComercial} - sistema integral para administracion de cda</p>
           </div>
-        )}
-
-        {/* Footer */}
-        <div className="text-center mt-6 text-xs text-gray-500">
-          <p>© 2026 CDASOFT</p>
-          <p>Versión 1.0.0</p>
         </div>
+      </div>
+      <div className="text-center text-[11px] text-slate-500 pb-4">
+        <p>Copyright © 2026 Prometheus Tech. Todos los derechos reservados.</p>
       </div>
     </div>
   );
