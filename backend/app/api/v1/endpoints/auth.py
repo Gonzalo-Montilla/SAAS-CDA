@@ -22,6 +22,10 @@ from app.models.audit_log import AuditAction
 
 router = APIRouter()
 
+def utcnow_naive() -> datetime:
+    """Retorna datetime UTC sin tzinfo para columnas TIMESTAMP sin zona."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
 
 @router.post("/register", response_model=Token, status_code=status.HTTP_201_CREATED)
 def register(
@@ -313,7 +317,7 @@ def forgot_password(
     
     # Generar token único y seguro
     token = secrets.token_urlsafe(32)
-    expira_en = datetime.now(timezone.utc) + timedelta(minutes=30)  # Válido por 30 minutos
+    expira_en = utcnow_naive() + timedelta(minutes=30)  # Válido por 30 minutos
     
     # Guardar token en la base de datos
     reset_token = PasswordResetToken(
@@ -378,7 +382,7 @@ def reset_password(
         )
     
     # Verificar que no haya expirado
-    if datetime.now(timezone.utc) > reset_token.expira_en:
+    if utcnow_naive() > reset_token.expira_en:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="El token ha expirado. Solicita una nueva recuperación"
@@ -394,7 +398,7 @@ def reset_password(
     
     # Actualizar contraseña
     usuario.hashed_password = get_password_hash(request.new_password)
-    usuario.updated_at = datetime.now(timezone.utc)
+    usuario.updated_at = utcnow_naive()
     
     # Marcar token como usado
     reset_token.usado = True

@@ -67,8 +67,28 @@ def ensure_tenant_baseline_schema(db):
     db.execute(
         text(
             """
-            INSERT INTO tenants (id, nombre, slug, activo, created_at)
-            VALUES (:tenant_id, :tenant_name, :tenant_slug, TRUE, NOW())
+            INSERT INTO tenants (
+                id,
+                nombre,
+                slug,
+                activo,
+                nombre_comercial,
+                logo_url,
+                color_primario,
+                color_secundario,
+                created_at
+            )
+            VALUES (
+                :tenant_id,
+                :tenant_name,
+                :tenant_slug,
+                TRUE,
+                :tenant_name,
+                NULL,
+                '#2563eb',
+                '#0f172a',
+                NOW()
+            )
             ON CONFLICT (slug) DO NOTHING
             """
         ),
@@ -345,7 +365,7 @@ def init_db():
             )
             db.add(owner)
             db.commit()
-            print("✅ Usuario global SaaS owner creado")
+            print("[OK] Usuario global SaaS owner creado")
             print(f"   Email: {settings.SAAS_OWNER_EMAIL}")
             print("   Password: [SAAS_OWNER_PASSWORD desde .env]")
 
@@ -353,7 +373,7 @@ def init_db():
         admin_exists = db.query(Usuario).filter(Usuario.email == "admin@cdasoft.com").first()
         
         if not admin_exists:
-            print("📝 Creando usuario administrador inicial...")
+            print("[INIT] Creando usuario administrador inicial...")
             
             # Crear usuario administrador
             admin = Usuario(
@@ -367,12 +387,12 @@ def init_db():
             db.add(admin)
             db.flush()
             
-            print("✅ Usuario administrador creado")
+            print("[OK] Usuario administrador creado")
             print("   Email: admin@cdasoft.com")
             print("   Password: admin123")
             
             # Crear tarifas 2025 para motos
-            print("\n📋 Creando tarifas 2025...")
+            print("\n[INIT] Creando tarifas 2025...")
             
             tarifas_2025 = [
                 # 0-2 años (modelos 2023-2025)
@@ -440,10 +460,10 @@ def init_db():
             for tarifa in tarifas_2025:
                 db.add(tarifa)
             
-            print("✅ Tarifas 2025 creadas (4 rangos de antigüedad)")
+            print("[OK] Tarifas 2025 creadas (4 rangos de antiguedad)")
             
             # Crear comisiones SOAT
-            print("\n💰 Creando comisiones SOAT...")
+            print("\n[INIT] Creando comisiones SOAT...")
             
             comisiones = [
                 ComisionSOAT(
@@ -469,15 +489,15 @@ def init_db():
             for comision in comisiones:
                 db.add(comision)
             
-            print("✅ Comisiones SOAT creadas (Moto: $30K, Carro: $50K)")
+            print("[OK] Comisiones SOAT creadas (Moto: $30K, Carro: $50K)")
             
             db.commit()
-            print("\n🎉 Base de datos inicializada correctamente\n")
+            print("\n[OK] Base de datos inicializada correctamente\n")
         else:
-            print("ℹ️  Base de datos ya inicializada")
+            print("[INFO] Base de datos ya inicializada")
             
     except Exception as e:
-        print(f"❌ Error inicializando base de datos: {e}")
+        print(f"[ERROR] Error inicializando base de datos: {e}")
         db.rollback()
     finally:
         db.close()

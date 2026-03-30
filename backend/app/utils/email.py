@@ -27,7 +27,7 @@ def enviar_email(destinatario: str, asunto: str, cuerpo_html: str) -> bool:
         mensaje["Subject"] = asunto
         
         # Agregar contenido HTML
-        parte_html = MIMEText(cuerpo_html, "html")
+        parte_html = MIMEText(cuerpo_html, "html", "utf-8")
         mensaje.attach(parte_html)
         
         # Conectar al servidor SMTP de Gmail
@@ -63,27 +63,28 @@ def generar_email_recuperacion_password(nombre: str, enlace_reset: str) -> str:
             body {{
                 font-family: Arial, sans-serif;
                 line-height: 1.6;
-                color: #333;
+                color: #0f172a;
             }}
             .container {{
                 max-width: 600px;
                 margin: 0 auto;
                 padding: 20px;
-                background-color: #f9f9f9;
+                background-color: #f8fafc;
             }}
             .card {{
                 background-color: white;
-                border-radius: 10px;
+                border-radius: 12px;
                 padding: 30px;
                 box-shadow: 0 2px 10px rgba(0,0,0,0.1);
             }}
-            .logo {{
+            .brand {{
                 text-align: center;
                 margin-bottom: 20px;
             }}
-            .logo h1 {{
+            .brand h1 {{
                 color: #2563eb;
                 margin: 0;
+                font-size: 28px;
             }}
             .content {{
                 margin: 20px 0;
@@ -104,8 +105,8 @@ def generar_email_recuperacion_password(nombre: str, enlace_reset: str) -> str:
                 color: #666;
             }}
             .warning {{
-                background-color: #fff3cd;
-                border-left: 4px solid #ffc107;
+                background-color: #fff7ed;
+                border-left: 4px solid #f59e0b;
                 padding: 10px;
                 margin: 15px 0;
             }}
@@ -114,9 +115,9 @@ def generar_email_recuperacion_password(nombre: str, enlace_reset: str) -> str:
     <body>
         <div class="container">
             <div class="card">
-                <div class="logo">
-                    <h1>🔧 CDA PIENDAMÓ</h1>
-                    <p>Centro de Diagnóstico Automotor</p>
+                <div class="brand">
+                    <h1>CDASOFT</h1>
+                    <p>Sistema integral para administracion de CDA</p>
                 </div>
                 
                 <div class="content">
@@ -142,7 +143,7 @@ def generar_email_recuperacion_password(nombre: str, enlace_reset: str) -> str:
                 </div>
                 
                 <div class="footer">
-                    <p>© 2025 CDA Piendamó - Sistema de Punto de Venta</p>
+                    <p>© 2026 CDASOFT</p>
                     <p>Este es un email automático, por favor no respondas a este mensaje.</p>
                 </div>
             </div>
