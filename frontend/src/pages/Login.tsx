@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { apiClient } from '../api/client';
+import type { AuthScope } from '../types';
 import logo from '../assets/LOGO_CDA_SOFT-SIN FONDO.png';
 
 export default function Login() {
@@ -10,6 +11,7 @@ export default function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+  const [loginMode, setLoginMode] = useState<AuthScope>('tenant');
   const [mostrarForgotPassword, setMostrarForgotPassword] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [mensajeForgot, setMensajeForgot] = useState('');
@@ -22,8 +24,8 @@ export default function Login() {
     setLoading(true);
 
     try {
-      await login({ username: email, password });
-      navigate('/dashboard');
+      await login({ username: email, password }, loginMode);
+      navigate(loginMode === 'saas' ? '/saas/backoffice' : '/dashboard');
     } catch (err: any) {
       setError(err.response?.data?.detail || 'Error al iniciar sesión');
     } finally {
@@ -53,19 +55,44 @@ export default function Login() {
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col">
       <div className="flex-1 flex items-center justify-center p-4">
-        <div className="w-full max-w-md rounded-2xl bg-white border border-slate-200 shadow-sm p-8">
-          <div className="text-center mb-8">
+        <div className="w-full max-w-md rounded-2xl bg-white border border-slate-200 shadow-sm px-7 py-8">
+          <div className="mb-8 flex flex-col items-center text-center">
             <img
               src={logo}
               alt="CDASOFT"
-              className="h-40 w-auto mx-auto mb-5"
+              className="h-48 w-auto mb-5 object-contain"
             />
-            <p className="text-sm text-slate-500">Sistema de Gestión</p>
+            <p className="text-[13px] text-slate-500">Sistema de Gestión</p>
+          </div>
+
+          <div className="mb-5 rounded-lg border border-slate-200 bg-slate-50 p-1 grid grid-cols-2 gap-1">
+            <button
+              type="button"
+              onClick={() => setLoginMode('tenant')}
+              className={`rounded-md px-3 py-2 text-xs font-semibold transition ${
+                loginMode === 'tenant'
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-white'
+              }`}
+            >
+              Acceso Tenant CDA
+            </button>
+            <button
+              type="button"
+              onClick={() => setLoginMode('saas')}
+              className={`rounded-md px-3 py-2 text-xs font-semibold transition ${
+                loginMode === 'saas'
+                  ? 'bg-slate-900 text-white shadow-sm'
+                  : 'text-slate-600 hover:bg-white'
+              }`}
+            >
+              SaaS Backoffice
+            </button>
           </div>
 
           <form onSubmit={handleSubmit} className="space-y-5">
             <div>
-              <label htmlFor="email" className="block text-sm font-medium text-slate-700 mb-2">
+              <label htmlFor="email" className="block text-xs font-medium text-slate-700 mb-2">
                 Correo electrónico
               </label>
               <input
@@ -74,14 +101,14 @@ export default function Login() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                placeholder="usuario@cdasoft.com"
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                placeholder={loginMode === 'saas' ? 'owner@cdasoft.com' : 'usuario@cdasoft.com'}
                 autoComplete="email"
               />
             </div>
 
             <div>
-              <label htmlFor="password" className="block text-sm font-medium text-slate-700 mb-2">
+              <label htmlFor="password" className="block text-xs font-medium text-slate-700 mb-2">
                 Contraseña
               </label>
               <input
@@ -90,7 +117,7 @@ export default function Login() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="w-full rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 placeholder="••••••••"
                 autoComplete="current-password"
               />
@@ -105,7 +132,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full rounded-lg bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 transition disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? (
                 <span className="flex items-center justify-center">
@@ -116,22 +143,24 @@ export default function Login() {
                   Iniciando sesión...
                 </span>
               ) : (
-                'Iniciar Sesión'
+                loginMode === 'saas' ? 'Ingresar a Backoffice' : 'Iniciar Sesión'
               )}
             </button>
 
-            <div className="text-center">
-              <button
-                type="button"
-                onClick={() => setMostrarForgotPassword(true)}
-                className="text-sm text-blue-600 hover:text-blue-800"
-              >
-                ¿Olvidaste tu contraseña?
-              </button>
-            </div>
+            {loginMode === 'tenant' && (
+              <div className="text-center">
+                <button
+                  type="button"
+                  onClick={() => setMostrarForgotPassword(true)}
+                  className="text-xs text-blue-600 hover:text-blue-800"
+                >
+                  ¿Olvidaste tu contraseña?
+                </button>
+              </div>
+            )}
           </form>
 
-          <div className="mt-8 border-t border-slate-100 pt-4 text-center text-xs text-slate-500">
+          <div className="mt-7 border-t border-slate-200 pt-5 text-center text-[11px] text-slate-500">
             <p>CDASOFT - sistema integral para administracion de cda</p>
           </div>
         </div>

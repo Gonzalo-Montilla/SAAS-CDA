@@ -35,8 +35,12 @@ apiClient.interceptors.response.use(
 
       try {
         const refreshToken = localStorage.getItem('refresh_token');
+        const authScope = localStorage.getItem('auth_scope') || 'tenant';
+        const refreshEndpoint =
+          authScope === 'saas' ? `${API_URL}/saas/auth/refresh` : `${API_URL}/auth/refresh`;
+
         if (refreshToken) {
-          const response = await axios.post(`${API_URL}/auth/refresh`, {
+          const response = await axios.post(refreshEndpoint, {
             refresh_token: refreshToken,
           });
 
@@ -54,6 +58,7 @@ apiClient.interceptors.response.use(
         // Si falla el refresh, cerrar sesión
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
+        localStorage.removeItem('auth_scope');
         window.location.href = '/login';
         return Promise.reject(refreshError);
       }

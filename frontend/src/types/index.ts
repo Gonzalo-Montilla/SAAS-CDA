@@ -5,9 +5,24 @@ export interface Usuario {
   email: string;
   nombre_completo: string;
   rol: 'administrador' | 'cajero' | 'recepcionista';
+  rol_global?: 'owner' | 'finanzas' | 'comercial' | 'soporte';
   activo: boolean;
   created_at: string;
 }
+
+export interface SaaSUser {
+  id: string;
+  email: string;
+  nombre_completo: string;
+  rol?: 'administrador' | 'cajero' | 'recepcionista';
+  rol_global: 'owner' | 'finanzas' | 'comercial' | 'soporte';
+  activo: boolean;
+  mfa_enabled: boolean;
+  session_version: number;
+  created_at: string;
+}
+
+export type AuthScope = 'tenant' | 'saas';
 
 export interface LoginCredentials {
   username: string;

@@ -1,4 +1,5 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { ToastProvider } from './contexts/ToastContext';
@@ -12,11 +13,19 @@ import Tesoreria from './pages/Tesoreria';
 import Reportes from './pages/Reportes';
 import Usuarios from './pages/Usuarios';
 import ResetPassword from './pages/ResetPassword';
+import SaaSBackoffice from './pages/SaaSBackoffice';
+import type { AuthScope } from './types';
 
 const queryClient = new QueryClient();
 
-function ProtectedRoute({ children }: { children: React.ReactNode }) {
-  const { isAuthenticated, loading } = useAuth();
+function ProtectedRoute({
+  children,
+  requiredScope,
+}: {
+  children: ReactNode;
+  requiredScope?: AuthScope;
+}) {
+  const { isAuthenticated, loading, authScope } = useAuth();
 
   if (loading) {
     return (
@@ -29,7 +38,24 @@ function ProtectedRoute({ children }: { children: React.ReactNode }) {
     );
   }
 
-  return isAuthenticated ? <>{children}</> : <Navigate to="/login" />;
+  if (!isAuthenticated) {
+    return <Navigate to="/login" />;
+  }
+
+  if (requiredScope && authScope !== requiredScope) {
+    return <Navigate to={authScope === 'saas' ? '/saas/backoffice' : '/dashboard'} replace />;
+  }
+
+  return <>{children}</>;
+}
+
+function HomeRedirect() {
+  const { isAuthenticated, authScope } = useAuth();
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
+
+  return <Navigate to={authScope === 'saas' ? '/saas/backoffice' : '/dashboard'} replace />;
 }
 
 function App() {
@@ -45,7 +71,7 @@ function App() {
             <Route
               path="/dashboard"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredScope="tenant">
                   <Dashboard />
                 </ProtectedRoute>
               }
@@ -53,7 +79,7 @@ function App() {
             <Route
               path="/recepcion"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredScope="tenant">
                   <Recepcion />
                 </ProtectedRoute>
               }
@@ -61,7 +87,7 @@ function App() {
             <Route
               path="/caja"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredScope="tenant">
                   <Caja />
                 </ProtectedRoute>
               }
@@ -69,7 +95,7 @@ function App() {
             <Route
               path="/tarifas"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredScope="tenant">
                   <Tarifas />
                 </ProtectedRoute>
               }
@@ -77,7 +103,7 @@ function App() {
             <Route
               path="/tesoreria"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredScope="tenant">
                   <Tesoreria />
                 </ProtectedRoute>
               }
@@ -85,7 +111,7 @@ function App() {
             <Route
               path="/reportes"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredScope="tenant">
                   <Reportes />
                 </ProtectedRoute>
               }
@@ -93,12 +119,20 @@ function App() {
             <Route
               path="/usuarios"
               element={
-                <ProtectedRoute>
+                <ProtectedRoute requiredScope="tenant">
                   <Usuarios />
                 </ProtectedRoute>
               }
             />
-            <Route path="/" element={<Navigate to="/dashboard" />} />
+            <Route
+              path="/saas/backoffice"
+              element={
+                <ProtectedRoute requiredScope="saas">
+                  <SaaSBackoffice />
+                </ProtectedRoute>
+              }
+            />
+            <Route path="/" element={<HomeRedirect />} />
               </Routes>
             </ErrorBoundary>
           </AuthProvider>
