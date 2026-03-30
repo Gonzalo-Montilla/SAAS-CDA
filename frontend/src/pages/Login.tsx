@@ -4,7 +4,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { useBrand } from '../contexts/BrandContext';
 import { apiClient } from '../api/client';
-import type { AuthScope } from '../types';
+import type { AuthScope, TenantSelfRegisterRequest } from '../types';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -13,8 +13,15 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [loginMode, setLoginMode] = useState<AuthScope>('tenant');
   const [mostrarForgotPassword, setMostrarForgotPassword] = useState(false);
+  const [mostrarRegistroTenant, setMostrarRegistroTenant] = useState(false);
   const [forgotEmail, setForgotEmail] = useState('');
   const [mensajeForgot, setMensajeForgot] = useState('');
+  const [registerNombreCda, setRegisterNombreCda] = useState('');
+  const [registerAdminNombre, setRegisterAdminNombre] = useState('');
+  const [registerAdminEmail, setRegisterAdminEmail] = useState('');
+  const [registerAdminPassword, setRegisterAdminPassword] = useState('');
+  const [registerLogoUrl, setRegisterLogoUrl] = useState('');
+  const [mensajeRegistro, setMensajeRegistro] = useState('');
   const { login } = useAuth();
   const brand = useBrand();
   const navigate = useNavigate();
@@ -51,6 +58,39 @@ export default function Login() {
     e.preventDefault();
     setMensajeForgot('');
     forgotPasswordMutation.mutate(forgotEmail);
+  };
+
+  const registerTenantMutation = useMutation({
+    mutationFn: async (payload: TenantSelfRegisterRequest) => {
+      const response = await apiClient.post('/onboarding/register-tenant', payload);
+      return response.data;
+    },
+    onSuccess: async () => {
+      setMensajeRegistro('✅ CDA creado exitosamente. Iniciando sesión...');
+      await login(
+        {
+          username: registerAdminEmail,
+          password: registerAdminPassword,
+        },
+        'tenant'
+      );
+      navigate('/dashboard');
+    },
+    onError: (err: any) => {
+      setMensajeRegistro(err.response?.data?.detail || '❌ No se pudo crear el CDA');
+    },
+  });
+
+  const handleRegisterTenant = (e: FormEvent) => {
+    e.preventDefault();
+    setMensajeRegistro('');
+    registerTenantMutation.mutate({
+      nombre_cda: registerNombreCda,
+      admin_nombre_completo: registerAdminNombre,
+      admin_email: registerAdminEmail,
+      admin_password: registerAdminPassword,
+      logo_url: registerLogoUrl || undefined,
+    });
   };
 
   return (
@@ -151,7 +191,7 @@ export default function Login() {
             </button>
 
             {loginMode === 'tenant' && (
-              <div className="text-center">
+              <div className="text-center space-y-2">
                 <button
                   type="button"
                   onClick={() => setMostrarForgotPassword(true)}
@@ -159,6 +199,15 @@ export default function Login() {
                 >
                   ¿Olvidaste tu contraseña?
                 </button>
+                <div>
+                  <button
+                    type="button"
+                    onClick={() => setMostrarRegistroTenant(true)}
+                    className="text-xs text-slate-600 hover:text-slate-800"
+                  >
+                    Crear mi CDA
+                  </button>
+                </div>
               </div>
             )}
           </form>
@@ -241,6 +290,103 @@ export default function Login() {
                   </button>
                 </div>
               </form>
+          </div>
+        </div>
+      )}
+
+      {/* Modal: Registro de tenant CDA */}
+      {mostrarRegistroTenant && (
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 border-2 border-gray-100">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-gray-800">Crear mi CDA</h3>
+              <button
+                onClick={() => {
+                  setMostrarRegistroTenant(false);
+                  setMensajeRegistro('');
+                }}
+                className="text-gray-500 hover:text-gray-700"
+              >
+                <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+
+            <p className="text-sm text-gray-600 mb-4">
+              Registra tu CDA y crea el usuario administrador inicial.
+            </p>
+
+            <form onSubmit={handleRegisterTenant} className="space-y-3">
+              <input
+                type="text"
+                value={registerNombreCda}
+                onChange={(e) => setRegisterNombreCda(e.target.value)}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg"
+                placeholder="Nombre de tu CDA / Marca"
+                required
+              />
+              <input
+                type="text"
+                value={registerAdminNombre}
+                onChange={(e) => setRegisterAdminNombre(e.target.value)}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg"
+                placeholder="Nombre completo del administrador"
+                required
+              />
+              <input
+                type="email"
+                value={registerAdminEmail}
+                onChange={(e) => setRegisterAdminEmail(e.target.value)}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg"
+                placeholder="Email del administrador"
+                required
+              />
+              <input
+                type="password"
+                value={registerAdminPassword}
+                onChange={(e) => setRegisterAdminPassword(e.target.value)}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg"
+                placeholder="Contraseña inicial"
+                required
+                minLength={6}
+              />
+              <input
+                type="url"
+                value={registerLogoUrl}
+                onChange={(e) => setRegisterLogoUrl(e.target.value)}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg"
+                placeholder="URL del logo (opcional)"
+              />
+
+              {mensajeRegistro && (
+                <div className={`p-3 rounded-lg text-sm ${
+                  mensajeRegistro.includes('✅')
+                    ? 'bg-green-50 border border-green-200 text-green-800'
+                    : 'bg-red-50 border border-red-200 text-red-800'
+                }`}>
+                  {mensajeRegistro}
+                </div>
+              )}
+
+              <div className="flex gap-3 pt-1">
+                <button
+                  type="button"
+                  onClick={() => setMostrarRegistroTenant(false)}
+                  className="flex-1 px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg font-semibold transition"
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={registerTenantMutation.isLoading}
+                  className="flex-1 px-4 py-2 text-white rounded-lg font-semibold transition disabled:opacity-50"
+                  style={{ backgroundColor: brand.colorPrimario }}
+                >
+                  {registerTenantMutation.isLoading ? 'Creando...' : 'Crear CDA'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

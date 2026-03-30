@@ -43,6 +43,14 @@ export interface LoginResponse {
   token_type: string;
 }
 
+export interface TenantSelfRegisterRequest {
+  nombre_cda: string;
+  admin_nombre_completo: string;
+  admin_email: string;
+  admin_password: string;
+  logo_url?: string;
+}
+
 // Vehículos
 export interface Vehiculo {
   id: string;

@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from app.api.v1.endpoints import (
     auth,
     saas_auth,
+    onboarding,
     vehiculos,
     cajas,
     tarifas,
@@ -21,6 +22,7 @@ api_router = APIRouter()
 # Incluir todos los routers de endpoints
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(saas_auth.router, prefix="/saas/auth", tags=["saas-auth"])
+api_router.include_router(onboarding.router, prefix="/onboarding", tags=["onboarding"])
 api_router.include_router(vehiculos.router, prefix="/vehiculos", tags=["vehiculos"])
 api_router.include_router(cajas.router, prefix="/cajas", tags=["cajas"])
 api_router.include_router(tarifas.router, prefix="/tarifas", tags=["tarifas"])
