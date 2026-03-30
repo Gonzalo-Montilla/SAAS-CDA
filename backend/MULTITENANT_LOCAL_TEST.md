@@ -106,3 +106,25 @@ Pruebas sugeridas:
 6. Invalidar sesiones globales:
    - `POST /api/v1/saas/auth/logout-all`.
    - Intentar usar un refresh token anterior y verificar `401`.
+
+## 8) Seguridad onboarding (rate limiting)
+
+Aplicar migración desde `backend/`:
+
+```bash
+python apply_onboarding_rate_limit_migration.py
+```
+
+Pruebas sugeridas:
+
+1. Ejecutar varios registros consecutivos contra `POST /api/v1/onboarding/register-tenant` con la misma IP.
+2. Al superar el límite configurado, la API debe responder `429`.
+3. Repetir con el mismo `admin_email` para validar límite por correo.
+4. Verificar en BD:
+
+```sql
+SELECT ip_address, admin_email, successful, failure_reason, created_at
+FROM onboarding_registration_attempts
+ORDER BY created_at DESC
+LIMIT 20;
+```

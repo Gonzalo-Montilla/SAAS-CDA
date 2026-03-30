@@ -10,6 +10,7 @@ class TenantSelfRegisterRequest(BaseModel):
     admin_email: EmailStr
     admin_password: str = Field(min_length=6, max_length=128)
     logo_url: str | None = Field(default=None, max_length=500)
+    captcha_token: str | None = Field(default=None, max_length=2048)
 
 
 class TenantSelfRegisterResponse(BaseModel):

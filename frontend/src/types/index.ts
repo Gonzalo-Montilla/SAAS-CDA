@@ -49,6 +49,7 @@ export interface TenantSelfRegisterRequest {
   admin_email: string;
   admin_password: string;
   logo_url?: string;
+  captcha_token?: string;
 }
 
 // Vehículos

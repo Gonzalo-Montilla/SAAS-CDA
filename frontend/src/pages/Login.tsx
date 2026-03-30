@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from 'react';
+import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
@@ -7,6 +7,9 @@ import { apiClient } from '../api/client';
 import type { AuthScope, TenantSelfRegisterRequest } from '../types';
 
 export default function Login() {
+  const turnstileEnabled = import.meta.env.VITE_TURNSTILE_ENABLED === 'true';
+  const turnstileSiteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY || '';
+
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState('');
@@ -21,7 +24,11 @@ export default function Login() {
   const [registerAdminEmail, setRegisterAdminEmail] = useState('');
   const [registerAdminPassword, setRegisterAdminPassword] = useState('');
   const [registerLogoUrl, setRegisterLogoUrl] = useState('');
+  const [registerCaptchaToken, setRegisterCaptchaToken] = useState('');
+  const [registerCaptchaError, setRegisterCaptchaError] = useState('');
   const [mensajeRegistro, setMensajeRegistro] = useState('');
+  const turnstileWidgetIdRef = useRef<string | null>(null);
+  const turnstileScriptLoadedRef = useRef(false);
   const { login } = useAuth();
   const brand = useBrand();
   const navigate = useNavigate();
@@ -78,20 +85,90 @@ export default function Login() {
     },
     onError: (err: any) => {
       setMensajeRegistro(err.response?.data?.detail || '❌ No se pudo crear el CDA');
+      setRegisterCaptchaToken('');
+      if (window.turnstile && turnstileWidgetIdRef.current) {
+        window.turnstile.reset(turnstileWidgetIdRef.current);
+      }
     },
   });
 
   const handleRegisterTenant = (e: FormEvent) => {
     e.preventDefault();
     setMensajeRegistro('');
+    setRegisterCaptchaError('');
+
+    if (turnstileEnabled && !registerCaptchaToken) {
+      setRegisterCaptchaError('Debes completar la verificación captcha.');
+      return;
+    }
+
     registerTenantMutation.mutate({
       nombre_cda: registerNombreCda,
       admin_nombre_completo: registerAdminNombre,
       admin_email: registerAdminEmail,
       admin_password: registerAdminPassword,
       logo_url: registerLogoUrl || undefined,
+      captcha_token: registerCaptchaToken || undefined,
     });
   };
+
+  useEffect(() => {
+    if (!mostrarRegistroTenant || !turnstileEnabled || !turnstileSiteKey) {
+      return;
+    }
+
+    const renderWidget = () => {
+      if (!window.turnstile || turnstileWidgetIdRef.current) {
+        return;
+      }
+
+      turnstileWidgetIdRef.current = window.turnstile.render('#turnstile-container', {
+        sitekey: turnstileSiteKey,
+        callback: (token: string) => {
+          setRegisterCaptchaToken(token);
+          setRegisterCaptchaError('');
+        },
+        'expired-callback': () => {
+          setRegisterCaptchaToken('');
+          setRegisterCaptchaError('El captcha expiró. Valídalo de nuevo.');
+        },
+        'error-callback': () => {
+          setRegisterCaptchaToken('');
+          setRegisterCaptchaError('No se pudo validar captcha. Intenta nuevamente.');
+        },
+      });
+    };
+
+    window.onloadTurnstileCallback = renderWidget;
+
+    if (window.turnstile) {
+      renderWidget();
+      return;
+    }
+
+    if (!turnstileScriptLoadedRef.current) {
+      const script = document.createElement('script');
+      script.id = 'turnstile-script';
+      script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onloadTurnstileCallback&render=explicit';
+      script.async = true;
+      script.defer = true;
+      document.body.appendChild(script);
+      turnstileScriptLoadedRef.current = true;
+    }
+  }, [mostrarRegistroTenant, turnstileEnabled, turnstileSiteKey]);
+
+  useEffect(() => {
+    if (mostrarRegistroTenant) {
+      return;
+    }
+
+    setRegisterCaptchaToken('');
+    setRegisterCaptchaError('');
+    if (window.turnstile && turnstileWidgetIdRef.current) {
+      window.turnstile.remove(turnstileWidgetIdRef.current);
+    }
+    turnstileWidgetIdRef.current = null;
+  }, [mostrarRegistroTenant]);
 
   return (
     <div className="min-h-screen bg-slate-100 flex flex-col">
@@ -191,23 +268,22 @@ export default function Login() {
             </button>
 
             {loginMode === 'tenant' && (
-              <div className="text-center space-y-2">
+              <div className="flex items-center justify-center gap-4 text-xs">
                 <button
                   type="button"
                   onClick={() => setMostrarForgotPassword(true)}
-                  className="text-xs text-blue-600 hover:text-blue-800"
+                  className="text-blue-600 hover:text-blue-800 transition"
                 >
                   ¿Olvidaste tu contraseña?
                 </button>
-                <div>
-                  <button
-                    type="button"
-                    onClick={() => setMostrarRegistroTenant(true)}
-                    className="text-xs text-slate-600 hover:text-slate-800"
-                  >
-                    Crear mi CDA
-                  </button>
-                </div>
+                <span className="text-slate-300">|</span>
+                <button
+                  type="button"
+                  onClick={() => setMostrarRegistroTenant(true)}
+                  className="text-blue-600 hover:text-blue-800 transition"
+                >
+                  Crear mi CDA
+                </button>
               </div>
             )}
           </form>
@@ -304,6 +380,8 @@ export default function Login() {
                 onClick={() => {
                   setMostrarRegistroTenant(false);
                   setMensajeRegistro('');
+                  setRegisterCaptchaToken('');
+                  setRegisterCaptchaError('');
                 }}
                 className="text-gray-500 hover:text-gray-700"
               >
@@ -358,6 +436,24 @@ export default function Login() {
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg"
                 placeholder="URL del logo (opcional)"
               />
+
+              {turnstileEnabled && (
+                <div className="pt-1">
+                  {!turnstileSiteKey ? (
+                    <div className="p-3 rounded-lg text-sm bg-amber-50 border border-amber-200 text-amber-800">
+                      Configura `VITE_TURNSTILE_SITE_KEY` para habilitar captcha.
+                    </div>
+                  ) : (
+                    <div id="turnstile-container" className="min-h-[65px]" />
+                  )}
+                </div>
+              )}
+
+              {registerCaptchaError && (
+                <div className="p-3 rounded-lg text-sm bg-red-50 border border-red-200 text-red-800">
+                  {registerCaptchaError}
+                </div>
+              )}
 
               {mensajeRegistro && (
                 <div className={`p-3 rounded-lg text-sm ${

@@ -313,6 +313,43 @@ def ensure_tenant_domain_schema(db):
     db.execute(text("UPDATE notificaciones_cierre_caja SET tenant_id = :tenant_id WHERE tenant_id IS NULL"), {"tenant_id": settings.SAAS_DEFAULT_TENANT_ID})
 
 
+def ensure_onboarding_security_schema(db):
+    """
+    Asegura tabla para rate limiting del onboarding público.
+    """
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS onboarding_registration_attempts (
+                id SERIAL PRIMARY KEY,
+                ip_address VARCHAR(64) NOT NULL,
+                admin_email VARCHAR(255) NOT NULL,
+                tenant_nombre VARCHAR(200),
+                successful BOOLEAN NOT NULL DEFAULT FALSE,
+                failure_reason VARCHAR(120),
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_onboarding_attempts_ip_created
+            ON onboarding_registration_attempts(ip_address, created_at)
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_onboarding_attempts_email_created
+            ON onboarding_registration_attempts(admin_email, created_at)
+            """
+        )
+    )
+
+
 def get_db():
     """
     Dependency para obtener sesión de base de datos
@@ -352,6 +389,8 @@ def init_db():
             raise RuntimeError("No se pudo inicializar tenant default")
 
         ensure_tenant_domain_schema(db)
+        ensure_onboarding_security_schema(db)
+        db.commit()
 
         # Verificar y crear owner global SaaS
         saas_owner = db.query(SaaSUser).filter(SaaSUser.email == settings.SAAS_OWNER_EMAIL).first()

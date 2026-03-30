@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     SAAS_OWNER_EMAIL: str = Field(default="owner@cdasoft.com", env="SAAS_OWNER_EMAIL")
     SAAS_OWNER_PASSWORD: str = Field(default="owner123", env="SAAS_OWNER_PASSWORD")
     SAAS_OWNER_NAME: str = Field(default="Owner CDASOFT", env="SAAS_OWNER_NAME")
+
+    # Seguridad onboarding tenant (registro público)
+    ONBOARDING_RATE_LIMIT_WINDOW_MINUTES: int = 60
+    ONBOARDING_RATE_LIMIT_MAX_ATTEMPTS_IP: int = 5
+    ONBOARDING_RATE_LIMIT_MAX_ATTEMPTS_EMAIL: int = 3
+    TURNSTILE_ENABLED: bool = False
+    TURNSTILE_SECRET_KEY: str = Field(default="", env="TURNSTILE_SECRET_KEY")
+    TURNSTILE_VERIFY_URL: str = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
     
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = ["*"]
