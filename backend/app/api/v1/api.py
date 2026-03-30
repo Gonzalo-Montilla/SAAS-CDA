@@ -3,12 +3,24 @@ API Router principal v1
 """
 from fastapi import APIRouter
 
-from app.api.v1.endpoints import auth, vehiculos, cajas, tarifas, config, tesoreria, reportes, usuarios, notificaciones
+from app.api.v1.endpoints import (
+    auth,
+    saas_auth,
+    vehiculos,
+    cajas,
+    tarifas,
+    config,
+    tesoreria,
+    reportes,
+    usuarios,
+    notificaciones,
+)
 
 api_router = APIRouter()
 
 # Incluir todos los routers de endpoints
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
+api_router.include_router(saas_auth.router, prefix="/saas/auth", tags=["saas-auth"])
 api_router.include_router(vehiculos.router, prefix="/vehiculos", tags=["vehiculos"])
 api_router.include_router(cajas.router, prefix="/cajas", tags=["cajas"])
 api_router.include_router(tarifas.router, prefix="/tarifas", tags=["tarifas"])

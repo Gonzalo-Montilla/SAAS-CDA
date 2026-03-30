@@ -56,10 +56,19 @@ def register(
     
     # Generar tokens
     access_token = create_access_token(
-        data={"sub": str(new_user.id), "rol": new_user.rol, "tenant_id": str(new_user.tenant_id)}
+        data={
+            "sub": str(new_user.id),
+            "rol": new_user.rol,
+            "tenant_id": str(new_user.tenant_id),
+            "auth_scope": "tenant",
+        }
     )
     refresh_token = create_refresh_token(
-        data={"sub": str(new_user.id), "tenant_id": str(new_user.tenant_id)}
+        data={
+            "sub": str(new_user.id),
+            "tenant_id": str(new_user.tenant_id),
+            "auth_scope": "tenant",
+        }
     )
     
     return Token(
@@ -114,10 +123,19 @@ def login(
     
     # Generar tokens
     access_token = create_access_token(
-        data={"sub": str(user.id), "rol": user.rol, "tenant_id": str(user.tenant_id)}
+        data={
+            "sub": str(user.id),
+            "rol": user.rol,
+            "tenant_id": str(user.tenant_id),
+            "auth_scope": "tenant",
+        }
     )
     refresh_token = create_refresh_token(
-        data={"sub": str(user.id), "tenant_id": str(user.tenant_id)}
+        data={
+            "sub": str(user.id),
+            "tenant_id": str(user.tenant_id),
+            "auth_scope": "tenant",
+        }
     )
     
     return Token(
@@ -144,7 +162,7 @@ def refresh_token(
         )
     
     # Verificar que es un refresh token
-    if payload.get("type") != "refresh":
+    if payload.get("type") != "refresh" or payload.get("auth_scope") != "tenant":
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Token inválido"
@@ -185,10 +203,19 @@ def refresh_token(
     
     # Generar nuevos tokens
     access_token = create_access_token(
-        data={"sub": str(user.id), "rol": user.rol, "tenant_id": str(user.tenant_id)}
+        data={
+            "sub": str(user.id),
+            "rol": user.rol,
+            "tenant_id": str(user.tenant_id),
+            "auth_scope": "tenant",
+        }
     )
     new_refresh_token = create_refresh_token(
-        data={"sub": str(user.id), "tenant_id": str(user.tenant_id)}
+        data={
+            "sub": str(user.id),
+            "tenant_id": str(user.tenant_id),
+            "auth_scope": "tenant",
+        }
     )
     
     return Token(

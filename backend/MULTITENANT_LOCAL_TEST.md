@@ -1,4 +1,4 @@
-# Multitenant Local Test (Fase 1 + Fase 2-A)
+# Multitenant Local Test (Fase 1 + Fase 2-A + Fase 3)
 
 Este checklist valida que el aislamiento por tenant esta funcionando en backend.
 
@@ -69,3 +69,40 @@ SELECT tenant_id, count(*) FROM movimientos_tesoreria GROUP BY tenant_id;
 - Ningun endpoint critico devuelve datos de otro tenant.
 - No hay filas nuevas con `tenant_id IS NULL` en tablas core.
 - Login/refresh mantiene claim `tenant_id` y validacion en backend.
+
+## 7) Validacion Fase 3 (Auth global SaaS + RBAC global)
+
+Aplicar migracion desde `backend/`:
+
+```bash
+python apply_saas_global_auth_migration.py
+```
+
+Luego iniciar backend:
+
+```bash
+python run.py
+```
+
+Pruebas sugeridas:
+
+1. Login global SaaS (owner por defecto desde `.env`):
+   - `POST /api/v1/saas/auth/login` con `username=owner@cdasoft.com` y `password=owner123` (o tu valor en `.env`).
+
+2. Con token global, validar identidad:
+   - `GET /api/v1/saas/auth/me`
+
+3. Revisar permisos RBAC global:
+   - `GET /api/v1/saas/auth/permissions/me`
+
+4. Crear usuario global (solo owner):
+   - `POST /api/v1/saas/auth/users`
+   - Ejemplo rol: `finanzas`, `comercial` o `soporte`.
+
+5. Validar restriccion RBAC:
+   - Login con usuario `finanzas` y probar `GET /api/v1/saas/auth/users`.
+   - Debe fallar con `403` (solo `owner`/`soporte`).
+
+6. Invalidar sesiones globales:
+   - `POST /api/v1/saas/auth/logout-all`.
+   - Intentar usar un refresh token anterior y verificar `401`.

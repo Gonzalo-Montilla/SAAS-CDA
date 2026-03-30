@@ -280,6 +280,7 @@ def init_db():
     from app.models.tarifa import Tarifa, ComisionSOAT
     from app.models.caja import Caja, MovimientoCaja
     from app.models.vehiculo import VehiculoProceso
+    from app.models.saas_user import SaaSUser
     from app.core.security import get_password_hash
     from datetime import date
     
@@ -298,6 +299,22 @@ def init_db():
             raise RuntimeError("No se pudo inicializar tenant default")
 
         ensure_tenant_domain_schema(db)
+
+        # Verificar y crear owner global SaaS
+        saas_owner = db.query(SaaSUser).filter(SaaSUser.email == settings.SAAS_OWNER_EMAIL).first()
+        if not saas_owner:
+            owner = SaaSUser(
+                email=settings.SAAS_OWNER_EMAIL,
+                hashed_password=get_password_hash(settings.SAAS_OWNER_PASSWORD),
+                nombre_completo=settings.SAAS_OWNER_NAME,
+                rol_global="owner",
+                activo=True,
+            )
+            db.add(owner)
+            db.commit()
+            print("✅ Usuario global SaaS owner creado")
+            print(f"   Email: {settings.SAAS_OWNER_EMAIL}")
+            print("   Password: [SAAS_OWNER_PASSWORD desde .env]")
 
         # Verificar si ya existe usuario admin
         admin_exists = db.query(Usuario).filter(Usuario.email == "admin@cdasoft.com").first()

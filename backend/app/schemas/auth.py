@@ -14,8 +14,11 @@ class Token(BaseModel):
 class TokenPayload(BaseModel):
     """Payload del token JWT"""
     sub: str  # user_id
-    rol: str
-    tenant_id: str
+    rol: str | None = None
+    tenant_id: str | None = None
+    rol_global: str | None = None
+    auth_scope: str | None = None
+    session_version: int | None = None
     exp: int
 
 

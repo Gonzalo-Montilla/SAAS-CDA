@@ -10,9 +10,11 @@ from uuid import UUID
 from app.db.database import get_db
 from app.core.security import decode_token
 from app.models.usuario import Usuario, RolEnum
+from app.models.saas_user import SaaSUser
 
 # OAuth2 scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
+oauth2_scheme_saas = OAuth2PasswordBearer(tokenUrl="/api/v1/saas/auth/login")
 
 
 def get_current_user(
@@ -35,6 +37,10 @@ def get_current_user(
     
     # Verificar que es access token
     if payload.get("type") != "access":
+        raise credentials_exception
+
+    # Verificar scope tenant
+    if payload.get("auth_scope") != "tenant":
         raise credentials_exception
     
     # Obtener user_id
@@ -74,6 +80,48 @@ def get_current_user(
     return user
 
 
+def get_current_saas_user(
+    token: str = Depends(oauth2_scheme_saas),
+    db: Session = Depends(get_db)
+) -> SaaSUser:
+    """Obtener usuario global SaaS desde JWT."""
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="No se pudo validar las credenciales globales",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+    payload = decode_token(token)
+    if payload is None:
+        raise credentials_exception
+
+    if payload.get("type") != "access" or payload.get("auth_scope") != "saas":
+        raise credentials_exception
+
+    user_id = payload.get("sub")
+    if user_id is None:
+        raise credentials_exception
+
+    try:
+        user_uuid = UUID(user_id)
+    except ValueError:
+        raise credentials_exception
+
+    user = db.query(SaaSUser).filter(SaaSUser.id == user_uuid).first()
+    if user is None or not user.activo:
+        raise credentials_exception
+
+    token_session_version = payload.get("session_version")
+    if token_session_version is not None and user.session_version != token_session_version:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Sesión global invalidada",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    return user
+
+
 def require_role(allowed_roles: list[str]):
     """
     Dependency para verificar rol de usuario
@@ -86,6 +134,19 @@ def require_role(allowed_roles: list[str]):
             )
         return current_user
     
+    return role_checker
+
+
+def require_saas_role(allowed_roles: list[str]):
+    """Dependency para verificar rol global SaaS."""
+    def role_checker(current_user: SaaSUser = Depends(get_current_saas_user)) -> SaaSUser:
+        if current_user.rol_global not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Permiso denegado. Roles globales permitidos: {', '.join(allowed_roles)}"
+            )
+        return current_user
+
     return role_checker
 
 
@@ -116,5 +177,15 @@ def get_recepcionista_or_admin(current_user: Usuario = Depends(get_current_user)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Solo recepcionistas o administradores pueden realizar esta acción"
+        )
+    return current_user
+
+
+def get_saas_owner(current_user: SaaSUser = Depends(get_current_saas_user)) -> SaaSUser:
+    """Solo owner global SaaS."""
+    if current_user.rol_global != "owner":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo owner SaaS puede realizar esta acción"
         )
     return current_user

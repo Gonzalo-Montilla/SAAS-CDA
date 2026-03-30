@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     SAAS_DEFAULT_TENANT_ID: str = "00000000-0000-0000-0000-000000000001"
     SAAS_DEFAULT_TENANT_SLUG: str = "default"
     SAAS_DEFAULT_TENANT_NAME: str = "Tenant Default CDA"
+    SAAS_OWNER_EMAIL: str = Field(default="owner@cdasoft.com", env="SAAS_OWNER_EMAIL")
+    SAAS_OWNER_PASSWORD: str = Field(default="owner123", env="SAAS_OWNER_PASSWORD")
+    SAAS_OWNER_NAME: str = Field(default="Owner CDASOFT", env="SAAS_OWNER_NAME")
     
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = ["*"]
