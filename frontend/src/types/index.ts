@@ -1,4 +1,11 @@
 // Usuarios y Auth
+export interface TenantBranding {
+  nombre_comercial: string;
+  logo_url?: string | null;
+  color_primario: string;
+  color_secundario: string;
+}
+
 export interface Usuario {
   id: string;
   tenant_id: string;
@@ -8,6 +15,7 @@ export interface Usuario {
   rol_global?: 'owner' | 'finanzas' | 'comercial' | 'soporte';
   activo: boolean;
   created_at: string;
+  tenant_branding?: TenantBranding;
 }
 
 export interface SaaSUser {

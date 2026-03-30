@@ -232,7 +232,22 @@ def get_current_user_info(
     """
     Obtener información del usuario actual
     """
-    return current_user
+    tenant = current_user.tenant
+    return {
+        "id": current_user.id,
+        "tenant_id": current_user.tenant_id,
+        "email": current_user.email,
+        "nombre_completo": current_user.nombre_completo,
+        "rol": current_user.rol,
+        "activo": current_user.activo,
+        "created_at": current_user.created_at,
+        "tenant_branding": {
+            "nombre_comercial": tenant.nombre_comercial if tenant else settings.APP_NAME,
+            "logo_url": tenant.logo_url if tenant else None,
+            "color_primario": tenant.color_primario if tenant else "#2563eb",
+            "color_secundario": tenant.color_secundario if tenant else "#0f172a",
+        },
+    }
 
 
 @router.post("/change-password")

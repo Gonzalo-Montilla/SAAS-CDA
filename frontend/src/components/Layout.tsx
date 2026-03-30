@@ -1,7 +1,7 @@
 import { useAuth } from '../contexts/AuthContext';
+import { useBrand } from '../contexts/BrandContext';
 import { useNavigate } from 'react-router-dom';
 import { Home, LogOut, User } from 'lucide-react';
-import logo from '../assets/LOGO_CDA_SOFT-SIN FONDO.png';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -10,6 +10,7 @@ interface LayoutProps {
 
 export default function Layout({ children, title }: LayoutProps) {
   const { user, logout } = useAuth();
+  const brand = useBrand();
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -28,8 +29,8 @@ export default function Layout({ children, title }: LayoutProps) {
               className="flex items-center gap-4 hover:opacity-80 transition-opacity"
             >
               <img 
-                src={logo} 
-                alt="CDASOFT" 
+                src={brand.logoSrc}
+                alt={brand.nombreComercial}
                 className="h-20 rounded-2xl shadow-md"
               />
               <div>

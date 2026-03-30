@@ -18,6 +18,10 @@ class Tenant(Base):
     nombre = Column(String(200), nullable=False)
     slug = Column(String(120), unique=True, nullable=False, index=True)
     activo = Column(Boolean, default=True, nullable=False)
+    nombre_comercial = Column(String(200), nullable=False, default="CDASOFT")
+    logo_url = Column(String(500), nullable=True)
+    color_primario = Column(String(20), nullable=False, default="#2563eb")
+    color_secundario = Column(String(20), nullable=False, default="#0f172a")
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

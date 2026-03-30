@@ -7,6 +7,13 @@ from typing import Optional
 from uuid import UUID
 
 
+class TenantBrandingResponse(BaseModel):
+    nombre_comercial: str
+    logo_url: Optional[str] = None
+    color_primario: str
+    color_secundario: str
+
+
 class UsuarioBase(BaseModel):
     """Base de usuario"""
     email: EmailStr
@@ -39,6 +46,7 @@ class UsuarioResponse(BaseModel):
     rol: str
     activo: bool
     created_at: datetime
+    tenant_branding: Optional[TenantBrandingResponse] = None
     
     model_config = ConfigDict(from_attributes=True)
 

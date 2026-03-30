@@ -2,9 +2,9 @@ import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
+import { useBrand } from '../contexts/BrandContext';
 import { apiClient } from '../api/client';
 import type { AuthScope } from '../types';
-import logo from '../assets/LOGO_CDA_SOFT-SIN FONDO.png';
 
 export default function Login() {
   const [email, setEmail] = useState('');
@@ -16,6 +16,7 @@ export default function Login() {
   const [forgotEmail, setForgotEmail] = useState('');
   const [mensajeForgot, setMensajeForgot] = useState('');
   const { login } = useAuth();
+  const brand = useBrand();
   const navigate = useNavigate();
 
   const handleSubmit = async (e: FormEvent) => {
@@ -58,8 +59,8 @@ export default function Login() {
         <div className="w-full max-w-md rounded-2xl bg-white border border-slate-200 shadow-sm px-7 py-8">
           <div className="mb-8 flex flex-col items-center text-center">
             <img
-              src={logo}
-              alt="CDASOFT"
+              src={brand.logoSrc}
+              alt={brand.nombreComercial}
               className="h-48 w-auto mb-5 object-contain"
             />
             <p className="text-[13px] text-slate-500">Sistema de Gestión</p>
@@ -71,9 +72,10 @@ export default function Login() {
               onClick={() => setLoginMode('tenant')}
               className={`rounded-md px-3 py-2 text-xs font-semibold transition ${
                 loginMode === 'tenant'
-                  ? 'bg-blue-600 text-white shadow-sm'
+                  ? 'text-white shadow-sm'
                   : 'text-slate-600 hover:bg-white'
               }`}
+              style={loginMode === 'tenant' ? { backgroundColor: brand.colorPrimario } : undefined}
             >
               Acceso Tenant CDA
             </button>
@@ -133,6 +135,7 @@ export default function Login() {
               type="submit"
               disabled={loading}
               className="w-full rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              style={loginMode === 'tenant' ? { backgroundColor: brand.colorPrimario } : undefined}
             >
               {loading ? (
                 <span className="flex items-center justify-center">
@@ -161,7 +164,7 @@ export default function Login() {
           </form>
 
           <div className="mt-7 border-t border-slate-200 pt-5 text-center text-[11px] text-slate-500">
-            <p>CDASOFT - sistema integral para administracion de cda</p>
+            <p>{brand.nombreComercial} - sistema integral para administracion de cda</p>
           </div>
         </div>
       </div>

@@ -41,12 +41,28 @@ def ensure_tenant_baseline_schema(db):
                 nombre VARCHAR(200) NOT NULL,
                 slug VARCHAR(120) UNIQUE NOT NULL,
                 activo BOOLEAN NOT NULL DEFAULT TRUE,
+                nombre_comercial VARCHAR(200) NOT NULL DEFAULT 'CDASOFT',
+                logo_url VARCHAR(500),
+                color_primario VARCHAR(20) NOT NULL DEFAULT '#2563eb',
+                color_secundario VARCHAR(20) NOT NULL DEFAULT '#0f172a',
                 created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMP WITHOUT TIME ZONE
             )
             """
         )
     )
+
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS nombre_comercial VARCHAR(200)"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS logo_url VARCHAR(500)"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS color_primario VARCHAR(20)"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS color_secundario VARCHAR(20)"))
+
+    db.execute(text("UPDATE tenants SET nombre_comercial = COALESCE(nombre_comercial, nombre)"))
+    db.execute(text("UPDATE tenants SET color_primario = COALESCE(color_primario, '#2563eb')"))
+    db.execute(text("UPDATE tenants SET color_secundario = COALESCE(color_secundario, '#0f172a')"))
+    db.execute(text("ALTER TABLE tenants ALTER COLUMN nombre_comercial SET NOT NULL"))
+    db.execute(text("ALTER TABLE tenants ALTER COLUMN color_primario SET NOT NULL"))
+    db.execute(text("ALTER TABLE tenants ALTER COLUMN color_secundario SET NOT NULL"))
 
     db.execute(
         text(
@@ -58,6 +74,23 @@ def ensure_tenant_baseline_schema(db):
         ),
         {
             "tenant_id": default_tenant_id,
+            "tenant_name": default_tenant_name,
+            "tenant_slug": default_tenant_slug,
+        },
+    )
+
+    db.execute(
+        text(
+            """
+            UPDATE tenants
+            SET nombre_comercial = :tenant_name,
+                color_primario = '#2563eb',
+                color_secundario = '#0f172a'
+            WHERE slug = :tenant_slug
+              AND (nombre_comercial IS NULL OR nombre_comercial = '')
+            """
+        ),
+        {
             "tenant_name": default_tenant_name,
             "tenant_slug": default_tenant_slug,
         },

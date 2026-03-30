@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import type { ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
+import { BrandProvider } from './contexts/BrandContext';
 import { ToastProvider } from './contexts/ToastContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import Login from './pages/Login';
@@ -64,8 +65,9 @@ function App() {
       <ToastProvider>
         <BrowserRouter>
           <AuthProvider>
-            <ErrorBoundary>
-              <Routes>
+            <BrandProvider>
+              <ErrorBoundary>
+                <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route
@@ -132,9 +134,10 @@ function App() {
                 </ProtectedRoute>
               }
             />
-            <Route path="/" element={<HomeRedirect />} />
-              </Routes>
-            </ErrorBoundary>
+                <Route path="/" element={<HomeRedirect />} />
+                </Routes>
+              </ErrorBoundary>
+            </BrandProvider>
           </AuthProvider>
         </BrowserRouter>
       </ToastProvider>

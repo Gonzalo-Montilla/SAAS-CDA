@@ -1,4 +1,5 @@
 import { useAuth } from '../contexts/AuthContext';
+import { useBrand } from '../contexts/BrandContext';
 import { useNavigate } from 'react-router-dom';
 import { 
   ClipboardList, 
@@ -11,10 +12,9 @@ import {
   CheckCircle2,
   Shield
 } from 'lucide-react';
-import logo from '../assets/LOGO_CDA_SOFT-SIN FONDO.png';
-
 export default function Dashboard() {
   const { user, logout } = useAuth();
+  const brand = useBrand();
   const navigate = useNavigate();
 
   const handleLogout = () => {
@@ -29,11 +29,11 @@ export default function Dashboard() {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
           <div className="flex items-center gap-4">
             <img 
-              src={logo} 
-              alt="CDASOFT" 
+              src={brand.logoSrc}
+              alt={brand.nombreComercial}
               className="h-32 rounded-2xl shadow-lg"
             />
-            <p className="text-xs text-gray-500 mt-0.5">Sistema de Punto de Venta</p>
+            <p className="text-xs text-gray-500 mt-0.5">{brand.nombreComercial}</p>
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right">
