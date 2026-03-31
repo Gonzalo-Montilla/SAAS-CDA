@@ -1,6 +1,5 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import * as XLSX from 'xlsx';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ContadorEfectivo, { type DesgloseEfectivo } from '../components/ContadorEfectivo';
@@ -119,7 +118,7 @@ function Dashboard() {
   });
 
   // Obtener desglose de efectivo (lazy)
-  const { data: desgloseEfectivo, isLoading: loadingDesgloseEfectivo } = useQuery({
+  const { data: desgloseEfectivo } = useQuery({
     queryKey: ['tesoreria-desglose-efectivo'],
     queryFn: tesoreriaApi.obtenerDesgloseEfectivo,
     enabled: !!saldo, // Solo cargar después del saldo
@@ -927,35 +926,42 @@ function Historial() {
   });
 
   // Función para exportar a Excel
-  const exportarExcel = () => {
+  const exportarExcel = async () => {
     if (!movimientos || movimientos.length === 0) {
       setFeedback({ type: 'error', message: 'No hay movimientos para exportar.' });
       return;
     }
 
-    // Preparar datos para Excel
-    const datosExcel = movimientos.map(mov => ({
-      'Fecha': new Date(mov.fecha_movimiento).toLocaleDateString('es-CO'),
-      'Tipo': mov.tipo === 'ingreso' ? 'Ingreso' : 'Egreso',
-      'Categoría': mov.categoria_ingreso || mov.categoria_egreso || 'N/A',
-      'Concepto': mov.concepto,
-      'Método de Pago': mov.metodo_pago,
-      'Monto': mov.monto,
-      'Número Comprobante': mov.numero_comprobante || '',
-    }));
+    try {
+      const XLSX = await import('xlsx');
 
-    // Crear libro y hoja
-    const ws = XLSX.utils.json_to_sheet(datosExcel);
-    const wb = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(wb, ws, 'Movimientos');
+      // Preparar datos para Excel
+      const datosExcel = movimientos.map(mov => ({
+        'Fecha': new Date(mov.fecha_movimiento).toLocaleDateString('es-CO'),
+        'Tipo': mov.tipo === 'ingreso' ? 'Ingreso' : 'Egreso',
+        'Categoría': mov.categoria_ingreso || mov.categoria_egreso || 'N/A',
+        'Concepto': mov.concepto,
+        'Método de Pago': mov.metodo_pago,
+        'Monto': mov.monto,
+        'Número Comprobante': mov.numero_comprobante || '',
+      }));
 
-    // Generar nombre de archivo con fecha
-    const fechaHoy = new Date().toISOString().split('T')[0];
-    const nombreArchivo = `Tesoreria_Movimientos_${fechaHoy}.xlsx`;
+      // Crear libro y hoja
+      const ws = XLSX.utils.json_to_sheet(datosExcel);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, 'Movimientos');
 
-    // Descargar
-    XLSX.writeFile(wb, nombreArchivo);
-    setFeedback({ type: 'success', message: 'Archivo Excel exportado correctamente.' });
+      // Generar nombre de archivo con fecha
+      const fechaHoy = new Date().toISOString().split('T')[0];
+      const nombreArchivo = `Tesoreria_Movimientos_${fechaHoy}.xlsx`;
+
+      // Descargar
+      XLSX.writeFile(wb, nombreArchivo);
+      setFeedback({ type: 'success', message: 'Archivo Excel exportado correctamente.' });
+    } catch (error) {
+      console.error('Error exportando Excel:', error);
+      setFeedback({ type: 'error', message: 'No fue posible exportar el archivo Excel.' });
+    }
   };
 
   return (
@@ -1094,7 +1100,7 @@ function Historial() {
                           onClick={async () => {
                             try {
                               // Usar apiClient que maneja el token automáticamente
-                              const response = await tesoreriaApi.obtenerMovimiento(mov.id);
+                              await tesoreriaApi.obtenerMovimiento(mov.id);
                               
                               // Abrir URL directamente - el navegador manejará la descarga
                               const url = `${import.meta.env.VITE_API_URL}/tesoreria/movimientos/${mov.id}/comprobante`;

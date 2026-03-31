@@ -1,10 +1,11 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { BarChart3, TrendingUp, TrendingDown, Wallet, Building2, FileText, Download, DollarSign, ArrowUpCircle, ArrowDownCircle, CalendarDays } from 'lucide-react';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import apiClient from '../api/client';
+
+const ReportesIngresosChart = lazy(() => import('../components/ReportesIngresosChart'));
 
 interface DashboardData {
   fecha: string;
@@ -467,16 +468,9 @@ export default function ReportesPage() {
             <TrendingUp className="w-6 h-6 text-primary-600" />
             Tendencia de Ingresos - Últimos 7 Días
           </h3>
-          <ResponsiveContainer width="100%" height={300}>
-            <BarChart data={grafica_ingresos_7_dias}>
-              <CartesianGrid strokeDasharray="3 3" />
-              <XAxis dataKey="dia_semana" />
-              <YAxis />
-              <Tooltip formatter={(value: number) => `$${value.toLocaleString()}`} />
-              <Legend />
-              <Bar dataKey="ingresos" fill="#10b981" name="Ingresos" />
-            </BarChart>
-          </ResponsiveContainer>
+          <Suspense fallback={<div className="h-[300px] rounded-lg bg-slate-100 animate-pulse" />}>
+            <ReportesIngresosChart data={grafica_ingresos_7_dias} />
+          </Suspense>
         </div>
         )}
 

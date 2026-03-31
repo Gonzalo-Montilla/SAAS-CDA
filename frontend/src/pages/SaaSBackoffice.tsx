@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ShieldCheck, LogOut, Users, Copy, Check, Building2, Shield, FileClock, Wallet } from 'lucide-react';
+import { ShieldCheck, LogOut, Users, Copy, Check, Building2, Shield, FileClock, Wallet, LifeBuoy } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import { apiClient } from '../api/client';
 import { useState } from 'react';
@@ -11,6 +11,8 @@ import type {
   SaaSPaymentRegisteredResponse,
   SaaSPaymentHistoryItem,
   SaaSSecuritySummary,
+  SaaSSupportSummary,
+  SaaSSupportTicketItem,
   SaaSTenantProfile,
   SaaSTenantBillingQuote,
   SaaSTenantSummary,
@@ -24,7 +26,7 @@ interface SaaSPermissionsResponse {
   permissions: string[];
 }
 
-type BackofficeModule = 'resumen' | 'tenants' | 'facturacion' | 'usuarios' | 'auditoria' | 'seguridad';
+type BackofficeModule = 'resumen' | 'tenants' | 'facturacion' | 'soporte' | 'usuarios' | 'auditoria' | 'seguridad';
 
 export default function SaaSBackoffice() {
   const { user, logout } = useAuth();
@@ -55,6 +57,13 @@ export default function SaaSBackoffice() {
   const [paymentNotes, setPaymentNotes] = useState('');
   const [lastPaymentReceipt, setLastPaymentReceipt] = useState<SaaSPaymentRegisteredResponse | null>(null);
   const [resentPaymentLogId, setResentPaymentLogId] = useState<string | null>(null);
+  const [supportTenantFilter, setSupportTenantFilter] = useState('');
+  const [supportStatusFilter, setSupportStatusFilter] = useState('');
+  const [supportPriorityFilter, setSupportPriorityFilter] = useState('');
+  const [supportActionError, setSupportActionError] = useState('');
+  const [supportActionSuccess, setSupportActionSuccess] = useState('');
+  const [supportReplyTicketId, setSupportReplyTicketId] = useState<string | null>(null);
+  const [supportReplyMessage, setSupportReplyMessage] = useState('');
 
   const formatAmountForInput = (amount: number): string => {
     if (!Number.isFinite(amount)) {
@@ -97,7 +106,23 @@ export default function SaaSBackoffice() {
     if (status === 'failed' || status === 'canceled' || status === 'cancelada') {
       return 'badge badge-danger';
     }
+    if (status === 'abierto' || status === 'en_progreso') {
+      return 'badge badge-info';
+    }
+    if (status === 'resuelto' || status === 'cerrado') {
+      return 'badge badge-success';
+    }
     return 'badge bg-slate-100 text-slate-700';
+  };
+
+  const supportStatusLabel = (status: string): string => {
+    const labels: Record<string, string> = {
+      abierto: 'Abierto',
+      en_progreso: 'En progreso',
+      resuelto: 'Resuelto',
+      cerrado: 'Cerrado',
+    };
+    return labels[status] || status;
   };
 
   const LoadingBlock = ({ lines = 3 }: { lines?: number }) => (
@@ -140,6 +165,36 @@ export default function SaaSBackoffice() {
       return response.data;
     },
     enabled: activeModule === 'usuarios',
+  });
+
+  const supportTicketsQuery = useQuery({
+    queryKey: ['saas-support-tickets', supportTenantFilter, supportStatusFilter, supportPriorityFilter],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      params.append('limit', '100');
+      if (supportTenantFilter) {
+        params.append('tenant_slug', supportTenantFilter);
+      }
+      if (supportStatusFilter) {
+        params.append('status_filter', supportStatusFilter);
+      }
+      if (supportPriorityFilter) {
+        params.append('priority', supportPriorityFilter);
+      }
+      const response = await apiClient.get<SaaSSupportTicketItem[]>(`/saas/auth/support/tickets?${params.toString()}`);
+      return response.data;
+    },
+    enabled: activeModule === 'soporte',
+  });
+
+  const supportSummaryQuery = useQuery({
+    queryKey: ['saas-support-summary'],
+    queryFn: async () => {
+      const response = await apiClient.get<SaaSSupportSummary>('/saas/auth/support/summary');
+      return response.data;
+    },
+    refetchInterval: 15000,
+    refetchOnWindowFocus: true,
   });
 
   const tenantProfileQuery = useQuery({
@@ -190,6 +245,36 @@ export default function SaaSBackoffice() {
     onError: (err: any) => {
       setCreateUserSuccess('');
       setCreateUserError(err?.response?.data?.detail || 'No fue posible crear el usuario SaaS. Intenta nuevamente.');
+    },
+  });
+
+  const updateSupportTicketMutation = useMutation({
+    mutationFn: async ({
+      ticketId,
+      status,
+      tenantResponseMessage,
+    }: {
+      ticketId: string;
+      status: string;
+      tenantResponseMessage?: string;
+    }) => {
+      const response = await apiClient.patch<SaaSSupportTicketItem>(`/saas/auth/support/tickets/${ticketId}`, {
+        status,
+        tenant_response_message: tenantResponseMessage,
+      });
+      return response.data;
+    },
+    onSuccess: () => {
+      setSupportActionError('');
+      setSupportActionSuccess('Ticket actualizado correctamente.');
+      queryClient.invalidateQueries({ queryKey: ['saas-support-tickets'] });
+      queryClient.invalidateQueries({ queryKey: ['saas-support-summary'] });
+      setSupportReplyTicketId(null);
+      setSupportReplyMessage('');
+    },
+    onError: (err: any) => {
+      setSupportActionSuccess('');
+      setSupportActionError(err?.response?.data?.detail || 'No fue posible actualizar el ticket.');
     },
   });
 
@@ -781,6 +866,186 @@ export default function SaaSBackoffice() {
       );
     }
 
+    if (activeModule === 'soporte') {
+      return (
+        <div className="space-y-6">
+          <div className="section-card p-6 space-y-4">
+            <p className="text-sm font-semibold text-slate-800">Tickets de soporte</p>
+            {supportActionError && (
+              <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">{supportActionError}</p>
+            )}
+            {supportActionSuccess && (
+              <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+                {supportActionSuccess}
+              </p>
+            )}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              <select
+                value={supportTenantFilter}
+                onChange={(e) => setSupportTenantFilter(e.target.value)}
+                className="input-corporate"
+              >
+                <option value="">Todos los tenants</option>
+                {(tenantsQuery.data || []).map((tenant) => (
+                  <option key={tenant.id} value={tenant.slug}>
+                    {tenant.nombre_comercial} (/{tenant.slug})
+                  </option>
+                ))}
+              </select>
+              <select
+                value={supportStatusFilter}
+                onChange={(e) => setSupportStatusFilter(e.target.value)}
+                className="input-corporate"
+              >
+                <option value="">Todos los estados</option>
+                <option value="abierto">Abierto</option>
+                <option value="en_progreso">En progreso</option>
+                <option value="resuelto">Resuelto</option>
+                <option value="cerrado">Cerrado</option>
+              </select>
+              <select
+                value={supportPriorityFilter}
+                onChange={(e) => setSupportPriorityFilter(e.target.value)}
+                className="input-corporate"
+              >
+                <option value="">Todas las prioridades</option>
+                <option value="baja">Baja</option>
+                <option value="media">Media</option>
+                <option value="alta">Alta</option>
+                <option value="critica">Crítica</option>
+              </select>
+            </div>
+
+            {supportTicketsQuery.isLoading && <LoadingBlock lines={4} />}
+            {supportTicketsQuery.isError && <p className="text-sm text-red-600">No fue posible cargar los tickets de soporte.</p>}
+            {supportTicketsQuery.data && (
+              supportTicketsQuery.data.length === 0 ? (
+                <EmptyState message="No hay tickets para los filtros seleccionados." />
+              ) : (
+                <div className="table-shell">
+                  <table className="table-enterprise">
+                    <thead>
+                      <tr className="text-left border-b border-slate-200">
+                        <th>Fecha</th>
+                        <th>Tenant</th>
+                        <th>Asunto</th>
+                        <th>Prioridad</th>
+                        <th>Estado</th>
+                        <th>Asignado</th>
+                        <th>Respuesta al CDA</th>
+                        <th>Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {supportTicketsQuery.data.map((ticket) => (
+                        <tr key={ticket.id}>
+                          <td>{new Date(ticket.created_at).toLocaleString()}</td>
+                          <td>{ticket.tenant_nombre}</td>
+                          <td>
+                            <p className="font-medium text-slate-900">{ticket.title}</p>
+                            <p className="text-xs text-slate-500">{ticket.description}</p>
+                          </td>
+                          <td className="capitalize">{ticket.priority}</td>
+                          <td>
+                            <span className={statusBadgeClass(ticket.status)}>{supportStatusLabel(ticket.status)}</span>
+                          </td>
+                          <td>{ticket.assigned_to_user_email || '-'}</td>
+                          <td>
+                            {ticket.tenant_response_message ? (
+                              <p className="text-xs text-slate-700">{ticket.tenant_response_message}</p>
+                            ) : (
+                              <span className="text-xs text-slate-400">Pendiente de respuesta</span>
+                            )}
+                          </td>
+                          <td>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => updateSupportTicketMutation.mutate({ ticketId: ticket.id, status: 'en_progreso' })}
+                                disabled={updateSupportTicketMutation.isLoading || ticket.status === 'en_progreso'}
+                                className="btn-chip"
+                              >
+                                En progreso
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setSupportReplyTicketId(ticket.id);
+                                  setSupportReplyMessage(ticket.tenant_response_message || '');
+                                  setSupportActionError('');
+                                }}
+                                disabled={updateSupportTicketMutation.isLoading}
+                                className="btn-chip"
+                              >
+                                Responder y resolver
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )
+            )}
+          </div>
+
+          {supportReplyTicketId && (
+            <div
+              className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4"
+              onClick={() => {
+                setSupportReplyTicketId(null);
+                setSupportReplyMessage('');
+              }}
+            >
+              <div
+                className="w-full max-w-2xl glass-card border border-slate-200/70 p-5"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <p className="text-sm font-semibold text-slate-800 mb-2">Respuesta al CDA</p>
+                <p className="text-xs text-slate-500 mb-3">
+                  Este mensaje será visible para el CDA en su módulo de soporte.
+                </p>
+                <textarea
+                  value={supportReplyMessage}
+                  onChange={(e) => setSupportReplyMessage(e.target.value)}
+                  className="input-corporate min-h-[120px] mb-3"
+                  placeholder="Ej: Se realizó la anulación del pago 14698115 y la caja quedó actualizada."
+                  required
+                />
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    className="btn-corporate-muted px-4"
+                    onClick={() => {
+                      setSupportReplyTicketId(null);
+                      setSupportReplyMessage('');
+                    }}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-corporate-primary px-4 disabled:opacity-60"
+                    disabled={updateSupportTicketMutation.isLoading || !supportReplyMessage.trim()}
+                    onClick={() =>
+                      updateSupportTicketMutation.mutate({
+                        ticketId: supportReplyTicketId,
+                        status: 'resuelto',
+                        tenantResponseMessage: supportReplyMessage.trim(),
+                      })
+                    }
+                  >
+                    {updateSupportTicketMutation.isLoading ? 'Guardando...' : 'Enviar y resolver'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
     if (activeModule === 'auditoria') {
       return (
         <div className="section-card p-6 space-y-4">
@@ -1000,11 +1265,12 @@ export default function SaaSBackoffice() {
         </div>
 
         <div className="mb-6 overflow-x-auto">
-          <div className="grid grid-cols-6 gap-3 min-w-[780px] md:min-w-0">
+          <div className="grid grid-cols-7 gap-3 min-w-[860px] md:min-w-0">
             {[
               { id: 'resumen' as BackofficeModule, title: 'Resumen', icon: Building2, color: 'text-blue-600' },
               { id: 'tenants' as BackofficeModule, title: 'Tenants', icon: Users, color: 'text-indigo-600' },
               { id: 'facturacion' as BackofficeModule, title: 'Facturación', icon: Wallet, color: 'text-violet-600' },
+              { id: 'soporte' as BackofficeModule, title: 'Soporte', icon: LifeBuoy, color: 'text-cyan-600' },
               { id: 'usuarios' as BackofficeModule, title: 'Usuarios SaaS', icon: ShieldCheck, color: 'text-emerald-600' },
               { id: 'auditoria' as BackofficeModule, title: 'Auditoría', icon: FileClock, color: 'text-amber-600' },
               { id: 'seguridad' as BackofficeModule, title: 'Seguridad', icon: Shield, color: 'text-rose-600' },
@@ -1022,6 +1288,11 @@ export default function SaaSBackoffice() {
                 <div className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 mb-2">
                   <module.icon className={`w-4 h-4 ${module.color}`} />
                 </div>
+                {module.id === 'soporte' && (supportSummaryQuery.data?.notificaciones_pendientes || 0) > 0 && (
+                  <span className="inline-flex items-center rounded-full bg-rose-600 text-white text-[10px] font-semibold px-2 py-0.5 mb-2">
+                    {supportSummaryQuery.data?.notificaciones_pendientes}
+                  </span>
+                )}
                 <p className="text-xs text-slate-500">Módulo</p>
                 <p className="font-semibold text-slate-900 text-sm">{module.title}</p>
               </button>

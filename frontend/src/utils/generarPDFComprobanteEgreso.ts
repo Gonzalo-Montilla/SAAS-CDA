@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf';
-import { cargarLogoCDA, LOGO_CONFIG } from './logoBase64';
+import { cargarLogoCDA } from './logoBase64';
 
 interface DatosEgresoPDF {
   numeroComprobante: string;

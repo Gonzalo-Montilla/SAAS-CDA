@@ -49,6 +49,15 @@ def ensure_tenant_baseline_schema(db):
                 logo_url VARCHAR(500),
                 color_primario VARCHAR(20) NOT NULL DEFAULT '#2563eb',
                 color_secundario VARCHAR(20) NOT NULL DEFAULT '#0f172a',
+                plan_actual VARCHAR(30) NOT NULL DEFAULT 'demo',
+                subscription_status VARCHAR(30) NOT NULL DEFAULT 'trial',
+                sedes_totales INTEGER NOT NULL DEFAULT 1,
+                plan_started_at TIMESTAMP WITHOUT TIME ZONE,
+                plan_ends_at TIMESTAMP WITHOUT TIME ZONE,
+                demo_ends_at TIMESTAMP WITHOUT TIME ZONE,
+                billing_cycle_days INTEGER NOT NULL DEFAULT 30,
+                next_billing_at TIMESTAMP WITHOUT TIME ZONE,
+                last_payment_at TIMESTAMP WITHOUT TIME ZONE,
                 created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMP WITHOUT TIME ZONE
             )
@@ -60,6 +69,15 @@ def ensure_tenant_baseline_schema(db):
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS logo_url VARCHAR(500)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS color_primario VARCHAR(20)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS color_secundario VARCHAR(20)"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan_actual VARCHAR(30)"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS subscription_status VARCHAR(30)"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS sedes_totales INTEGER"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan_started_at TIMESTAMP WITHOUT TIME ZONE"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan_ends_at TIMESTAMP WITHOUT TIME ZONE"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS demo_ends_at TIMESTAMP WITHOUT TIME ZONE"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS billing_cycle_days INTEGER"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS next_billing_at TIMESTAMP WITHOUT TIME ZONE"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS last_payment_at TIMESTAMP WITHOUT TIME ZONE"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS nit_cda VARCHAR(30)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS correo_electronico VARCHAR(255)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS nombre_representante VARCHAR(200)"))
@@ -69,9 +87,18 @@ def ensure_tenant_baseline_schema(db):
     db.execute(text("UPDATE tenants SET nombre_comercial = COALESCE(nombre_comercial, nombre)"))
     db.execute(text("UPDATE tenants SET color_primario = COALESCE(color_primario, '#2563eb')"))
     db.execute(text("UPDATE tenants SET color_secundario = COALESCE(color_secundario, '#0f172a')"))
+    db.execute(text("UPDATE tenants SET plan_actual = COALESCE(plan_actual, 'demo')"))
+    db.execute(text("UPDATE tenants SET subscription_status = COALESCE(subscription_status, 'trial')"))
+    db.execute(text("UPDATE tenants SET sedes_totales = COALESCE(sedes_totales, 1)"))
+    db.execute(text("UPDATE tenants SET demo_ends_at = COALESCE(demo_ends_at, NOW() + INTERVAL '15 day')"))
+    db.execute(text("UPDATE tenants SET billing_cycle_days = COALESCE(billing_cycle_days, 30)"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN nombre_comercial SET NOT NULL"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN color_primario SET NOT NULL"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN color_secundario SET NOT NULL"))
+    db.execute(text("ALTER TABLE tenants ALTER COLUMN plan_actual SET NOT NULL"))
+    db.execute(text("ALTER TABLE tenants ALTER COLUMN subscription_status SET NOT NULL"))
+    db.execute(text("ALTER TABLE tenants ALTER COLUMN sedes_totales SET NOT NULL"))
+    db.execute(text("ALTER TABLE tenants ALTER COLUMN billing_cycle_days SET NOT NULL"))
 
     db.execute(
         text(
@@ -89,6 +116,15 @@ def ensure_tenant_baseline_schema(db):
                 logo_url,
                 color_primario,
                 color_secundario,
+                plan_actual,
+                subscription_status,
+                sedes_totales,
+                plan_started_at,
+                plan_ends_at,
+                demo_ends_at,
+                billing_cycle_days,
+                next_billing_at,
+                last_payment_at,
                 created_at
             )
             VALUES (
@@ -104,6 +140,15 @@ def ensure_tenant_baseline_schema(db):
                 NULL,
                 '#2563eb',
                 '#0f172a',
+                'demo',
+                'trial',
+                1,
+                NOW(),
+                NULL,
+                NOW() + INTERVAL '15 day',
+                30,
+                NOW() + INTERVAL '15 day',
+                NULL,
                 NOW()
             )
             ON CONFLICT (slug) DO NOTHING
@@ -392,6 +437,23 @@ def ensure_onboarding_security_schema(db):
     )
 
 
+def ensure_support_schema(db):
+    """
+    Asegura ajustes de compatibilidad para tickets de soporte.
+    """
+    db.execute(
+        text(
+            """
+            ALTER TABLE IF EXISTS saas_support_tickets
+            ALTER COLUMN created_by_saas_user_id DROP NOT NULL
+            """
+        )
+    )
+    db.execute(text("ALTER TABLE IF EXISTS saas_support_tickets ADD COLUMN IF NOT EXISTS responded_by_saas_user_id UUID"))
+    db.execute(text("ALTER TABLE IF EXISTS saas_support_tickets ADD COLUMN IF NOT EXISTS tenant_response_message TEXT"))
+    db.execute(text("ALTER TABLE IF EXISTS saas_support_tickets ADD COLUMN IF NOT EXISTS tenant_responded_at TIMESTAMP WITHOUT TIME ZONE"))
+
+
 def get_db():
     """
     Dependency para obtener sesión de base de datos
@@ -413,6 +475,7 @@ def init_db():
     from app.models.caja import Caja, MovimientoCaja
     from app.models.vehiculo import VehiculoProceso
     from app.models.saas_user import SaaSUser
+    from app.models.support_ticket import SaaSSupportTicket
     from app.core.security import get_password_hash
     from datetime import date
     
@@ -432,6 +495,7 @@ def init_db():
 
         ensure_tenant_domain_schema(db)
         ensure_onboarding_security_schema(db)
+        ensure_support_schema(db)
         db.commit()
 
         # Verificar y crear owner global SaaS
@@ -443,12 +507,18 @@ def init_db():
                 nombre_completo=settings.SAAS_OWNER_NAME,
                 rol_global="owner",
                 activo=True,
+                mfa_enabled=True,
             )
             db.add(owner)
             db.commit()
             print("[OK] Usuario global SaaS owner creado")
             print(f"   Email: {settings.SAAS_OWNER_EMAIL}")
             print("   Password: [SAAS_OWNER_PASSWORD desde .env]")
+        else:
+            if not saas_owner.mfa_enabled:
+                saas_owner.mfa_enabled = True
+                db.commit()
+                print("[INFO] MFA habilitado automáticamente para owner SaaS por política de seguridad")
 
         # Verificar si ya existe usuario admin
         admin_exists = db.query(Usuario).filter(Usuario.email == "admin@cdasoft.com").first()

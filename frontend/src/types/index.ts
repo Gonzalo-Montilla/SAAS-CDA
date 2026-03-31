@@ -33,10 +33,200 @@ export interface SaaSUser {
 export interface SaaSTenantSummary {
   id: string;
   slug: string;
+  nombre: string;
   nombre_comercial: string;
+  logo_url?: string | null;
+  nit_cda?: string | null;
   correo_electronico?: string | null;
+  nombre_representante?: string | null;
+  celular?: string | null;
+  plan_actual: string;
+  subscription_status: string;
+  sedes_totales: number;
+  sucursales_facturables: number;
+  sucursales_incluidas: number;
+  plan_ends_at?: string | null;
+  demo_ends_at?: string | null;
+  billing_cycle_days: number;
+  next_billing_at?: string | null;
+  last_payment_at?: string | null;
   activo: boolean;
   login_url: string;
+}
+
+export interface SaaSTenantUserSummary {
+  id: string;
+  email: string;
+  nombre_completo: string;
+  rol: string;
+  activo: boolean;
+  created_at: string;
+}
+
+export interface SaaSTenantProfile extends SaaSTenantSummary {
+  total_usuarios: number;
+  usuarios_recientes: SaaSTenantUserSummary[];
+}
+
+export interface SaaSBillingPlanItem {
+  code: string;
+  label: string;
+  duration_days: number;
+  base_price: number;
+  additional_branch_price: number;
+  included_branches: number;
+  iva_rate: number;
+  is_prepay: boolean;
+}
+
+export interface SaaSTenantBillingQuote {
+  tenant_id: string;
+  tenant_slug: string;
+  plan_code: string;
+  plan_label: string;
+  sedes_totales: number;
+  included_branches: number;
+  chargeable_additional_branches: number;
+  subtotal: number;
+  iva: number;
+  total: number;
+  period_days: number;
+}
+
+export interface SaaSPaymentRegisteredResponse {
+  tenant_id: string;
+  tenant_slug: string;
+  plan_code: string;
+  plan_label: string;
+  amount: number;
+  paid_at: string;
+  sedes_totales: number;
+  sucursales_incluidas: number;
+  sucursales_facturables: number;
+  period_days: number;
+  comprobante_referencia: string;
+  payment_log_id: string;
+  receipt_download_url: string;
+  receipt_email_sent: boolean;
+  next_billing_at?: string | null;
+  subscription_status: string;
+}
+
+export interface SaaSBillingOverviewItem {
+  tenant_id: string;
+  tenant_slug: string;
+  tenant_nombre: string;
+  plan_code: string;
+  plan_label: string;
+  subscription_status: string;
+  cobro_status: 'al_dia' | 'por_vencer' | 'vencido' | 'bloqueado' | 'trial' | 'sin_fecha';
+  sedes_totales: number;
+  sucursales_facturables: number;
+  next_billing_at?: string | null;
+  last_payment_at?: string | null;
+  last_payment_amount?: number | null;
+  last_receipt_reference?: string | null;
+  last_payment_log_id?: string | null;
+}
+
+export interface SaaSPaymentHistoryItem {
+  id: string;
+  tenant_id: string;
+  tenant_slug: string;
+  amount: number;
+  paid_at: string;
+  next_billing_at?: string | null;
+  plan_code?: string | null;
+  plan_label?: string | null;
+  sedes_totales?: number | null;
+  sucursales_facturables?: number | null;
+  comprobante_referencia?: string | null;
+  payment_log_id: string;
+  receipt_download_url: string;
+  actor_email?: string | null;
+  notes?: string | null;
+}
+
+export interface SaaSAuditLogItem {
+  id: string;
+  action: string;
+  description: string;
+  usuario_email?: string | null;
+  usuario_nombre?: string | null;
+  success: string;
+  ip_address?: string | null;
+  tenant_slug?: string | null;
+  created_at: string;
+}
+
+export interface SaaSSecuritySummary {
+  current_user_email: string;
+  current_user_role: string;
+  current_session_version: number;
+  mfa_enabled: boolean;
+  total_saas_users: number;
+  active_saas_users: number;
+  locked_saas_users: number;
+  mfa_enabled_users: number;
+}
+
+export interface SaaSUserSecurityItem {
+  id: string;
+  email: string;
+  nombre_completo: string;
+  rol_global: string;
+  activo: boolean;
+  mfa_enabled: boolean;
+  intentos_fallidos: number;
+  bloqueado_hasta?: string | null;
+  session_version: number;
+}
+
+export interface TenantSupportTicketItem {
+  id: string;
+  title: string;
+  description: string;
+  category: string;
+  priority: 'baja' | 'media' | 'alta' | 'critica';
+  status: 'abierto' | 'en_progreso' | 'resuelto' | 'cerrado';
+  assigned_to_user_email?: string | null;
+  tenant_response_message?: string | null;
+  tenant_responded_at?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+  resolved_at?: string | null;
+}
+
+export interface SaaSSupportTicketItem {
+  id: string;
+  tenant_id: string;
+  tenant_slug: string;
+  tenant_nombre: string;
+  title: string;
+  description: string;
+  category: string;
+  priority: 'baja' | 'media' | 'alta' | 'critica';
+  status: 'abierto' | 'en_progreso' | 'resuelto' | 'cerrado';
+  assigned_to_user_id?: string | null;
+  assigned_to_user_email?: string | null;
+  created_by_user_id?: string | null;
+  created_by_user_email?: string | null;
+  internal_notes?: string | null;
+  tenant_response_message?: string | null;
+  tenant_responded_at?: string | null;
+  sla_due_at?: string | null;
+  resolved_at?: string | null;
+  created_at: string;
+  updated_at?: string | null;
+}
+
+export interface SaaSSupportSummary {
+  total_tickets: number;
+  abiertos: number;
+  en_progreso: number;
+  sin_resolver: number;
+  criticos_abiertos: number;
+  notificaciones_pendientes: number;
 }
 
 export type AuthScope = 'tenant' | 'saas';
@@ -59,6 +249,7 @@ export interface TenantSelfRegisterRequest {
   correo_electronico: string;
   nombre_representante_legal_o_administrador: string;
   celular: string;
+  sedes_totales: number;
   admin_password: string;
   codigo_verificacion_email?: string;
   logo_url?: string;

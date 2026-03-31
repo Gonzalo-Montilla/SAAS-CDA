@@ -1,16 +1,17 @@
 import { useAuth } from '../contexts/AuthContext';
 import { useBrand } from '../contexts/BrandContext';
 import { useNavigate } from 'react-router-dom';
-import { 
-  ClipboardList, 
-  Wallet, 
-  DollarSign, 
-  Vault, 
-  BarChart3, 
-  Users, 
+import {
+  ClipboardList,
+  Wallet,
+  DollarSign,
+  Vault,
+  BarChart3,
+  Users,
   LogOut,
   CheckCircle2,
-  Shield
+  Shield,
+  LifeBuoy,
 } from 'lucide-react';
 export default function Dashboard() {
   const { user, logout } = useAuth();
@@ -153,6 +154,19 @@ export default function Dashboard() {
               </button>
             </>
           )}
+
+          <button
+            onClick={() => navigate('/soporte')}
+            className="card-pos text-left group animate-fade-in animate-delay-200"
+          >
+            <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-cyan-100 text-cyan-600 mb-4 group-hover:bg-cyan-600 group-hover:text-white transition-all duration-300">
+              <LifeBuoy className="w-8 h-8 icon-hover" />
+            </div>
+            <h3 className="text-xl font-bold text-gray-900 mb-2">Soporte</h3>
+            <p className="text-gray-600 text-sm">
+              Reportar incidentes y hacer seguimiento a solicitudes del CDA
+            </p>
+          </button>
         </div>
 
         {/* Info rápida */}

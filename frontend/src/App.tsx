@@ -1,23 +1,35 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
-import type { ReactNode } from 'react';
+import { Suspense, lazy, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { BrandProvider } from './contexts/BrandContext';
 import { ToastProvider } from './contexts/ToastContext';
 import ErrorBoundary from './components/ErrorBoundary';
-import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import Recepcion from './pages/Recepcion';
-import Caja from './pages/Caja';
-import Tarifas from './pages/Tarifas';
-import Tesoreria from './pages/Tesoreria';
-import Reportes from './pages/Reportes';
-import Usuarios from './pages/Usuarios';
-import ResetPassword from './pages/ResetPassword';
-import SaaSBackoffice from './pages/SaaSBackoffice';
 import type { AuthScope } from './types';
 
+const Login = lazy(() => import('./pages/Login'));
+const Dashboard = lazy(() => import('./pages/Dashboard'));
+const Recepcion = lazy(() => import('./pages/Recepcion'));
+const Caja = lazy(() => import('./pages/Caja'));
+const Tarifas = lazy(() => import('./pages/Tarifas'));
+const Tesoreria = lazy(() => import('./pages/Tesoreria'));
+const Reportes = lazy(() => import('./pages/Reportes'));
+const Usuarios = lazy(() => import('./pages/Usuarios'));
+const Soporte = lazy(() => import('./pages/Soporte'));
+const ResetPassword = lazy(() => import('./pages/ResetPassword'));
+const SaaSBackoffice = lazy(() => import('./pages/SaaSBackoffice'));
+
 const queryClient = new QueryClient();
+
+function RouteLoadingFallback() {
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="text-center">
+        <p className="text-gray-600">Cargando módulo...</p>
+      </div>
+    </div>
+  );
+}
 
 function ProtectedRoute({
   children,
@@ -68,7 +80,8 @@ function App() {
           <AuthProvider>
             <BrandProvider>
               <ErrorBoundary>
-                <Routes>
+                <Suspense fallback={<RouteLoadingFallback />}>
+                  <Routes>
             <Route path="/login" element={<Login />} />
             <Route path="/saas/login" element={<Login />} />
             <Route path="/reset-password" element={<ResetPassword />} />
@@ -129,6 +142,14 @@ function App() {
               }
             />
             <Route
+              path="/soporte"
+              element={
+                <ProtectedRoute requiredScope="tenant">
+                  <Soporte />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/saas/backoffice"
               element={
                 <ProtectedRoute requiredScope="saas">
@@ -138,7 +159,8 @@ function App() {
             />
                 <Route path="/:tenantSlug" element={<Login />} />
                 <Route path="/" element={<HomeRedirect />} />
-                </Routes>
+                  </Routes>
+                </Suspense>
               </ErrorBoundary>
             </BrandProvider>
           </AuthProvider>

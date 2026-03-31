@@ -1,13 +1,10 @@
 // Logo CDASOFT convertido a Base64
 // Este archivo se genera automáticamente al cargar la imagen del logo
 // Asset: LOGO_CDA_SOFT-SIN FONDO.png
+import logoCdaSoftUrl from '../assets/LOGO_CDA_SOFT-SIN FONDO.png';
 
 export async function cargarLogoCDA(): Promise<string> {
   try {
-    // Importar dinámicamente la imagen
-    const logoModule = await import('../assets/LOGO_CDA_SOFT-SIN FONDO.png');
-    const logoUrl = logoModule.default;
-    
     // Convertir a Base64
     return new Promise((resolve, reject) => {
       const img = new Image();
@@ -33,7 +30,7 @@ export async function cargarLogoCDA(): Promise<string> {
         reject(new Error('Error al cargar el logo'));
       };
       
-      img.src = logoUrl;
+      img.src = logoCdaSoftUrl;
     });
   } catch (error) {
     console.error('Error al cargar el logo:', error);

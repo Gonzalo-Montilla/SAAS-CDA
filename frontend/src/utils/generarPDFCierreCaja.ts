@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import type { CajaResumen, Caja, MovimientoCaja } from '../types';
-import { cargarLogoCDA, LOGO_CONFIG } from './logoBase64';
+import { cargarLogoCDA } from './logoBase64';
 
 interface DatosCierrePDF {
   caja: Caja;

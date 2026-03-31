@@ -7,10 +7,6 @@ import { cajasApi } from '../api/cajas';
 import { vehiculosApi } from '../api/vehiculos';
 import { configApi } from '../api/config';
 import { useAuth } from '../contexts/AuthContext';
-import { generarPDFCierreCaja } from '../utils/generarPDFCierreCaja';
-import { generarPDFComprobanteEgreso } from '../utils/generarPDFComprobanteEgreso';
-import { generarPDFVentaSOAT } from '../utils/generarPDFVentaSOAT';
-import { generarPDFReciboPago } from '../utils/generarPDFReciboPago';
 import { formatCurrency } from '../utils/formatCurrency';
 import { formatDateTimeShort, formatTime24, formatDateWithWeekday } from '../utils/formatDate';
 import type { CajaApertura, Vehiculo } from '../types';
@@ -849,6 +845,7 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
     onSuccess: async (vehiculoCobrado) => {
       // Generar PDF del recibo de pago
       const comisionFinal = clientePagaSOAT ? vehiculo.comision_soat : 0;
+      const { generarPDFReciboPago } = await import('../utils/generarPDFReciboPago');
       const nombrePDF = await generarPDFReciboPago({
         placa: vehiculoCobrado.placa,
         tipoVehiculo: vehiculoCobrado.tipo_vehiculo,
@@ -1507,6 +1504,7 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
       const numeroComprobante = `EG-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
       
       // Generar PDF del comprobante
+      const { generarPDFComprobanteEgreso } = await import('../utils/generarPDFComprobanteEgreso');
       const nombrePDF = await generarPDFComprobanteEgreso({
         numeroComprobante,
         tipo: formData.tipo,
@@ -1799,7 +1797,6 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
 // Componente de Cierre de Caja
 function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => void }) {
   const queryClient = useQueryClient();
-  const { user } = useAuth();
   const [montoFisico, setMontoFisico] = useState<number | null>(null);
   const [observaciones, setObservaciones] = useState('');
   const [mostrarDetalleMetodos, setMostrarDetalleMetodos] = useState(false);
@@ -3036,6 +3033,7 @@ function ModalVentaSOAT({ onClose, onSuccess }: { onClose: () => void, onSuccess
     mutationFn: vehiculosApi.ventaSoat,
     onSuccess: async (vehiculoCreado) => {
       // Generar PDF del recibo
+      const { generarPDFVentaSOAT } = await import('../utils/generarPDFVentaSOAT');
       const nombrePDF = await generarPDFVentaSOAT({
         placa: vehiculoCreado.placa,
         tipoVehiculo: formData.tipo_vehiculo,
