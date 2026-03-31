@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import type { CajaResumen, Caja, MovimientoCaja } from '../types';
-import { cargarLogoCDA } from './logoBase64';
+import { cargarLogoCDAConDimensiones } from './logoBase64';
 
 interface DatosCierrePDF {
   caja: Caja;
@@ -10,13 +10,14 @@ interface DatosCierrePDF {
   diferencia: number;
   nombreCajero: string;
   observaciones?: string;
+  logoUrl?: string;
 }
 
 export async function generarPDFCierreCaja(datos: DatosCierrePDF) {
   const doc = new jsPDF();
   
   // Cargar logo
-  const logoBase64 = await cargarLogoCDA();
+  const logoData = await cargarLogoCDAConDimensiones(datos.logoUrl);
   
   let y = 15;
   const leftMargin = 15;
@@ -48,12 +49,19 @@ export async function generarPDFCierreCaja(datos: DatosCierrePDF) {
   };
   
   // ENCABEZADO CON LOGO (compacto)
-  if (logoBase64) {
-    const logoWidth = 20;
-    const logoHeight = 20;
+  if (logoData && logoData.width > 0 && logoData.height > 0) {
+    const maxLogoWidth = 28;
+    const maxLogoHeight = 16;
+    const ratio = logoData.width / logoData.height;
+    let logoWidth = maxLogoWidth;
+    let logoHeight = logoWidth / ratio;
+    if (logoHeight > maxLogoHeight) {
+      logoHeight = maxLogoHeight;
+      logoWidth = logoHeight * ratio;
+    }
     const logoX = (pageWidth - logoWidth) / 2;
-    doc.addImage(logoBase64, 'PNG', logoX, y - 3, logoWidth, logoHeight);
-    y += logoHeight;
+    doc.addImage(logoData.dataUrl, 'PNG', logoX, y - 1, logoWidth, logoHeight);
+    y += logoHeight + 1;
   }
   
   doc.setFontSize(14);

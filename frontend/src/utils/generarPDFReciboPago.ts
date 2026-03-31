@@ -1,5 +1,5 @@
 import { jsPDF } from 'jspdf';
-import { cargarLogoCDA } from './logoBase64';
+import { cargarLogoCDAConDimensiones } from './logoBase64';
 
 interface DatosReciboPagoPDF {
   placa: string;
@@ -16,13 +16,14 @@ interface DatosReciboPagoPDF {
   numeroFacturaDIAN: string;
   fecha: Date;
   nombreCajero: string;
+  logoUrl?: string;
 }
 
 export async function generarPDFReciboPago(datos: DatosReciboPagoPDF): Promise<string> {
   const doc = new jsPDF();
   
   // Cargar logo
-  const logoBase64 = await cargarLogoCDA();
+  const logoData = await cargarLogoCDAConDimensiones(datos.logoUrl);
   
   let y = 20;
   const leftMargin = 20;
@@ -54,28 +55,31 @@ export async function generarPDFReciboPago(datos: DatosReciboPagoPDF): Promise<s
   };
   
   // ENCABEZADO CON LOGO
-  if (logoBase64) {
-    // Logo centrado arriba
-    const logoWidth = 25;
-    const logoHeight = 25;
+  if (logoData && logoData.width > 0 && logoData.height > 0) {
+    // Logo centrado manteniendo proporción original
+    const maxLogoWidth = 40;
+    const maxLogoHeight = 24;
+    const ratio = logoData.width / logoData.height;
+    let logoWidth = maxLogoWidth;
+    let logoHeight = logoWidth / ratio;
+    if (logoHeight > maxLogoHeight) {
+      logoHeight = maxLogoHeight;
+      logoWidth = logoHeight * ratio;
+    }
     const logoX = (pageWidth - logoWidth) / 2;
-    doc.addImage(logoBase64, 'PNG', logoX, y - 5, logoWidth, logoHeight);
-    y += logoHeight + 2;
+    doc.addImage(logoData.dataUrl, 'PNG', logoX, y - 1, logoWidth, logoHeight);
+    y += logoHeight + 5;
   }
   
-  doc.setFontSize(18);
-  doc.setFont('helvetica', 'bold');
-  doc.text('CDASOFT', pageWidth / 2, y, { align: 'center' });
-  y += 8;
-  
   doc.setFontSize(14);
+  doc.setFont('helvetica', 'bold');
   doc.text('RECIBO DE PAGO', pageWidth / 2, y, { align: 'center' });
-  y += 6;
+  y += 7;
   
   doc.setFontSize(10);
   doc.setFont('helvetica', 'italic');
   doc.text('Revisión Técnico-Mecánica y de Emisiones Contaminantes', pageWidth / 2, y, { align: 'center' });
-  y += 12;
+  y += 11;
   
   // Número de recibo
   doc.setFontSize(10);
@@ -249,8 +253,7 @@ export async function generarPDFReciboPago(datos: DatosReciboPagoPDF): Promise<s
   doc.setFontSize(7);
   doc.setFont('helvetica', 'italic');
   doc.setTextColor(100, 100, 100);
-  doc.text('CDASOFT — sistema integral para administracion de cda · Sistema de Gestión POS', pageWidth / 2, footerY + 5, { align: 'center' });
-  doc.text(`Generado: ${new Date().toLocaleString('es-CO')}`, pageWidth / 2, footerY + 9, { align: 'center' });
+  doc.text(`Generado: ${new Date().toLocaleString('es-CO')}`, pageWidth / 2, footerY + 7, { align: 'center' });
   
   // Generar nombre de archivo
   const timestamp = datos.fecha.toISOString().slice(0, 19).replace(/:/g, '-');

@@ -7,6 +7,7 @@ import { cajasApi } from '../api/cajas';
 import { vehiculosApi } from '../api/vehiculos';
 import { configApi } from '../api/config';
 import { useAuth } from '../contexts/AuthContext';
+import { useBrand } from '../contexts/BrandContext';
 import { formatCurrency } from '../utils/formatCurrency';
 import { formatDateTimeShort, formatTime24, formatDateWithWeekday } from '../utils/formatDate';
 import type { CajaApertura, Vehiculo } from '../types';
@@ -784,6 +785,7 @@ function VehiculosPendientes({
 function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => void }) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const brand = useBrand();
   const [metodoPago, setMetodoPago] = useState<string>('efectivo');
   const [registros, setRegistros] = useState({
     registrado_runt: false,
@@ -861,6 +863,7 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
         numeroFacturaDIAN: numeroFactura,
         fecha: new Date(),
         nombreCajero: user?.nombre_completo || 'Cajero',
+        logoUrl: brand.logoSrc,
       });
       
       alert(`Cobro registrado exitosamente.\n\nRecibo generado: ${nombrePDF}`);
@@ -1483,6 +1486,7 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
 function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: () => void }) {
   const queryClient = useQueryClient();
   const { user } = useAuth();
+  const brand = useBrand();
   const [formData, setFormData] = useState({
     tipo: 'gasto',
     monto: '',
@@ -1513,6 +1517,7 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
         fecha: new Date(),
         nombreCajero: user?.nombre_completo || 'Cajero',
         turno: cajaActiva?.turno || 'N/A',
+        logoUrl: brand.logoSrc,
       });
       
       setNombreArchivoPDF(nombrePDF);
@@ -3017,6 +3022,7 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
 // Componente Modal de Venta Solo SOAT
 function ModalVentaSOAT({ onClose, onSuccess }: { onClose: () => void, onSuccess: () => void }) {
   const { user } = useAuth();
+  const brand = useBrand();
   const [formData, setFormData] = useState({
     placa: '',
     tipo_vehiculo: 'moto' as 'moto' | 'carro',
@@ -3044,6 +3050,7 @@ function ModalVentaSOAT({ onClose, onSuccess }: { onClose: () => void, onSuccess
         fecha: new Date(),
         nombreCajero: user?.nombre_completo || 'Cajero',
         metodoPago: formData.metodo_pago,
+        logoUrl: brand.logoSrc,
       });
       
       alert(`Venta de SOAT registrada exitosamente.\n\nRecibo generado: ${nombrePDF}`);
