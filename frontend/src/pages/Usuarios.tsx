@@ -30,6 +30,7 @@ export default function UsuariosPage() {
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
   const [usuarioEditando, setUsuarioEditando] = useState<Usuario | null>(null);
   const [mostrarCambiarPassword, setMostrarCambiarPassword] = useState<string | null>(null);
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Form states
   const [formData, setFormData] = useState({
@@ -77,10 +78,13 @@ export default function UsuariosPage() {
       queryClient.invalidateQueries({ queryKey: ['usuarios-estadisticas'] });
       setMostrarFormulario(false);
       resetForm();
-      alert('✅ Usuario creado exitosamente');
+      setFeedback({ type: 'success', message: 'Usuario creado exitosamente.' });
     },
     onError: (error: any) => {
-      alert(`❌ Error: ${error.response?.data?.detail || 'No se pudo crear el usuario'}`);
+      setFeedback({
+        type: 'error',
+        message: error.response?.data?.detail || 'No fue posible crear el usuario. Intenta nuevamente.',
+      });
     },
   });
 
@@ -95,10 +99,13 @@ export default function UsuariosPage() {
       setMostrarFormulario(false);
       setUsuarioEditando(null);
       resetForm();
-      alert('✅ Usuario actualizado exitosamente');
+      setFeedback({ type: 'success', message: 'Usuario actualizado exitosamente.' });
     },
     onError: (error: any) => {
-      alert(`❌ Error: ${error.response?.data?.detail || 'No se pudo actualizar el usuario'}`);
+      setFeedback({
+        type: 'error',
+        message: error.response?.data?.detail || 'No fue posible actualizar el usuario. Intenta nuevamente.',
+      });
     },
   });
 
@@ -111,10 +118,13 @@ export default function UsuariosPage() {
     onSuccess: () => {
       setMostrarCambiarPassword(null);
       setPasswordData({ password: '' });
-      alert('✅ Contraseña cambiada exitosamente');
+      setFeedback({ type: 'success', message: 'Contraseña actualizada exitosamente.' });
     },
     onError: (error: any) => {
-      alert(`❌ Error: ${error.response?.data?.detail || 'No se pudo cambiar la contraseña'}`);
+      setFeedback({
+        type: 'error',
+        message: error.response?.data?.detail || 'No fue posible cambiar la contraseña. Intenta nuevamente.',
+      });
     },
   });
 
@@ -129,7 +139,10 @@ export default function UsuariosPage() {
       queryClient.invalidateQueries({ queryKey: ['usuarios-estadisticas'] });
     },
     onError: (error: any) => {
-      alert(`❌ Error: ${error.response?.data?.detail || 'No se pudo cambiar el estado'}`);
+      setFeedback({
+        type: 'error',
+        message: error.response?.data?.detail || 'No fue posible actualizar el estado del usuario.',
+      });
     },
   });
 
@@ -142,10 +155,13 @@ export default function UsuariosPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['usuarios'] });
       queryClient.invalidateQueries({ queryKey: ['usuarios-estadisticas'] });
-      alert('✅ Usuario eliminado exitosamente');
+      setFeedback({ type: 'success', message: 'Usuario eliminado exitosamente.' });
     },
     onError: (error: any) => {
-      alert(`❌ Error: ${error.response?.data?.detail || 'No se pudo eliminar el usuario'}`);
+      setFeedback({
+        type: 'error',
+        message: error.response?.data?.detail || 'No fue posible eliminar el usuario. Intenta nuevamente.',
+      });
     },
   });
 
@@ -185,7 +201,7 @@ export default function UsuariosPage() {
     } else {
       // Crear (con password)
       if (!formData.password) {
-        alert('❌ La contraseña es obligatoria');
+        setFeedback({ type: 'error', message: 'La contraseña es obligatoria para crear el usuario.' });
         return;
       }
       crearMutation.mutate(formData);
@@ -197,7 +213,7 @@ export default function UsuariosPage() {
     if (!mostrarCambiarPassword) return;
     
     if (!passwordData.password) {
-      alert('❌ La contraseña no puede estar vacía');
+      setFeedback({ type: 'error', message: 'La nueva contraseña no puede estar vacía.' });
       return;
     }
     
@@ -205,13 +221,13 @@ export default function UsuariosPage() {
   };
 
   const handleToggleEstado = (usuario: Usuario) => {
-    if (confirm(`¿Estás seguro de ${usuario.activo ? 'desactivar' : 'activar'} a ${usuario.nombre_completo}?`)) {
+    if (confirm(`¿Confirmas ${usuario.activo ? 'desactivar' : 'activar'} al usuario ${usuario.nombre_completo}?`)) {
       toggleEstadoMutation.mutate(usuario.id);
     }
   };
 
   const handleEliminar = (usuario: Usuario) => {
-    if (confirm(`⚠️ ¿Estás seguro de eliminar permanentemente a ${usuario.nombre_completo}?\nEsta acción no se puede deshacer.`)) {
+    if (confirm(`¿Confirmas eliminar permanentemente a ${usuario.nombre_completo}?\nEsta acción no se puede deshacer.`)) {
       eliminarMutation.mutate(usuario.id);
     }
   };
@@ -247,6 +263,18 @@ export default function UsuariosPage() {
   return (
     <Layout title="Gestión de Usuarios">
       <div className="space-y-6">
+        {feedback && (
+          <div
+            className={`rounded-lg border p-3 text-sm ${
+              feedback.type === 'success'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                : 'bg-red-50 border-red-200 text-red-800'
+            }`}
+          >
+            {feedback.message}
+          </div>
+        )}
+
         {/* Header */}
         <div className="flex justify-between items-center">
           <div>

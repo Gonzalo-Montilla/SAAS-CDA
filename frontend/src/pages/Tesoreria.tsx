@@ -138,7 +138,7 @@ function Dashboard() {
 
   // Mostrar loading solo para queries principales
   if (loadingSaldo || loadingResumen) {
-    return <LoadingSpinner message="Cargando dashboard..." />;
+    return <LoadingSpinner message="Cargando panel de tesorería..." />;
   }
 
   const saldoActual = saldo?.saldo_actual || 0;
@@ -229,7 +229,7 @@ function Dashboard() {
             {loadingDesglose ? (
               <div className="text-center py-8">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-                <p className="text-sm text-gray-500 mt-2">Cargando desglose...</p>
+                <p className="text-sm text-gray-500 mt-2">Cargando detalle...</p>
               </div>
             ) : desglose && (
               <>
@@ -388,7 +388,7 @@ function Dashboard() {
         {loadingMovimientos ? (
           <div className="text-center py-8">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
-            <p className="text-sm text-gray-500 mt-2">Cargando movimientos...</p>
+            <p className="text-sm text-gray-500 mt-2">Cargando movimientos recientes...</p>
           </div>
         ) : movimientos && movimientos.length > 0 ? (
           <div className="space-y-3">
@@ -432,6 +432,7 @@ function Dashboard() {
 // ==================== REGISTRAR MOVIMIENTO ====================
 function RegistrarMovimiento() {
   const queryClient = useQueryClient();
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [tipoMovimiento, setTipoMovimiento] = useState<'ingreso' | 'egreso'>('egreso');
   const [formData, setFormData] = useState({
     categoria: '',
@@ -499,18 +500,22 @@ function RegistrarMovimiento() {
       setDesgloseEfectivo(null); // Limpiar desglose también
       
       const mensaje = tipoMovimiento === 'egreso' 
-        ? 'Egreso registrado exitosamente. El comprobante se está descargando...'
-        : 'Ingreso registrado exitosamente';
-      alert(mensaje);
+        ? 'Egreso registrado exitosamente. El comprobante se está descargando.'
+        : 'Ingreso registrado exitosamente.';
+      setFeedback({ type: 'success', message: mensaje });
     },
     onError: (error: any) => {
       console.error('Error al registrar movimiento:', error);
-      alert('Error al registrar movimiento: ' + (error.response?.data?.detail || error.message));
+      setFeedback({
+        type: 'error',
+        message: error.response?.data?.detail || 'No fue posible registrar el movimiento. Intenta nuevamente.',
+      });
     },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setFeedback(null);
 
     const monto = parseFloat(formData.monto);
     console.log('=== DEBUG REGISTRO MOVIMIENTO ===');
@@ -522,7 +527,10 @@ function RegistrarMovimiento() {
     if (formData.metodo_pago === 'efectivo') {
       // El desglose es obligatorio
       if (!desgloseEfectivo) {
-        alert('El desglose de efectivo es obligatorio. Por favor, especifica las denominaciones de billetes y monedas.');
+        setFeedback({
+          type: 'error',
+          message: 'El desglose de efectivo es obligatorio. Especifica las denominaciones de billetes y monedas.',
+        });
         return;
       }
       
@@ -546,13 +554,19 @@ function RegistrarMovimiento() {
       
       // Validar que el total no sea cero
       if (totalDesglose === 0) {
-        alert('Debes especificar las denominaciones de billetes y monedas. El desglose no puede estar vacío.');
+        setFeedback({
+          type: 'error',
+          message: 'Debes especificar las denominaciones de billetes y monedas. El desglose no puede estar vacío.',
+        });
         return;
       }
       
       // Validar que coincida con el monto
       if (totalDesglose !== monto) {
-        alert(`El desglose de efectivo ($${formatCurrency(totalDesglose)}) no coincide con el monto ($${formatCurrency(monto)}).\n\nPor favor ajusta las denominaciones para que el total calculado coincida exactamente.`);
+        setFeedback({
+          type: 'error',
+          message: `El desglose de efectivo ($${formatCurrency(totalDesglose)}) no coincide con el monto ($${formatCurrency(monto)}). Ajusta las denominaciones para que coincidan.`,
+        });
         return;
       }
     }
@@ -612,11 +626,11 @@ function RegistrarMovimiento() {
             <div className="flex items-center justify-center gap-2 mb-2">
               <AlertTriangle className="w-6 h-6 text-red-600" />
               <p className="text-red-800 font-bold text-lg">
-                Error al cargar el formulario
+                No fue posible cargar el formulario
               </p>
             </div>
             <p className="text-red-600 text-sm">
-              No se pudieron cargar las categorías. Verifica que el backend esté funcionando.
+              No fue posible cargar las categorías. Verifica la conexión con el backend.
             </p>
             <button 
               onClick={() => window.location.reload()} 
@@ -638,11 +652,23 @@ function RegistrarMovimiento() {
           Registrar Movimiento
         </h3>
 
+        {feedback && (
+          <div
+            className={`mb-6 rounded-lg border p-3 text-sm ${
+              feedback.type === 'success'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                : 'bg-red-50 border-red-200 text-red-800'
+            }`}
+          >
+            {feedback.message}
+          </div>
+        )}
+
         {registrarMutation.isError && (
           <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6 flex items-center justify-center gap-2">
             <AlertTriangle className="w-5 h-5 text-red-600" />
             <p className="text-red-800 font-semibold">
-              Error al registrar movimiento
+              No fue posible registrar el movimiento
             </p>
           </div>
         )}
@@ -783,7 +809,7 @@ function RegistrarMovimiento() {
               required
             >
               {!categorias?.metodos_pago || categorias.metodos_pago.length === 0 ? (
-                <option value="">Cargando...</option>
+                <option value="">Cargando métodos de pago...</option>
               ) : (
                 categorias.metodos_pago.map((metodo) => (
                   <option key={metodo.value} value={metodo.value}>
@@ -876,6 +902,7 @@ function Historial() {
     fecha_hasta: '',
   });
   const [busqueda, setBusqueda] = useState('');
+  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   
   
 
@@ -902,7 +929,7 @@ function Historial() {
   // Función para exportar a Excel
   const exportarExcel = () => {
     if (!movimientos || movimientos.length === 0) {
-      alert('No hay movimientos para exportar');
+      setFeedback({ type: 'error', message: 'No hay movimientos para exportar.' });
       return;
     }
 
@@ -928,6 +955,7 @@ function Historial() {
 
     // Descargar
     XLSX.writeFile(wb, nombreArchivo);
+    setFeedback({ type: 'success', message: 'Archivo Excel exportado correctamente.' });
   };
 
   return (
@@ -994,6 +1022,18 @@ function Historial() {
       </div>
 
       <div className="card-pos">
+        {feedback && (
+          <div
+            className={`mb-4 rounded-lg border p-3 text-sm ${
+              feedback.type === 'success'
+                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+                : 'bg-red-50 border-red-200 text-red-800'
+            }`}
+          >
+            {feedback.message}
+          </div>
+        )}
+
         <div className="flex justify-between items-center mb-4">
           <h3 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
             <FileText className="w-7 h-7 text-primary-600" />
@@ -1010,7 +1050,7 @@ function Historial() {
         </div>
 
         {isLoading ? (
-          <LoadingSpinner message="Cargando movimientos..." />
+          <LoadingSpinner message="Cargando historial de movimientos..." />
         ) : movimientos && movimientos.length > 0 ? (
           <div className="overflow-x-auto">
             <table className="w-full">
@@ -1069,7 +1109,10 @@ function Historial() {
                               document.body.removeChild(a);
                             } catch (error) {
                               console.error('Error:', error);
-                              alert('Error al descargar comprobante');
+                              setFeedback({
+                                type: 'error',
+                                message: 'No fue posible descargar el comprobante. Intenta nuevamente.',
+                              });
                             }
                           }}
                           className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 inline-flex items-center gap-1"

@@ -145,10 +145,10 @@ export default function CajaPage() {
             <AlertTriangle className="w-20 h-20 text-red-500" />
           </div>
           <h3 className="text-2xl font-bold text-gray-900 mb-2">
-            Error al conectar con el servidor
+            No fue posible conectar con el servidor
           </h3>
           <p className="text-gray-600 mb-4">
-            No se pudo verificar el estado de la caja
+            No fue posible verificar el estado de la caja
           </p>
           <button
             onClick={() => queryClient.invalidateQueries({ queryKey: ['caja-activa'] })}
@@ -202,14 +202,14 @@ export default function CajaPage() {
       )}
 
       {/* Header con info de caja */}
-      <div className="bg-gradient-to-r from-primary-600 to-primary-700 text-white rounded-xl shadow-lg p-6 mb-6">
-        <div className="flex justify-between items-center">
+      <div className="bg-gradient-to-r from-primary-600 to-primary-700 text-white rounded-2xl shadow-lg p-4 sm:p-6 mb-6">
+        <div className="flex flex-col xl:flex-row gap-4 xl:gap-6 xl:items-center xl:justify-between">
           <div className="flex-1">
             <h2 className="text-2xl font-bold mb-2 flex items-center gap-2">
               <Wallet className="w-7 h-7" />
               Caja Activa
             </h2>
-            <div className="flex gap-6 text-sm">
+            <div className="flex flex-wrap gap-4 sm:gap-6 text-sm">
               <div>
                 <span className="opacity-80">Turno:</span>{' '}
                 <span className="font-semibold capitalize">{cajaActiva.turno}</span>
@@ -229,7 +229,7 @@ export default function CajaPage() {
           
           {/* Contador de Efectivo en Tiempo Real */}
           {resumenTiempoReal && (
-            <div className="bg-white bg-opacity-20 rounded-lg px-6 py-4 backdrop-blur-sm mr-6">
+            <div className="bg-white/20 rounded-lg px-4 sm:px-6 py-3 sm:py-4 backdrop-blur-sm">
               <p className="text-xs opacity-90 mb-1 flex items-center gap-1">
                 <Banknote className="w-4 h-4" />
                 Efectivo en Caja
@@ -242,7 +242,7 @@ export default function CajaPage() {
               </p>
             </div>
           )}
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-3">
             <button
               onClick={() => setMostrarModalVentaSOAT(true)}
               className="px-6 py-3 bg-secondary-500 text-white rounded-lg font-bold hover:bg-secondary-600 transition-colors inline-flex items-center gap-2 shadow-lg"
@@ -396,15 +396,15 @@ function AperturaCaja() {
     
     // Validar que el monto inicial no sea negativo
     if (formData.monto_inicial < 0) {
-      alert('⚠️ El monto inicial no puede ser negativo.');
+      alert('El monto inicial no puede ser negativo.');
       return;
     }
     
     // Advertir si el monto es $0 o muy bajo
     if (formData.monto_inicial === 0) {
       const confirmar = window.confirm(
-        `⚠️ Vas a abrir la caja con $0.\n\n` +
-        `IMPORTANTE: Asegúrate de tener efectivo disponible para dar cambio a los clientes.\n\n` +
+        `Vas a abrir la caja con $0.\n\n` +
+        `Asegúrate de tener efectivo disponible para dar cambio a los clientes.\n\n` +
         `¿Deseas continuar?`
       );
       if (!confirmar) {
@@ -412,8 +412,8 @@ function AperturaCaja() {
       }
     } else if (formData.monto_inicial < 20000) {
       const confirmar = window.confirm(
-        `⚠️ El monto inicial es muy bajo ($${formData.monto_inicial.toLocaleString()}).\n\n` +
-        `Puede que no tengas suficiente cambio para los clientes.\n\n` +
+        `El monto inicial es muy bajo ($${formData.monto_inicial.toLocaleString()}).\n\n` +
+        `Podrías no tener suficiente cambio para los clientes.\n\n` +
         `¿Deseas continuar de todas formas?`
       );
       if (!confirmar) {
@@ -500,7 +500,7 @@ function AperturaCaja() {
           <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6">
             <p className="text-red-800 font-semibold text-center flex items-center justify-center gap-2">
               <XCircle className="w-5 h-5" />
-              {(abrirMutation.error as Error & { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Error al abrir caja'}
+              {(abrirMutation.error as Error & { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'No fue posible abrir la caja.'}
             </p>
           </div>
         )}
@@ -596,7 +596,7 @@ function VehiculosPendientes({
   const [busqueda, setBusqueda] = useState('');
 
   if (loading) {
-    return <LoadingSpinner message="Cargando vehículos pendientes..." />;
+    return <LoadingSpinner message="Cargando vehículos pendientes de cobro..." />;
   }
 
   if (error) {
@@ -606,7 +606,7 @@ function VehiculosPendientes({
           <XCircle className="w-20 h-20 text-red-500" />
         </div>
         <h3 className="text-2xl font-bold text-gray-900 mb-2">
-          Error al cargar vehículos
+          No fue posible cargar los vehículos
         </h3>
         <p className="text-gray-600 mb-4">
           No se pudieron obtener los vehículos pendientes
@@ -866,7 +866,7 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
         nombreCajero: user?.nombre_completo || 'Cajero',
       });
       
-      alert(`✅ Cobro registrado exitosamente\n\nRecibo generado: ${nombrePDF}`);
+      alert(`Cobro registrado exitosamente.\n\nRecibo generado: ${nombrePDF}`);
       
       // Defer query invalidation to prevent React DOM errors
       setTimeout(() => {
@@ -958,7 +958,7 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
             <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6">
               <p className="text-red-800 font-semibold text-center flex items-center justify-center gap-2">
                 <XCircle className="w-5 h-5" />
-                {(cobrarMutation.error as Error & { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Error al cobrar'}
+                {(cobrarMutation.error as Error & { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'No fue posible registrar el cobro.'}
               </p>
             </div>
           )}
@@ -1538,9 +1538,9 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
     // Confirmación para gastos grandes (>$50,000)
     if (monto > 50000) {
       const confirmar = window.confirm(
-        `⚠️ MONTO ALTO: $${monto.toLocaleString()}\n\n` +
+        `Monto alto detectado: $${monto.toLocaleString()}.\n\n` +
         `Concepto: ${formData.concepto}\n\n` +
-        `¿Estás seguro de registrar este gasto?`
+        `¿Confirmas registrar este gasto?`
       );
       if (!confirmar) {
         return;
@@ -1666,7 +1666,7 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
             <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6">
               <p className="text-red-800 font-semibold text-center flex items-center justify-center gap-2">
                 <XCircle className="w-5 h-5" />
-                {(registrarGastoMutation.error as Error & { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Error al registrar gasto'}
+                {(registrarGastoMutation.error as Error & { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'No fue posible registrar el gasto.'}
               </p>
             </div>
           )}
@@ -1907,11 +1907,11 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
           document.body.removeChild(a);
           window.URL.revokeObjectURL(url);
           
-          alert('✅ Caja cerrada exitosamente. El comprobante se ha descargado.');
+          alert('Caja cerrada exitosamente. El comprobante se descargó correctamente.');
         }
       } catch (error) {
         console.error('Error al descargar comprobante:', error);
-        alert('⚠️ Caja cerrada, pero no se pudo descargar el comprobante automáticamente.');
+        alert('La caja se cerró, pero no fue posible descargar el comprobante automáticamente.');
       }
       
       // Defer query invalidation and callback to prevent React DOM errors
@@ -1926,10 +1926,10 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
     // Validar si hay vehículos pendientes
     if (vehiculosPendientes.length > 0) {
       const confirmacion = window.confirm(
-        `⚠️ ADVERTENCIA: Hay ${vehiculosPendientes.length} vehículo(s) pendiente(s) de cobro.\n\n` +
+        `Hay ${vehiculosPendientes.length} vehículo(s) pendiente(s) de cobro.\n\n` +
         `Placas pendientes: ${vehiculosPendientes.slice(0, 5).map((v: Vehiculo) => v.placa).join(', ')}` +
         `${vehiculosPendientes.length > 5 ? '...' : ''}\n\n` +
-        `¿Estás seguro de cerrar la caja sin cobrarlos?`
+        `¿Confirmas cerrar la caja sin cobrarlos?`
       );
       if (!confirmacion) {
         return;
@@ -1942,7 +1942,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
       // Si no hay observaciones, exigirlas
       if (!observaciones || observaciones.trim().length < 10) {
         alert(
-          `⚠️ DIFERENCIA GRANDE DETECTADA: $${diferencia.toLocaleString()}\n\n` +
+          `Se detectó una diferencia alta: $${diferencia.toLocaleString()}.\n\n` +
           `Debes agregar observaciones (mínimo 10 caracteres) explicando la diferencia.`
         );
         return;
@@ -1950,9 +1950,9 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
       
       // Confirmación adicional
       const confirmarDiferencia = window.confirm(
-        `⚠️ ${diferencia < 0 ? 'FALTANTE' : 'SOBRANTE'} DE $${diferenciaAbsoluta.toLocaleString()}\n\n` +
-        `Saldo Esperado: $${resumen?.saldo_esperado.toLocaleString()}\n` +
-        `Efectivo Contado: $${montoFisico?.toLocaleString()}\n\n` +
+        `${diferencia < 0 ? 'Faltante' : 'Sobrante'} de $${diferenciaAbsoluta.toLocaleString()}.\n\n` +
+        `Saldo esperado: $${resumen?.saldo_esperado.toLocaleString()}\n` +
+        `Efectivo contado: $${montoFisico?.toLocaleString()}\n\n` +
         `Observaciones: ${observaciones}\n\n` +
         `¿Confirmas cerrar con esta diferencia?`
       );
@@ -1975,7 +1975,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
   if (isLoading || !resumen) {
     return (
       <div className="card-pos">
-        <LoadingSpinner message="Cargando resumen de caja..." />
+        <LoadingSpinner message="Cargando resumen operativo de caja..." />
       </div>
     );
   }
@@ -1995,7 +1995,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
           <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6">
             <p className="text-red-800 font-semibold text-center flex items-center justify-center gap-2">
               <XCircle className="w-5 h-5" />
-              {(cerrarMutation.error as Error & { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'Error al cerrar caja'}
+              {(cerrarMutation.error as Error & { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'No fue posible cerrar la caja.'}
             </p>
           </div>
         )}
@@ -2604,7 +2604,7 @@ function HistorialCajas() {
   });
 
   if (isLoading) {
-    return <LoadingSpinner message="Cargando historial..." />;
+    return <LoadingSpinner message="Cargando historial de caja..." />;
   }
 
   const cajasArray = cajas || [];
@@ -2746,11 +2746,11 @@ function HistorialCajas() {
                               document.body.removeChild(a);
                               window.URL.revokeObjectURL(url);
                             } else {
-                              alert('❌ Error al cargar el comprobante');
+                              alert('No fue posible cargar el comprobante.');
                             }
                           } catch (error) {
                             console.error('Error al descargar PDF:', error);
-                            alert('❌ Error al cargar el comprobante');
+                            alert('No fue posible cargar el comprobante.');
                           }
                         }}
                         className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-semibold rounded-lg inline-flex items-center justify-center gap-1 transition-colors"
@@ -2789,7 +2789,7 @@ function VehiculosCobradosHoy({ vehiculos, loading }: { vehiculos: Vehiculo[], l
   const [vehiculoSeleccionado, setVehiculoSeleccionado] = useState<Vehiculo | null>(null);
 
   if (loading) {
-    return <LoadingSpinner message="Cargando vehículos cobrados hoy..." />;
+    return <LoadingSpinner message="Cargando vehículos cobrados del día..." />;
   }
 
   if (vehiculos.length === 0) {
@@ -2877,7 +2877,7 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
   const cambiarMetodoMutation = useMutation({
     mutationFn: () => vehiculosApi.cambiarMetodoPago(vehiculo.id, nuevoMetodo, motivo),
     onSuccess: (data) => {
-      alert(`✅ ${data.message}\n\nMétodo anterior: ${data.metodo_anterior}\nMétodo nuevo: ${data.metodo_nuevo}`);
+      alert(`${data.message}\n\nMétodo anterior: ${data.metodo_anterior}\nMétodo nuevo: ${data.metodo_nuevo}`);
       
       // Defer query invalidations
       setTimeout(() => {
@@ -2888,14 +2888,14 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
       onClose();
     },
     onError: (error: any) => {
-      alert(`❌ Error: ${error.response?.data?.detail || 'No se pudo cambiar el método de pago'}`);
+      alert(error.response?.data?.detail || 'No fue posible cambiar el método de pago.');
     },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (nuevoMetodo === vehiculo.metodo_pago) {
-      alert('⚠️ El método de pago seleccionado es el mismo que el actual');
+      alert('El método de pago seleccionado es el mismo que el actual.');
       return;
     }
     cambiarMetodoMutation.mutate();
@@ -3048,7 +3048,7 @@ function ModalVentaSOAT({ onClose, onSuccess }: { onClose: () => void, onSuccess
         metodoPago: formData.metodo_pago,
       });
       
-      alert(`✅ Venta de SOAT registrada exitosamente\n\nRecibo generado: ${nombrePDF}`);
+      alert(`Venta de SOAT registrada exitosamente.\n\nRecibo generado: ${nombrePDF}`);
       onSuccess();
     },
   });
@@ -3059,7 +3059,7 @@ function ModalVentaSOAT({ onClose, onSuccess }: { onClose: () => void, onSuccess
     const valorComercial = parseFloat(formData.valor_soat_comercial);
     
     if (isNaN(valorComercial) || valorComercial <= 0) {
-      alert('⚠️ El valor comercial del SOAT debe ser mayor a $0');
+      alert('El valor comercial del SOAT debe ser mayor a $0.');
       return;
     }
 
@@ -3106,7 +3106,7 @@ function ModalVentaSOAT({ onClose, onSuccess }: { onClose: () => void, onSuccess
             <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6">
               <p className="text-red-800 font-semibold text-center flex items-center justify-center gap-2">
                 <XCircle className="w-5 h-5" />
-                {(ventaSOATMutation.error as any)?.response?.data?.detail || 'Error al registrar venta'}
+                {(ventaSOATMutation.error as any)?.response?.data?.detail || 'No fue posible registrar la venta SOAT.'}
               </p>
             </div>
           )}

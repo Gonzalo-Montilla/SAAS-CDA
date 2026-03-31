@@ -4,7 +4,11 @@
 
 @layer base {
   body {
-    @apply bg-gray-50 text-gray-900 font-sans antialiased;
+    @apply text-slate-900 font-sans antialiased;
+    background:
+      radial-gradient(1200px 500px at 10% -10%, rgba(37, 99, 235, 0.14), transparent 60%),
+      radial-gradient(900px 420px at 95% 0%, rgba(14, 165, 233, 0.12), transparent 60%),
+      linear-gradient(180deg, #f8fbff 0%, #f1f5fb 45%, #eef3f9 100%);
   }
 }
 
@@ -52,6 +56,115 @@
 }
 
 @layer components {
+  .corporate-shell {
+    @apply min-h-screen relative;
+  }
+
+  .corporate-shell::before {
+    content: '';
+    @apply absolute inset-0 pointer-events-none;
+    background:
+      radial-gradient(900px 340px at 0% 100%, rgba(15, 23, 42, 0.05), transparent 60%),
+      radial-gradient(700px 280px at 100% 90%, rgba(30, 64, 175, 0.08), transparent 60%);
+  }
+
+  .glass-card {
+    @apply backdrop-blur-sm border rounded-2xl shadow-[0_18px_42px_-24px_rgba(15,23,42,0.45)];
+    background-color: rgba(255, 255, 255, 0.92);
+    border-color: rgba(255, 255, 255, 0.6);
+  }
+
+  .section-card {
+    @apply rounded-2xl border bg-white shadow-sm;
+    border-color: rgba(226, 232, 240, 0.75);
+    background-color: rgba(255, 255, 255, 0.9);
+  }
+
+  .kpi-card {
+    @apply section-card p-5 transition hover:shadow-md hover:-translate-y-0.5;
+  }
+
+  .kpi-label {
+    @apply text-xs font-medium uppercase tracking-wide text-slate-500;
+  }
+
+  .kpi-value {
+    @apply mt-2 text-3xl font-bold leading-none text-slate-900;
+  }
+
+  .table-shell {
+    @apply overflow-x-auto rounded-xl border bg-white;
+    border-color: rgba(226, 232, 240, 0.8);
+    background-color: rgba(255, 255, 255, 0.72);
+    scrollbar-width: thin;
+    scrollbar-color: #94a3b8 transparent;
+  }
+
+  .table-shell::-webkit-scrollbar {
+    height: 8px;
+  }
+
+  .table-shell::-webkit-scrollbar-thumb {
+    background: #94a3b8;
+    border-radius: 999px;
+  }
+
+  .table-shell::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  .table-enterprise {
+    @apply w-full text-sm overflow-hidden;
+    min-width: 760px;
+  }
+
+  .table-enterprise thead th {
+    @apply py-3 pr-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500 bg-slate-50 border-b border-slate-200;
+  }
+
+  .table-enterprise tbody tr {
+    @apply border-b border-slate-100 hover:bg-slate-50 transition-colors;
+  }
+
+  .table-enterprise tbody td {
+    @apply py-2.5 pr-4 text-slate-700 align-middle;
+  }
+
+  .btn-chip {
+    @apply inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 transition disabled:opacity-50;
+  }
+
+  @media (min-width: 1024px) {
+    .table-enterprise {
+      min-width: 100%;
+    }
+  }
+
+  .input-corporate {
+    @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500 transition;
+  }
+
+  .btn-corporate-primary {
+    @apply rounded-lg text-white text-sm font-semibold py-2.5 transition shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed;
+    background: linear-gradient(120deg, #1d4ed8 0%, #2563eb 45%, #0f172a 100%);
+  }
+
+  .btn-corporate-muted {
+    @apply rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-sm font-medium py-2.5 transition;
+  }
+
+  .module-hero {
+    @apply section-card p-4 sm:p-6 mb-6;
+  }
+
+  .module-hero-title {
+    @apply text-2xl sm:text-3xl font-bold text-slate-900 mb-2 flex items-center gap-3;
+  }
+
+  .module-hero-subtitle {
+    @apply text-sm sm:text-base text-slate-600;
+  }
+
   /* Botones POS - Diseño Profesional */
   .btn-pos {
     @apply px-6 py-3 rounded-xl font-semibold text-base shadow-sm hover:shadow-lg transition-all duration-200 transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100;
@@ -111,7 +224,8 @@
   
   /* Modales profesionales */
   .modal-overlay {
-    @apply fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50;
+    @apply fixed inset-0 bg-black backdrop-blur-sm flex items-center justify-center z-50;
+    background-color: rgba(2, 6, 23, 0.6);
     animation: fadeIn 0.2s ease-out;
   }
   

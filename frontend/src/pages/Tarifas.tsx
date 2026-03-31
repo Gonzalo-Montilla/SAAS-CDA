@@ -104,7 +104,7 @@ function TarifasRTM({
   ).sort((a, b) => b - a);
 
   if (isLoading) {
-    return <LoadingSpinner message="Cargando tarifas..." />;
+    return <LoadingSpinner message="Cargando tarifas RTM..." />;
   }
 
   return (
@@ -338,7 +338,7 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
             <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6">
               <p className="text-red-800 font-semibold text-center flex items-center justify-center gap-2">
                 <XCircle className="w-5 h-5" />
-                {(crearMutation.error as any)?.response?.data?.detail || 'Error al crear tarifa'}
+                {(crearMutation.error as any)?.response?.data?.detail || 'No fue posible crear la tarifa. Intenta nuevamente.'}
               </p>
             </div>
           )}
@@ -582,7 +582,7 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
             <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6">
               <p className="text-red-800 font-semibold text-center flex items-center justify-center gap-2">
                 <XCircle className="w-5 h-5" />
-                {(editarMutation.error as any)?.response?.data?.detail || 'Error al editar'}
+                {(editarMutation.error as any)?.response?.data?.detail || 'No fue posible actualizar la tarifa. Intenta nuevamente.'}
               </p>
             </div>
           )}
@@ -708,7 +708,7 @@ function ComisionesSOAT() {
   });
 
   const handleEliminar = (comision: any) => {
-    if (window.confirm(`¿Estás seguro de eliminar la comisión de ${comision.tipo_vehiculo}?\n\nValor: $${comision.valor_comision.toLocaleString()}`)) {
+    if (window.confirm(`¿Confirmas eliminar la comisión de ${comision.tipo_vehiculo}?\n\nValor: $${comision.valor_comision.toLocaleString()}`)) {
       eliminarMutation.mutate(comision.id);
     }
   };
@@ -745,7 +745,7 @@ function ComisionesSOAT() {
           </div>
           <h3 className="text-xl font-bold text-gray-900 mb-2">No hay comisiones configuradas</h3>
           <p className="text-gray-600 mb-4">
-            Contacta al administrador del sistema para configurar las comisiones SOAT
+            Configura una comisión para iniciar el registro de ventas SOAT.
           </p>
         </div>
       ) : (
@@ -892,7 +892,7 @@ function ModalEditarComisionSOAT({ comision, onClose }: { comision: any; onClose
             <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6">
               <p className="text-red-800 font-semibold text-center flex items-center justify-center gap-2">
                 <XCircle className="w-5 h-5" />
-                Error al {esNuevo ? 'crear' : 'actualizar'} comisión
+                No fue posible {esNuevo ? 'crear' : 'actualizar'} la comisión. Intenta nuevamente.
               </p>
             </div>
           )}

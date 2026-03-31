@@ -200,7 +200,7 @@ export default function ReportesPage() {
   if (isLoading) {
     return (
       <Layout title="Reportes">
-        <LoadingSpinner message="Cargando dashboard..." />
+        <LoadingSpinner message="Cargando panel de reportes..." />
       </Layout>
     );
   }
@@ -209,7 +209,7 @@ export default function ReportesPage() {
     return (
       <Layout title="Reportes">
         <div className="bg-red-50 border-2 border-red-200 rounded-lg p-6">
-          <p className="text-red-800 font-bold">Error al cargar los datos del dashboard</p>
+          <p className="text-red-800 font-bold">No fue posible cargar los datos del dashboard.</p>
         </div>
       </Layout>
     );

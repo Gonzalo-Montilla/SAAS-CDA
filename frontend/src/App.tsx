@@ -40,7 +40,8 @@ function ProtectedRoute({
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" />;
+    const loginPath = requiredScope === 'saas' ? '/saas/login' : '/login';
+    return <Navigate to={loginPath} replace />;
   }
 
   if (requiredScope && authScope !== requiredScope) {

@@ -79,6 +79,7 @@ export default function Login() {
   const [registerCorreoElectronico, setRegisterCorreoElectronico] = useState('');
   const [registerRepresentanteNombre, setRegisterRepresentanteNombre] = useState('');
   const [registerCelular, setRegisterCelular] = useState('');
+  const [registerSedesTotales, setRegisterSedesTotales] = useState(1);
   const [registerAdminPassword, setRegisterAdminPassword] = useState('');
   const [registerEmailCode, setRegisterEmailCode] = useState('');
   const [emailCodeTarget, setEmailCodeTarget] = useState('');
@@ -170,7 +171,7 @@ export default function Login() {
       navigate(loginMode === 'saas' ? '/saas/backoffice' : '/dashboard');
     } catch (err: any) {
       if (isMountedRef.current) {
-        setError(extractApiErrorMessage(err, 'Error al iniciar sesión'));
+        setError(extractApiErrorMessage(err, 'No fue posible iniciar sesión. Verifica tus credenciales.'));
       }
     } finally {
       if (isMountedRef.current) {
@@ -188,13 +189,13 @@ export default function Login() {
       if (!isMountedRef.current) {
         return;
       }
-      setMensajeForgot('✅ Si el email existe, recibirás instrucciones para recuperar tu contraseña.');
+      setMensajeForgot('Si el correo existe, recibirás instrucciones para recuperar tu contraseña.');
     },
     onError: () => {
       if (!isMountedRef.current) {
         return;
       }
-      setMensajeForgot('❌ Error al enviar el email. Intenta nuevamente.');
+      setMensajeForgot('No fue posible enviar el correo de recuperación. Intenta nuevamente.');
     },
   });
 
@@ -212,6 +213,7 @@ export default function Login() {
       formData.append('correo_electronico', payload.correo_electronico);
       formData.append('nombre_representante_legal_o_administrador', payload.nombre_representante_legal_o_administrador);
       formData.append('celular', payload.celular);
+      formData.append('sedes_totales', String(payload.sedes_totales));
       formData.append('admin_password', payload.admin_password);
       if (payload.codigo_verificacion_email) {
         formData.append('codigo_verificacion_email', payload.codigo_verificacion_email);
@@ -231,7 +233,7 @@ export default function Login() {
     },
     onSuccess: async (data: any) => {
       const loginUrl = data?.login_url ? ` URL personalizada: ${data.login_url}` : '';
-      setMensajeRegistro(`✅ CDA creado exitosamente.${loginUrl} Iniciando sesión...`);
+      setMensajeRegistro(`CDA creado exitosamente.${loginUrl} Iniciando sesión...`);
       await login(
         {
           username: registerCorreoElectronico,
@@ -245,7 +247,7 @@ export default function Login() {
       if (!isMountedRef.current) {
         return;
       }
-      setMensajeRegistro(`❌ ${extractApiErrorMessage(err, 'No se pudo crear el CDA')}`);
+      setMensajeRegistro(extractApiErrorMessage(err, 'No fue posible crear el CDA. Intenta nuevamente.'));
       setRegisterCaptchaToken('');
       if (window.turnstile && turnstileWidgetIdRef.current) {
         window.turnstile.reset(turnstileWidgetIdRef.current);
@@ -266,13 +268,13 @@ export default function Login() {
         return;
       }
       setEmailCodeTarget(registerCorreoElectronico.trim().toLowerCase());
-      setMensajeRegistro('✅ Código enviado. Revisa tu correo y continúa el registro.');
+      setMensajeRegistro('Código enviado. Revisa tu correo y continúa con el registro.');
     },
     onError: (err: any) => {
       if (!isMountedRef.current) {
         return;
       }
-      setMensajeRegistro(`❌ ${extractApiErrorMessage(err, 'No se pudo enviar el código de verificación')}`);
+      setMensajeRegistro(extractApiErrorMessage(err, 'No fue posible enviar el código de verificación. Intenta nuevamente.'));
     },
   });
 
@@ -289,6 +291,10 @@ export default function Login() {
 
     if (!isValidColombianCell(registerCelular)) {
       setRegisterValidationError('El celular debe ser colombiano y tener 10 dígitos (inicia en 3).');
+      return;
+    }
+    if (registerSedesTotales < 1) {
+      setRegisterValidationError('Total de sedes debe ser mayor o igual a 1.');
       return;
     }
 
@@ -312,6 +318,7 @@ export default function Login() {
       correo_electronico: registerCorreoElectronico,
       nombre_representante_legal_o_administrador: registerRepresentanteNombre,
       celular: registerCelular,
+      sedes_totales: registerSedesTotales,
       admin_password: registerAdminPassword,
       codigo_verificacion_email: registerEmailCode.trim(),
       logo_url: logoInputMode === 'url' ? (registerLogoUrl || undefined) : undefined,
@@ -351,7 +358,7 @@ export default function Login() {
             return;
           }
           setRegisterCaptchaToken('');
-          setRegisterCaptchaError('No se pudo validar captcha. Intenta nuevamente.');
+          setRegisterCaptchaError('No fue posible validar el captcha. Intenta nuevamente.');
         },
       });
     };
@@ -388,9 +395,9 @@ export default function Login() {
   }, [mostrarRegistroTenant]);
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col">
+    <div className="corporate-shell flex flex-col">
       <div className="flex-1 flex items-center justify-center p-4">
-        <div className="w-full max-w-md rounded-2xl bg-white border border-slate-200 shadow-sm px-7 py-8">
+        <div className="w-full max-w-md glass-card px-7 py-8">
           <div className="mb-8 flex flex-col items-center text-center">
             <img
               src={effectiveBrand.logoSrc}
@@ -445,7 +452,7 @@ export default function Login() {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 required
-                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="input-corporate"
                 placeholder={loginMode === 'saas' ? 'owner@cdasoft.com' : 'usuario@cdasoft.com'}
                 autoComplete="email"
               />
@@ -461,7 +468,7 @@ export default function Login() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
-                className="w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                className="input-corporate"
                 placeholder="••••••••"
                 autoComplete="current-password"
               />
@@ -476,7 +483,7 @@ export default function Login() {
             <button
               type="submit"
               disabled={loading}
-              className="w-full rounded-md bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2.5 transition disabled:opacity-50 disabled:cursor-not-allowed"
+              className="w-full btn-corporate-primary"
               style={loginMode === 'tenant' ? { backgroundColor: effectiveBrand.colorPrimario } : undefined}
             >
               {loading ? (
@@ -518,18 +525,18 @@ export default function Login() {
           </form>
 
           <div className="mt-7 border-t border-slate-200 pt-5 text-center text-[11px] text-slate-500">
-            <p>{effectiveBrand.nombreComercial} - sistema integral para administracion de cda</p>
+            <p>{effectiveBrand.nombreComercial} - Sistema integral para administración de CDA</p>
           </div>
         </div>
       </div>
 
       {/* Modal: Olvidé mi contraseña */}
       {mostrarForgotPassword && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-md w-full p-6 border-2 border-gray-100">
+        <div className="fixed inset-0 bg-slate-900/55 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="glass-card max-w-md w-full p-6 border border-slate-200/70">
               {/* Header */}
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-bold text-gray-800">🔑 Recuperar Contraseña</h3>
+                <h3 className="text-xl font-bold text-gray-800">Recuperar contraseña</h3>
                 <button
                   onClick={() => {
                     setMostrarForgotPassword(false);
@@ -558,7 +565,7 @@ export default function Login() {
                     type="email"
                     value={forgotEmail}
                     onChange={(e) => setForgotEmail(e.target.value)}
-                    className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all"
+                    className="input-corporate"
                     placeholder="tu@email.com"
                     required
                   />
@@ -566,7 +573,7 @@ export default function Login() {
 
                 {mensajeForgot && (
                   <div className={`p-3 rounded-lg text-sm ${
-                    mensajeForgot.includes('✅') 
+                    !mensajeForgot.startsWith('No fue posible')
                       ? 'bg-green-50 border-2 border-green-200 text-green-800'
                       : 'bg-red-50 border-2 border-red-200 text-red-800'
                   }`}>
@@ -582,14 +589,14 @@ export default function Login() {
                       setForgotEmail('');
                       setMensajeForgot('');
                     }}
-                    className="flex-1 px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg font-semibold transition"
+                    className="flex-1 btn-corporate-muted"
                   >
                     Cancelar
                   </button>
                   <button
                     type="submit"
                     disabled={forgotPasswordMutation.isLoading}
-                    className="flex-1 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold transition disabled:opacity-50"
+                    className="flex-1 btn-corporate-primary disabled:opacity-50"
                   >
                     {forgotPasswordMutation.isLoading ? 'Enviando...' : 'Enviar'}
                   </button>
@@ -601,10 +608,10 @@ export default function Login() {
 
       {/* Modal: Registro de tenant CDA */}
       {mostrarRegistroTenant && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full p-6 border-2 border-gray-100">
+        <div className="fixed inset-0 bg-slate-900/55 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="glass-card max-w-lg w-full p-6 border border-slate-200/70">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-gray-800">Crear mi CDA</h3>
+              <h3 className="text-xl font-bold text-gray-800">Crear CDA</h3>
               <button
                 onClick={() => {
                   setMostrarRegistroTenant(false);
@@ -630,7 +637,7 @@ export default function Login() {
             {(registerValidationError || mensajeRegistro) && (
               <div
                 className={`mb-3 p-3 rounded-lg text-sm ${
-                  registerValidationError || mensajeRegistro.startsWith('❌')
+                  registerValidationError || mensajeRegistro.startsWith('No fue posible')
                     ? 'bg-red-50 border border-red-200 text-red-800'
                     : 'bg-green-50 border border-green-200 text-green-800'
                 }`}
@@ -678,6 +685,16 @@ export default function Login() {
                 onChange={(e) => setRegisterCelular(normalizePhoneInput(e.target.value))}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg"
                 placeholder="Celular"
+                required
+              />
+              <input
+                type="number"
+                min={1}
+                max={100}
+                value={registerSedesTotales}
+                onChange={(e) => setRegisterSedesTotales(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
+                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg"
+                placeholder="Total sedes (principal + sucursales)"
                 required
               />
               <div className="flex gap-2">
@@ -771,9 +788,9 @@ export default function Login() {
                   {registerCaptchaError}
                 </div>
               )}
-              {mensajeRegistro && !(registerValidationError || mensajeRegistro.startsWith('❌')) && (
+              {mensajeRegistro && !(registerValidationError || mensajeRegistro.startsWith('No fue posible')) && (
                 <div className={`p-3 rounded-lg text-sm ${
-                  mensajeRegistro.includes('✅')
+                  !mensajeRegistro.startsWith('No fue posible')
                     ? 'bg-green-50 border border-green-200 text-green-800'
                     : 'bg-red-50 border border-red-200 text-red-800'
                 }`}>

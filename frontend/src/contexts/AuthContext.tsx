@@ -12,6 +12,25 @@ interface AuthContextType {
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
+const MAX_FETCH_USER_RETRIES = 2;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function shouldRetryFetchUser(error: any): boolean {
+  const status = error?.response?.status;
+  const code = error?.code;
+
+  // Retry only for transient network/server failures.
+  if (!status) {
+    return true;
+  }
+  if (status >= 500) {
+    return true;
+  }
+  return code === 'ECONNABORTED' || code === 'ERR_NETWORK';
+}
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<Usuario | SaaSUser | null>(null);
@@ -21,8 +40,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     // Verificar si hay token al cargar
     const token = localStorage.getItem('access_token');
-    const savedScope = (localStorage.getItem('auth_scope') as AuthScope | null) || 'tenant';
+    const savedScope = localStorage.getItem('auth_scope') as AuthScope | null;
     if (token) {
+      if (!savedScope) {
+        localStorage.removeItem('access_token');
+        localStorage.removeItem('refresh_token');
+        setLoading(false);
+        return;
+      }
       setAuthScope(savedScope);
       fetchCurrentUser(savedScope);
     } else {
@@ -34,8 +59,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const meEndpoint = scope === 'saas' ? '/saas/auth/me' : '/auth/me';
 
     try {
-      const response = await apiClient.get<Usuario | SaaSUser>(meEndpoint);
-      setUser(response.data);
+      let lastError: any = null;
+
+      for (let attempt = 0; attempt <= MAX_FETCH_USER_RETRIES; attempt += 1) {
+        try {
+          const response = await apiClient.get<Usuario | SaaSUser>(meEndpoint);
+          setUser(response.data);
+          return;
+        } catch (error: any) {
+          lastError = error;
+          if (attempt >= MAX_FETCH_USER_RETRIES || !shouldRetryFetchUser(error)) {
+            break;
+          }
+          await sleep(400 * (attempt + 1));
+        }
+      }
+
+      throw lastError;
     } catch (error) {
       console.error('Error fetching user:', error);
       localStorage.removeItem('access_token');

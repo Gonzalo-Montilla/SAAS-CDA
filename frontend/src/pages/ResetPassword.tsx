@@ -17,7 +17,7 @@ export default function ResetPassword() {
 
   useEffect(() => {
     if (!token) {
-      setError('Token no válido. Por favor solicita un nuevo enlace de recuperación.');
+      setError('El enlace de recuperación no es válido. Solicita uno nuevo.');
     }
   }, [token]);
 
@@ -27,15 +27,15 @@ export default function ResetPassword() {
       return response.data;
     },
     onSuccess: () => {
-      setMensaje('✅ Contraseña actualizada exitosamente. Redirigiendo al login...');
+      setMensaje('Contraseña actualizada exitosamente. Redirigiendo al inicio de sesión...');
       setError('');
       setTimeout(() => {
         navigate('/login');
       }, 3000);
     },
     onError: (error: any) => {
-      const errorMsg = error.response?.data?.detail || 'Error al actualizar la contraseña';
-      setError(`❌ ${errorMsg}`);
+      const errorMsg = error.response?.data?.detail || 'No fue posible actualizar la contraseña. Intenta nuevamente.';
+      setError(errorMsg);
       setMensaje('');
     },
   });
@@ -46,7 +46,7 @@ export default function ResetPassword() {
     setMensaje('');
 
     if (!token) {
-      setError('Token no válido');
+      setError('El token no es válido.');
       return;
     }
 
@@ -64,9 +64,9 @@ export default function ResetPassword() {
   };
 
   return (
-    <div className="min-h-screen bg-slate-100 flex flex-col">
+    <div className="corporate-shell flex flex-col">
       <div className="flex-1 flex items-center justify-center p-4">
-        <div className="w-full max-w-md rounded-2xl bg-white border border-slate-200 shadow-sm px-7 py-8">
+        <div className="w-full max-w-md glass-card px-7 py-8">
           <div className="mb-8 flex flex-col items-center text-center">
             <img
               src={brand.logoSrc}
@@ -103,7 +103,7 @@ export default function ResetPassword() {
                   type="password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
-                  className="w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="input-corporate"
                   placeholder="Mínimo 6 caracteres"
                   required
                   minLength={6}
@@ -118,7 +118,7 @@ export default function ResetPassword() {
                   type="password"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
-                  className="w-full rounded-md border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="input-corporate"
                   placeholder="Repite la contraseña"
                   required
                   minLength={6}
@@ -128,8 +128,7 @@ export default function ResetPassword() {
               <button
                 type="submit"
                 disabled={resetPasswordMutation.isLoading}
-                className="w-full rounded-md text-white text-sm font-semibold py-2.5 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                style={{ backgroundColor: brand.colorPrimario }}
+                className="w-full btn-corporate-primary"
               >
                 {resetPasswordMutation.isLoading ? 'Actualizando...' : 'Actualizar Contraseña'}
               </button>
@@ -137,9 +136,9 @@ export default function ResetPassword() {
               <button
                 type="button"
                 onClick={() => navigate('/login')}
-                className="w-full rounded-md bg-slate-200 hover:bg-slate-300 text-slate-800 text-sm font-semibold py-2.5 transition"
+                className="w-full btn-corporate-muted"
               >
-                Volver al Login
+                Volver al inicio de sesión
               </button>
             </form>
           )}
@@ -148,16 +147,15 @@ export default function ResetPassword() {
             <div className="text-center">
               <button
                 onClick={() => navigate('/login')}
-                className="w-full rounded-md text-white text-sm font-semibold py-2.5 transition"
-                style={{ backgroundColor: brand.colorPrimario }}
+                className="w-full btn-corporate-primary"
               >
-                Ir al Login
+                Ir al inicio de sesión
               </button>
             </div>
           )}
 
           <div className="mt-7 border-t border-slate-200 pt-5 text-center text-[11px] text-slate-500">
-            <p>{brand.nombreComercial} - sistema integral para administracion de cda</p>
+            <p>{brand.nombreComercial} - Sistema integral para administración de CDA</p>
           </div>
         </div>
       </div>

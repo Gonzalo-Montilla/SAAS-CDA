@@ -59,7 +59,7 @@ export default function Dashboard() {
           <h2 className="text-3xl font-bold text-gray-900 mb-2">
             Bienvenido, {user?.nombre_completo}
           </h2>
-          <p className="text-gray-600">Selecciona un módulo para comenzar</p>
+          <p className="text-gray-600">Selecciona un módulo para comenzar tu operación.</p>
         </div>
 
         {/* Módulos principales */}
@@ -162,7 +162,7 @@ export default function Dashboard() {
               <CheckCircle2 className="w-6 h-6 text-white" />
             </div>
             <div>
-              <p className="text-sm text-emerald-700 font-medium">Estado del Sistema</p>
+              <p className="text-sm text-emerald-700 font-medium">Estado de la plataforma</p>
               <p className="text-xl font-bold text-emerald-900">Operativo</p>
             </div>
           </div>
@@ -171,7 +171,7 @@ export default function Dashboard() {
               <Shield className="w-6 h-6 text-white" />
             </div>
             <div>
-              <p className="text-sm text-blue-700 font-medium">Tu Rol</p>
+              <p className="text-sm text-blue-700 font-medium">Rol actual</p>
               <p className="text-xl font-bold text-blue-900 capitalize">{user?.rol}</p>
             </div>
           </div>

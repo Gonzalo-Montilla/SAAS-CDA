@@ -122,7 +122,7 @@ export default function Recepcion() {
       // 1. Mostrar notificación GLOBAL (NO afectada por ErrorBoundary)
       showToast(
         'success',
-        '¡Vehículo registrado exitosamente!',
+        'Vehículo registrado exitosamente.',
         cantidadFotos > 0 
           ? `${cantidadFotos} foto${cantidadFotos !== 1 ? 's' : ''} adjuntada${cantidadFotos !== 1 ? 's' : ''}`
           : undefined
@@ -144,10 +144,10 @@ export default function Recepcion() {
     },
     onError: (error: any) => {
       // Manejo de errores robusto
-      const errorMessage = error?.response?.data?.detail || 'Error al registrar el vehículo';
+      const errorMessage = error?.response?.data?.detail || 'No fue posible registrar el vehículo. Intenta nuevamente.';
       showToast(
         'error',
-        'Error al registrar vehículo',
+        'No fue posible registrar el vehículo',
         typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage)
       );
     }
@@ -157,7 +157,7 @@ export default function Recepcion() {
   const editarMutation = useMutation({
     mutationFn: ({ id, data }: { id: string; data: VehiculoRegistro }) => vehiculosApi.editar(id, data),
     onSuccess: () => {
-      showToast('success', '¡Vehículo actualizado exitosamente!');
+      showToast('success', 'Vehículo actualizado exitosamente.');
       
       setModoEdicion(false);
       setVehiculoEditando(null);
@@ -171,10 +171,10 @@ export default function Recepcion() {
       }, 300);
     },
     onError: (error: any) => {
-      const errorMessage = error?.response?.data?.detail || 'Error al editar el vehículo';
+      const errorMessage = error?.response?.data?.detail || 'No fue posible actualizar el vehículo. Intenta nuevamente.';
       showToast(
         'error',
-        'Error al editar vehículo',
+        'No fue posible actualizar el vehículo',
         typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage)
       );
     }
@@ -329,12 +329,12 @@ export default function Recepcion() {
     <Layout title="Módulo de Recepción">
       {/* Toast ahora es GLOBAL - está en ToastProvider */}
 
-      <div className="mb-6">
-        <h2 className="text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3">
+      <div className="module-hero">
+        <h2 className="module-hero-title">
           <ClipboardList className="w-8 h-8 text-primary-600" />
           Registrar Vehículo
         </h2>
-        <p className="text-gray-600">
+        <p className="module-hero-subtitle">
           Ingrese los datos del vehículo y cliente para iniciar el proceso de inspección RTM
         </p>
       </div>
@@ -342,7 +342,7 @@ export default function Recepcion() {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Formulario de Registro */}
         <div className="lg:col-span-2">
-          <form onSubmit={handleSubmit} className="card-pos">
+          <form onSubmit={handleSubmit} className="section-card p-6">
             <div className="flex items-center justify-between mb-6">
               <h3 className="text-xl font-bold text-gray-900">
                 {modoEdicion ? 'Editando Vehículo' : 'Datos del Vehículo y Cliente'}
@@ -633,7 +633,7 @@ export default function Recepcion() {
 
         {/* Resumen de Tarifa */}
         <div className="lg:col-span-1">
-          <div className="card-pos bg-primary-50 border-2 border-primary-200 sticky top-4">
+          <div className="section-card bg-primary-50/80 border-2 border-primary-200 p-5 sticky top-4">
             <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
               <DollarSign className="w-6 h-6 text-primary-600" />
               Tarifa a Cobrar
@@ -773,7 +773,7 @@ export default function Recepcion() {
         </div>
 
         {/* Barra de Búsqueda y Filtros */}
-        <div className="card-pos mb-6">
+        <div className="section-card p-5 mb-6">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
             {/* Barra de búsqueda */}
             <div className="lg:col-span-5">
@@ -902,7 +902,7 @@ export default function Recepcion() {
         <ErrorBoundary>
         {loadingVehiculos ? (
           <div className="flex items-center justify-center py-12">
-            <LoadingSpinner message="Cargando vehículos..." />
+            <LoadingSpinner message="Cargando registro de vehículos..." />
           </div>
         ) : vehiculos && vehiculos.length > 0 ? (
           <div>
