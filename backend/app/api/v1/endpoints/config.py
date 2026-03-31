@@ -54,6 +54,29 @@ def obtener_tenant_branding(
     }
 
 
+@router.get("/public-tenant-branding/{tenant_slug}")
+def obtener_tenant_branding_publico(
+    tenant_slug: str,
+    db: Session = Depends(get_db),
+):
+    tenant = db.query(Tenant).filter(Tenant.slug == tenant_slug, Tenant.activo == True).first()
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant no encontrado o inactivo",
+        )
+
+    login_url = f"{settings.FRONTEND_URL.rstrip('/')}/{tenant.slug}"
+    return {
+        "tenant_slug": tenant.slug,
+        "nombre_comercial": tenant.nombre_comercial,
+        "logo_url": tenant.logo_url,
+        "color_primario": tenant.color_primario,
+        "color_secundario": tenant.color_secundario,
+        "login_url": login_url,
+    }
+
+
 @router.put("/tenant-branding")
 def actualizar_tenant_branding(
     payload: TenantBrandingUpdate,

@@ -1,9 +1,11 @@
 """
 Aplicación principal FastAPI - CDASOFT
 """
+from pathlib import Path
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
+from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.core.config import settings
 from app.db.database import init_db
@@ -75,3 +77,8 @@ def health_check():
 
 # Incluir routers de API
 app.include_router(api_router, prefix="/api/v1")
+
+# Servir logos/uploads públicos
+uploads_dir = Path(settings.TENANT_LOGO_UPLOAD_DIR).resolve().parent
+uploads_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=str(uploads_dir)), name="uploads")

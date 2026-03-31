@@ -41,6 +41,10 @@ def ensure_tenant_baseline_schema(db):
                 nombre VARCHAR(200) NOT NULL,
                 slug VARCHAR(120) UNIQUE NOT NULL,
                 activo BOOLEAN NOT NULL DEFAULT TRUE,
+                nit_cda VARCHAR(30),
+                correo_electronico VARCHAR(255),
+                nombre_representante VARCHAR(200),
+                celular VARCHAR(30),
                 nombre_comercial VARCHAR(200) NOT NULL DEFAULT 'CDASOFT',
                 logo_url VARCHAR(500),
                 color_primario VARCHAR(20) NOT NULL DEFAULT '#2563eb',
@@ -56,6 +60,11 @@ def ensure_tenant_baseline_schema(db):
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS logo_url VARCHAR(500)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS color_primario VARCHAR(20)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS color_secundario VARCHAR(20)"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS nit_cda VARCHAR(30)"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS correo_electronico VARCHAR(255)"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS nombre_representante VARCHAR(200)"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS celular VARCHAR(30)"))
+    db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_tenants_nit_cda ON tenants(nit_cda) WHERE nit_cda IS NOT NULL"))
 
     db.execute(text("UPDATE tenants SET nombre_comercial = COALESCE(nombre_comercial, nombre)"))
     db.execute(text("UPDATE tenants SET color_primario = COALESCE(color_primario, '#2563eb')"))
@@ -72,6 +81,10 @@ def ensure_tenant_baseline_schema(db):
                 nombre,
                 slug,
                 activo,
+                nit_cda,
+                correo_electronico,
+                nombre_representante,
+                celular,
                 nombre_comercial,
                 logo_url,
                 color_primario,
@@ -83,6 +96,10 @@ def ensure_tenant_baseline_schema(db):
                 :tenant_name,
                 :tenant_slug,
                 TRUE,
+                NULL,
+                NULL,
+                NULL,
+                NULL,
                 :tenant_name,
                 NULL,
                 '#2563eb',
@@ -345,6 +362,31 @@ def ensure_onboarding_security_schema(db):
             """
             CREATE INDEX IF NOT EXISTS ix_onboarding_attempts_email_created
             ON onboarding_registration_attempts(admin_email, created_at)
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS onboarding_email_verifications (
+                id SERIAL PRIMARY KEY,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                code_hash VARCHAR(128) NOT NULL,
+                expires_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+                attempts INTEGER NOT NULL DEFAULT 0,
+                verified BOOLEAN NOT NULL DEFAULT FALSE,
+                verified_at TIMESTAMP WITHOUT TIME ZONE,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_onboarding_email_verifications_expires
+            ON onboarding_email_verifications(expires_at)
             """
         )
     )

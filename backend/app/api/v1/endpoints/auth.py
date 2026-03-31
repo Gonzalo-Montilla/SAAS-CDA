@@ -13,6 +13,7 @@ from app.core.deps import get_db, get_current_user, get_admin
 from app.core.security import verify_password, get_password_hash, create_access_token, create_refresh_token, decode_token
 from app.core.config import settings
 from app.models.usuario import Usuario
+from app.models.tenant import Tenant
 from app.models.password_reset_token import PasswordResetToken
 from app.schemas.auth import Token, UserRegister, PasswordChange, RefreshTokenRequest
 from app.schemas.usuario import UsuarioResponse
@@ -83,7 +84,7 @@ def register(
 
 
 @router.post("/login", response_model=Token)
-def login(
+async def login(
     request: Request,
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db)
@@ -91,6 +92,9 @@ def login(
     """
     Login de usuario con email y contraseña
     """
+    raw_form = await request.form()
+    requested_tenant_slug = raw_form.get("tenant_slug")
+
     # Buscar usuario por email
     user = db.query(Usuario).filter(Usuario.email == form_data.username).first()
     
@@ -121,6 +125,16 @@ def login(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Usuario inactivo"
         )
+
+    if requested_tenant_slug:
+        tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
+        if not tenant or tenant.slug.lower() != str(requested_tenant_slug).strip().lower():
+            audit_login_failed(db, form_data.username, request, "Tenant slug inválido para usuario")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Este usuario no pertenece al tenant de esta URL",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
     
     # Auditar login exitoso
     audit_login_success(db, user, request)

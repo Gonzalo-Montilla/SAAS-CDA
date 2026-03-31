@@ -1,6 +1,7 @@
 """
 Configuración central de la aplicación
 """
+import json
 from typing import List
 from pydantic_settings import BaseSettings
 from pydantic import Field, validator
@@ -39,6 +40,12 @@ class Settings(BaseSettings):
     TURNSTILE_ENABLED: bool = False
     TURNSTILE_SECRET_KEY: str = Field(default="", env="TURNSTILE_SECRET_KEY")
     TURNSTILE_VERIFY_URL: str = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
+    BACKEND_PUBLIC_BASE_URL: str = Field(default="http://localhost:8000", env="BACKEND_PUBLIC_BASE_URL")
+    TENANT_LOGO_UPLOAD_DIR: str = Field(default="uploads/tenant-logos", env="TENANT_LOGO_UPLOAD_DIR")
+    TENANT_LOGO_MAX_SIZE_MB: int = 4
+    ONBOARDING_EMAIL_VERIFICATION_REQUIRED: bool = True
+    ONBOARDING_EMAIL_CODE_TTL_MINUTES: int = 15
+    ONBOARDING_EMAIL_CODE_MAX_ATTEMPTS: int = 5
     
     # CORS
     BACKEND_CORS_ORIGINS: List[str] = ["*"]
@@ -66,7 +73,15 @@ class Settings(BaseSettings):
     @validator("BACKEND_CORS_ORIGINS", pre=True)
     def assemble_cors_origins(cls, v):
         if isinstance(v, str):
-            return [i.strip() for i in v.split(",")]
+            raw = v.strip()
+            if raw.startswith("["):
+                try:
+                    parsed = json.loads(raw)
+                    if isinstance(parsed, list):
+                        return [str(i).strip() for i in parsed]
+                except Exception:
+                    pass
+            return [i.strip() for i in raw.split(",") if i.strip()]
         return v
     
     class Config:

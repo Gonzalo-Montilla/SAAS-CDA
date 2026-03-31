@@ -4,6 +4,7 @@ Endpoints de autenticación global SaaS (backoffice).
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordRequestForm
+from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from uuid import UUID
 
@@ -13,6 +14,7 @@ from app.core.deps import (
     get_saas_owner,
     require_saas_role,
 )
+from app.core.config import settings
 from app.core.security import (
     verify_password,
     get_password_hash,
@@ -34,6 +36,15 @@ GLOBAL_ROLE_PERMISSIONS = {
     "comercial": ["tenants:read", "tenants:write", "billing:read"],
     "soporte": ["support:read", "support:write", "tenants:read", "audit:read"],
 }
+
+
+class SaaSTenantSummary(BaseModel):
+    id: str
+    slug: str
+    nombre_comercial: str
+    correo_electronico: str | None = None
+    activo: bool
+    login_url: str
 
 
 @router.post("/login", response_model=Token)
@@ -173,6 +184,29 @@ def saas_my_permissions(current_user: SaaSUser = Depends(get_current_saas_user))
         "role": current_user.rol_global,
         "permissions": GLOBAL_ROLE_PERMISSIONS.get(current_user.rol_global, []),
     }
+
+
+@router.get("/tenants", response_model=list[SaaSTenantSummary])
+def list_saas_tenants(
+    db: Session = Depends(get_db),
+    _: SaaSUser = Depends(require_saas_role(["owner", "comercial", "soporte"])),
+):
+    from app.models.tenant import Tenant
+
+    tenants = db.query(Tenant).order_by(Tenant.created_at.desc()).all()
+    base_url = settings.FRONTEND_URL.rstrip("/")
+
+    return [
+        SaaSTenantSummary(
+            id=str(tenant.id),
+            slug=tenant.slug,
+            nombre_comercial=tenant.nombre_comercial,
+            correo_electronico=tenant.correo_electronico,
+            activo=tenant.activo,
+            login_url=f"{base_url}/{tenant.slug}",
+        )
+        for tenant in tenants
+    ]
 
 
 @router.get("/users", response_model=list[SaaSUserResponse])

@@ -69,6 +69,7 @@ function App() {
               <ErrorBoundary>
                 <Routes>
             <Route path="/login" element={<Login />} />
+            <Route path="/saas/login" element={<Login />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route
               path="/dashboard"
@@ -134,6 +135,7 @@ function App() {
                 </ProtectedRoute>
               }
             />
+                <Route path="/:tenantSlug" element={<Login />} />
                 <Route path="/" element={<HomeRedirect />} />
                 </Routes>
               </ErrorBoundary>

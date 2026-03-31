@@ -151,3 +151,130 @@ def generar_email_recuperacion_password(nombre: str, enlace_reset: str) -> str:
     </body>
     </html>
     """
+
+
+def generar_email_codigo_onboarding(nombre_cda: str, codigo: str) -> str:
+    """Generar HTML para código de verificación de onboarding."""
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{
+                font-family: Arial, sans-serif;
+                line-height: 1.6;
+                color: #0f172a;
+            }}
+            .container {{
+                max-width: 600px;
+                margin: 0 auto;
+                padding: 20px;
+                background-color: #f8fafc;
+            }}
+            .card {{
+                background-color: white;
+                border-radius: 12px;
+                padding: 30px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }}
+            .brand {{
+                text-align: center;
+                margin-bottom: 20px;
+            }}
+            .brand h1 {{
+                color: #2563eb;
+                margin: 0;
+                font-size: 28px;
+            }}
+            .code {{
+                font-size: 32px;
+                font-weight: bold;
+                letter-spacing: 6px;
+                text-align: center;
+                margin: 20px 0;
+                color: #1e293b;
+            }}
+            .footer {{
+                text-align: center;
+                margin-top: 20px;
+                font-size: 12px;
+                color: #666;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="card">
+                <div class="brand">
+                    <h1>CDASOFT</h1>
+                    <p>Sistema integral para administracion de CDA</p>
+                </div>
+                <p>Recibimos una solicitud para crear el CDA <strong>{nombre_cda}</strong>.</p>
+                <p>Usa este código para continuar el registro:</p>
+                <div class="code">{codigo}</div>
+                <p>El código expira en 15 minutos y solo puede usarse una vez.</p>
+                <div class="footer">
+                    <p>© 2026 CDASOFT</p>
+                    <p>Si no solicitaste este registro, ignora este mensaje.</p>
+                </div>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+
+def generar_email_bienvenida_tenant(nombre_cda: str, nombre_admin: str, login_url: str) -> str:
+    """Email de bienvenida con URL personalizada del tenant."""
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{
+                font-family: Arial, sans-serif;
+                line-height: 1.6;
+                color: #0f172a;
+            }}
+            .container {{
+                max-width: 600px;
+                margin: 0 auto;
+                padding: 20px;
+                background-color: #f8fafc;
+            }}
+            .card {{
+                background-color: white;
+                border-radius: 12px;
+                padding: 30px;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            }}
+            .button {{
+                display: inline-block;
+                padding: 12px 30px;
+                background-color: #2563eb;
+                color: white;
+                text-decoration: none;
+                border-radius: 5px;
+                margin: 20px 0;
+            }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="card">
+                <h1>Bienvenido a CDASOFT</h1>
+                <p>Hola {nombre_admin},</p>
+                <p>Tu CDA <strong>{nombre_cda}</strong> ya está creado.</p>
+                <p>Tu URL personalizada para ingresar es:</p>
+                <p><strong>{login_url}</strong></p>
+                <div style="text-align:center;">
+                    <a href="{login_url}" class="button">Ingresar a mi CDA</a>
+                </div>
+                <p>Guarda este enlace y compártelo con tu equipo autorizado.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """

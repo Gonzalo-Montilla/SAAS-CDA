@@ -119,7 +119,7 @@ Pruebas sugeridas:
 
 1. Ejecutar varios registros consecutivos contra `POST /api/v1/onboarding/register-tenant` con la misma IP.
 2. Al superar el límite configurado, la API debe responder `429`.
-3. Repetir con el mismo `admin_email` para validar límite por correo.
+3. Repetir con el mismo `correo_electronico` para validar límite por correo.
 4. Verificar en BD:
 
 ```sql
@@ -127,4 +127,38 @@ SELECT ip_address, admin_email, successful, failure_reason, created_at
 FROM onboarding_registration_attempts
 ORDER BY created_at DESC
 LIMIT 20;
+```
+
+## 9) Onboarding CDA con campos obligatorios y logo
+
+Campos mínimos requeridos en `POST /api/v1/onboarding/register-tenant`:
+
+- `nombre_cda`
+- `nit_cda`
+- `correo_electronico`
+- `nombre_representante_legal_o_administrador`
+- `celular`
+- `admin_password`
+- `logo_url` o `logo_file`
+
+Ejemplo con `multipart/form-data`:
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/onboarding/register-tenant" \
+  -F "nombre_cda=CDA Demo Nuevo" \
+  -F "nit_cda=901234567-8" \
+  -F "correo_electronico=admin.demo@correo.com" \
+  -F "nombre_representante_legal_o_administrador=Maria Perez" \
+  -F "celular=3001234567" \
+  -F "admin_password=admin123" \
+  -F "codigo_verificacion_email=123456" \
+  -F "logo_file=@/ruta/logo.png"
+```
+
+Enviar código de verificación:
+
+```bash
+curl -X POST "http://localhost:8000/api/v1/onboarding/send-email-code" \
+  -H "Content-Type: application/json" \
+  -d '{"correo_electronico":"admin.demo@correo.com","nombre_cda":"CDA Demo Nuevo"}'
 ```

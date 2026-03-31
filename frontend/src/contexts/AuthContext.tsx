@@ -51,6 +51,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const formData = new URLSearchParams();
     formData.append('username', credentials.username);
     formData.append('password', credentials.password);
+    if (scope === 'tenant' && credentials.tenant_slug) {
+      formData.append('tenant_slug', credentials.tenant_slug);
+    }
 
     const loginEndpoint = scope === 'saas' ? '/saas/auth/login' : '/auth/login';
     const response = await apiClient.post<LoginResponse>(loginEndpoint, formData, {

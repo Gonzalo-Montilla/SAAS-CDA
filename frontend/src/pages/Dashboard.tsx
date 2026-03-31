@@ -33,7 +33,9 @@ export default function Dashboard() {
               alt={brand.nombreComercial}
               className="h-32 rounded-2xl shadow-lg"
             />
-            <p className="text-xs text-gray-500 mt-0.5">{brand.nombreComercial}</p>
+            <div>
+              <p className="text-2xl font-bold text-gray-900 leading-tight">{brand.nombreComercial}</p>
+            </div>
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right">

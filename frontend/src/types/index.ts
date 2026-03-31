@@ -30,11 +30,21 @@ export interface SaaSUser {
   created_at: string;
 }
 
+export interface SaaSTenantSummary {
+  id: string;
+  slug: string;
+  nombre_comercial: string;
+  correo_electronico?: string | null;
+  activo: boolean;
+  login_url: string;
+}
+
 export type AuthScope = 'tenant' | 'saas';
 
 export interface LoginCredentials {
   username: string;
   password: string;
+  tenant_slug?: string;
 }
 
 export interface LoginResponse {
@@ -45,10 +55,14 @@ export interface LoginResponse {
 
 export interface TenantSelfRegisterRequest {
   nombre_cda: string;
-  admin_nombre_completo: string;
-  admin_email: string;
+  nit_cda: string;
+  correo_electronico: string;
+  nombre_representante_legal_o_administrador: string;
+  celular: string;
   admin_password: string;
+  codigo_verificacion_email?: string;
   logo_url?: string;
+  logo_file?: File;
   captcha_token?: string;
 }
 
