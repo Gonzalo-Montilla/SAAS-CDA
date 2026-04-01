@@ -7,4 +7,11 @@ export const configApi = {
     const response = await apiClient.get<URLsExternas>('/config/urls-externas');
     return response.data;
   },
+
+  obtenerTenantLogoBlob: async (): Promise<Blob> => {
+    const response = await apiClient.get('/config/tenant-logo', {
+      responseType: 'blob',
+    });
+    return response.data as Blob;
+  },
 };

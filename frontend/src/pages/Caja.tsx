@@ -864,8 +864,8 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
     onSuccess: async (vehiculoCobrado) => {
       // Generar PDF del recibo de pago
       const comisionFinal = clientePagaSOAT ? vehiculo.comision_soat : 0;
-      const { generarPDFReciboPago } = await import('../utils/generarPDFReciboPago');
-      const nombrePDF = await generarPDFReciboPago({
+      const { generarPDFReciboPagoParaEnvio } = await import('../utils/generarPDFReciboPago');
+      const { nombreArchivo, blob } = await generarPDFReciboPagoParaEnvio({
         placa: vehiculoCobrado.placa,
         tipoVehiculo: vehiculoCobrado.tipo_vehiculo,
         marca: vehiculoCobrado.marca,
@@ -883,11 +883,35 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
         logoUrl: brand.logoSrc,
       });
 
+      // Descargar localmente el mismo PDF que se adjunta por correo.
+      const downloadUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = downloadUrl;
+      anchor.download = nombreArchivo;
+      document.body.appendChild(anchor);
+      anchor.click();
+      document.body.removeChild(anchor);
+      URL.revokeObjectURL(downloadUrl);
+
+      // Enviar por correo el MISMO recibo generado en caja (no bloqueante).
+      let emailStatusNote = '';
+      try {
+        const receiptFile = new File([blob], nombreArchivo, { type: 'application/pdf' });
+        const emailResult = await vehiculosApi.enviarReciboPagoEmail(vehiculoCobrado.id, receiptFile);
+        if (!emailResult.sent) {
+          emailStatusNote = emailResult.has_email
+            ? '\nAviso: no fue posible enviar el recibo por correo.'
+            : '\nAviso: cliente sin correo registrado, no se envió email.';
+        }
+      } catch {
+        emailStatusNote = '\nAviso: falló el envío del recibo por correo.';
+      }
+
       if (!isMountedRef.current) {
         return;
       }
 
-      alert(`Cobro registrado exitosamente.\n\nRecibo generado: ${nombrePDF}`);
+      alert(`Cobro registrado exitosamente.\n\nRecibo generado: ${nombreArchivo}${emailStatusNote}`);
       
       // Defer query invalidation to prevent React DOM errors
       setTimeout(() => {

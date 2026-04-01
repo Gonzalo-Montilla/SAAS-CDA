@@ -1,7 +1,13 @@
 """
 Endpoints de Configuración
 """
+from io import BytesIO
+from pathlib import Path
+from urllib.parse import urlparse
+from urllib.request import urlopen
+
 from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -11,6 +17,78 @@ from app.models.usuario import Usuario
 from app.models.tenant import Tenant
 
 router = APIRouter()
+
+
+def _resolve_tenant_logo_bytes(logo_url: str | None) -> tuple[bytes, str] | None:
+    if not logo_url:
+        return None
+
+    raw = str(logo_url).strip()
+    if not raw:
+        return None
+
+    uploads_root = Path(settings.TENANT_LOGO_UPLOAD_DIR).resolve().parent
+    normalized = raw.replace("\\", "/")
+    local_candidates: list[Path] = []
+
+    # Ruta absoluta local.
+    direct_path = Path(raw)
+    if direct_path.is_file():
+        local_candidates.append(direct_path)
+
+    # URL/ruta pública de uploads.
+    if normalized.startswith("/uploads/"):
+        rel = normalized[len("/uploads/"):]
+        local_candidates.append(uploads_root / rel)
+    elif normalized.startswith("uploads/"):
+        rel = normalized[len("uploads/"):]
+        local_candidates.append(uploads_root / rel)
+
+    # URL absoluta hacia /uploads.
+    if normalized.startswith("http://") or normalized.startswith("https://"):
+        parsed = urlparse(normalized)
+        parsed_path = (parsed.path or "").replace("\\", "/")
+        if parsed_path.startswith("/uploads/"):
+            rel = parsed_path[len("/uploads/"):]
+            local_candidates.append(uploads_root / rel)
+
+    # Fragmento tenant-logos en rutas locales heredadas.
+    idx = normalized.lower().find("tenant-logos/")
+    if idx >= 0:
+        rel = normalized[idx + len("tenant-logos/") :]
+        local_candidates.append(uploads_root / "tenant-logos" / rel)
+
+    seen: set[str] = set()
+    for candidate in local_candidates:
+        candidate_key = str(candidate.resolve()) if candidate.exists() else str(candidate)
+        if candidate_key in seen:
+            continue
+        seen.add(candidate_key)
+        if candidate.is_file():
+            content = candidate.read_bytes()
+            if content:
+                ext = candidate.suffix.lower()
+                media_type = {
+                    ".png": "image/png",
+                    ".jpg": "image/jpeg",
+                    ".jpeg": "image/jpeg",
+                    ".webp": "image/webp",
+                }.get(ext, "application/octet-stream")
+                return content, media_type
+
+    # Último intento: descargar URL remota.
+    if normalized.startswith("http://") or normalized.startswith("https://"):
+        try:
+            with urlopen(normalized, timeout=4) as remote:
+                content = remote.read()
+                if not content:
+                    return None
+                content_type = remote.headers.get("Content-Type", "application/octet-stream")
+                return content, content_type
+        except Exception:
+            return None
+
+    return None
 
 
 @router.get("/urls-externas")
@@ -25,6 +103,33 @@ def obtener_urls_externas(
         "sicov_url": settings.SICOV_URL,
         "indra_url": settings.INDRA_URL
     }
+
+
+@router.get("/tenant-logo")
+def obtener_logo_tenant(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant no encontrado",
+        )
+
+    resolved = _resolve_tenant_logo_bytes(tenant.logo_url)
+    if not resolved:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Logo del tenant no disponible",
+        )
+
+    content, media_type = resolved
+    return Response(
+        content=content,
+        media_type=media_type,
+        headers={"Cache-Control": "private, max-age=300"},
+    )
 
 
 class TenantBrandingUpdate(BaseModel):

@@ -28,6 +28,12 @@ interface NotificacionPasoCajaResponse {
   message: string;
 }
 
+interface EnvioReciboResponse {
+  sent: boolean;
+  has_email: boolean;
+  message: string;
+}
+
 export const vehiculosApi = {
   // Registrar un nuevo vehículo (Recepción)
   registrar: async (data: VehiculoRegistro): Promise<Vehiculo> => {
@@ -65,6 +71,14 @@ export const vehiculosApi = {
   // Notificar al cliente que debe pasar a caja
   notificarPasoCaja: async (vehiculoId: string): Promise<NotificacionPasoCajaResponse> => {
     const response = await apiClient.post<NotificacionPasoCajaResponse>(`/vehiculos/${vehiculoId}/notificar-paso-caja`);
+    return response.data;
+  },
+
+  // Enviar por email el mismo recibo generado en caja
+  enviarReciboPagoEmail: async (vehiculoId: string, pdfFile: File): Promise<EnvioReciboResponse> => {
+    const formData = new FormData();
+    formData.append('receipt_file', pdfFile);
+    const response = await apiClient.post<EnvioReciboResponse>(`/vehiculos/${vehiculoId}/enviar-recibo-email`, formData);
     return response.data;
   },
 

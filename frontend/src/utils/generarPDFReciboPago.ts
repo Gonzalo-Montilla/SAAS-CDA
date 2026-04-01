@@ -19,7 +19,12 @@ interface DatosReciboPagoPDF {
   logoUrl?: string;
 }
 
-export async function generarPDFReciboPago(datos: DatosReciboPagoPDF): Promise<string> {
+export interface ReciboPagoPdfResult {
+  nombreArchivo: string;
+  blob: Blob;
+}
+
+export async function generarPDFReciboPagoParaEnvio(datos: DatosReciboPagoPDF): Promise<ReciboPagoPdfResult> {
   const doc = new jsPDF();
   
   // Cargar logo
@@ -258,9 +263,23 @@ export async function generarPDFReciboPago(datos: DatosReciboPagoPDF): Promise<s
   // Generar nombre de archivo
   const timestamp = datos.fecha.toISOString().slice(0, 19).replace(/:/g, '-');
   const nombreArchivo = `Recibo_Pago_${datos.placa}_${timestamp}.pdf`;
-  
-  // Guardar PDF
-  doc.save(nombreArchivo);
-  
+
+  const blob = doc.output('blob');
+  return { nombreArchivo, blob };
+}
+
+export async function generarPDFReciboPago(datos: DatosReciboPagoPDF): Promise<string> {
+  const { nombreArchivo, blob } = await generarPDFReciboPagoParaEnvio(datos);
+
+  // Guardar PDF en cliente (flujo actual)
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = nombreArchivo;
+  document.body.appendChild(anchor);
+  anchor.click();
+  document.body.removeChild(anchor);
+  URL.revokeObjectURL(url);
+
   return nombreArchivo;
 }
