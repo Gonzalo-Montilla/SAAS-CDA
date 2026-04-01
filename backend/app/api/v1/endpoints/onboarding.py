@@ -318,7 +318,7 @@ def send_onboarding_email_code(
     email_html = generar_email_codigo_onboarding(payload.nombre_cda, code)
     email_sent = enviar_email(
         destinatario=normalized_email,
-        asunto="CDASOFT - Código de verificación para crear tu CDA",
+        asunto=f"{payload.nombre_cda} - Código de verificación para crear tu CDA",
         cuerpo_html=email_html,
     )
     if not email_sent:
@@ -500,7 +500,7 @@ def register_tenant_self_service(
     # Mejor esfuerzo: no bloqueamos onboarding si el proveedor SMTP falla.
     enviar_email(
         destinatario=normalized_email,
-        asunto="CDASOFT - Tu CDA fue creado",
+        asunto=f"{nombre_cda} - Tu CDA fue creado",
         cuerpo_html=welcome_html,
     )
 

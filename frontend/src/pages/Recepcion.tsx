@@ -36,6 +36,7 @@ export default function Recepcion() {
     cliente_nombre: '',
     cliente_documento: '',
     cliente_telefono: '',
+    cliente_email: '',
     tiene_soat: false,
     observaciones: '',
   });
@@ -246,6 +247,7 @@ export default function Recepcion() {
       cliente_nombre: '',
       cliente_documento: '',
       cliente_telefono: '',
+      cliente_email: '',
       tiene_soat: false,
       observaciones: '',
     });
@@ -279,6 +281,7 @@ export default function Recepcion() {
       cliente_nombre: vehiculo.cliente_nombre,
       cliente_documento: vehiculo.cliente_documento,
       cliente_telefono: vehiculo.cliente_telefono || '',
+      cliente_email: vehiculo.cliente_email || '',
       tiene_soat: vehiculo.tiene_soat,
       observaciones: textoObservaciones,
     });
@@ -601,6 +604,20 @@ export default function Recepcion() {
                   onChange={(e) => handleInputChange('cliente_telefono', e.target.value)}
                   className="input-pos"
                   placeholder="3001234567"
+                />
+              </div>
+
+              {/* Correo electrónico (opcional) */}
+              <div>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  Correo electrónico
+                </label>
+                <input
+                  type="email"
+                  value={formData.cliente_email || ''}
+                  onChange={(e) => handleInputChange('cliente_email', e.target.value.toLowerCase())}
+                  className="input-pos"
+                  placeholder="cliente@correo.com"
                 />
               </div>
             </div>

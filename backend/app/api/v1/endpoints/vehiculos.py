@@ -10,9 +10,11 @@ from decimal import Decimal
 
 from app.core.deps import get_db, get_current_user, get_cajero_or_admin, get_recepcionista_or_admin
 from app.models.usuario import Usuario
+from app.models.tenant import Tenant
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo, MetodoPago
 from app.models.tarifa import Tarifa, ComisionSOAT
 from app.models.caja import Caja, MovimientoCaja, TipoMovimiento, EstadoCaja
+from app.utils.email import enviar_email, generar_email_bienvenida_recepcion_cliente
 from app.schemas.vehiculo import (
     VehiculoRegistro,
     VehiculoEdicion,
@@ -216,6 +218,7 @@ def registrar_vehiculo(
         total_cobrado = valor_rtm + comision_soat
     
     # Crear vehículo en proceso
+    cliente_email_normalizado = (vehiculo_data.cliente_email or "").strip().lower() or None
     nuevo_vehiculo = VehiculoProceso(
         tenant_id=current_user.tenant_id,
         placa=placa_upper,
@@ -226,6 +229,7 @@ def registrar_vehiculo(
         cliente_nombre=vehiculo_data.cliente_nombre,
         cliente_documento=vehiculo_data.cliente_documento,
         cliente_telefono=vehiculo_data.cliente_telefono,
+        cliente_email=cliente_email_normalizado,
         valor_rtm=valor_rtm,
         tiene_soat=vehiculo_data.tiene_soat,
         comision_soat=comision_soat,
@@ -238,6 +242,24 @@ def registrar_vehiculo(
     db.add(nuevo_vehiculo)
     db.commit()
     db.refresh(nuevo_vehiculo)
+
+    # Notificación opcional por email al cliente (no bloquea el flujo de recepción).
+    if cliente_email_normalizado:
+        try:
+            tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+            nombre_cda = (
+                tenant.nombre_comercial
+                if tenant and tenant.nombre_comercial
+                else (tenant.nombre if tenant else "CDASOFT")
+            )
+            asunto = f"Bienvenido a {nombre_cda}"
+            cuerpo_html = generar_email_bienvenida_recepcion_cliente(
+                nombre_cda=nombre_cda,
+                placa_vehiculo=placa_upper,
+            )
+            enviar_email(cliente_email_normalizado, asunto, cuerpo_html)
+        except Exception as e:
+            print(f"[WARN] No se pudo enviar email de recepción al cliente: {e}")
     
     return nuevo_vehiculo
 
@@ -351,6 +373,7 @@ def editar_vehiculo(
     vehiculo.cliente_nombre = vehiculo_data.cliente_nombre
     vehiculo.cliente_documento = vehiculo_data.cliente_documento
     vehiculo.cliente_telefono = vehiculo_data.cliente_telefono
+    vehiculo.cliente_email = (vehiculo_data.cliente_email or "").strip().lower() or None
     vehiculo.tiene_soat = vehiculo_data.tiene_soat
     vehiculo.observaciones = vehiculo_data.observaciones
     

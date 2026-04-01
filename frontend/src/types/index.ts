@@ -268,6 +268,7 @@ export interface Vehiculo {
   cliente_nombre: string;
   cliente_documento: string;
   cliente_telefono?: string;
+  cliente_email?: string;
   valor_rtm: number;
   tiene_soat: boolean;
   comision_soat: number;
@@ -292,6 +293,7 @@ export interface VehiculoRegistro {
   cliente_nombre: string;
   cliente_documento: string;
   cliente_telefono?: string;
+  cliente_email?: string;
   tiene_soat: boolean;
   observaciones?: string;
 }

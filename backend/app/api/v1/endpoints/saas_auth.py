@@ -995,7 +995,7 @@ def register_tenant_payment(
         )
         receipt_email_sent = enviar_email_con_adjuntos(
             destinatario=tenant.correo_electronico,
-            asunto=f"CDASOFT - Recibo de pago {comprobante_referencia}",
+            asunto=f"{tenant.nombre_comercial} - Recibo de pago {comprobante_referencia}",
             cuerpo_html=email_html,
             adjuntos=[(receipt_filename, receipt_pdf, "application/pdf")],
         )
@@ -1214,7 +1214,7 @@ def resend_payment_receipt_email(
 
     sent = enviar_email_con_adjuntos(
         destinatario=tenant.correo_electronico,
-        asunto=f"CDASOFT - Reenvío recibo de pago {reference}",
+        asunto=f"{tenant.nombre_comercial} - Reenvío recibo de pago {reference}",
         cuerpo_html=email_html,
         adjuntos=[(receipt_filename, receipt_pdf, "application/pdf")],
     )

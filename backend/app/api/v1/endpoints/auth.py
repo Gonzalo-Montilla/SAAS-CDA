@@ -362,16 +362,24 @@ def forgot_password(
     
     # Generar enlace de recuperación
     enlace_reset = f"{settings.FRONTEND_URL}/reset-password?token={token}"
+
+    tenant = db.query(Tenant).filter(Tenant.id == usuario.tenant_id).first()
+    tenant_nombre = (
+        tenant.nombre_comercial
+        if tenant and tenant.nombre_comercial
+        else (tenant.nombre if tenant else None)
+    )
     
     # Generar y enviar email
     cuerpo_email = generar_email_recuperacion_password(
         nombre=usuario.nombre_completo,
-        enlace_reset=enlace_reset
+        enlace_reset=enlace_reset,
+        tenant_nombre=tenant_nombre,
     )
     
     envio_exitoso = enviar_email(
         destinatario=usuario.email,
-        asunto="Recuperación de Contraseña - CDASOFT",
+        asunto=f"Recuperación de contraseña - {tenant_nombre}" if tenant_nombre else "Recuperación de contraseña - CDASOFT",
         cuerpo_html=cuerpo_email
     )
     

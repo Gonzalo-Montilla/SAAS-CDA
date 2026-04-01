@@ -1,7 +1,7 @@
 """
 Schemas de Vehículos en Proceso
 """
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, EmailStr
 from decimal import Decimal
 from datetime import datetime
 from typing import Optional
@@ -18,6 +18,7 @@ class VehiculoRegistro(BaseModel):
     cliente_nombre: str = Field(min_length=3)
     cliente_documento: str = Field(min_length=5)
     cliente_telefono: Optional[str] = None
+    cliente_email: Optional[EmailStr] = None
     tiene_soat: bool = False
     observaciones: Optional[str] = None
 
@@ -32,6 +33,7 @@ class VehiculoEdicion(BaseModel):
     cliente_nombre: str = Field(min_length=3)
     cliente_documento: str = Field(min_length=5)
     cliente_telefono: Optional[str] = None
+    cliente_email: Optional[EmailStr] = None
     tiene_soat: bool = False
     observaciones: Optional[str] = None
 
@@ -60,6 +62,7 @@ class VehiculoResponse(BaseModel):
     cliente_nombre: str
     cliente_documento: str
     cliente_telefono: Optional[str]
+    cliente_email: Optional[str]
     valor_rtm: Decimal
     tiene_soat: bool
     comision_soat: Decimal

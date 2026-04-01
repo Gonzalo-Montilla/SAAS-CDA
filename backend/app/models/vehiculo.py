@@ -50,6 +50,7 @@ class VehiculoProceso(Base):
     cliente_nombre = Column(String(200), nullable=False)
     cliente_documento = Column(String(50), nullable=False)
     cliente_telefono = Column(String(20))
+    cliente_email = Column(String(255))
     
     # Servicio RTM
     valor_rtm = Column(Numeric(10, 2), nullable=False)
