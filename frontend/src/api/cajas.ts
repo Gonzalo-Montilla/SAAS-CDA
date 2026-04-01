@@ -23,9 +23,16 @@ export const cajasApi = {
   },
 
   // Obtener resumen de caja activa (pre-cierre)
-  obtenerResumen: async (): Promise<CajaResumen> => {
-    const response = await apiClient.get<CajaResumen>('/cajas/activa/resumen');
-    return response.data;
+  obtenerResumen: async (): Promise<CajaResumen | null> => {
+    try {
+      const response = await apiClient.get<CajaResumen>('/cajas/activa/resumen');
+      return response.data;
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        return null; // No hay caja activa/resumen disponible
+      }
+      throw error;
+    }
   },
 
   // Cerrar caja (fin de turno con arqueo)
@@ -42,8 +49,15 @@ export const cajasApi = {
 
   // Listar movimientos de caja activa
   listarMovimientos: async (): Promise<MovimientoCaja[]> => {
-    const response = await apiClient.get<MovimientoCaja[]>('/cajas/movimientos');
-    return response.data;
+    try {
+      const response = await apiClient.get<MovimientoCaja[]>('/cajas/movimientos');
+      return response.data;
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        return [];
+      }
+      throw error;
+    }
   },
 
   // Obtener historial de cajas
@@ -65,8 +79,15 @@ export const cajasApi = {
     total_cobrado: number;
     fecha_cobro: string;
   }>>> => {
-    const response = await apiClient.get('/cajas/vehiculos-por-metodo');
-    return response.data;
+    try {
+      const response = await apiClient.get('/cajas/vehiculos-por-metodo');
+      return response.data;
+    } catch (error: any) {
+      if (error.response?.status === 404) {
+        return {};
+      }
+      throw error;
+    }
   },
 
   // Obtener resumen de la última caja cerrada

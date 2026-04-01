@@ -1,19 +1,25 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ClipboardList, DollarSign, CheckCircle2, RotateCcw, Search, X, Calendar, CalendarDays, CalendarRange, BarChart3, Camera, Car, Edit } from 'lucide-react';
+import { ClipboardList, DollarSign, CheckCircle2, RotateCcw, Search, X, Calendar, CalendarDays, CalendarRange, BarChart3, Camera, Car, Edit, AlertTriangle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import CapturaFotos from '../components/CapturaFotos';
 import ErrorBoundary from '../components/ErrorBoundary';
 import { useToast } from '../contexts/ToastContext';
+import { useAuth } from '../contexts/AuthContext';
 import { vehiculosApi, type TarifaCalculada } from '../api/vehiculos';
 import { tarifasApi } from '../api/tarifas';
 import type { VehiculoRegistro } from '../types';
 
 export default function Recepcion() {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
+  const { user } = useAuth();
   const { showToast } = useToast();
+  const anoActual = new Date().getFullYear();
   const [tarifaCalculada, setTarifaCalculada] = useState<TarifaCalculada | null>(null);
+  const [tarifaError, setTarifaError] = useState<string>('');
   const [fotosVehiculo, setFotosVehiculo] = useState<string[]>([]);
 
   // Estado para edición
@@ -26,7 +32,7 @@ export default function Recepcion() {
     tipo_vehiculo: 'liviano_particular',
     marca: '',
     modelo: '',
-    ano_modelo: new Date().getFullYear(), // Año actual por defecto
+    ano_modelo: anoActual, // Año actual por defecto
     cliente_nombre: '',
     cliente_documento: '',
     cliente_telefono: '',
@@ -182,28 +188,55 @@ export default function Recepcion() {
 
   // Calcular tarifa cuando cambia el año del modelo o el tipo de vehículo
   useEffect(() => {
+    let cancelled = false;
+
     // Si es preventiva, no calcular tarifa
     if (formData.tipo_vehiculo === 'preventiva') {
       setTarifaCalculada(null);
+      setTarifaError('');
+      return;
+    }
+
+    // Evitar consultas innecesarias para años futuros (suelen no tener vigencia configurada aún).
+    if (formData.ano_modelo > anoActual) {
+      setTarifaCalculada(null);
+      setTarifaError(
+        `El año modelo ${formData.ano_modelo} es mayor al año actual (${anoActual}). Ajusta el año o configura tarifas futuras antes de continuar.`,
+      );
       return;
     }
     
     if (formData.ano_modelo >= 1950 && formData.ano_modelo <= 2030 && formData.tipo_vehiculo) {
+      setTarifaError('');
       vehiculosApi.calcularTarifa(formData.ano_modelo, formData.tipo_vehiculo)
-        .then(setTarifaCalculada)
-        .catch(() => {
-          console.warn('No hay tarifas configuradas para el año', formData.ano_modelo, 'y tipo', formData.tipo_vehiculo);
+        .then((tarifa) => {
+          if (cancelled) return;
+          setTarifaCalculada(tarifa);
+          setTarifaError('');
+        })
+        .catch((error: any) => {
+          if (cancelled) return;
           setTarifaCalculada(null);
+          if (error?.response?.status === 404) {
+            setTarifaError(
+              `No hay tarifa vigente para ${formData.tipo_vehiculo} modelo ${formData.ano_modelo}. Configura tarifas para continuar.`,
+            );
+            return;
+          }
+          setTarifaError('No fue posible calcular la tarifa en este momento.');
         });
     }
-  }, [formData.ano_modelo, formData.tipo_vehiculo]);
+
+    return () => {
+      cancelled = true;
+    };
+  }, [formData.ano_modelo, formData.tipo_vehiculo, anoActual]);
 
   const resetForm = () => {
     // Limpiar fotos
     setFotosVehiculo([]);
     
     // Limpiar formulario PERO mantener el año para que la tarifa siga visible
-    const anoActual = new Date().getFullYear();
     setFormData({
       placa: '',
       tipo_vehiculo: 'liviano_particular',
@@ -492,8 +525,11 @@ export default function Recepcion() {
                   required
                   className="input-pos"
                   min={1950}
-                  max={2030}
+                  max={anoActual}
                 />
+                <p className="mt-1 text-xs text-gray-500">
+                  Rango permitido: 1950 a {anoActual}.
+                </p>
               </div>
 
               {/* SOAT */}
@@ -745,6 +781,31 @@ export default function Recepcion() {
                     </p>
                   </div>
                 )}
+              </div>
+            ) : tarifaError ? (
+              <div className="bg-amber-50 border-2 border-amber-200 rounded-lg p-4">
+                <div className="flex items-start gap-2">
+                  <AlertTriangle className="w-5 h-5 text-amber-700 mt-0.5 flex-shrink-0" />
+                  <div>
+                    <p className="text-sm font-semibold text-amber-900 mb-1">
+                      Tarifa no disponible
+                    </p>
+                    <p className="text-sm text-amber-800">{tarifaError}</p>
+                    {(user as { rol?: string } | null)?.rol === 'administrador' ? (
+                      <button
+                        type="button"
+                        onClick={() => navigate('/tarifas')}
+                        className="mt-3 px-3 py-2 rounded-lg bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold transition"
+                      >
+                        Configurar tarifas ahora
+                      </button>
+                    ) : (
+                      <p className="mt-2 text-xs text-amber-700">
+                        Solicita a un administrador configurar las tarifas en el módulo Tarifas.
+                      </p>
+                    )}
+                  </div>
+                </div>
               </div>
             ) : (
               <div className="text-center py-8">

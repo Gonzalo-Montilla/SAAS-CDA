@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -775,6 +775,7 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const brand = useBrand();
+  const isMountedRef = useRef(true);
   const [metodoPago, setMetodoPago] = useState<string>('efectivo');
   const [registros, setRegistros] = useState({
     registrado_runt: false,
@@ -831,6 +832,12 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
   
   const puedeConfirmarCobro = todosRegistrados && preventivaTieneValor && desgloseMixtoValido;
 
+  useEffect(() => {
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   const cobrarMutation = useMutation({
     mutationFn: vehiculosApi.cobrar,
     onSuccess: async (vehiculoCobrado) => {
@@ -854,11 +861,18 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
         nombreCajero: user?.nombre_completo || 'Cajero',
         logoUrl: brand.logoSrc,
       });
-      
+
+      if (!isMountedRef.current) {
+        return;
+      }
+
       alert(`Cobro registrado exitosamente.\n\nRecibo generado: ${nombrePDF}`);
       
       // Defer query invalidation to prevent React DOM errors
       setTimeout(() => {
+        if (!isMountedRef.current) {
+          return;
+        }
         queryClient.invalidateQueries({ queryKey: ['vehiculos-pendientes'] });
       }, 300);
       
