@@ -400,3 +400,38 @@ def generar_email_encuesta_calidad_cliente(
         body_html=body_html,
         label=f"Calidad - {nombre_cda}",
     )
+
+
+def generar_email_confirmacion_cita(
+    nombre_cda: str,
+    nombre_cliente: str,
+    fecha_legible: str,
+    hora_legible: str,
+    placa: str,
+    tipo_servicio: str,
+) -> str:
+    """Email de confirmación de agendamiento."""
+    body_html = f"""
+    <p>Hola <strong>{nombre_cliente}</strong>,</p>
+    <p>¡Qué bien que ya tienes tu cita con nosotros! Queremos dejarte toda la información para que llegues sin preocupaciones:</p>
+    <div class="highlight">
+        <p style="margin:0 0 6px 0;">📌 <strong>Día:</strong> {fecha_legible}</p>
+        <p style="margin:0 0 6px 0;">⏰ <strong>Hora:</strong> {hora_legible}</p>
+        <p style="margin:0 0 6px 0;">📍 <strong>Placa:</strong> {placa}</p>
+        <p style="margin:0;">🔧 <strong>Servicio:</strong> {tipo_servicio}</p>
+    </div>
+    <p>
+        Te invitamos a llegar unos minutos antes para registrarte y pasar tranquilamente a nuestra sala de espera,
+        donde podrás relajarte mientras cuidamos de tu vehículo.
+    </p>
+    <p><strong>¡Te esperamos!</strong></p>
+    <p class="muted">
+        Saludos,<br />
+        El equipo de {nombre_cda}
+    </p>
+    """
+    return _render_email_corporativo(
+        title=f"Confirmación de cita - {nombre_cda}",
+        body_html=body_html,
+        label=f"Agendamiento - {nombre_cda}",
+    )

@@ -1,7 +1,7 @@
 import { useState, useEffect, type FormEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ClipboardList, DollarSign, CheckCircle2, RotateCcw, Search, X, Calendar, CalendarDays, CalendarRange, BarChart3, Camera, Car, Edit, AlertTriangle } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import CapturaFotos from '../components/CapturaFotos';
@@ -15,6 +15,7 @@ import type { VehiculoRegistro } from '../types';
 export default function Recepcion() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const { showToast } = useToast();
   const anoActual = new Date().getFullYear();
@@ -40,6 +41,16 @@ export default function Recepcion() {
     tiene_soat: false,
     observaciones: '',
   });
+
+  type PrefillState = {
+    agendamiento_prefill?: {
+      placa?: string;
+      tipo_vehiculo?: string;
+      cliente_nombre?: string;
+      cliente_telefono?: string;
+      cliente_email?: string;
+    } | null;
+  };
 
   // Obtener comisiones SOAT
   const { data: comisionesSOAT } = useQuery({
@@ -186,6 +197,49 @@ export default function Recepcion() {
       );
     }
   });
+
+  // Calcular tarifa cuando cambia el año del modelo o el tipo de vehículo
+  useEffect(() => {
+    const state = location.state as PrefillState | null;
+    const prefill = state?.agendamiento_prefill;
+    if (!prefill) return;
+
+    const allowedTipoVehiculo = new Set([
+      'liviano_particular',
+      'liviano_publico',
+      'pesado_particular',
+      'pesado_publico',
+      'moto',
+      'preventiva',
+    ]);
+
+    const tipoMap: Record<string, string> = {
+      pesado: 'pesado_particular',
+      liviano: 'liviano_particular',
+    };
+
+    const tipoRaw = (prefill.tipo_vehiculo || '').trim().toLowerCase();
+    const tipoPrefill = allowedTipoVehiculo.has(tipoRaw)
+      ? tipoRaw
+      : (tipoMap[tipoRaw] || 'liviano_particular');
+
+    setFormData((prev) => ({
+      ...prev,
+      placa: (prefill.placa || prev.placa || '').toUpperCase(),
+      tipo_vehiculo: tipoPrefill,
+      cliente_nombre: (prefill.cliente_nombre || prev.cliente_nombre || '').toUpperCase(),
+      cliente_telefono: prefill.cliente_telefono || prev.cliente_telefono || '',
+      cliente_email: (prefill.cliente_email || prev.cliente_email || '').toLowerCase(),
+    }));
+
+    showToast(
+      'success',
+      'Datos precargados desde Agendamiento.',
+      'Completa documento y demás campos para registrar el vehículo.',
+    );
+
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.pathname, location.state, navigate, showToast]);
 
   // Calcular tarifa cuando cambia el año del modelo o el tipo de vehículo
   useEffect(() => {

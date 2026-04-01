@@ -152,6 +152,7 @@ def obtener_tenant_branding(
         )
 
     return {
+        "tenant_slug": tenant.slug,
         "nombre_comercial": tenant.nombre_comercial,
         "logo_url": tenant.logo_url,
         "color_primario": tenant.color_primario,

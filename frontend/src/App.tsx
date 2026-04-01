@@ -7,7 +7,7 @@ import { ToastProvider } from './contexts/ToastContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import type { AuthScope } from './types';
 
-type TenantRole = 'administrador' | 'cajero' | 'recepcionista' | 'contador';
+type TenantRole = 'administrador' | 'cajero' | 'recepcionista' | 'contador' | 'comercial';
 
 const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -20,6 +20,8 @@ const Usuarios = lazy(() => import('./pages/Usuarios'));
 const Soporte = lazy(() => import('./pages/Soporte'));
 const Calidad = lazy(() => import('./pages/Calidad'));
 const CalidadEncuesta = lazy(() => import('./pages/CalidadEncuesta'));
+const Agendamiento = lazy(() => import('./pages/Agendamiento'));
+const AgendarPublico = lazy(() => import('./pages/AgendarPublico'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const SaaSBackoffice = lazy(() => import('./pages/SaaSBackoffice'));
 
@@ -109,7 +111,7 @@ function App() {
             <Route
               path="/recepcion"
               element={
-                <ProtectedRoute requiredScope="tenant">
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador', 'recepcionista']}>
                   <Recepcion />
                 </ProtectedRoute>
               }
@@ -155,6 +157,14 @@ function App() {
               }
             />
             <Route
+              path="/agendamiento"
+              element={
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador', 'recepcionista', 'comercial']}>
+                  <Agendamiento />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/soporte"
               element={
                 <ProtectedRoute requiredScope="tenant">
@@ -165,7 +175,7 @@ function App() {
             <Route
               path="/calidad"
               element={
-                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador']}>
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador', 'comercial']}>
                   <Calidad />
                 </ProtectedRoute>
               }
@@ -179,6 +189,7 @@ function App() {
               }
             />
                 <Route path="/calidad/encuesta/:token" element={<CalidadEncuesta />} />
+                <Route path="/agendar/:tenantSlug" element={<AgendarPublico />} />
                 <Route path="/:tenantSlug" element={<Login />} />
                 <Route path="/" element={<HomeRedirect />} />
                   </Routes>

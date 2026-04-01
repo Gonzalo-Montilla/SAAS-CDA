@@ -9,9 +9,10 @@ export interface TenantBranding {
 export interface Usuario {
   id: string;
   tenant_id: string;
+  tenant_slug?: string;
   email: string;
   nombre_completo: string;
-  rol: 'administrador' | 'cajero' | 'recepcionista' | 'contador';
+  rol: 'administrador' | 'cajero' | 'recepcionista' | 'contador' | 'comercial';
   rol_global?: 'owner' | 'finanzas' | 'comercial' | 'soporte';
   activo: boolean;
   created_at: string;
@@ -22,7 +23,7 @@ export interface SaaSUser {
   id: string;
   email: string;
   nombre_completo: string;
-  rol?: 'administrador' | 'cajero' | 'recepcionista';
+  rol?: 'administrador' | 'cajero' | 'recepcionista' | 'contador' | 'comercial';
   rol_global: 'owner' | 'finanzas' | 'comercial' | 'soporte';
   activo: boolean;
   mfa_enabled: boolean;
@@ -243,6 +244,27 @@ export interface QualityPublicSurveyInfo {
   cliente_nombre: string;
   placa: string;
   tipo_vehiculo: string;
+}
+
+export interface AppointmentSlot {
+  hora: string;
+  disponible: boolean;
+  cupos_disponibles: number;
+  ocupados: number;
+}
+
+export interface AppointmentItem {
+  id: string;
+  cliente_nombre: string;
+  cliente_email?: string | null;
+  cliente_celular?: string | null;
+  placa: string;
+  tipo_vehiculo: string;
+  scheduled_at: string;
+  status: 'scheduled' | 'confirmed' | 'checked_in' | 'cancelled' | 'no_show';
+  source: string;
+  notes?: string | null;
+  created_at: string;
 }
 
 export interface SaaSSupportTicketItem {

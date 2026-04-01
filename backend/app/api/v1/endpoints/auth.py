@@ -266,6 +266,7 @@ def get_current_user_info(
     return {
         "id": current_user.id,
         "tenant_id": current_user.tenant_id,
+        "tenant_slug": tenant.slug if tenant else None,
         "email": current_user.email,
         "nombre_completo": current_user.nombre_completo,
         "rol": current_user.rol,

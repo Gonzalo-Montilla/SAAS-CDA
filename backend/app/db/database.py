@@ -455,6 +455,25 @@ def ensure_support_schema(db):
     db.execute(text("ALTER TABLE IF EXISTS saas_support_tickets ADD COLUMN IF NOT EXISTS tenant_responded_at TIMESTAMP WITHOUT TIME ZONE"))
 
 
+def ensure_usuario_roles_schema(db):
+    """
+    Asegura compatibilidad del enum de roles en usuarios.
+    """
+    enum_type_name = db.execute(
+        text(
+            """
+            SELECT udt_name
+            FROM information_schema.columns
+            WHERE table_name = 'usuarios' AND column_name = 'rol'
+            LIMIT 1
+            """
+        )
+    ).scalar()
+
+    if enum_type_name:
+        db.execute(text(f"ALTER TYPE {enum_type_name} ADD VALUE IF NOT EXISTS 'comercial'"))
+
+
 def get_db():
     """
     Dependency para obtener sesión de base de datos
@@ -478,6 +497,7 @@ def init_db():
     from app.models.saas_user import SaaSUser
     from app.models.support_ticket import SaaSSupportTicket
     from app.models.quality import QualitySurveyInvite, QualitySurveyResponse
+    from app.models.appointment import Appointment
     from app.core.security import get_password_hash
     from datetime import date
     
@@ -498,6 +518,7 @@ def init_db():
         ensure_tenant_domain_schema(db)
         ensure_onboarding_security_schema(db)
         ensure_support_schema(db)
+        ensure_usuario_roles_schema(db)
         db.commit()
 
         # Verificar y crear owner global SaaS

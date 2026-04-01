@@ -22,6 +22,50 @@ interface Estadisticas {
   por_rol: Record<string, number>;
 }
 
+const ROLE_PERMISSION_MATRIX: Array<{
+  rol: string;
+  colorClass: string;
+  cardClass: string;
+  icon: string;
+  permisos: string;
+}> = [
+  {
+    rol: 'Administrador',
+    colorClass: 'bg-red-100 text-red-800',
+    cardClass: 'border-red-200 bg-gradient-to-br from-red-50 to-white',
+    icon: '🛡️',
+    permisos: 'Acceso total: recepción, caja, agendamiento, calidad, tarifas, tesorería, reportes y usuarios.',
+  },
+  {
+    rol: 'Recepcionista',
+    colorClass: 'bg-green-100 text-green-800',
+    cardClass: 'border-green-200 bg-gradient-to-br from-green-50 to-white',
+    icon: '📋',
+    permisos: 'Recepción y agendamiento: registro de vehículos, check-in y gestión operativa de citas.',
+  },
+  {
+    rol: 'Comercial',
+    colorClass: 'bg-cyan-100 text-cyan-800',
+    cardClass: 'border-cyan-200 bg-gradient-to-br from-cyan-50 to-white',
+    icon: '📈',
+    permisos: 'Agendamiento y calidad: gestión comercial de citas y seguimiento de experiencia del cliente.',
+  },
+  {
+    rol: 'Cajero',
+    colorClass: 'bg-blue-100 text-blue-800',
+    cardClass: 'border-blue-200 bg-gradient-to-br from-blue-50 to-white',
+    icon: '💳',
+    permisos: 'Caja: cobros, apertura/cierre de caja y operaciones de punto de pago.',
+  },
+  {
+    rol: 'Contador',
+    colorClass: 'bg-purple-100 text-purple-800',
+    cardClass: 'border-purple-200 bg-gradient-to-br from-purple-50 to-white',
+    icon: '📊',
+    permisos: 'Reportes: análisis financiero y seguimiento de información contable.',
+  },
+];
+
 const validatePasswordPolicy = (password: string): string | null => {
   if (password.length < 10) return 'La contraseña debe tener mínimo 10 caracteres.';
   if (!/[A-Z]/.test(password)) return 'La contraseña debe incluir al menos una mayúscula.';
@@ -264,7 +308,8 @@ export default function UsuariosPage() {
       'administrador': 'Administrador',
       'cajero': 'Cajero',
       'recepcionista': 'Recepcionista',
-      'contador': 'Contador'
+      'contador': 'Contador',
+      'comercial': 'Comercial',
     };
     return labels[rol] || rol;
   };
@@ -274,7 +319,8 @@ export default function UsuariosPage() {
       'administrador': 'bg-red-100 text-red-800',
       'cajero': 'bg-blue-100 text-blue-800',
       'recepcionista': 'bg-green-100 text-green-800',
-      'contador': 'bg-purple-100 text-purple-800'
+      'contador': 'bg-purple-100 text-purple-800',
+      'comercial': 'bg-cyan-100 text-cyan-800',
     };
     return colors[rol] || 'bg-gray-100 text-gray-800';
   };
@@ -344,6 +390,37 @@ export default function UsuariosPage() {
           </div>
         )}
 
+        {/* Matriz visual de permisos */}
+        <div className="card-pos border border-slate-200 shadow-sm">
+          <div className="mb-5 rounded-xl border border-slate-200 bg-gradient-to-r from-slate-50 via-white to-slate-50 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h3 className="text-lg font-bold text-slate-900 flex items-center gap-2">
+                <UserCog className="w-5 h-5 text-primary-600" />
+                Matriz de permisos por rol
+              </h3>
+              <p className="text-xs text-slate-500">Guía rápida para creación de usuarios</p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {ROLE_PERMISSION_MATRIX.map((item) => (
+              <div
+                key={item.rol}
+                className={`rounded-xl border p-4 shadow-sm transition-all duration-200 hover:shadow-md hover:-translate-y-0.5 ${item.cardClass}`}
+              >
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <span className={`px-3 py-1 rounded-full text-xs font-semibold ${item.colorClass}`}>
+                    {item.rol}
+                  </span>
+                  <span className="text-lg leading-none" aria-hidden="true">
+                    {item.icon}
+                  </span>
+                </div>
+                <p className="text-sm text-slate-700 leading-relaxed">{item.permisos}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+
         {/* Filtros */}
         <div className="card-pos">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -374,6 +451,7 @@ export default function UsuariosPage() {
                 <option value="cajero">Cajero</option>
                 <option value="recepcionista">Recepcionista</option>
                 <option value="contador">Contador</option>
+                <option value="comercial">Comercial</option>
               </select>
             </div>
             <div>
@@ -603,6 +681,7 @@ export default function UsuariosPage() {
                       <option value="cajero">Cajero</option>
                       <option value="recepcionista">Recepcionista</option>
                       <option value="contador">Contador</option>
+                      <option value="comercial">Comercial</option>
                       <option value="administrador">Administrador</option>
                     </select>
                     <p className="text-xs text-gray-500 mt-2">
@@ -610,6 +689,7 @@ export default function UsuariosPage() {
                       {formData.rol === 'cajero' && 'Acceso a caja y cobros'}
                       {formData.rol === 'recepcionista' && 'Acceso a recepción y registro'}
                       {formData.rol === 'contador' && 'Acceso a reportes y finanzas'}
+                      {formData.rol === 'comercial' && 'Acceso a agendamiento y calidad'}
                     </p>
                   </div>
 

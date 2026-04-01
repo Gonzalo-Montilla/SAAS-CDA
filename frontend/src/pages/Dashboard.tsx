@@ -13,6 +13,7 @@ import {
   Shield,
   LifeBuoy,
   MessageSquareHeart,
+  CalendarClock,
 } from 'lucide-react';
 export default function Dashboard() {
   const { user, logout } = useAuth();
@@ -79,6 +80,21 @@ export default function Dashboard() {
               <h3 className="text-xl font-bold text-gray-900 mb-2">Recepción</h3>
               <p className="text-gray-600 text-sm">
                 Registrar vehículos y clientes para inspección RTM
+              </p>
+            </button>
+          )}
+
+          {(user?.rol === 'recepcionista' || user?.rol === 'administrador' || user?.rol === 'comercial') && (
+            <button
+              onClick={() => navigate('/agendamiento')}
+              className="card-pos text-left group animate-fade-in animate-delay-100"
+            >
+              <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-sky-100 text-sky-600 mb-4 group-hover:bg-sky-600 group-hover:text-white transition-all duration-300">
+                <CalendarClock className="w-8 h-8 icon-hover" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Agendamiento</h3>
+              <p className="text-gray-600 text-sm">
+                Gestionar citas por link público y control de check-in
               </p>
             </button>
           )}
@@ -154,19 +170,22 @@ export default function Dashboard() {
                 </p>
               </button>
 
-              <button
-                onClick={() => navigate('/calidad')}
-                className="card-pos text-left group animate-fade-in animate-delay-200"
-              >
-                <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-violet-100 text-violet-600 mb-4 group-hover:bg-violet-600 group-hover:text-white transition-all duration-300">
-                  <MessageSquareHeart className="w-8 h-8 icon-hover" />
-                </div>
-                <h3 className="text-xl font-bold text-gray-900 mb-2">Calidad</h3>
-                <p className="text-gray-600 text-sm">
-                  Seguimiento de encuestas de satisfacción y comentarios de clientes
-                </p>
-              </button>
             </>
+          )}
+
+          {(user?.rol === 'administrador' || user?.rol === 'comercial') && (
+            <button
+              onClick={() => navigate('/calidad')}
+              className="card-pos text-left group animate-fade-in animate-delay-200"
+            >
+              <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-violet-100 text-violet-600 mb-4 group-hover:bg-violet-600 group-hover:text-white transition-all duration-300">
+                <MessageSquareHeart className="w-8 h-8 icon-hover" />
+              </div>
+              <h3 className="text-xl font-bold text-gray-900 mb-2">Calidad</h3>
+              <p className="text-gray-600 text-sm">
+                Seguimiento de encuestas de satisfacción y comentarios de clientes
+              </p>
+            </button>
           )}
 
           <button

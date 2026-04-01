@@ -17,6 +17,7 @@ class RolEnum(str, enum.Enum):
     CAJERO = "cajero"
     RECEPCIONISTA = "recepcionista"
     CONTADOR = "contador"
+    COMERCIAL = "comercial"
 
 
 class Usuario(Base):

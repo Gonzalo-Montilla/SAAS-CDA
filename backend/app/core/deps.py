@@ -208,6 +208,16 @@ def get_recepcionista_or_admin(current_user: Usuario = Depends(get_current_user)
     return current_user
 
 
+def get_agendamiento_or_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
+    """Recepcionistas, comerciales o administradores."""
+    if current_user.rol not in [RolEnum.RECEPCIONISTA, RolEnum.COMERCIAL, RolEnum.ADMINISTRADOR]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo recepcionistas, comerciales o administradores pueden realizar esta acción"
+        )
+    return current_user
+
+
 def get_contador_or_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
     """Contadores o administradores"""
     if current_user.rol not in [RolEnum.CONTADOR, RolEnum.ADMINISTRADOR]:

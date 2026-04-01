@@ -46,6 +46,7 @@ class UsuarioResponse(BaseModel):
     rol: str
     activo: bool
     created_at: datetime
+    tenant_slug: Optional[str] = None
     tenant_branding: Optional[TenantBrandingResponse] = None
     
     model_config = ConfigDict(from_attributes=True)
