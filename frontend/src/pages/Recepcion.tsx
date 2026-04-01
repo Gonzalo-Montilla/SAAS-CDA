@@ -300,9 +300,12 @@ export default function Recepcion() {
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     
+    const clienteEmailNormalizado = (formData.cliente_email || '').trim().toLowerCase();
+
     // Preparar datos incluyendo fotos en observaciones
     const dataConFotos = {
       ...formData,
+      cliente_email: clienteEmailNormalizado || undefined,
       observaciones: JSON.stringify({
         texto: formData.observaciones || '',
         fotos: fotosVehiculo

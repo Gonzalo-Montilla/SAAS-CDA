@@ -1,7 +1,7 @@
 """
 Schemas de Vehículos en Proceso
 """
-from pydantic import BaseModel, Field, ConfigDict, EmailStr
+from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator
 from decimal import Decimal
 from datetime import datetime
 from typing import Optional
@@ -22,6 +22,15 @@ class VehiculoRegistro(BaseModel):
     tiene_soat: bool = False
     observaciones: Optional[str] = None
 
+    @field_validator("cliente_email", mode="before")
+    @classmethod
+    def empty_email_to_none(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
+
 
 class VehiculoEdicion(BaseModel):
     """Edición de vehículo registrado (antes de cobrar)"""
@@ -36,6 +45,15 @@ class VehiculoEdicion(BaseModel):
     cliente_email: Optional[EmailStr] = None
     tiene_soat: bool = False
     observaciones: Optional[str] = None
+
+    @field_validator("cliente_email", mode="before")
+    @classmethod
+    def empty_email_to_none(cls, value):
+        if value is None:
+            return None
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
 
 class VehiculoCobro(BaseModel):
