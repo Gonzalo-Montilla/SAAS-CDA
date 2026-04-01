@@ -286,6 +286,30 @@ def generar_email_bienvenida_recepcion_cliente(
     )
 
 
+def generar_email_llamado_caja_cliente(
+    nombre_cda: str,
+    nombre_cliente: str,
+) -> str:
+    """Email para invitar al cliente a pasar a caja antes de finalizar revisión."""
+    body_html = f"""
+    <p>Estimado/a <strong>{nombre_cliente}</strong>,</p>
+    <div class="highlight">
+        Te invitamos a pasar a nuestra caja <strong>{nombre_cda}</strong> para realizar el pago correspondiente.
+        De esta manera, cuando tu vehículo esté completamente listo, podremos agilizar tu salida.
+    </div>
+    <p>Agradecemos tu confianza y quedamos atentos.</p>
+    <p class="muted">
+        Saludos cordiales,<br />
+        Equipo {nombre_cda}
+    </p>
+    """
+    return _render_email_corporativo(
+        title="Notificación de pago en caja",
+        body_html=body_html,
+        label=f"Caja - {nombre_cda}",
+    )
+
+
 def generar_email_recibo_pago_saas(
     nombre_cda: str,
     referencia: str,

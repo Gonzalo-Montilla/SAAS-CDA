@@ -22,6 +22,12 @@ interface VehiculosPendientesResponse {
   total: number;
 }
 
+interface NotificacionPasoCajaResponse {
+  sent: boolean;
+  has_email: boolean;
+  message: string;
+}
+
 export const vehiculosApi = {
   // Registrar un nuevo vehículo (Recepción)
   registrar: async (data: VehiculoRegistro): Promise<Vehiculo> => {
@@ -53,6 +59,12 @@ export const vehiculosApi = {
   // Cobrar un vehículo (Caja)
   cobrar: async (data: VehiculoCobro): Promise<Vehiculo> => {
     const response = await apiClient.post<Vehiculo>('/vehiculos/cobrar', data);
+    return response.data;
+  },
+
+  // Notificar al cliente que debe pasar a caja
+  notificarPasoCaja: async (vehiculoId: string): Promise<NotificacionPasoCajaResponse> => {
+    const response = await apiClient.post<NotificacionPasoCajaResponse>(`/vehiculos/${vehiculoId}/notificar-paso-caja`);
     return response.data;
   },
 

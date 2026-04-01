@@ -14,7 +14,11 @@ from app.models.tenant import Tenant
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo, MetodoPago
 from app.models.tarifa import Tarifa, ComisionSOAT
 from app.models.caja import Caja, MovimientoCaja, TipoMovimiento, EstadoCaja
-from app.utils.email import enviar_email, generar_email_bienvenida_recepcion_cliente
+from app.utils.email import (
+    enviar_email,
+    generar_email_bienvenida_recepcion_cliente,
+    generar_email_llamado_caja_cliente,
+)
 from app.schemas.vehiculo import (
     VehiculoRegistro,
     VehiculoEdicion,
@@ -405,6 +409,62 @@ def listar_pendientes(
         vehiculos=vehiculos,
         total=len(vehiculos)
     )
+
+
+@router.post("/{vehiculo_id}/notificar-paso-caja")
+def notificar_paso_caja(
+    vehiculo_id: str,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_cajero_or_admin),
+):
+    """
+    Notificar por email al cliente para pasar a caja.
+    No bloquea la operación de cobro si el envío falla.
+    """
+    vehiculo = db.query(VehiculoProceso).filter(
+        VehiculoProceso.id == vehiculo_id,
+        VehiculoProceso.tenant_id == current_user.tenant_id,
+    ).first()
+    if not vehiculo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Vehículo no encontrado",
+        )
+
+    if vehiculo.estado != EstadoVehiculo.REGISTRADO:
+        return {
+            "sent": False,
+            "has_email": bool(vehiculo.cliente_email),
+            "message": "El vehículo ya no está en estado pendiente de cobro.",
+        }
+
+    cliente_email = (vehiculo.cliente_email or "").strip().lower()
+    if not cliente_email:
+        return {
+            "sent": False,
+            "has_email": False,
+            "message": "El cliente no tiene correo electrónico registrado.",
+        }
+
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    nombre_cda = (
+        tenant.nombre_comercial
+        if tenant and tenant.nombre_comercial
+        else (tenant.nombre if tenant else "CDASOFT")
+    )
+
+    asunto = f"{nombre_cda} - Te invitamos a pasar a caja"
+    cuerpo_html = generar_email_llamado_caja_cliente(
+        nombre_cda=nombre_cda,
+        nombre_cliente=vehiculo.cliente_nombre,
+    )
+    sent = enviar_email(cliente_email, asunto, cuerpo_html)
+
+    return {
+        "sent": bool(sent),
+        "has_email": True,
+        "message": "Notificación enviada al cliente." if sent else "No fue posible enviar la notificación.",
+    }
 
 
 @router.post("/cobrar", response_model=VehiculoResponse)

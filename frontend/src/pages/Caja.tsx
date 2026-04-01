@@ -581,6 +581,24 @@ function VehiculosPendientes({
   const [vehiculoSeleccionado, setVehiculoSeleccionado] = useState<Vehiculo | null>(null);
   const [busqueda, setBusqueda] = useState('');
 
+  const notificarPasoCaja = (vehiculo: Vehiculo) => {
+    void vehiculosApi.notificarPasoCaja(vehiculo.id)
+      .then((result) => {
+        // Solo avisar cuando hay problema de envío o no existe email.
+        if (!result.sent) {
+          if (!result.has_email) {
+            console.info(`Sin correo para notificación de caja: ${vehiculo.placa}`);
+            return;
+          }
+          alert('El vehículo se abrió para cobro, pero no fue posible enviar la notificación al cliente.');
+        }
+      })
+      .catch(() => {
+        // No bloquear apertura del flujo de cobro por fallo de notificación.
+        alert('El vehículo se abrió para cobro, pero falló la notificación por correo.');
+      });
+  };
+
   if (loading) {
     return <LoadingSpinner message="Cargando vehículos pendientes de cobro..." />;
   }
@@ -715,7 +733,10 @@ function VehiculosPendientes({
           {vehiculosFiltrados.map((vehiculo) => (
             <button
               key={vehiculo.id}
-              onClick={() => setVehiculoSeleccionado(vehiculo)}
+              onClick={() => {
+                notificarPasoCaja(vehiculo);
+                setVehiculoSeleccionado(vehiculo);
+              }}
               className="vehicle-card text-left hover:scale-105 transition-transform"
             >
               <div className="flex justify-between items-start mb-3">
