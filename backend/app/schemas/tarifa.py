@@ -23,9 +23,9 @@ class TarifaCreate(BaseModel):
 
 class TarifaUpdate(BaseModel):
     """Actualizar tarifa"""
-    valor_rtm: Optional[Decimal] = None
-    valor_terceros: Optional[Decimal] = None
-    valor_total: Optional[Decimal] = None
+    valor_rtm: Optional[Decimal] = Field(default=None, gt=0)
+    valor_terceros: Optional[Decimal] = Field(default=None, gt=0)
+    valor_total: Optional[Decimal] = Field(default=None, gt=0)
     activa: Optional[bool] = None
 
 
@@ -59,6 +59,15 @@ class ComisionSOATCreate(BaseModel):
     valor_comision: Decimal = Field(gt=0)
     vigencia_inicio: date
     vigencia_fin: Optional[date] = None
+
+
+class ComisionSOATUpdate(BaseModel):
+    """Actualizar comisión SOAT"""
+    tipo_vehiculo: Optional[str] = Field(default=None, pattern="^(moto|carro)$")
+    valor_comision: Optional[Decimal] = Field(default=None, gt=0)
+    vigencia_inicio: Optional[date] = None
+    vigencia_fin: Optional[date] = None
+    activa: Optional[bool] = None
 
 
 class ComisionSOATResponse(BaseModel):

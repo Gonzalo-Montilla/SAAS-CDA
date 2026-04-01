@@ -188,7 +188,7 @@ export default function Recepcion() {
       return;
     }
     
-    if (formData.ano_modelo >= 1900 && formData.ano_modelo <= new Date().getFullYear() + 1 && formData.tipo_vehiculo) {
+    if (formData.ano_modelo >= 1950 && formData.ano_modelo <= 2030 && formData.tipo_vehiculo) {
       vehiculosApi.calcularTarifa(formData.ano_modelo, formData.tipo_vehiculo)
         .then(setTarifaCalculada)
         .catch(() => {
@@ -369,7 +369,7 @@ export default function Recepcion() {
                   required
                   className="input-pos uppercase"
                   placeholder="ABC123"
-                  maxLength={6}
+                  maxLength={10}
                 />
               </div>
 
@@ -491,8 +491,8 @@ export default function Recepcion() {
                   onChange={(e) => handleInputChange('ano_modelo', parseInt(e.target.value))}
                   required
                   className="input-pos"
-                  min={1900}
-                  max={new Date().getFullYear() + 1}
+                  min={1950}
+                  max={2030}
                 />
               </div>
 

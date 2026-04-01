@@ -284,10 +284,12 @@ def listar_movimientos(
         )
     
     if fecha_desde:
-        query = query.filter(MovimientoTesoreria.fecha_movimiento >= fecha_desde)
+        fecha_desde_dt = datetime.combine(fecha_desde, datetime.min.time())
+        query = query.filter(MovimientoTesoreria.fecha_movimiento >= fecha_desde_dt)
     
     if fecha_hasta:
-        query = query.filter(MovimientoTesoreria.fecha_movimiento <= fecha_hasta)
+        fecha_hasta_dt = datetime.combine(fecha_hasta, datetime.max.time())
+        query = query.filter(MovimientoTesoreria.fecha_movimiento <= fecha_hasta_dt)
     
     if metodo_pago:
         query = query.filter(MovimientoTesoreria.metodo_pago == metodo_pago)
@@ -361,10 +363,6 @@ def obtener_resumen(
     fecha_desde_dt = datetime.combine(fecha_desde, datetime.min.time())
     fecha_hasta_dt = datetime.combine(fecha_hasta, datetime.max.time())
     
-    print(f"\n=== DEBUG RESUMEN ===")
-    print(f"Fecha desde: {fecha_desde_dt}")
-    print(f"Fecha hasta: {fecha_hasta_dt}")
-    
     # Obtener movimientos del período
     movimientos = db.query(MovimientoTesoreria).filter(
         and_(
@@ -373,11 +371,6 @@ def obtener_resumen(
             MovimientoTesoreria.fecha_movimiento <= fecha_hasta_dt
         )
     ).all()
-    
-    print(f"Movimientos encontrados: {len(movimientos)}")
-    for mov in movimientos[:3]:  # Mostrar solo los primeros 3
-        print(f"  - {mov.fecha_movimiento} | Monto: {mov.monto} | Tipo: {mov.tipo}")
-    print(f"===================\n")
     
     # Calcular totales
     total_ingresos = Decimal(0)
@@ -527,11 +520,14 @@ def obtener_estadisticas(
     """
     Obtener estadísticas detalladas de un período
     """
+    fecha_desde_dt = datetime.combine(fecha_desde, datetime.min.time())
+    fecha_hasta_dt = datetime.combine(fecha_hasta, datetime.max.time())
+
     movimientos = db.query(MovimientoTesoreria).filter(
         and_(
             MovimientoTesoreria.tenant_id == current_user.tenant_id,
-            MovimientoTesoreria.fecha_movimiento >= fecha_desde,
-            MovimientoTesoreria.fecha_movimiento <= fecha_hasta
+            MovimientoTesoreria.fecha_movimiento >= fecha_desde_dt,
+            MovimientoTesoreria.fecha_movimiento <= fecha_hasta_dt
         )
     ).all()
     
@@ -557,7 +553,7 @@ def obtener_estadisticas(
     # Saldo inicial (antes del período)
     saldo_inicial = db.query(func.sum(MovimientoTesoreria.monto)).filter(
         MovimientoTesoreria.tenant_id == current_user.tenant_id,
-        MovimientoTesoreria.fecha_movimiento < fecha_desde
+        MovimientoTesoreria.fecha_movimiento < fecha_desde_dt
     ).scalar() or Decimal(0)
     
     saldo_final = saldo_inicial + total_ingresos - total_egresos
@@ -646,46 +642,15 @@ def actualizar_configuracion(
 
 # ==================== COMPROBANTES ====================
 
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from jose import jwt, JWTError
-from app.core.config import settings
-
-security = HTTPBearer(auto_error=False)
-
 @router.get("/movimientos/{movimiento_id}/comprobante")
 async def descargar_comprobante_egreso(
     movimiento_id: str,
-    t: Optional[str] = Query(None, description="Token de autenticación"),
-    credentials: Optional[HTTPAuthorizationCredentials] = Depends(security),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_admin),
 ):
     """
     Generar y descargar comprobante de egreso en PDF
     """
-    # Obtener token (de query param o header)
-    token = t or (credentials.credentials if credentials else None)
-    if not token:
-        raise HTTPException(status_code=401, detail="No autorizado")
-    
-    # Verificar token
-    try:
-        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
-        user_id = payload.get("sub")
-        token_tenant_id = payload.get("tenant_id")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Token inválido")
-        if not token_tenant_id:
-            raise HTTPException(status_code=401, detail="Token inválido")
-    except JWTError:
-        raise HTTPException(status_code=401, detail="Token inválido")
-    
-    # Obtener usuario
-    current_user = db.query(Usuario).filter(Usuario.id == user_id).first()
-    if not current_user or not current_user.activo:
-        raise HTTPException(status_code=401, detail="Usuario no activo")
-    if str(current_user.tenant_id) != str(token_tenant_id):
-        raise HTTPException(status_code=401, detail="Token inválido")
-    
     # Obtener movimiento
     movimiento = db.query(MovimientoTesoreria).filter(
         MovimientoTesoreria.id == movimiento_id,

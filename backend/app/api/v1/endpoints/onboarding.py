@@ -338,6 +338,7 @@ def register_tenant_self_service(
     correo_electronico: EmailStr = Form(...),
     nombre_representante_legal_o_administrador: str = Form(...),
     celular: str = Form(...),
+    sedes_totales: int = Form(1),
     admin_password: str = Form(...),
     codigo_verificacion_email: str | None = Form(default=None),
     logo_url: str | None = Form(default=None),
@@ -353,6 +354,10 @@ def register_tenant_self_service(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="NIT del CDA inválido")
     if len(normalized_phone) < 7:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Celular inválido")
+    if sedes_totales < 1:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="sedes_totales debe ser mayor o igual a 1")
+    if sedes_totales > 100:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="sedes_totales no puede ser mayor a 100")
     if len(admin_password) < 6:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La contraseña debe tener al menos 6 caracteres")
     if not logo_url and logo_file is None:
@@ -457,6 +462,13 @@ def register_tenant_self_service(
         slug=tenant_slug,
         activo=True,
         logo_url=resolved_logo_url,
+        plan_actual="demo",
+        subscription_status="trial",
+        sedes_totales=sedes_totales,
+        plan_started_at=utcnow_naive(),
+        demo_ends_at=utcnow_naive() + timedelta(days=15),
+        billing_cycle_days=15,
+        next_billing_at=utcnow_naive() + timedelta(days=15),
     )
     db.add(tenant)
     db.flush()

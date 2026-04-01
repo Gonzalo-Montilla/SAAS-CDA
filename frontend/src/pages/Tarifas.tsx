@@ -285,6 +285,7 @@ function TarifasRTM({
 // Modal para crear tarifa
 function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial: number }) {
   const queryClient = useQueryClient();
+  const [formError, setFormError] = useState('');
   const [formData, setFormData] = useState({
     ano_vigencia: anoInicial,
     vigencia_inicio: `${anoInicial}-01-01`,
@@ -305,8 +306,38 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
     },
   });
 
+  const totalEsperado = formData.valor_rtm + formData.valor_terceros;
+  const totalCoincide = formData.valor_total === totalEsperado;
+
+  const parsePositiveInt = (value: string): number => {
+    const parsed = parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  };
+
+  const validateForm = (): string | null => {
+    if (formData.antiguedad_max < formData.antiguedad_min) {
+      return 'La antigüedad máxima no puede ser menor que la mínima.';
+    }
+    if (new Date(formData.vigencia_inicio) > new Date(formData.vigencia_fin)) {
+      return 'La fecha de inicio de vigencia no puede ser mayor a la fecha fin.';
+    }
+    if (formData.valor_rtm <= 0 || formData.valor_terceros <= 0 || formData.valor_total <= 0) {
+      return 'Los valores RTM, terceros y total deben ser mayores a cero.';
+    }
+    if (!totalCoincide) {
+      return `El valor total debe ser exactamente ${totalEsperado.toLocaleString('es-CO')}.`;
+    }
+    return null;
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError('');
+    const validationError = validateForm();
+    if (validationError) {
+      setFormError(validationError);
+      return;
+    }
     crearMutation.mutate(formData);
   };
 
@@ -342,6 +373,14 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
               </p>
             </div>
           )}
+          {formError && (
+            <div className="bg-amber-50 border-2 border-amber-200 rounded-lg p-4 mb-6">
+              <p className="text-amber-800 font-semibold text-center flex items-center justify-center gap-2">
+                <AlertTriangle className="w-5 h-5" />
+                {formError}
+              </p>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Año de Vigencia */}
@@ -353,7 +392,10 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
               <input
                 type="number"
                 value={formData.ano_vigencia}
-                onChange={(e) => setFormData({ ...formData, ano_vigencia: parseInt(e.target.value) })}
+                  onChange={(e) => {
+                    setFormError('');
+                    setFormData({ ...formData, ano_vigencia: parsePositiveInt(e.target.value) });
+                  }}
                 className="input-pos"
                 required
                 min={new Date().getFullYear()}
@@ -389,7 +431,10 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
                 <input
                   type="date"
                   value={formData.vigencia_inicio}
-                  onChange={(e) => setFormData({ ...formData, vigencia_inicio: e.target.value })}
+                  onChange={(e) => {
+                    setFormError('');
+                    setFormData({ ...formData, vigencia_inicio: e.target.value });
+                  }}
                   className="input-pos"
                   required
                 />
@@ -401,7 +446,10 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
                 <input
                   type="date"
                   value={formData.vigencia_fin}
-                  onChange={(e) => setFormData({ ...formData, vigencia_fin: e.target.value })}
+                  onChange={(e) => {
+                    setFormError('');
+                    setFormData({ ...formData, vigencia_fin: e.target.value });
+                  }}
                   className="input-pos"
                   required
                 />
@@ -418,7 +466,15 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
                 <input
                   type="number"
                   value={formData.antiguedad_min}
-                  onChange={(e) => setFormData({ ...formData, antiguedad_min: parseInt(e.target.value) })}
+                  onChange={(e) => {
+                    setFormError('');
+                    const nuevoMin = parsePositiveInt(e.target.value);
+                    setFormData((prev) => ({
+                      ...prev,
+                      antiguedad_min: nuevoMin,
+                      antiguedad_max: Math.max(prev.antiguedad_max, nuevoMin),
+                    }));
+                  }}
                   className="input-pos"
                   required
                   min={0}
@@ -431,7 +487,10 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
                 <input
                   type="number"
                   value={formData.antiguedad_max}
-                  onChange={(e) => setFormData({ ...formData, antiguedad_max: parseInt(e.target.value) })}
+                  onChange={(e) => {
+                    setFormError('');
+                    setFormData({ ...formData, antiguedad_max: parsePositiveInt(e.target.value) });
+                  }}
                   className="input-pos"
                   required
                   min={formData.antiguedad_min}
@@ -452,7 +511,10 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
                 <input
                   type="number"
                   value={formData.valor_rtm}
-                  onChange={(e) => setFormData({ ...formData, valor_rtm: parseInt(e.target.value) })}
+                  onChange={(e) => {
+                    setFormError('');
+                    setFormData({ ...formData, valor_rtm: parsePositiveInt(e.target.value) });
+                  }}
                   onBlur={calcularTotal}
                   className="input-pos"
                   required
@@ -469,7 +531,10 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
                 <input
                   type="number"
                   value={formData.valor_terceros}
-                  onChange={(e) => setFormData({ ...formData, valor_terceros: parseInt(e.target.value) })}
+                  onChange={(e) => {
+                    setFormError('');
+                    setFormData({ ...formData, valor_terceros: parsePositiveInt(e.target.value) });
+                  }}
                   onBlur={calcularTotal}
                   className="input-pos"
                   required
@@ -486,16 +551,26 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
                 <input
                   type="number"
                   value={formData.valor_total}
-                  onChange={(e) => setFormData({ ...formData, valor_total: parseInt(e.target.value) })}
+                  onChange={(e) => {
+                    setFormError('');
+                    setFormData({ ...formData, valor_total: parsePositiveInt(e.target.value) });
+                  }}
                   className="input-pos text-2xl font-bold"
                   required
                   step="any"
                   min={0}
                 />
-                <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
-                  <CheckCircle2 className="w-3 h-3" />
-                  Este es el precio que verá el cliente
-                </p>
+                {totalCoincide ? (
+                  <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" />
+                    Total coherente. Este es el precio que verá el cliente.
+                  </p>
+                ) : (
+                  <p className="text-xs text-amber-700 mt-1 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" />
+                    Total esperado: ${totalEsperado.toLocaleString('es-CO')}.
+                  </p>
+                )}
               </div>
             </div>
 
@@ -534,6 +609,7 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
 // Modal para editar tarifa
 function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () => void }) {
   const queryClient = useQueryClient();
+  const [formError, setFormError] = useState('');
   const [formData, setFormData] = useState({
     valor_rtm: tarifa.valor_rtm,
     valor_terceros: tarifa.valor_terceros,
@@ -549,8 +625,32 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
     },
   });
 
+  const totalEsperado = formData.valor_rtm + formData.valor_terceros;
+  const totalCoincide = formData.valor_total === totalEsperado;
+
+  const parsePositiveInt = (value: string): number => {
+    const parsed = parseInt(value, 10);
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+  };
+
+  const validateForm = (): string | null => {
+    if (formData.valor_rtm <= 0 || formData.valor_terceros <= 0 || formData.valor_total <= 0) {
+      return 'Los valores RTM, terceros y total deben ser mayores a cero.';
+    }
+    if (!totalCoincide) {
+      return `El valor total debe ser exactamente ${totalEsperado.toLocaleString('es-CO')}.`;
+    }
+    return null;
+  };
+
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    setFormError('');
+    const validationError = validateForm();
+    if (validationError) {
+      setFormError(validationError);
+      return;
+    }
     editarMutation.mutate(formData);
   };
 
@@ -586,6 +686,14 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
               </p>
             </div>
           )}
+          {formError && (
+            <div className="bg-amber-50 border-2 border-amber-200 rounded-lg p-4 mb-6">
+              <p className="text-amber-800 font-semibold text-center flex items-center justify-center gap-2">
+                <AlertTriangle className="w-5 h-5" />
+                {formError}
+              </p>
+            </div>
+          )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -596,7 +704,10 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
               <input
                 type="number"
                 value={formData.valor_rtm}
-                onChange={(e) => setFormData({ ...formData, valor_rtm: parseInt(e.target.value) })}
+                  onChange={(e) => {
+                    setFormError('');
+                    setFormData({ ...formData, valor_rtm: parsePositiveInt(e.target.value) });
+                  }}
                 onBlur={calcularTotal}
                 className="input-pos"
                 step="any"
@@ -612,7 +723,10 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
               <input
                 type="number"
                 value={formData.valor_terceros}
-                onChange={(e) => setFormData({ ...formData, valor_terceros: parseInt(e.target.value) })}
+                  onChange={(e) => {
+                    setFormError('');
+                    setFormData({ ...formData, valor_terceros: parsePositiveInt(e.target.value) });
+                  }}
                 onBlur={calcularTotal}
                 className="input-pos"
                 step="any"
@@ -628,11 +742,25 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
               <input
                 type="number"
                 value={formData.valor_total}
-                onChange={(e) => setFormData({ ...formData, valor_total: parseInt(e.target.value) })}
+                  onChange={(e) => {
+                    setFormError('');
+                    setFormData({ ...formData, valor_total: parsePositiveInt(e.target.value) });
+                  }}
                 className="input-pos text-xl font-bold"
                 step="any"
                 required
               />
+                {totalCoincide ? (
+                  <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" />
+                    Total coherente.
+                  </p>
+                ) : (
+                  <p className="text-xs text-amber-700 mt-1 flex items-center gap-1">
+                    <AlertTriangle className="w-3 h-3" />
+                    Total esperado: ${totalEsperado.toLocaleString('es-CO')}.
+                  </p>
+                )}
             </div>
 
             <div>

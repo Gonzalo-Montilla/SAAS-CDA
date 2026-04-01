@@ -7,6 +7,13 @@ import apiClient from '../api/client';
 
 const ReportesIngresosChart = lazy(() => import('../components/ReportesIngresosChart'));
 
+const formatLocalDate = (d: Date): string => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 interface DashboardData {
   fecha: string;
   resumen: {
@@ -67,21 +74,17 @@ interface Tramite {
 }
 
 export default function ReportesPage() {
+  const todayLocal = formatLocalDate(new Date());
   const [modoVista, setModoVista] = useState<'dia' | 'rango'>('dia');
-  const [fechaSeleccionada, setFechaSeleccionada] = useState<string>(
-    new Date().toISOString().split('T')[0]
-  );
-  const [fechaInicio, setFechaInicio] = useState<string>(
-    new Date().toISOString().split('T')[0]
-  );
-  const [fechaFin, setFechaFin] = useState<string>(
-    new Date().toISOString().split('T')[0]
-  );
+  const [fechaSeleccionada, setFechaSeleccionada] = useState<string>(todayLocal);
+  const [fechaInicio, setFechaInicio] = useState<string>(todayLocal);
+  const [fechaFin, setFechaFin] = useState<string>(todayLocal);
 
   // Estados para filtros locales de movimientos
   const [filtroTipo, setFiltroTipo] = useState<string>('todos');
   const [filtroMetodo, setFiltroMetodo] = useState<string>('todos');
   const [filtroConcepto, setFiltroConcepto] = useState<string>('');
+  const rangoInvalido = modoVista === 'rango' && fechaInicio > fechaFin;
 
   // Query principal: Dashboard general
   const { data, isLoading, isError } = useQuery<DashboardData>({
@@ -103,6 +106,7 @@ export default function ReportesPage() {
       const response = await apiClient.get(`/reportes/movimientos-detallados?${params}`);
       return response.data;
     },
+    enabled: !rangoInvalido,
     refetchInterval: 60000,
   });
 
@@ -116,6 +120,7 @@ export default function ReportesPage() {
       const response = await apiClient.get(`/reportes/desglose-conceptos?${params}`);
       return response.data;
     },
+    enabled: !rangoInvalido,
     refetchInterval: 60000,
   });
 
@@ -129,6 +134,7 @@ export default function ReportesPage() {
       const response = await apiClient.get(`/reportes/desglose-medios-pago?${params}`);
       return response.data;
     },
+    enabled: !rangoInvalido,
     refetchInterval: 60000,
   });
 
@@ -142,6 +148,7 @@ export default function ReportesPage() {
       const response = await apiClient.get(`/reportes/tramites-detallados?${params}`);
       return response.data;
     },
+    enabled: !rangoInvalido,
     refetchInterval: 60000,
   });
 
@@ -166,6 +173,10 @@ export default function ReportesPage() {
 
   // Función para exportar a CSV
   const exportarCSV = (datos: any[], nombreArchivo: string) => {
+    const periodoArchivo = modoVista === 'rango'
+      ? `${fechaInicio}_a_${fechaFin}`
+      : fechaSeleccionada;
+
     if (!datos || datos.length === 0) return;
 
     // Obtener encabezados
@@ -191,7 +202,7 @@ export default function ReportesPage() {
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
-    link.setAttribute('download', `${nombreArchivo}_${fechaSeleccionada}.csv`);
+    link.setAttribute('download', `${nombreArchivo}_${periodoArchivo}.csv`);
     link.style.visibility = 'hidden';
     document.body.appendChild(link);
     link.click();
@@ -274,7 +285,7 @@ export default function ReportesPage() {
                   type="date"
                   value={fechaSeleccionada}
                   onChange={(e) => setFechaSeleccionada(e.target.value)}
-                  max={new Date().toISOString().split('T')[0]}
+                  max={todayLocal}
                   className="px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
@@ -288,7 +299,7 @@ export default function ReportesPage() {
                     type="date"
                     value={fechaInicio}
                     onChange={(e) => setFechaInicio(e.target.value)}
-                    max={new Date().toISOString().split('T')[0]}
+                    max={todayLocal}
                     className="px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
@@ -300,7 +311,7 @@ export default function ReportesPage() {
                     type="date"
                     value={fechaFin}
                     onChange={(e) => setFechaFin(e.target.value)}
-                    max={new Date().toISOString().split('T')[0]}
+                    max={todayLocal}
                     min={fechaInicio}
                     className="px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
@@ -320,8 +331,8 @@ export default function ReportesPage() {
                       const hoy = new Date();
                       const hace7dias = new Date(hoy);
                       hace7dias.setDate(hace7dias.getDate() - 7);
-                      setFechaInicio(hace7dias.toISOString().split('T')[0]);
-                      setFechaFin(hoy.toISOString().split('T')[0]);
+                      setFechaInicio(formatLocalDate(hace7dias));
+                      setFechaFin(formatLocalDate(hoy));
                     }}
                     className="px-3 py-2 bg-purple-100 hover:bg-purple-200 text-purple-800 text-sm font-semibold rounded transition"
                   >
@@ -332,8 +343,8 @@ export default function ReportesPage() {
                       const hoy = new Date();
                       const hace15dias = new Date(hoy);
                       hace15dias.setDate(hace15dias.getDate() - 15);
-                      setFechaInicio(hace15dias.toISOString().split('T')[0]);
-                      setFechaFin(hoy.toISOString().split('T')[0]);
+                      setFechaInicio(formatLocalDate(hace15dias));
+                      setFechaFin(formatLocalDate(hoy));
                     }}
                     className="px-3 py-2 bg-purple-100 hover:bg-purple-200 text-purple-800 text-sm font-semibold rounded transition"
                   >
@@ -344,8 +355,8 @@ export default function ReportesPage() {
                       const hoy = new Date();
                       const hace30dias = new Date(hoy);
                       hace30dias.setDate(hace30dias.getDate() - 30);
-                      setFechaInicio(hace30dias.toISOString().split('T')[0]);
-                      setFechaFin(hoy.toISOString().split('T')[0]);
+                      setFechaInicio(formatLocalDate(hace30dias));
+                      setFechaFin(formatLocalDate(hoy));
                     }}
                     className="px-3 py-2 bg-purple-100 hover:bg-purple-200 text-purple-800 text-sm font-semibold rounded transition"
                   >
@@ -355,8 +366,8 @@ export default function ReportesPage() {
                     onClick={() => {
                       const hoy = new Date();
                       const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-                      setFechaInicio(primerDiaMes.toISOString().split('T')[0]);
-                      setFechaFin(hoy.toISOString().split('T')[0]);
+                      setFechaInicio(formatLocalDate(primerDiaMes));
+                      setFechaFin(formatLocalDate(hoy));
                     }}
                     className="px-3 py-2 bg-purple-100 hover:bg-purple-200 text-purple-800 text-sm font-semibold rounded transition"
                   >
@@ -371,7 +382,7 @@ export default function ReportesPage() {
                 // Exportar resumen consolidado
                 const resumenCompleto = [
                   { 
-                    fecha: fechaSeleccionada,
+                    fecha: modoVista === 'rango' ? `${fechaInicio} a ${fechaFin}` : fechaSeleccionada,
                     ingresos_dia: resumen.total_ingresos_dia,
                     egresos_dia: resumen.total_egresos_dia,
                     utilidad_dia: resumen.utilidad_dia,
@@ -394,6 +405,12 @@ export default function ReportesPage() {
             </button>
           </div>
         </div>
+
+        {rangoInvalido && (
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+            La fecha inicial no puede ser mayor que la fecha final.
+          </div>
+        )}
 
         {/* Tarjetas de Resumen Principal - Solo en modo día */}
         {modoVista === 'dia' && (

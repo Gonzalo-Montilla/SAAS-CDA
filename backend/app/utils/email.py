@@ -2,6 +2,8 @@
 Utilidad para envío de emails
 """
 import smtplib
+from email import encoders
+from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from app.core.config import settings
@@ -40,6 +42,45 @@ def enviar_email(destinatario: str, asunto: str, cuerpo_html: str) -> bool:
     
     except Exception as e:
         print(f"Error al enviar email: {e}")
+        return False
+
+
+def enviar_email_con_adjuntos(
+    destinatario: str,
+    asunto: str,
+    cuerpo_html: str,
+    adjuntos: list[tuple[str, bytes, str]],
+) -> bool:
+    """
+    Enviar email HTML con archivos adjuntos.
+    Cada adjunto: (nombre_archivo, contenido_bytes, mime_type).
+    """
+    try:
+        mensaje = MIMEMultipart("mixed")
+        mensaje["From"] = settings.SMTP_USER
+        mensaje["To"] = destinatario
+        mensaje["Subject"] = asunto
+
+        cuerpo = MIMEMultipart("alternative")
+        cuerpo.attach(MIMEText(cuerpo_html, "html", "utf-8"))
+        mensaje.attach(cuerpo)
+
+        for nombre, contenido, mime_type in adjuntos:
+            main_type, sub_type = (mime_type.split("/", 1) + ["octet-stream"])[:2]
+            part = MIMEBase(main_type, sub_type)
+            part.set_payload(contenido)
+            encoders.encode_base64(part)
+            part.add_header("Content-Disposition", f'attachment; filename="{nombre}"')
+            mensaje.attach(part)
+
+        with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
+            server.starttls()
+            server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
+            server.send_message(mensaje)
+
+        return True
+    except Exception as e:
+        print(f"Error al enviar email con adjuntos: {e}")
         return False
 
 
@@ -273,6 +314,44 @@ def generar_email_bienvenida_tenant(nombre_cda: str, nombre_admin: str, login_ur
                     <a href="{login_url}" class="button">Ingresar a mi CDA</a>
                 </div>
                 <p>Guarda este enlace y compártelo con tu equipo autorizado.</p>
+            </div>
+        </div>
+    </body>
+    </html>
+    """
+
+
+def generar_email_recibo_pago_saas(
+    nombre_cda: str,
+    referencia: str,
+    monto: float,
+    fecha_pago: str,
+    proximo_cobro: str,
+) -> str:
+    return f"""
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta charset="UTF-8">
+        <style>
+            body {{ font-family: Arial, sans-serif; color: #0f172a; }}
+            .container {{ max-width: 600px; margin: 0 auto; padding: 20px; background: #f8fafc; }}
+            .card {{ background: white; border-radius: 12px; padding: 24px; }}
+            .badge {{ display: inline-block; background: #dcfce7; color: #166534; padding: 6px 10px; border-radius: 999px; font-size: 12px; }}
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <div class="card">
+                <h2>Recibo de pago CDASOFT</h2>
+                <p>Hemos registrado tu pago para <strong>{nombre_cda}</strong>.</p>
+                <p><span class="badge">Referencia: {referencia}</span></p>
+                <ul>
+                    <li>Monto: <strong>${monto:,.0f}</strong></li>
+                    <li>Fecha de pago: <strong>{fecha_pago}</strong></li>
+                    <li>Próximo cobro: <strong>{proximo_cobro}</strong></li>
+                </ul>
+                <p>Adjunto encontrarás el recibo en PDF.</p>
             </div>
         </div>
     </body>

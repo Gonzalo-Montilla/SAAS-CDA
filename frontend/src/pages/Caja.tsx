@@ -49,6 +49,13 @@ import {
   Printer
 } from 'lucide-react';
 
+const formatLocalDate = (d: Date): string => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+};
+
 export default function CajaPage() {
   const queryClient = useQueryClient();
   const [vistaActual, setVistaActual] = useState<'apertura' | 'cobros' | 'cobrados-hoy' | 'cierre' | 'historial'>('cobros');
@@ -66,39 +73,7 @@ export default function CajaPage() {
   // Obtener vehículos pendientes
   const { data: vehiculosPendientes, isLoading: loadingVehiculos, error: errorVehiculos } = useQuery({
     queryKey: ['vehiculos-pendientes'],
-    queryFn: async () => {
-      console.log('🔍 Obteniendo vehículos pendientes...');
-      const data = await vehiculosApi.obtenerPendientes();
-      console.log('📦 Respuesta completa del servidor:', data);
-      console.log('📦 Tipo:', typeof data);
-      console.log('🔢 Es array:', Array.isArray(data));
-      
-      // Si es un objeto, intentar extraer el array
-      if (data && typeof data === 'object' && !Array.isArray(data)) {
-        console.log('⚠️ Es un objeto, buscando array dentro...');
-        console.log('🔑 Keys del objeto:', Object.keys(data));
-        
-        // Intentar diferentes estructuras comunes
-        if ('vehiculos' in data) {
-          console.log('✅ Encontrado en data.vehiculos');
-          return Array.isArray((data as any).vehiculos) ? (data as any).vehiculos : [];
-        }
-        if ('data' in data) {
-          console.log('✅ Encontrado en data.data');
-          return Array.isArray((data as any).data) ? (data as any).data : [];
-        }
-        if ('items' in data) {
-          console.log('✅ Encontrado en data.items');
-          return Array.isArray((data as any).items) ? (data as any).items : [];
-        }
-        
-        console.error('❌ No se encontró array en el objeto');
-        return [];
-      }
-      
-      console.log('🔢 Cantidad:', Array.isArray(data) ? data.length : 'N/A');
-      return Array.isArray(data) ? data : [];
-    },
+    queryFn: vehiculosApi.obtenerPendientes,
     enabled: !!cajaActiva, // Solo si hay caja activa
     refetchInterval: 10000, // Refrescar cada 10 segundos
     retry: 1,
@@ -1871,13 +1846,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
   // Obtener vehículos pendientes para validar antes de cerrar
   const { data: vehiculosPendientesData } = useQuery({
     queryKey: ['vehiculos-pendientes'],
-    queryFn: async () => {
-      const data = await vehiculosApi.obtenerPendientes();
-      if (data && typeof data === 'object' && !Array.isArray(data) && 'vehiculos' in data) {
-        return Array.isArray((data as any).vehiculos) ? (data as any).vehiculos : [];
-      }
-      return Array.isArray(data) ? data : [];
-    },
+    queryFn: vehiculosApi.obtenerPendientes,
     retry: 1,
   });
 
@@ -1903,7 +1872,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
           const url = window.URL.createObjectURL(blob);
           const a = document.createElement('a');
           a.href = url;
-          a.download = `comprobante_cierre_caja_${new Date().toISOString().slice(0,10)}.pdf`;
+          a.download = `comprobante_cierre_caja_${formatLocalDate(new Date())}.pdf`;
           document.body.appendChild(a);
           a.click();
           document.body.removeChild(a);
@@ -1927,15 +1896,14 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
   const handleCerrar = () => {
     // Validar si hay vehículos pendientes
     if (vehiculosPendientes.length > 0) {
-      const confirmacion = window.confirm(
-        `Hay ${vehiculosPendientes.length} vehículo(s) pendiente(s) de cobro.\n\n` +
-        `Placas pendientes: ${vehiculosPendientes.slice(0, 5).map((v: Vehiculo) => v.placa).join(', ')}` +
+      alert(
+        `No es posible cerrar la caja con vehículos pendientes de cobro.\n\n` +
+        `Pendientes: ${vehiculosPendientes.length}\n` +
+        `Placas: ${vehiculosPendientes.slice(0, 5).map((v: Vehiculo) => v.placa).join(', ')}` +
         `${vehiculosPendientes.length > 5 ? '...' : ''}\n\n` +
-        `¿Confirmas cerrar la caja sin cobrarlos?`
+        `Finaliza estos cobros para continuar con el cierre.`
       );
-      if (!confirmacion) {
-        return;
-      }
+      return;
     }
 
     // Validar diferencias grandes (faltantes o sobrantes mayores a $20,000)
@@ -2742,7 +2710,7 @@ function HistorialCajas() {
                               const url = window.URL.createObjectURL(blob);
                               const a = document.createElement('a');
                               a.href = url;
-                              a.download = `comprobante_cierre_${caja.turno}_${new Date(caja.fecha_cierre!).toISOString().slice(0,10)}.pdf`;
+                              a.download = `comprobante_cierre_${caja.turno}_${formatLocalDate(new Date(caja.fecha_cierre!))}.pdf`;
                               document.body.appendChild(a);
                               a.click();
                               document.body.removeChild(a);

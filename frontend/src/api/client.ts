@@ -25,6 +25,7 @@ apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
     const originalRequest = error.config;
+    const currentScope = localStorage.getItem('auth_scope') || 'tenant';
 
     // Si el token expiró (401) y no hemos reintentado ya
     if (error.response?.status === 401 && !originalRequest._retry) {
@@ -32,9 +33,8 @@ apiClient.interceptors.response.use(
 
       try {
         const refreshToken = localStorage.getItem('refresh_token');
-        const authScope = localStorage.getItem('auth_scope') || 'tenant';
         const refreshEndpoint =
-          authScope === 'saas' ? `${API_URL}/saas/auth/refresh` : `${API_URL}/auth/refresh`;
+          currentScope === 'saas' ? `${API_URL}/saas/auth/refresh` : `${API_URL}/auth/refresh`;
 
         if (refreshToken) {
           const response = await axios.post(refreshEndpoint, {
@@ -56,7 +56,7 @@ apiClient.interceptors.response.use(
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
         localStorage.removeItem('auth_scope');
-        window.location.href = '/login';
+        window.location.href = currentScope === 'saas' ? '/saas/login' : '/login';
         return Promise.reject(refreshError);
       }
     }

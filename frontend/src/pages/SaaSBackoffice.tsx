@@ -150,6 +150,10 @@ export default function SaaSBackoffice() {
     },
   });
 
+  const currentSaaSRole = permissionsQuery.data?.role;
+  const canReadSupport = currentSaaSRole === 'owner' || currentSaaSRole === 'soporte' || currentSaaSRole === 'comercial';
+  const canManageSupport = currentSaaSRole === 'owner' || currentSaaSRole === 'soporte';
+
   const tenantsQuery = useQuery({
     queryKey: ['saas-tenants-list'],
     queryFn: async () => {
@@ -184,7 +188,7 @@ export default function SaaSBackoffice() {
       const response = await apiClient.get<SaaSSupportTicketItem[]>(`/saas/auth/support/tickets?${params.toString()}`);
       return response.data;
     },
-    enabled: activeModule === 'soporte',
+    enabled: activeModule === 'soporte' && canReadSupport,
   });
 
   const supportSummaryQuery = useQuery({
@@ -193,7 +197,8 @@ export default function SaaSBackoffice() {
       const response = await apiClient.get<SaaSSupportSummary>('/saas/auth/support/summary');
       return response.data;
     },
-    refetchInterval: 15000,
+    enabled: canReadSupport,
+    refetchInterval: canReadSupport ? 15000 : false,
     refetchOnWindowFocus: true,
   });
 
@@ -879,6 +884,11 @@ export default function SaaSBackoffice() {
                 {supportActionSuccess}
               </p>
             )}
+            {!canManageSupport && (
+              <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                Tu rol tiene acceso de lectura a soporte. Solo owner y soporte pueden actualizar tickets.
+              </p>
+            )}
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
               <select
                 value={supportTenantFilter}
@@ -962,7 +972,7 @@ export default function SaaSBackoffice() {
                               <button
                                 type="button"
                                 onClick={() => updateSupportTicketMutation.mutate({ ticketId: ticket.id, status: 'en_progreso' })}
-                                disabled={updateSupportTicketMutation.isLoading || ticket.status === 'en_progreso'}
+                                disabled={!canManageSupport || updateSupportTicketMutation.isLoading || ticket.status === 'en_progreso'}
                                 className="btn-chip"
                               >
                                 En progreso
@@ -974,7 +984,7 @@ export default function SaaSBackoffice() {
                                   setSupportReplyMessage(ticket.tenant_response_message || '');
                                   setSupportActionError('');
                                 }}
-                                disabled={updateSupportTicketMutation.isLoading}
+                                disabled={!canManageSupport || updateSupportTicketMutation.isLoading}
                                 className="btn-chip"
                               >
                                 Responder y resolver

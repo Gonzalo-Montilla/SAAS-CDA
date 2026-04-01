@@ -99,11 +99,7 @@ function Dashboard() {
   // Obtener resumen del mes actual (prioridad 1)
   const { data: resumen, isLoading: loadingResumen } = useQuery({
     queryKey: ['tesoreria-resumen'],
-    queryFn: async () => {
-      const data = await tesoreriaApi.obtenerResumen();
-      console.log('Resumen recibido del backend:', data);
-      return data;
-    },
+    queryFn: () => tesoreriaApi.obtenerResumen(),
     refetchInterval: 60000,
     staleTime: 30000,
   });
@@ -460,7 +456,7 @@ function RegistrarMovimiento() {
   // Hook de mutación (debe estar antes de cualquier return)
   const registrarMutation = useMutation({
     mutationFn: tesoreriaApi.crearMovimiento,
-    onSuccess: (movimientoCreado) => {
+    onSuccess: async (movimientoCreado) => {
       // Invalidar TODAS las queries de tesorería (incluso las inactivas)
       queryClient.invalidateQueries({ queryKey: ['tesoreria-saldo'] });
       queryClient.invalidateQueries({ queryKey: ['tesoreria-resumen'] });
@@ -472,19 +468,19 @@ function RegistrarMovimiento() {
       queryClient.refetchQueries({ queryKey: ['tesoreria-resumen'] });
       queryClient.refetchQueries({ queryKey: ['tesoreria-movimientos-recientes'] });
       queryClient.refetchQueries({ queryKey: ['tesoreria-desglose'] });
+      queryClient.refetchQueries({ queryKey: ['tesoreria-desglose-efectivo'] });
+      queryClient.refetchQueries({ queryKey: ['tesoreria-inventario-disponible'] });
       
       // Si es egreso, descargar comprobante automáticamente
       if (tipoMovimiento === 'egreso' && movimientoCreado?.id) {
-        const url = `${import.meta.env.VITE_API_URL}/tesoreria/movimientos/${movimientoCreado.id}/comprobante`;
-        const token = localStorage.getItem('access_token');
-        
-        // Crear enlace temporal para descarga
-        const a = document.createElement('a');
-        a.href = `${url}?t=${token}`;
-        a.download = `Comprobante_Egreso_${movimientoCreado.id}.pdf`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
+        try {
+          await tesoreriaApi.descargarComprobanteEgreso(movimientoCreado.id);
+        } catch {
+          setFeedback({
+            type: 'error',
+            message: 'El movimiento fue registrado, pero no fue posible descargar el comprobante.',
+          });
+        }
       }
       
       // Limpiar formulario
@@ -517,10 +513,6 @@ function RegistrarMovimiento() {
     setFeedback(null);
 
     const monto = parseFloat(formData.monto);
-    console.log('=== DEBUG REGISTRO MOVIMIENTO ===');
-    console.log('formData.monto (string):', formData.monto);
-    console.log('monto parseado (number):', monto);
-    console.log('tipo:', tipoMovimiento);
     
     // Validar desglose de efectivo si el método de pago es efectivo
     if (formData.metodo_pago === 'efectivo') {
@@ -596,8 +588,6 @@ function RegistrarMovimiento() {
       data.desglose_efectivo = desgloseEfectivo;
     }
 
-    console.log('Data que se envía al backend:', data);
-    console.log('=================================');
     registrarMutation.mutate(data);
   };
 
@@ -1099,20 +1089,7 @@ function Historial() {
                         <button
                           onClick={async () => {
                             try {
-                              // Usar apiClient que maneja el token automáticamente
-                              await tesoreriaApi.obtenerMovimiento(mov.id);
-                              
-                              // Abrir URL directamente - el navegador manejará la descarga
-                              const url = `${import.meta.env.VITE_API_URL}/tesoreria/movimientos/${mov.id}/comprobante`;
-                              const token = localStorage.getItem('access_token');
-                              
-                              // Crear enlace temporal
-                              const a = document.createElement('a');
-                              a.href = `${url}?t=${token}`;
-                              a.download = `Comprobante_${mov.id}.pdf`;
-                              document.body.appendChild(a);
-                              a.click();
-                              document.body.removeChild(a);
+                              await tesoreriaApi.descargarComprobanteEgreso(mov.id);
                             } catch (error) {
                               console.error('Error:', error);
                               setFeedback({

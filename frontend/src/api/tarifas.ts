@@ -1,6 +1,11 @@
 import apiClient from './client';
 import type { Tarifa, ComisionSOAT } from '../types';
 
+interface TarifasPorAnoResponse {
+  ano: number;
+  tarifas: Tarifa[];
+}
+
 export const tarifasApi = {
   // Obtener tarifas vigentes
   obtenerVigentes: async (): Promise<Tarifa[]> => {
@@ -9,8 +14,8 @@ export const tarifasApi = {
   },
 
   // Obtener tarifas de un año específico
-  obtenerPorAno: async (ano: number): Promise<Tarifa[]> => {
-    const response = await apiClient.get<Tarifa[]>(`/tarifas/por-ano/${ano}`);
+  obtenerPorAno: async (ano: number): Promise<TarifasPorAnoResponse> => {
+    const response = await apiClient.get<TarifasPorAnoResponse>(`/tarifas/por-ano/${ano}`);
     return response.data;
   },
 

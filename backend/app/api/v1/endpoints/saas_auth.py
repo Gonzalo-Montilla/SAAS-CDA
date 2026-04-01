@@ -24,6 +24,7 @@ from app.core.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
+    validate_password_strength,
 )
 from app.models.audit_log import AuditLog
 from app.models.saas_user import SaaSUser
@@ -36,6 +37,20 @@ from app.utils.email import enviar_email_con_adjuntos, generar_email_recibo_pago
 from app.utils.saas_billing_receipts import build_saas_payment_receipt_pdf
 
 router = APIRouter()
+
+
+def utcnow_naive() -> datetime:
+    """Retorna datetime UTC sin tzinfo para columnas TIMESTAMP sin zona."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def as_naive_utc(dt: datetime | None) -> datetime | None:
+    """Normaliza datetime (aware/naive) a naive UTC para comparaciones seguras."""
+    if dt is None:
+        return None
+    if dt.tzinfo is not None:
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+    return dt
 
 
 ALLOWED_GLOBAL_ROLES = {"owner", "finanzas", "comercial", "soporte"}
@@ -298,16 +313,10 @@ class SaaSPaymentHistoryItem(BaseModel):
 
 
 def validate_saas_password(password: str):
-    if len(password) < 10:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La contraseña debe tener mínimo 10 caracteres")
-    if not any(c.isupper() for c in password):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La contraseña debe incluir al menos una mayúscula")
-    if not any(c.islower() for c in password):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La contraseña debe incluir al menos una minúscula")
-    if not any(c.isdigit() for c in password):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La contraseña debe incluir al menos un número")
-    if not any(c in "!@#$%^&*()-_=+[]{};:,.?/|" for c in password):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La contraseña debe incluir al menos un carácter especial")
+    try:
+        validate_password_strength(password, min_length=10)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
 def calculate_plan_quote(plan_code: str, sedes_totales: int) -> tuple[dict, int, float, float, float]:
@@ -489,7 +498,9 @@ def saas_login(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    if user.bloqueado_hasta and user.bloqueado_hasta > datetime.now(timezone.utc):
+    now_ts = utcnow_naive()
+    bloqueado_hasta = as_naive_utc(user.bloqueado_hasta)
+    if bloqueado_hasta and bloqueado_hasta > now_ts:
         create_saas_audit_log(
             db=db,
             action="saas_failed_login",
@@ -508,7 +519,7 @@ def saas_login(
         if user.intentos_fallidos >= 5:
             # Lockout básico para backoffice global (15 minutos).
             from datetime import timedelta
-            user.bloqueado_hasta = datetime.now(timezone.utc) + timedelta(minutes=15)
+            user.bloqueado_hasta = utcnow_naive() + timedelta(minutes=15)
             user.intentos_fallidos = 0
         db.commit()
         create_saas_audit_log(
@@ -1417,7 +1428,7 @@ def support_summary(
         en_progreso=en_progreso,
         sin_resolver=abiertos + en_progreso,
         criticos_abiertos=criticos_abiertos,
-        notificaciones_pendientes=abiertos,
+        notificaciones_pendientes=abiertos + en_progreso,
     )
 
 
@@ -1510,7 +1521,7 @@ def update_support_ticket(
                 )
         ticket.status = next_status
         if next_status in {"resuelto", "cerrado"}:
-            ticket.resolved_at = datetime.now(timezone.utc)
+            ticket.resolved_at = utcnow_naive()
         elif next_status in {"abierto", "en_progreso"}:
             ticket.resolved_at = None
     if payload.assigned_to_user_id is not None:
@@ -1531,7 +1542,7 @@ def update_support_ticket(
         tenant_response_message = payload.tenant_response_message.strip()
         ticket.tenant_response_message = tenant_response_message or None
         if tenant_response_message:
-            ticket.tenant_responded_at = datetime.now(timezone.utc)
+            ticket.tenant_responded_at = utcnow_naive()
             ticket.responded_by_saas_user_id = current_user.id
 
     db.commit()
@@ -1682,12 +1693,15 @@ def saas_security_summary(
     db: Session = Depends(get_db),
     current_user: SaaSUser = Depends(require_saas_role(["owner", "soporte"])),
 ):
-    now_ts = datetime.now(timezone.utc)
+    now_ts = utcnow_naive()
     all_users = db.query(SaaSUser).all()
     total_users = len(all_users)
     active_users = len([u for u in all_users if u.activo])
     mfa_users = len([u for u in all_users if u.mfa_enabled])
-    locked_users = len([u for u in all_users if u.bloqueado_hasta and u.bloqueado_hasta > now_ts])
+    locked_users = len([
+        u for u in all_users
+        if as_naive_utc(u.bloqueado_hasta) and as_naive_utc(u.bloqueado_hasta) > now_ts
+    ])
 
     return SaaSSecuritySummary(
         current_user_email=current_user.email,

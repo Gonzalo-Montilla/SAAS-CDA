@@ -10,7 +10,14 @@ import secrets
 from uuid import UUID
 
 from app.core.deps import get_db, get_current_user, get_admin
-from app.core.security import verify_password, get_password_hash, create_access_token, create_refresh_token, decode_token
+from app.core.security import (
+    verify_password,
+    get_password_hash,
+    create_access_token,
+    create_refresh_token,
+    decode_token,
+    validate_password_strength,
+)
 from app.core.config import settings
 from app.models.usuario import Usuario
 from app.models.tenant import Tenant
@@ -45,6 +52,11 @@ def register(
             detail="El email ya está registrado"
         )
     
+    try:
+        validate_password_strength(user_data.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
     # Crear usuario
     hashed_password = get_password_hash(user_data.password)
     new_user = Usuario(
@@ -285,6 +297,11 @@ def change_password(
             detail="Contraseña actual incorrecta"
         )
     
+    try:
+        validate_password_strength(password_data.new_password)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
     # Actualizar contraseña
     current_user.hashed_password = get_password_hash(password_data.new_password)
     db.commit()
@@ -410,6 +427,11 @@ def reset_password(
             detail="Usuario no encontrado"
         )
     
+    try:
+        validate_password_strength(request.new_password)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
     # Actualizar contraseña
     usuario.hashed_password = get_password_hash(request.new_password)
     usuario.updated_at = utcnow_naive()

@@ -22,6 +22,15 @@ interface Estadisticas {
   por_rol: Record<string, number>;
 }
 
+const validatePasswordPolicy = (password: string): string | null => {
+  if (password.length < 10) return 'La contraseña debe tener mínimo 10 caracteres.';
+  if (!/[A-Z]/.test(password)) return 'La contraseña debe incluir al menos una mayúscula.';
+  if (!/[a-z]/.test(password)) return 'La contraseña debe incluir al menos una minúscula.';
+  if (!/[0-9]/.test(password)) return 'La contraseña debe incluir al menos un número.';
+  if (!/[!@#$%^&*()\-_=+\[\]{};:,.?/|]/.test(password)) return 'La contraseña debe incluir al menos un carácter especial.';
+  return null;
+};
+
 export default function UsuariosPage() {
   const queryClient = useQueryClient();
   const [buscar, setBuscar] = useState('');
@@ -204,6 +213,11 @@ export default function UsuariosPage() {
         setFeedback({ type: 'error', message: 'La contraseña es obligatoria para crear el usuario.' });
         return;
       }
+      const passwordError = validatePasswordPolicy(formData.password);
+      if (passwordError) {
+        setFeedback({ type: 'error', message: passwordError });
+        return;
+      }
       crearMutation.mutate(formData);
     }
   };
@@ -214,6 +228,11 @@ export default function UsuariosPage() {
     
     if (!passwordData.password) {
       setFeedback({ type: 'error', message: 'La nueva contraseña no puede estar vacía.' });
+      return;
+    }
+    const passwordError = validatePasswordPolicy(passwordData.password);
+    if (passwordError) {
+      setFeedback({ type: 'error', message: passwordError });
       return;
     }
     
@@ -538,7 +557,7 @@ export default function UsuariosPage() {
                         value={formData.password}
                         onChange={(e) => setFormData({ ...formData, password: e.target.value })}
                         className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 transition-all placeholder-gray-400"
-                        placeholder="Mínimo 6 caracteres"
+                        placeholder="Mínimo 10, con mayúscula, minúscula, número y símbolo"
                         required
                       />
                     </div>
@@ -637,7 +656,7 @@ export default function UsuariosPage() {
                       onChange={(e) => setPasswordData({ password: e.target.value })}
                       className="input"
                       required
-                      placeholder="Ingresa la nueva contraseña"
+                      placeholder="Mínimo 10, con mayúscula, minúscula, número y símbolo"
                     />
                   </div>
 

@@ -7,6 +7,8 @@ import { ToastProvider } from './contexts/ToastContext';
 import ErrorBoundary from './components/ErrorBoundary';
 import type { AuthScope } from './types';
 
+type TenantRole = 'administrador' | 'cajero' | 'recepcionista' | 'contador';
+
 const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Recepcion = lazy(() => import('./pages/Recepcion'));
@@ -34,11 +36,13 @@ function RouteLoadingFallback() {
 function ProtectedRoute({
   children,
   requiredScope,
+  requiredTenantRoles,
 }: {
   children: ReactNode;
   requiredScope?: AuthScope;
+  requiredTenantRoles?: TenantRole[];
 }) {
-  const { isAuthenticated, loading, authScope } = useAuth();
+  const { isAuthenticated, loading, authScope, user } = useAuth();
 
   if (loading) {
     return (
@@ -58,6 +62,13 @@ function ProtectedRoute({
 
   if (requiredScope && authScope !== requiredScope) {
     return <Navigate to={authScope === 'saas' ? '/saas/backoffice' : '/dashboard'} replace />;
+  }
+
+  if (requiredScope === 'tenant' && requiredTenantRoles && requiredTenantRoles.length > 0) {
+    const tenantRole = (user as { rol?: TenantRole } | null)?.rol;
+    if (!tenantRole || !requiredTenantRoles.includes(tenantRole)) {
+      return <Navigate to="/dashboard" replace />;
+    }
   }
 
   return <>{children}</>;
@@ -112,7 +123,7 @@ function App() {
             <Route
               path="/tarifas"
               element={
-                <ProtectedRoute requiredScope="tenant">
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador']}>
                   <Tarifas />
                 </ProtectedRoute>
               }
@@ -120,7 +131,7 @@ function App() {
             <Route
               path="/tesoreria"
               element={
-                <ProtectedRoute requiredScope="tenant">
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador']}>
                   <Tesoreria />
                 </ProtectedRoute>
               }
@@ -128,7 +139,7 @@ function App() {
             <Route
               path="/reportes"
               element={
-                <ProtectedRoute requiredScope="tenant">
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador', 'contador']}>
                   <Reportes />
                 </ProtectedRoute>
               }
@@ -136,7 +147,7 @@ function App() {
             <Route
               path="/usuarios"
               element={
-                <ProtectedRoute requiredScope="tenant">
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador']}>
                   <Usuarios />
                 </ProtectedRoute>
               }

@@ -50,6 +50,7 @@ def abrir_caja(
     caja_existente = db.query(Caja).filter(
         and_(
             Caja.usuario_id == current_user.id,
+            Caja.tenant_id == current_user.tenant_id,
             Caja.estado == EstadoCaja.ABIERTA
         )
     ).first()
@@ -233,10 +234,10 @@ def cerrar_caja(
             detail="No tienes una caja abierta para cerrar"
         )
     
-    # Validar que no haya vehículos en proceso sin cobrar
+    # Validar que no haya vehículos pendientes sin cobrar en el tenant.
+    # Se alinea con la misma lógica mostrada en UI (/vehiculos/pendientes).
     vehiculos_pendientes = db.query(VehiculoProceso).filter(
         and_(
-            VehiculoProceso.caja_id == caja.id,
             VehiculoProceso.tenant_id == current_user.tenant_id,
             VehiculoProceso.estado == EstadoVehiculo.REGISTRADO
         )

@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 from app.core.deps import get_db, get_current_user, get_admin
 from app.models.usuario import Usuario, RolEnum
-from app.core.security import get_password_hash
+from app.core.security import get_password_hash, validate_password_strength
 from pydantic import BaseModel, EmailStr, field_serializer
 from uuid import UUID
 from app.utils.audit import create_audit_log
@@ -198,6 +198,11 @@ def crear_usuario(
             detail="Ya existe un usuario con este email"
         )
     
+    try:
+        validate_password_strength(usuario_data.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
     # Crear usuario
     nuevo_usuario = Usuario(
         tenant_id=current_user.tenant_id,
@@ -336,6 +341,11 @@ def cambiar_password(
             detail="Usuario no encontrado"
         )
     
+    try:
+        validate_password_strength(password_data.password)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
     # Actualizar contraseña
     usuario.hashed_password = get_password_hash(password_data.password)
     usuario.updated_at = datetime.now(timezone.utc)
@@ -360,6 +370,7 @@ def cambiar_password(
 
 @router.patch("/{usuario_id}/toggle-estado")
 def toggle_estado_usuario(
+    request: Request,
     usuario_id: str,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_admin)
@@ -385,12 +396,28 @@ def toggle_estado_usuario(
             detail="No puedes desactivar tu propia cuenta"
         )
     
+    estado_anterior = usuario.activo
+
     # Toggle estado
     usuario.activo = not usuario.activo
     usuario.updated_at = datetime.now(timezone.utc)
     
     db.commit()
     db.refresh(usuario)
+
+    create_audit_log(
+        db=db,
+        action=AuditAction.UPDATE_USER,
+        description=f"Estado de usuario cambiado: {usuario.email} ({'activo' if estado_anterior else 'inactivo'} -> {'activo' if usuario.activo else 'inactivo'})",
+        usuario=current_user,
+        request=request,
+        metadata={
+            "usuario_afectado_id": str(usuario.id),
+            "usuario_afectado_email": usuario.email,
+            "estado_anterior": estado_anterior,
+            "estado_nuevo": usuario.activo,
+        },
+    )
     
     return {
         "message": f"Usuario {'activado' if usuario.activo else 'desactivado'} exitosamente",

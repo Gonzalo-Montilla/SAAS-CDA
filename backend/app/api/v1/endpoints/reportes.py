@@ -7,8 +7,9 @@ from sqlalchemy import func, and_
 from datetime import datetime, timedelta, date, timezone
 from decimal import Decimal
 from typing import Optional
+from calendar import monthrange
 
-from app.core.deps import get_db, get_current_user, get_admin
+from app.core.deps import get_db, get_contador_or_admin
 from app.models.usuario import Usuario
 from app.models.caja import MovimientoCaja
 from app.models.tesoreria import MovimientoTesoreria
@@ -17,22 +18,47 @@ from app.models.vehiculo import VehiculoProceso
 router = APIRouter()
 
 
+def resolve_report_date_window(
+    *,
+    fecha: Optional[date],
+    fecha_inicio: Optional[date],
+    fecha_fin: Optional[date],
+) -> tuple[datetime, datetime, str]:
+    """
+    Resuelve y valida ventana de fechas para reportes.
+    - Día: usa `fecha` o hoy.
+    - Rango: requiere fecha_inicio y fecha_fin.
+    """
+    if (fecha_inicio is None) != (fecha_fin is None):
+        raise ValueError("Debes enviar fecha_inicio y fecha_fin juntos para usar modo rango")
+
+    if fecha_inicio and fecha_fin:
+        if fecha_inicio > fecha_fin:
+            raise ValueError("fecha_inicio no puede ser mayor que fecha_fin")
+        inicio_dt = datetime.combine(fecha_inicio, datetime.min.time())
+        fin_dt = datetime.combine(fecha_fin, datetime.max.time())
+        label = f"{fecha_inicio.strftime('%Y-%m-%d')} a {fecha_fin.strftime('%Y-%m-%d')}"
+        return inicio_dt, fin_dt, label
+
+    fecha_base = fecha or date.today()
+    inicio_dt = datetime.combine(fecha_base, datetime.min.time())
+    fin_dt = datetime.combine(fecha_base, datetime.max.time())
+    label = fecha_base.strftime("%Y-%m-%d")
+    return inicio_dt, fin_dt, label
+
+
 @router.get("/dashboard-general")
 def obtener_dashboard_general(
     fecha: Optional[date] = Query(None, description="Fecha específica (default: hoy)"),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin)
+    current_user: Usuario = Depends(get_contador_or_admin)
 ):
     """
     Dashboard General del CDA - Consolidado de todos los módulos
     """
-    # Si no se especifica fecha, usar hoy
-    if not fecha:
-        fecha = date.today()
-    
-    # Convertir a datetime para consultas
-    fecha_inicio = datetime.combine(fecha, datetime.min.time())
-    fecha_fin = datetime.combine(fecha, datetime.max.time())
+    fecha_base = fecha or date.today()
+    fecha_inicio = datetime.combine(fecha_base, datetime.min.time())
+    fecha_fin = datetime.combine(fecha_base, datetime.max.time())
     
     # ==================== INGRESOS DEL DÍA ====================
     
@@ -110,7 +136,7 @@ def obtener_dashboard_general(
     
     ingresos_7_dias = []
     for i in range(6, -1, -1):  # De 6 días atrás hasta hoy
-        dia = fecha - timedelta(days=i)
+        dia = fecha_base - timedelta(days=i)
         dia_inicio = datetime.combine(dia, datetime.min.time())
         dia_fin = datetime.combine(dia, datetime.max.time())
         
@@ -158,7 +184,7 @@ def obtener_dashboard_general(
     }
     
     return {
-        "fecha": fecha.strftime("%Y-%m-%d"),
+        "fecha": fecha_base.strftime("%Y-%m-%d"),
         "resumen": {
             "total_ingresos_dia": total_ingresos_dia,
             "total_egresos_dia": total_egresos_dia,
@@ -178,7 +204,7 @@ def obtener_movimientos_detallados(
     fecha_inicio: Optional[date] = Query(None, description="Fecha inicio para rango"),
     fecha_fin: Optional[date] = Query(None, description="Fecha fin para rango"),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin)
+    current_user: Usuario = Depends(get_contador_or_admin)
 ):
     """
     Lista detallada de todos los movimientos del día o rango (Caja + Tesorería)
@@ -186,17 +212,15 @@ def obtener_movimientos_detallados(
     """
     from app.models.caja import Caja
     
-    # Determinar rango de fechas
-    if fecha_inicio and fecha_fin:
-        # Modo rango
-        fecha_inicio_dt = datetime.combine(fecha_inicio, datetime.min.time())
-        fecha_fin_dt = datetime.combine(fecha_fin, datetime.max.time())
-    else:
-        # Modo día único
-        if not fecha:
-            fecha = date.today()
-        fecha_inicio_dt = datetime.combine(fecha, datetime.min.time())
-        fecha_fin_dt = datetime.combine(fecha, datetime.max.time())
+    try:
+        fecha_inicio_dt, fecha_fin_dt, etiqueta_fecha = resolve_report_date_window(
+            fecha=fecha,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+        )
+    except ValueError as exc:
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     
     # ==================== MOVIMIENTOS DE CAJA ====================
     movimientos_caja = db.query(MovimientoCaja).filter(
@@ -221,6 +245,7 @@ def obtener_movimientos_detallados(
         lista_caja.append({
             "id": str(mov.id),
             "hora": mov.created_at.strftime("%H:%M:%S"),
+            "_sort_ts": mov.created_at.isoformat(),
             "modulo": "Caja",
             "turno": turno,
             "tipo_movimiento": tipo_mov,
@@ -258,6 +283,7 @@ def obtener_movimientos_detallados(
         lista_tesoreria.append({
             "id": str(mov.id),
             "hora": mov.fecha_movimiento.strftime("%H:%M:%S"),
+            "_sort_ts": mov.fecha_movimiento.isoformat(),
             "modulo": "Tesorería",
             "turno": "N/A",
             "tipo_movimiento": tipo_mov,
@@ -272,13 +298,9 @@ def obtener_movimientos_detallados(
     
     # Combinar y ordenar por hora
     todos_movimientos = lista_caja + lista_tesoreria
-    todos_movimientos.sort(key=lambda x: x["hora"])
-    
-    # Determinar etiqueta de fecha para respuesta
-    if fecha_inicio and fecha_fin:
-        etiqueta_fecha = f"{fecha_inicio.strftime('%Y-%m-%d')} a {fecha_fin.strftime('%Y-%m-%d')}"
-    else:
-        etiqueta_fecha = fecha.strftime("%Y-%m-%d")
+    todos_movimientos.sort(key=lambda x: x["_sort_ts"])
+    for mov in todos_movimientos:
+        mov.pop("_sort_ts", None)
     
     return {
         "fecha": etiqueta_fecha,
@@ -293,25 +315,21 @@ def obtener_desglose_conceptos(
     fecha_inicio: Optional[date] = Query(None, description="Fecha inicio para rango"),
     fecha_fin: Optional[date] = Query(None, description="Fecha fin para rango"),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin)
+    current_user: Usuario = Depends(get_contador_or_admin)
 ):
     """
     Desglose de ingresos y egresos por concepto/categoría
     Soporta modo día único o rango de fechas
     """
-    # Determinar rango de fechas
-    if fecha_inicio and fecha_fin:
-        # Modo rango
-        fecha_inicio_dt = datetime.combine(fecha_inicio, datetime.min.time())
-        fecha_fin_dt = datetime.combine(fecha_fin, datetime.max.time())
-        etiqueta_fecha = f"{fecha_inicio.strftime('%Y-%m-%d')} a {fecha_fin.strftime('%Y-%m-%d')}"
-    else:
-        # Modo día único
-        if not fecha:
-            fecha = date.today()
-        fecha_inicio_dt = datetime.combine(fecha, datetime.min.time())
-        fecha_fin_dt = datetime.combine(fecha, datetime.max.time())
-        etiqueta_fecha = fecha.strftime("%Y-%m-%d")
+    try:
+        fecha_inicio_dt, fecha_fin_dt, etiqueta_fecha = resolve_report_date_window(
+            fecha=fecha,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+        )
+    except ValueError as exc:
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     
     # ==================== INGRESOS POR CONCEPTO ====================
     ingresos_por_concepto = {}
@@ -395,25 +413,21 @@ def obtener_desglose_medios_pago(
     fecha_inicio: Optional[date] = Query(None, description="Fecha inicio para rango"),
     fecha_fin: Optional[date] = Query(None, description="Fecha fin para rango"),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin)
+    current_user: Usuario = Depends(get_contador_or_admin)
 ):
     """
     Desglose de movimientos por medio de pago
     Soporta modo día único o rango de fechas
     """
-    # Determinar rango de fechas
-    if fecha_inicio and fecha_fin:
-        # Modo rango
-        fecha_inicio_dt = datetime.combine(fecha_inicio, datetime.min.time())
-        fecha_fin_dt = datetime.combine(fecha_fin, datetime.max.time())
-        etiqueta_fecha = f"{fecha_inicio.strftime('%Y-%m-%d')} a {fecha_fin.strftime('%Y-%m-%d')}"
-    else:
-        # Modo día único
-        if not fecha:
-            fecha = date.today()
-        fecha_inicio_dt = datetime.combine(fecha, datetime.min.time())
-        fecha_fin_dt = datetime.combine(fecha, datetime.max.time())
-        etiqueta_fecha = fecha.strftime("%Y-%m-%d")
+    try:
+        fecha_inicio_dt, fecha_fin_dt, etiqueta_fecha = resolve_report_date_window(
+            fecha=fecha,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+        )
+    except ValueError as exc:
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     
     desglose = {}
     
@@ -476,20 +490,20 @@ def obtener_tramites_detallados(
     fecha_inicio: Optional[date] = Query(None, description="Fecha inicio para rango"),
     fecha_fin: Optional[date] = Query(None, description="Fecha fin para rango"),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin)
+    current_user: Usuario = Depends(get_contador_or_admin)
 ):
     """
     Lista detallada de todos los trámites del día o rango con valores
     """
-    # Determinar rango de fechas
-    if fecha_inicio and fecha_fin:
-        fecha_inicio_dt = datetime.combine(fecha_inicio, datetime.min.time())
-        fecha_fin_dt = datetime.combine(fecha_fin, datetime.max.time())
-    else:
-        if not fecha:
-            fecha = date.today()
-        fecha_inicio_dt = datetime.combine(fecha, datetime.min.time())
-        fecha_fin_dt = datetime.combine(fecha, datetime.max.time())
+    try:
+        fecha_inicio_dt, fecha_fin_dt, etiqueta_fecha = resolve_report_date_window(
+            fecha=fecha,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+        )
+    except ValueError as exc:
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     
     # Obtener vehículos del rango
     vehiculos = db.query(VehiculoProceso).filter(
@@ -524,12 +538,6 @@ def obtener_tramites_detallados(
     total_cobrado = sum(t["total_cobrado"] for t in lista_tramites if t["pagado"])
     total_pendiente = sum(t["total_cobrado"] for t in lista_tramites if not t["pagado"])
     
-    # Determinar etiqueta de fecha
-    if fecha_inicio and fecha_fin:
-        etiqueta_fecha = f"{fecha_inicio.strftime('%Y-%m-%d')} a {fecha_fin.strftime('%Y-%m-%d')}"
-    else:
-        etiqueta_fecha = fecha.strftime("%Y-%m-%d")
-    
     return {
         "fecha": etiqueta_fecha,
         "total_tramites": len(lista_tramites),
@@ -548,7 +556,7 @@ def obtener_resumen_mensual(
     mes: Optional[int] = Query(None, description="Mes (1-12)"),
     anio: Optional[int] = Query(None, description="Año"),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin)
+    current_user: Usuario = Depends(get_contador_or_admin)
 ):
     """
     Resumen mensual consolidado
@@ -565,6 +573,7 @@ def obtener_resumen_mensual(
         fecha_fin = datetime(anio + 1, 1, 1) - timedelta(seconds=1)
     else:
         fecha_fin = datetime(anio, mes + 1, 1) - timedelta(seconds=1)
+    dias_mes = monthrange(anio, mes)[1]
     
     # Ingresos del mes
     ingresos_caja = db.query(func.sum(MovimientoCaja.monto)).filter(
@@ -624,6 +633,6 @@ def obtener_resumen_mensual(
         "total_egresos": total_egresos,
         "utilidad": total_ingresos - total_egresos,
         "tramites_atendidos": tramites_mes,
-        "promedio_diario_ingresos": total_ingresos / 30,
-        "promedio_diario_egresos": total_egresos / 30
+        "promedio_diario_ingresos": total_ingresos / dias_mes,
+        "promedio_diario_egresos": total_egresos / dias_mes
     }

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from datetime import date
-from typing import List
+from typing import List, Optional
 
 from app.core.deps import get_db, get_current_user, get_admin
 from app.models.usuario import Usuario
@@ -16,10 +16,21 @@ from app.schemas.tarifa import (
     TarifaResponse,
     TarifasPorAno,
     ComisionSOATCreate,
+    ComisionSOATUpdate,
     ComisionSOATResponse
 )
 
 router = APIRouter()
+
+
+def _ranges_overlap(min_a: int, max_a: Optional[int], min_b: int, max_b: Optional[int]) -> bool:
+    upper_a = float("inf") if max_a is None else max_a
+    upper_b = float("inf") if max_b is None else max_b
+    return min_a <= upper_b and min_b <= upper_a
+
+
+def _dates_overlap(start_a: date, end_a: date, start_b: date, end_b: date) -> bool:
+    return start_a <= end_b and start_b <= end_a
 
 
 @router.get("/vigentes", response_model=List[TarifaResponse])
@@ -69,24 +80,62 @@ def crear_tarifa(
     db: Session = Depends(get_db),
     admin: Usuario = Depends(get_admin)
 ):
+    if tarifa_data.antiguedad_max is not None and tarifa_data.antiguedad_max < tarifa_data.antiguedad_min:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La antigüedad máxima no puede ser menor a la antigüedad mínima.",
+        )
+
+    expected_total = tarifa_data.valor_rtm + tarifa_data.valor_terceros
+    if tarifa_data.valor_total != expected_total:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Inconsistencia en valores de tarifa: el valor total debe ser igual a "
+                f"valor_rtm + valor_terceros ({expected_total})."
+            ),
+        )
+
     """
     Crear nueva tarifa (solo administrador)
     """
-    # Verificar que no exista conflicto de vigencias
-    conflicto = db.query(Tarifa).filter(
+    # Verificar conflictos de vigencia + antigüedad en el mismo tenant/tipo/año.
+    candidatas = db.query(Tarifa).filter(
         and_(
             Tarifa.ano_vigencia == tarifa_data.ano_vigencia,
             Tarifa.tenant_id == admin.tenant_id,
             Tarifa.tipo_vehiculo == tarifa_data.tipo_vehiculo,
-            Tarifa.antiguedad_min == tarifa_data.antiguedad_min,
             Tarifa.activa == True
         )
-    ).first()
-    
+    ).all()
+
+    conflicto = next(
+        (
+            tarifa
+            for tarifa in candidatas
+            if _dates_overlap(
+                tarifa.vigencia_inicio,
+                tarifa.vigencia_fin,
+                tarifa_data.vigencia_inicio,
+                tarifa_data.vigencia_fin,
+            )
+            and _ranges_overlap(
+                tarifa.antiguedad_min,
+                tarifa.antiguedad_max,
+                tarifa_data.antiguedad_min,
+                tarifa_data.antiguedad_max,
+            )
+        ),
+        None,
+    )
+
     if conflicto:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Ya existe una tarifa para {tarifa_data.ano_vigencia} tipo '{tarifa_data.tipo_vehiculo}' con antigüedad {tarifa_data.antiguedad_min}"
+            detail=(
+                "Ya existe una tarifa activa con vigencia y rango de antigüedad solapados para este tipo de vehículo "
+                f"(rango existente: {conflicto.antiguedad_min}-{conflicto.antiguedad_max or '∞'} años)."
+            ),
         )
     
     nueva_tarifa = Tarifa(
@@ -132,13 +181,26 @@ def actualizar_tarifa(
             detail="Tarifa no encontrada"
         )
     
-    # Actualizar campos
-    if tarifa_data.valor_rtm is not None:
-        tarifa.valor_rtm = tarifa_data.valor_rtm
-    if tarifa_data.valor_terceros is not None:
-        tarifa.valor_terceros = tarifa_data.valor_terceros
-    if tarifa_data.valor_total is not None:
-        tarifa.valor_total = tarifa_data.valor_total
+    # Calcular valores efectivos después del update para mantener coherencia.
+    valor_rtm_efectivo = tarifa_data.valor_rtm if tarifa_data.valor_rtm is not None else tarifa.valor_rtm
+    valor_terceros_efectivo = (
+        tarifa_data.valor_terceros if tarifa_data.valor_terceros is not None else tarifa.valor_terceros
+    )
+    total_calculado = valor_rtm_efectivo + valor_terceros_efectivo
+
+    if tarifa_data.valor_total is not None and tarifa_data.valor_total != total_calculado:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Inconsistencia en actualización: el valor total debe ser igual a "
+                f"valor_rtm + valor_terceros ({total_calculado})."
+            ),
+        )
+
+    # Actualizar campos base y normalizar total.
+    tarifa.valor_rtm = valor_rtm_efectivo
+    tarifa.valor_terceros = valor_terceros_efectivo
+    tarifa.valor_total = total_calculado
     if tarifa_data.activa is not None:
         tarifa.activa = tarifa_data.activa
     
@@ -198,7 +260,7 @@ def crear_comision_soat(
 @router.put("/comisiones-soat/{comision_id}", response_model=ComisionSOATResponse)
 def actualizar_comision_soat(
     comision_id: str,
-    comision_data: ComisionSOATCreate,
+    comision_data: ComisionSOATUpdate,
     db: Session = Depends(get_db),
     admin: Usuario = Depends(get_admin)
 ):
@@ -217,9 +279,15 @@ def actualizar_comision_soat(
         )
     
     # Actualizar campos
-    if hasattr(comision_data, 'valor_comision') and comision_data.valor_comision is not None:
+    if comision_data.tipo_vehiculo is not None:
+        comision.tipo_vehiculo = comision_data.tipo_vehiculo
+    if comision_data.valor_comision is not None:
         comision.valor_comision = comision_data.valor_comision
-    if hasattr(comision_data, 'activa') and comision_data.activa is not None:
+    if comision_data.vigencia_inicio is not None:
+        comision.vigencia_inicio = comision_data.vigencia_inicio
+    if comision_data.vigencia_fin is not None:
+        comision.vigencia_fin = comision_data.vigencia_fin
+    if comision_data.activa is not None:
         comision.activa = comision_data.activa
     
     db.commit()

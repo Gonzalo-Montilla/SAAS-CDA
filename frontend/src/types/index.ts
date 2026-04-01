@@ -11,7 +11,7 @@ export interface Usuario {
   tenant_id: string;
   email: string;
   nombre_completo: string;
-  rol: 'administrador' | 'cajero' | 'recepcionista';
+  rol: 'administrador' | 'cajero' | 'recepcionista' | 'contador';
   rol_global?: 'owner' | 'finanzas' | 'comercial' | 'soporte';
   activo: boolean;
   created_at: string;

@@ -17,6 +17,11 @@ export interface TarifaCalculada {
   descripcion_antiguedad: string;
 }
 
+interface VehiculosPendientesResponse {
+  vehiculos: Vehiculo[];
+  total: number;
+}
+
 export const vehiculosApi = {
   // Registrar un nuevo vehículo (Recepción)
   registrar: async (data: VehiculoRegistro): Promise<Vehiculo> => {
@@ -41,8 +46,8 @@ export const vehiculosApi = {
 
   // Obtener vehículos pendientes de pago (Caja)
   obtenerPendientes: async (): Promise<Vehiculo[]> => {
-    const response = await apiClient.get<Vehiculo[]>('/vehiculos/pendientes');
-    return response.data;
+    const response = await apiClient.get<VehiculosPendientesResponse>('/vehiculos/pendientes');
+    return Array.isArray(response.data?.vehiculos) ? response.data.vehiculos : [];
   },
 
   // Cobrar un vehículo (Caja)

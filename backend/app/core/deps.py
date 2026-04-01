@@ -1,7 +1,8 @@
 """
 Dependencias de autenticación y permisos
 """
-from fastapi import Depends, HTTPException, status
+from datetime import datetime, timezone
+from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
 from typing import Optional
@@ -11,6 +12,7 @@ from app.db.database import get_db
 from app.core.security import decode_token
 from app.models.usuario import Usuario, RolEnum
 from app.models.saas_user import SaaSUser
+from app.models.tenant import Tenant
 
 # OAuth2 scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -19,7 +21,8 @@ oauth2_scheme_saas = OAuth2PasswordBearer(tokenUrl="/api/v1/saas/auth/login")
 
 def get_current_user(
     token: str = Depends(oauth2_scheme),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    request: Request = None,
 ) -> Usuario:
     """
     Obtener usuario actual desde token JWT
@@ -75,6 +78,30 @@ def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Contexto de tenant inválido",
             headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
+    if tenant is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Tenant no encontrado",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    now_ts = datetime.now(timezone.utc).replace(tzinfo=None)
+    if tenant.plan_actual == "demo" and tenant.demo_ends_at and tenant.demo_ends_at < now_ts:
+        tenant.subscription_status = "pending_plan"
+        db.commit()
+
+    request_method = request.method if request else "GET"
+    is_write_operation = request_method.upper() in {"POST", "PUT", "PATCH", "DELETE"}
+    if tenant.subscription_status == "pending_plan" and is_write_operation:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=(
+                "El tenant está en estado pendiente_de_plan. "
+                "La operación de escritura está bloqueada hasta asignar un plan de pago."
+            ),
         )
     
     return user
@@ -177,6 +204,16 @@ def get_recepcionista_or_admin(current_user: Usuario = Depends(get_current_user)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Solo recepcionistas o administradores pueden realizar esta acción"
+        )
+    return current_user
+
+
+def get_contador_or_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
+    """Contadores o administradores"""
+    if current_user.rol not in [RolEnum.CONTADOR, RolEnum.ADMINISTRADOR]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo contadores o administradores pueden realizar esta acción"
         )
     return current_user
 

@@ -10,6 +10,7 @@ class TenantSelfRegisterRequest(BaseModel):
     correo_electronico: EmailStr
     nombre_representante_legal_o_administrador: str = Field(min_length=3, max_length=200)
     celular: str = Field(min_length=7, max_length=30)
+    sedes_totales: int = Field(default=1, ge=1, le=100)
     admin_password: str = Field(min_length=6, max_length=128)
     logo_url: str | None = Field(default=None, max_length=500)
     codigo_verificacion_email: str | None = Field(default=None, min_length=6, max_length=6)

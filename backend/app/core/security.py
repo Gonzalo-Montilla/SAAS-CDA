@@ -21,6 +21,23 @@ def get_password_hash(password: str) -> str:
     return pwd_context.hash(password)
 
 
+def validate_password_strength(password: str, min_length: int = 10) -> None:
+    """
+    Valida política de contraseña robusta.
+    Lanza ValueError con mensaje de negocio si no cumple.
+    """
+    if len(password or "") < min_length:
+        raise ValueError(f"La contraseña debe tener mínimo {min_length} caracteres")
+    if not any(c.isupper() for c in password):
+        raise ValueError("La contraseña debe incluir al menos una mayúscula")
+    if not any(c.islower() for c in password):
+        raise ValueError("La contraseña debe incluir al menos una minúscula")
+    if not any(c.isdigit() for c in password):
+        raise ValueError("La contraseña debe incluir al menos un número")
+    if not any(c in "!@#$%^&*()-_=+[]{};:,.?/|" for c in password):
+        raise ValueError("La contraseña debe incluir al menos un carácter especial")
+
+
 def create_access_token(data: Dict[str, Any]) -> str:
     """
     Crear token de acceso JWT
