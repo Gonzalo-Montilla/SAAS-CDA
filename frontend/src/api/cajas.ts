@@ -2,6 +2,7 @@ import apiClient from './client';
 import type { Caja, CajaApertura, CajaCierre, CajaResumen, MovimientoCaja } from '../types';
 
 export const cajasApi = {
+  sleep: (ms: number) => new Promise((resolve) => setTimeout(resolve, ms)),
   // Abrir caja (inicio de turno)
   abrir: async (data: CajaApertura): Promise<Caja> => {
     const response = await apiClient.post<Caja>('/cajas/abrir', data);
@@ -70,6 +71,7 @@ export const cajasApi = {
 
   // Obtener resumen de la última caja cerrada
   obtenerUltimaCerrada: async (): Promise<{
+    caja_id?: string;
     fecha_cierre: string;
     turno: string;
     vehiculos_cobrados: number;
@@ -78,5 +80,26 @@ export const cajasApi = {
   } | null> => {
     const response = await apiClient.get('/cajas/ultima-cerrada');
     return response.data;
+  },
+
+  // Descargar comprobante PDF de cierre
+  descargarComprobanteCierre: async (cajaId: string): Promise<Blob> => {
+    let lastError: any = null;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        const response = await apiClient.get(`/cajas/${cajaId}/comprobante-cierre`, {
+          responseType: 'blob',
+        });
+        return response.data as Blob;
+      } catch (error: any) {
+        lastError = error;
+        if (attempt === 0 && error?.response?.status === 404) {
+          await cajasApi.sleep(400);
+          continue;
+        }
+        break;
+      }
+    }
+    throw lastError;
   },
 };

@@ -56,6 +56,20 @@ const formatLocalDate = (d: Date): string => {
   return `${year}-${month}-${day}`;
 };
 
+const saveBlobAsFile = (blob: Blob, filename: string): void => {
+  if (!blob || blob.size === 0) {
+    throw new Error('El comprobante llegó vacío');
+  }
+  const downloadUrl = window.URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = downloadUrl;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  window.URL.revokeObjectURL(downloadUrl);
+};
+
 export default function CajaPage() {
   const queryClient = useQueryClient();
   const [vistaActual, setVistaActual] = useState<'apertura' | 'cobros' | 'cobrados-hoy' | 'cierre' | 'historial'>('cobros');
@@ -1860,28 +1874,23 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
     onSuccess: async (cajaCerrada) => {
       // Descargar PDF generado por el backend
       try {
-        const token = localStorage.getItem('access_token');
-        const response = await fetch(`${import.meta.env.VITE_API_URL}/cajas/${cajaCerrada.id}/comprobante-cierre`, {
-          headers: {
-            'Authorization': `Bearer ${token}`
+        const blob = await cajasApi.descargarComprobanteCierre(cajaCerrada.id);
+        saveBlobAsFile(blob, `comprobante_cierre_caja_${formatLocalDate(new Date())}.pdf`);
+        alert('Caja cerrada exitosamente. El comprobante se descargó correctamente.');
+      } catch (error: any) {
+        try {
+          // Fallback operativo: intentar con la última caja cerrada del usuario.
+          const ultimaCerrada = await cajasApi.obtenerUltimaCerrada();
+          if (ultimaCerrada?.caja_id) {
+            const blob = await cajasApi.descargarComprobanteCierre(ultimaCerrada.caja_id);
+            saveBlobAsFile(blob, `comprobante_cierre_caja_${formatLocalDate(new Date())}.pdf`);
+            alert('Caja cerrada exitosamente. Comprobante descargado en segundo intento.');
+            return;
           }
-        });
-        
-        if (response.ok) {
-          const blob = await response.blob();
-          const url = window.URL.createObjectURL(blob);
-          const a = document.createElement('a');
-          a.href = url;
-          a.download = `comprobante_cierre_caja_${formatLocalDate(new Date())}.pdf`;
-          document.body.appendChild(a);
-          a.click();
-          document.body.removeChild(a);
-          window.URL.revokeObjectURL(url);
-          
-          alert('Caja cerrada exitosamente. El comprobante se descargó correctamente.');
+        } catch (fallbackError) {
+          console.error('Error en fallback de comprobante:', fallbackError);
         }
-      } catch (error) {
-        console.error('Error al descargar comprobante:', error);
+        console.error('Error al descargar comprobante:', error?.response?.status, error?.response?.data || error);
         alert('La caja se cerró, pero no fue posible descargar el comprobante automáticamente.');
       }
       
@@ -2698,26 +2707,11 @@ function HistorialCajas() {
                       <button
                         onClick={async () => {
                           try {
-                            const token = localStorage.getItem('access_token');
-                            const response = await fetch(`${import.meta.env.VITE_API_URL}/cajas/${caja.id}/comprobante-cierre`, {
-                              headers: {
-                                'Authorization': `Bearer ${token}`
-                              }
-                            });
-                            
-                            if (response.ok) {
-                              const blob = await response.blob();
-                              const url = window.URL.createObjectURL(blob);
-                              const a = document.createElement('a');
-                              a.href = url;
-                              a.download = `comprobante_cierre_${caja.turno}_${formatLocalDate(new Date(caja.fecha_cierre!))}.pdf`;
-                              document.body.appendChild(a);
-                              a.click();
-                              document.body.removeChild(a);
-                              window.URL.revokeObjectURL(url);
-                            } else {
-                              alert('No fue posible cargar el comprobante.');
-                            }
+                            const blob = await cajasApi.descargarComprobanteCierre(caja.id);
+                            saveBlobAsFile(
+                              blob,
+                              `comprobante_cierre_${caja.turno}_${formatLocalDate(new Date(caja.fecha_cierre!))}.pdf`,
+                            );
                           } catch (error) {
                             console.error('Error al descargar PDF:', error);
                             alert('No fue posible cargar el comprobante.');

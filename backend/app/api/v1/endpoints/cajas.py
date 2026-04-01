@@ -2,7 +2,7 @@
 Endpoints de Cajas
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func
 from datetime import datetime, timezone
@@ -522,6 +522,7 @@ def obtener_ultima_caja_cerrada(
     ).scalar()
     
     return {
+        "caja_id": str(ultima_caja.id),
         "fecha_cierre": ultima_caja.fecha_cierre.isoformat(),
         "turno": ultima_caja.turno,
         "vehiculos_cobrados": vehiculos_cobrados or 0,
@@ -673,18 +674,20 @@ def descargar_comprobante_cierre(
             detail="No tienes permiso para ver este comprobante"
         )
     
-    # Obtener desglose de efectivo
+    # Obtener desglose de efectivo.
+    # Si por alguna razón no existe registro, generamos comprobante igual
+    # con desglose en cero para no bloquear la operación de cierre.
     desglose = db.query(DesgloseEfectivoCierre).filter(
         DesgloseEfectivoCierre.caja_id == caja.id
     ).first()
     
-    if not desglose:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No se encontró el desglose de efectivo para esta caja"
-        )
-    
     # Calcular totales para el PDF
+    tenant_logo_url = None
+    if caja.tenant_id:
+        from app.models.tenant import Tenant
+        tenant = db.query(Tenant).filter(Tenant.id == caja.tenant_id).first()
+        tenant_logo_url = tenant.logo_url if tenant else None
+
     movimientos = db.query(MovimientoCaja).filter(
         MovimientoCaja.caja_id == caja.id
     ).all()
@@ -727,20 +730,36 @@ def descargar_comprobante_cierre(
     ).scalar() or 0
     
     # Preparar desglose como diccionario
-    desglose_dict = {
-        'billetes_100000': int(desglose.billetes_100000 or 0),
-        'billetes_50000': int(desglose.billetes_50000 or 0),
-        'billetes_20000': int(desglose.billetes_20000 or 0),
-        'billetes_10000': int(desglose.billetes_10000 or 0),
-        'billetes_5000': int(desglose.billetes_5000 or 0),
-        'billetes_2000': int(desglose.billetes_2000 or 0),
-        'billetes_1000': int(desglose.billetes_1000 or 0),
-        'monedas_1000': int(desglose.monedas_1000 or 0),
-        'monedas_500': int(desglose.monedas_500 or 0),
-        'monedas_200': int(desglose.monedas_200 or 0),
-        'monedas_100': int(desglose.monedas_100 or 0),
-        'monedas_50': int(desglose.monedas_50 or 0),
-    }
+    if desglose:
+        desglose_dict = {
+            'billetes_100000': int(desglose.billetes_100000 or 0),
+            'billetes_50000': int(desglose.billetes_50000 or 0),
+            'billetes_20000': int(desglose.billetes_20000 or 0),
+            'billetes_10000': int(desglose.billetes_10000 or 0),
+            'billetes_5000': int(desglose.billetes_5000 or 0),
+            'billetes_2000': int(desglose.billetes_2000 or 0),
+            'billetes_1000': int(desglose.billetes_1000 or 0),
+            'monedas_1000': int(desglose.monedas_1000 or 0),
+            'monedas_500': int(desglose.monedas_500 or 0),
+            'monedas_200': int(desglose.monedas_200 or 0),
+            'monedas_100': int(desglose.monedas_100 or 0),
+            'monedas_50': int(desglose.monedas_50 or 0),
+        }
+    else:
+        desglose_dict = {
+            'billetes_100000': 0,
+            'billetes_50000': 0,
+            'billetes_20000': 0,
+            'billetes_10000': 0,
+            'billetes_5000': 0,
+            'billetes_2000': 0,
+            'billetes_1000': 0,
+            'monedas_1000': 0,
+            'monedas_500': 0,
+            'monedas_200': 0,
+            'monedas_100': 0,
+            'monedas_50': 0,
+        }
     
     # Generar PDF
     pdf_buffer = generar_comprobante_cierre_caja(
@@ -765,14 +784,17 @@ def descargar_comprobante_cierre(
         total_tarjeta_credito=total_tarjeta_credito,
         total_transferencia=total_transferencia,
         total_credismart=total_credismart,
-        total_sistecredito=total_sistecredito
+        total_sistecredito=total_sistecredito,
+        tenant_logo_url=tenant_logo_url,
     )
     
-    # Retornar PDF
-    return StreamingResponse(
-        pdf_buffer,
+    # Retornar PDF como bytes para evitar descargas corruptas en algunos clientes.
+    pdf_bytes = pdf_buffer.getvalue()
+    return Response(
+        content=pdf_bytes,
         media_type="application/pdf",
         headers={
-            "Content-Disposition": f"attachment; filename=comprobante_cierre_caja_{caja.fecha_cierre.strftime('%Y%m%d_%H%M')}.pdf"
-        }
+            "Content-Disposition": f"attachment; filename=comprobante_cierre_caja_{caja.fecha_cierre.strftime('%Y%m%d_%H%M')}.pdf",
+            "Content-Length": str(len(pdf_bytes)),
+        },
     )

@@ -12,6 +12,65 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional
 import os
+from pathlib import Path
+from urllib.parse import urlparse
+
+from app.core.config import settings
+
+
+def _safe_text(value: object) -> str:
+    """
+    Normaliza texto para fuentes PDF estándar (WinAnsi/cp1252).
+    Evita que caracteres fuera de soporte (ej. emoji) rompan la generación.
+    """
+    if value is None:
+        return ""
+    return str(value).encode("cp1252", errors="replace").decode("cp1252")
+
+
+def _resolve_tenant_logo_path(tenant_logo_url: Optional[str]) -> Optional[str]:
+    """
+    Resuelve la ruta local del logo del tenant cuando viene en formato URL pública.
+    Soporta URLs tipo /uploads/... mapeadas al filesystem local.
+    """
+    if not tenant_logo_url:
+        return None
+
+    raw = str(tenant_logo_url).strip()
+    if not raw:
+        return None
+
+    # Caso 1: ruta absoluta local
+    direct_path = Path(raw)
+    if direct_path.is_file():
+        return str(direct_path)
+
+    uploads_root = Path(settings.TENANT_LOGO_UPLOAD_DIR).resolve().parent
+
+    # Caso 2: URL pública servida por /uploads
+    if raw.startswith("/uploads/"):
+        rel = raw[len("/uploads/"):]
+        candidate = uploads_root / rel
+        if candidate.is_file():
+            return str(candidate)
+
+    # Caso 2b: URL absoluta (http/https) apuntando a /uploads/...
+    if raw.startswith("http://") or raw.startswith("https://"):
+        parsed = urlparse(raw)
+        path = parsed.path or ""
+        if path.startswith("/uploads/"):
+            rel = path[len("/uploads/"):]
+            candidate = uploads_root / rel
+            if candidate.is_file():
+                return str(candidate)
+
+    # Caso 3: ruta relativa tipo uploads/tenant-logos/...
+    if raw.startswith("uploads/"):
+        candidate = Path(raw).resolve()
+        if candidate.is_file():
+            return str(candidate)
+
+    return None
 
 
 def generar_comprobante_cierre_caja(
@@ -36,7 +95,8 @@ def generar_comprobante_cierre_caja(
     total_tarjeta_credito: Decimal = Decimal(0),
     total_transferencia: Decimal = Decimal(0),
     total_credismart: Decimal = Decimal(0),
-    total_sistecredito: Decimal = Decimal(0)
+    total_sistecredito: Decimal = Decimal(0),
+    tenant_logo_url: Optional[str] = None,
 ) -> BytesIO:
     """
     Genera un comprobante de cierre de caja en PDF
@@ -119,17 +179,22 @@ def generar_comprobante_cierre_caja(
     # Elementos del documento
     elementos = []
     
-    # Logo compacto (si existe)
-    logo_path = os.path.join(os.path.dirname(__file__), 'logo_cda.png')
+    # Logo: priorizar tenant actual; fallback al heredado local.
+    logo_path = _resolve_tenant_logo_path(tenant_logo_url)
+    if not logo_path:
+        logo_path = os.path.join(os.path.dirname(__file__), 'logo_cda.png')
     if os.path.exists(logo_path):
-        logo = Image(logo_path, width=0.8*inch, height=0.8*inch, kind='proportional')
+        # Aumentar el área máxima del logo manteniendo proporción.
+        logo = Image(logo_path, width=1.9*inch, height=1.1*inch, kind='proportional')
         logo.hAlign = 'CENTER'
         elementos.append(logo)
         elementos.append(Spacer(1, 0.05*inch))
     
+    cajero_nombre_safe = _safe_text(cajero_nombre)
+    observaciones_safe = _safe_text(observaciones) if observaciones else None
+
     # Encabezado compacto
     elementos.append(Paragraph("COMPROBANTE DE CIERRE DE CAJA", titulo_style))
-    elementos.append(Paragraph("CDASOFT", subtitulo_style))
     elementos.append(Spacer(1, 0.1*inch))
     
     # Información de la caja
@@ -140,7 +205,7 @@ def generar_comprobante_cierre_caja(
     }
     
     info_data = [
-        ["Cajero:", cajero_nombre, "Turno:", turnos_map.get(turno, turno)],
+        ["Cajero:", cajero_nombre_safe, "Turno:", turnos_map.get(turno, turno)],
         ["Apertura:", fecha_apertura_local.strftime("%d/%m/%Y %H:%M"), "Cierre:", fecha_cierre_local.strftime("%d/%m/%Y %H:%M")],
     ]
     
@@ -339,7 +404,7 @@ def generar_comprobante_cierre_caja(
     elementos.append(Spacer(1, 0.1*inch))
     
     # Observaciones
-    if observaciones:
+    if observaciones_safe:
         elementos.append(Paragraph("OBSERVACIONES", seccion_style))
         obs_style = ParagraphStyle(
             'Observaciones',
@@ -347,14 +412,14 @@ def generar_comprobante_cierre_caja(
             fontSize=7,
             textColor=colors.black
         )
-        elementos.append(Paragraph(observaciones, obs_style))
+        elementos.append(Paragraph(observaciones_safe, obs_style))
         elementos.append(Spacer(1, 0.08*inch))
     
     # Firmas
     firmas_data = [
         ["_________________________", "_________________________"],
         ["Cajero", "Supervisor/Administrador"],
-        [cajero_nombre, ""]
+        [cajero_nombre_safe, ""]
     ]
     
     firmas_table = Table(firmas_data, colWidths=[2.75*inch, 2.75*inch])
@@ -379,10 +444,57 @@ def generar_comprobante_cierre_caja(
         textColor=colors.gray,
         alignment=TA_CENTER
     )
-    elementos.append(Paragraph(f"Documento generado el {fecha_generacion} | Caja ID: {caja_id}", pie_style))
+    elementos.append(Paragraph(f"Documento generado por CDASOFT | {fecha_generacion} | Caja ID: {caja_id}", pie_style))
     
-    # Construir PDF
-    doc.build(elementos)
-    buffer.seek(0)
-    
-    return buffer
+    # Construir PDF principal.
+    # Si por algún carácter inesperado falla, devolver PDF de respaldo válido.
+    try:
+        doc.build(elementos)
+        buffer.seek(0)
+        return buffer
+    except Exception:
+        fallback = BytesIO()
+        fallback_doc = SimpleDocTemplate(
+            fallback,
+            pagesize=letter,
+            topMargin=0.5 * inch,
+            bottomMargin=0.5 * inch,
+            leftMargin=0.6 * inch,
+            rightMargin=0.6 * inch,
+        )
+        fallback_styles = getSampleStyleSheet()
+        fallback_title = ParagraphStyle(
+            "FallbackTitle",
+            parent=fallback_styles["Heading1"],
+            fontSize=13,
+            alignment=TA_CENTER,
+            textColor=colors.HexColor("#0a1d3d"),
+        )
+        fallback_body = ParagraphStyle(
+            "FallbackBody",
+            parent=fallback_styles["Normal"],
+            fontSize=9,
+            leading=13,
+            textColor=colors.black,
+        )
+        fallback_elements = [
+            Paragraph("COMPROBANTE DE CIERRE DE CAJA", fallback_title),
+            Spacer(1, 0.15 * inch),
+            Paragraph(f"Caja ID: {_safe_text(caja_id)}", fallback_body),
+            Paragraph(f"Cajero: {cajero_nombre_safe}", fallback_body),
+            Paragraph(f"Turno: {_safe_text(turnos_map.get(turno, turno))}", fallback_body),
+            Paragraph(f"Apertura: {fecha_apertura_local.strftime('%d/%m/%Y %H:%M')}", fallback_body),
+            Paragraph(f"Cierre: {fecha_cierre_local.strftime('%d/%m/%Y %H:%M')}", fallback_body),
+            Spacer(1, 0.10 * inch),
+            Paragraph(f"Saldo esperado: ${float(saldo_esperado):,.0f}", fallback_body),
+            Paragraph(f"Monto final físico: ${float(monto_final_fisico):,.0f}", fallback_body),
+            Paragraph(f"Diferencia: ${float(diferencia):,.0f}", fallback_body),
+            Spacer(1, 0.15 * inch),
+            Paragraph(
+                "Nota: Se generó versión de respaldo para garantizar la continuidad operativa del cierre.",
+                fallback_body,
+            ),
+        ]
+        fallback_doc.build(fallback_elements)
+        fallback.seek(0)
+        return fallback
