@@ -1,7 +1,7 @@
 """
 Endpoints de Vehículos
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func
 from datetime import datetime, date, timezone
@@ -16,9 +16,12 @@ from app.models.tarifa import Tarifa, ComisionSOAT
 from app.models.caja import Caja, MovimientoCaja, TipoMovimiento, EstadoCaja
 from app.utils.email import (
     enviar_email,
+    enviar_email_con_adjuntos,
     generar_email_bienvenida_recepcion_cliente,
     generar_email_llamado_caja_cliente,
+    generar_email_recibo_pago_cliente,
 )
+from app.utils.quality import create_quality_survey_invite
 from app.schemas.vehiculo import (
     VehiculoRegistro,
     VehiculoEdicion,
@@ -467,6 +470,58 @@ def notificar_paso_caja(
     }
 
 
+@router.post("/{vehiculo_id}/enviar-recibo-email")
+async def enviar_recibo_pago_email(
+    vehiculo_id: str,
+    receipt_file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_cajero_or_admin),
+):
+    """Envía por email el recibo PDF generado en caja para el vehículo indicado."""
+    vehiculo = db.query(VehiculoProceso).filter(
+        VehiculoProceso.id == vehiculo_id,
+        VehiculoProceso.tenant_id == current_user.tenant_id,
+    ).first()
+    if not vehiculo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehículo no encontrado")
+
+    cliente_email = (vehiculo.cliente_email or "").strip().lower()
+    if not cliente_email:
+        return {
+            "sent": False,
+            "has_email": False,
+            "message": "El cliente no tiene correo electrónico registrado.",
+        }
+
+    content = await receipt_file.read()
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El archivo de recibo está vacío")
+
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    nombre_cda = (
+        tenant.nombre_comercial
+        if tenant and tenant.nombre_comercial
+        else (tenant.nombre if tenant else "CDASOFT")
+    )
+    email_html = generar_email_recibo_pago_cliente(
+        nombre_cda=nombre_cda,
+        nombre_cliente=vehiculo.cliente_nombre,
+        placa_vehiculo=vehiculo.placa,
+    )
+    filename = receipt_file.filename or f"recibo_pago_{vehiculo.placa}.pdf"
+    sent = enviar_email_con_adjuntos(
+        destinatario=cliente_email,
+        asunto=f"Recibo de pago - {nombre_cda} - {vehiculo.placa}",
+        cuerpo_html=email_html,
+        adjuntos=[(filename, content, "application/pdf")],
+    )
+    return {
+        "sent": bool(sent),
+        "has_email": True,
+        "message": "Recibo enviado al cliente." if sent else "No fue posible enviar el recibo por correo.",
+    }
+
+
 @router.post("/cobrar", response_model=VehiculoResponse)
 def cobrar_vehiculo(
     request: Request,
@@ -674,6 +729,33 @@ def cobrar_vehiculo(
         
         db.commit()
         db.refresh(vehiculo)
+
+        # Programar encuesta de calidad (envío diferido) sin bloquear el flujo de cobro.
+        try:
+            recepcionista_nombre = None
+            if vehiculo.registrado_por:
+                recepcionista = db.query(Usuario).filter(Usuario.id == vehiculo.registrado_por).first()
+                if recepcionista:
+                    recepcionista_nombre = recepcionista.nombre_completo
+
+            create_quality_survey_invite(
+                db,
+                tenant_id=current_user.tenant_id,
+                vehiculo_id=vehiculo.id,
+                cliente_nombre=vehiculo.cliente_nombre,
+                cliente_email=vehiculo.cliente_email,
+                cliente_celular=vehiculo.cliente_telefono,
+                placa=vehiculo.placa,
+                tipo_vehiculo=vehiculo.tipo_vehiculo,
+                cajero_nombre=current_user.nombre_completo,
+                recepcionista_nombre=recepcionista_nombre,
+                send_delay_hours=3,
+                expires_in_days=7,
+            )
+            db.commit()
+        except Exception as quality_exc:
+            db.rollback()
+            print(f"[WARN] No se pudo programar encuesta de calidad: {quality_exc}")
 
         from app.utils.audit import audit_caja_operation
         from app.models.audit_log import AuditAction

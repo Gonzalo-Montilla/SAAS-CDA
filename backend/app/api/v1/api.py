@@ -16,6 +16,7 @@ from app.api.v1.endpoints import (
     usuarios,
     notificaciones,
     support,
+    quality,
 )
 
 api_router = APIRouter()
@@ -33,3 +34,4 @@ api_router.include_router(usuarios.router, prefix="/usuarios", tags=["usuarios"]
 api_router.include_router(config.router, prefix="/config", tags=["config"])
 api_router.include_router(notificaciones.router, prefix="/notificaciones", tags=["notificaciones"])
 api_router.include_router(support.router, prefix="/support", tags=["support"])
+api_router.include_router(quality.router, prefix="/quality", tags=["quality"])

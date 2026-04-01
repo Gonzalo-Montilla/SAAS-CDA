@@ -197,6 +197,54 @@ export interface TenantSupportTicketItem {
   resolved_at?: string | null;
 }
 
+export interface QualitySummary {
+  total_invitaciones: number;
+  total_respondidas: number;
+  total_pendientes: number;
+  promedio_general: number;
+  tasa_respuesta: number;
+}
+
+export interface QualityInviteItem {
+  id: string;
+  cliente_nombre: string;
+  cliente_email?: string | null;
+  cliente_celular?: string | null;
+  placa: string;
+  tipo_vehiculo: string;
+  status: 'pending' | 'sent' | 'responded' | 'expired' | 'failed' | 'no_email';
+  scheduled_send_at: string;
+  sent_at?: string | null;
+  responded_at?: string | null;
+  expires_at: string;
+  atencion_general?: number | null;
+  comentario?: string | null;
+  created_at: string;
+}
+
+export interface QualityInviteDetail extends QualityInviteItem {
+  atencion_recepcion?: number | null;
+  atencion_caja?: number | null;
+  sala_espera?: number | null;
+  agrado_visita?: number | null;
+  cajero_nombre?: string | null;
+  recepcionista_nombre?: string | null;
+}
+
+export interface QualityPublicSurveyInfo {
+  token_valid: boolean;
+  already_answered: boolean;
+  expired: boolean;
+  invite_id: string;
+  nombre_cda: string;
+  logo_url?: string | null;
+  color_primario: string;
+  color_secundario: string;
+  cliente_nombre: string;
+  placa: string;
+  tipo_vehiculo: string;
+}
+
 export interface SaaSSupportTicketItem {
   id: string;
   tenant_id: string;

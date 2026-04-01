@@ -18,6 +18,8 @@ const Tesoreria = lazy(() => import('./pages/Tesoreria'));
 const Reportes = lazy(() => import('./pages/Reportes'));
 const Usuarios = lazy(() => import('./pages/Usuarios'));
 const Soporte = lazy(() => import('./pages/Soporte'));
+const Calidad = lazy(() => import('./pages/Calidad'));
+const CalidadEncuesta = lazy(() => import('./pages/CalidadEncuesta'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const SaaSBackoffice = lazy(() => import('./pages/SaaSBackoffice'));
 
@@ -161,6 +163,14 @@ function App() {
               }
             />
             <Route
+              path="/calidad"
+              element={
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador']}>
+                  <Calidad />
+                </ProtectedRoute>
+              }
+            />
+            <Route
               path="/saas/backoffice"
               element={
                 <ProtectedRoute requiredScope="saas">
@@ -168,6 +178,7 @@ function App() {
                 </ProtectedRoute>
               }
             />
+                <Route path="/calidad/encuesta/:token" element={<CalidadEncuesta />} />
                 <Route path="/:tenantSlug" element={<Login />} />
                 <Route path="/" element={<HomeRedirect />} />
                   </Routes>

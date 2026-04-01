@@ -310,6 +310,36 @@ def generar_email_llamado_caja_cliente(
     )
 
 
+def generar_email_recibo_pago_cliente(
+    nombre_cda: str,
+    nombre_cliente: str,
+    placa_vehiculo: str,
+) -> str:
+    """Email para enviar recibo de pago al cliente luego del cobro en caja."""
+    body_html = f"""
+    <p>Estimado/a <strong>{nombre_cliente}</strong>,</p>
+    <div class="highlight">
+        Adjunto encontrarás el recibo de tu pago del vehículo de placa <strong>{placa_vehiculo}</strong>.
+        Queremos agradecerte por haber depositado tu confianza en <strong>{nombre_cda}</strong>;
+        para nosotros es un gusto atender a clientes como tú.
+    </div>
+    <p>
+        Esperamos que tu experiencia haya sido satisfactoria y te invitamos a regresar cuando lo necesites.
+        Estaremos encantados de seguir siendo tu centro de diagnóstico de confianza.
+    </p>
+    <p><strong>Con {nombre_cda}, siempre estás seguro.</strong></p>
+    <p class="muted">
+        Saludos cordiales,<br />
+        Equipo {nombre_cda}
+    </p>
+    """
+    return _render_email_corporativo(
+        title="Recibo de pago",
+        body_html=body_html,
+        label=f"Caja - {nombre_cda}",
+    )
+
+
 def generar_email_recibo_pago_saas(
     nombre_cda: str,
     referencia: str,
@@ -331,4 +361,42 @@ def generar_email_recibo_pago_saas(
         title=f"Recibo de pago - {nombre_cda}",
         body_html=body_html,
         label=f"Facturación - {nombre_cda}",
+    )
+
+
+def generar_email_encuesta_calidad_cliente(
+    nombre_cda: str,
+    nombre_cliente: str,
+    survey_link: str,
+) -> str:
+    """Email de invitación a encuesta de calidad post-servicio."""
+    body_html = f"""
+    <p>Estimado/a <strong>{nombre_cliente}</strong>,</p>
+    <p>
+        Agradecemos nuevamente que hayas confiado en nosotros para el cuidado de tu vehículo.
+        Para nosotros es muy importante conocer tu opinión, ya que nos ayuda a seguir mejorando.
+    </p>
+    <p>
+        Te invitamos a responder una breve encuesta sobre tu experiencia.
+        Solo toma un minuto y tus comentarios son muy valiosos para nosotros.
+    </p>
+    <p style="text-align:center;">
+        <a href="{survey_link}" class="button">Responder encuesta</a>
+    </p>
+    <p class="muted" style="word-break: break-all;">
+        Si el botón no funciona, copia y pega este enlace:<br />
+        {survey_link}
+    </p>
+    <p>
+        Agradecemos de antemano tu tiempo y esperamos verte pronto.
+    </p>
+    <p class="muted">
+        Saludos cordiales,<br />
+        Equipo {nombre_cda}
+    </p>
+    """
+    return _render_email_corporativo(
+        title=f"Tu experiencia en {nombre_cda}",
+        body_html=body_html,
+        label=f"Calidad - {nombre_cda}",
     )

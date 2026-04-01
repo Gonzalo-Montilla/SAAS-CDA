@@ -477,6 +477,7 @@ def init_db():
     from app.models.vehiculo import VehiculoProceso
     from app.models.saas_user import SaaSUser
     from app.models.support_ticket import SaaSSupportTicket
+    from app.models.quality import QualitySurveyInvite, QualitySurveyResponse
     from app.core.security import get_password_hash
     from datetime import date
     

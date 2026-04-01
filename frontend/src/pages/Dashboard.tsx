@@ -12,6 +12,7 @@ import {
   CheckCircle2,
   Shield,
   LifeBuoy,
+  MessageSquareHeart,
 } from 'lucide-react';
 export default function Dashboard() {
   const { user, logout } = useAuth();
@@ -150,6 +151,19 @@ export default function Dashboard() {
                 <h3 className="text-xl font-bold text-gray-900 mb-2">Usuarios</h3>
                 <p className="text-gray-600 text-sm">
                   Gestionar usuarios del sistema
+                </p>
+              </button>
+
+              <button
+                onClick={() => navigate('/calidad')}
+                className="card-pos text-left group animate-fade-in animate-delay-200"
+              >
+                <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-violet-100 text-violet-600 mb-4 group-hover:bg-violet-600 group-hover:text-white transition-all duration-300">
+                  <MessageSquareHeart className="w-8 h-8 icon-hover" />
+                </div>
+                <h3 className="text-xl font-bold text-gray-900 mb-2">Calidad</h3>
+                <p className="text-gray-600 text-sm">
+                  Seguimiento de encuestas de satisfacción y comentarios de clientes
                 </p>
               </button>
             </>
