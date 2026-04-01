@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Users, UserPlus, Search, Edit2, Key, Ban, Check, Trash2, User, Mail, Lock, UserCog, X, Save, CheckCircle2, XCircle } from 'lucide-react';
 import Layout from '../components/Layout';
@@ -33,6 +33,7 @@ const validatePasswordPolicy = (password: string): string | null => {
 
 export default function UsuariosPage() {
   const queryClient = useQueryClient();
+  const [buscarInput, setBuscarInput] = useState('');
   const [buscar, setBuscar] = useState('');
   const [filtroRol, setFiltroRol] = useState<string>('');
   const [filtroActivo, setFiltroActivo] = useState<string>('');
@@ -52,6 +53,13 @@ export default function UsuariosPage() {
   const [passwordData, setPasswordData] = useState({
     password: ''
   });
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      setBuscar(buscarInput.trim());
+    }, 300);
+    return () => clearTimeout(timeout);
+  }, [buscarInput]);
 
   // Query: Listar usuarios
   const { data: usuarios, isLoading } = useQuery<Usuario[]>({
@@ -346,8 +354,8 @@ export default function UsuariosPage() {
               </label>
               <input
                 type="text"
-                value={buscar}
-                onChange={(e) => setBuscar(e.target.value)}
+                value={buscarInput}
+                onChange={(e) => setBuscarInput(e.target.value)}
                 placeholder="Nombre o email..."
                 className="input"
               />
@@ -382,6 +390,23 @@ export default function UsuariosPage() {
                 <option value="false">Inactivos</option>
               </select>
             </div>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-sm text-gray-600">
+              Mostrando {usuarios?.length || 0} usuario(s) con los filtros actuales.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setBuscarInput('');
+                setBuscar('');
+                setFiltroRol('');
+                setFiltroActivo('');
+              }}
+              className="px-3 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-semibold hover:bg-gray-50"
+            >
+              Limpiar filtros
+            </button>
           </div>
         </div>
 

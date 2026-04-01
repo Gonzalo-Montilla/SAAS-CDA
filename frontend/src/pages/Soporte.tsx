@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { LifeBuoy, Send } from 'lucide-react';
+import { LifeBuoy, Search, Send } from 'lucide-react';
 import Layout from '../components/Layout';
 import apiClient from '../api/client';
 import type { TenantSupportTicketItem } from '../types';
@@ -27,6 +27,9 @@ export default function Soporte() {
   const [description, setDescription] = useState('');
   const [category, setCategory] = useState('general');
   const [priority, setPriority] = useState<'baja' | 'media' | 'alta' | 'critica'>('media');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState<string>('todos');
+  const [priorityFilter, setPriorityFilter] = useState<string>('todos');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const ticketsQuery = useQuery({
@@ -35,7 +38,33 @@ export default function Soporte() {
       const response = await apiClient.get<TenantSupportTicketItem[]>('/support/tickets');
       return response.data;
     },
+    refetchInterval: 30000,
   });
+
+  const lastRefreshLabel = useMemo(() => {
+    if (!ticketsQuery.dataUpdatedAt) return 'Sin sincronización reciente';
+    return new Date(ticketsQuery.dataUpdatedAt).toLocaleString('es-CO');
+  }, [ticketsQuery.dataUpdatedAt]);
+
+  const ticketsFiltered = useMemo(() => {
+    const tickets = ticketsQuery.data || [];
+    return tickets.filter((ticket) => {
+      const matchStatus = statusFilter === 'todos' || ticket.status === statusFilter;
+      const matchPriority = priorityFilter === 'todos' || ticket.priority === priorityFilter;
+      const q = search.trim().toLowerCase();
+      const matchSearch =
+        q.length === 0 ||
+        ticket.title.toLowerCase().includes(q) ||
+        ticket.description.toLowerCase().includes(q) ||
+        ticket.category.toLowerCase().includes(q);
+      return matchStatus && matchPriority && matchSearch;
+    });
+  }, [ticketsQuery.data, priorityFilter, search, statusFilter]);
+
+  const openTicketsCount = useMemo(() => {
+    const tickets = ticketsQuery.data || [];
+    return tickets.filter((t) => t.status === 'abierto' || t.status === 'en_progreso').length;
+  }, [ticketsQuery.data]);
 
   const createTicketMutation = useMutation({
     mutationFn: async () => {
@@ -145,7 +174,73 @@ export default function Soporte() {
         </section>
 
         <section className="section-card p-6">
-          <p className="text-sm font-semibold text-slate-800 mb-3">Mis tickets</p>
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+            <p className="text-sm font-semibold text-slate-800">Mis tickets</p>
+            <div className="text-xs text-slate-600 text-right">
+              <p>
+                Pendientes: <span className="font-semibold text-cyan-700">{openTicketsCount}</span> | Total: <span className="font-semibold">{ticketsQuery.data?.length || 0}</span>
+              </p>
+              <p className="mt-0.5">
+                Última actualización: <span className="font-medium">{lastRefreshLabel}</span>
+              </p>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+            <div className="md:col-span-2">
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Buscar</label>
+              <div className="relative">
+                <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                <input
+                  type="text"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  className="input-corporate pl-9"
+                  placeholder="Asunto, descripción o categoría"
+                />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Estado</label>
+              <select
+                value={statusFilter}
+                onChange={(e) => setStatusFilter(e.target.value)}
+                className="input-corporate"
+              >
+                <option value="todos">Todos</option>
+                <option value="abierto">Abierto</option>
+                <option value="en_progreso">En progreso</option>
+                <option value="resuelto">Resuelto</option>
+                <option value="cerrado">Cerrado</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-600 mb-1">Prioridad</label>
+              <select
+                value={priorityFilter}
+                onChange={(e) => setPriorityFilter(e.target.value)}
+                className="input-corporate"
+              >
+                <option value="todos">Todas</option>
+                <option value="baja">Baja</option>
+                <option value="media">Media</option>
+                <option value="alta">Alta</option>
+                <option value="critica">Crítica</option>
+              </select>
+            </div>
+          </div>
+          <div className="mb-4 flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                setSearch('');
+                setStatusFilter('todos');
+                setPriorityFilter('todos');
+              }}
+              className="px-3 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm font-semibold hover:bg-slate-50"
+            >
+              Limpiar filtros
+            </button>
+          </div>
           {ticketsQuery.isLoading && <p className="text-sm text-slate-500">Cargando tickets...</p>}
           {ticketsQuery.isError && <p className="text-sm text-red-600">No fue posible cargar tus tickets.</p>}
           {ticketsQuery.data && (
@@ -166,7 +261,14 @@ export default function Soporte() {
                     </tr>
                   </thead>
                   <tbody>
-                    {ticketsQuery.data.map((ticket) => (
+                    {ticketsFiltered.length === 0 && (
+                      <tr>
+                        <td colSpan={7} className="text-sm text-slate-500">
+                          No hay tickets que coincidan con los filtros aplicados.
+                        </td>
+                      </tr>
+                    )}
+                    {ticketsFiltered.map((ticket) => (
                       <tr key={ticket.id}>
                         <td>{new Date(ticket.created_at).toLocaleString()}</td>
                         <td>

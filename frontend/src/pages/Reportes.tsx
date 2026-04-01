@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, Suspense, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart3, TrendingUp, TrendingDown, Wallet, Building2, FileText, Download, DollarSign, ArrowUpCircle, ArrowDownCircle, CalendarDays } from 'lucide-react';
 import Layout from '../components/Layout';
@@ -13,6 +13,8 @@ const formatLocalDate = (d: Date): string => {
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
+
+const formatCurrency = (value: number): string => `$${value.toLocaleString()}`;
 
 interface DashboardData {
   fecha: string;
@@ -85,6 +87,15 @@ export default function ReportesPage() {
   const [filtroMetodo, setFiltroMetodo] = useState<string>('todos');
   const [filtroConcepto, setFiltroConcepto] = useState<string>('');
   const rangoInvalido = modoVista === 'rango' && fechaInicio > fechaFin;
+  const periodoActual = modoVista === 'rango' ? `${fechaInicio} a ${fechaFin}` : fechaSeleccionada;
+  const reportesEnabled = !rangoInvalido;
+  const dashboardEnabled = modoVista === 'dia';
+  const queryParams = useMemo(() => {
+    if (modoVista === 'rango') {
+      return `fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`;
+    }
+    return `fecha=${fechaSeleccionada}`;
+  }, [modoVista, fechaInicio, fechaFin, fechaSeleccionada]);
 
   // Query principal: Dashboard general
   const { data, isLoading, isError } = useQuery<DashboardData>({
@@ -93,20 +104,18 @@ export default function ReportesPage() {
       const response = await apiClient.get(`/reportes/dashboard-general?fecha=${fechaSeleccionada}`);
       return response.data;
     },
+    enabled: dashboardEnabled,
     refetchInterval: 60000, // Actualizar cada minuto
   });
 
   // Query: Movimientos detallados
-  const { data: movimientosData } = useQuery({
+  const { data: movimientosData, isFetching: isFetchingMovimientos } = useQuery({
     queryKey: ['movimientos-detallados', modoVista, fechaSeleccionada, fechaInicio, fechaFin],
     queryFn: async () => {
-      const params = modoVista === 'rango' 
-        ? `fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`
-        : `fecha=${fechaSeleccionada}`;
-      const response = await apiClient.get(`/reportes/movimientos-detallados?${params}`);
+      const response = await apiClient.get(`/reportes/movimientos-detallados?${queryParams}`);
       return response.data;
     },
-    enabled: !rangoInvalido,
+    enabled: reportesEnabled,
     refetchInterval: 60000,
   });
 
@@ -114,13 +123,10 @@ export default function ReportesPage() {
   const { data: conceptosData } = useQuery({
     queryKey: ['desglose-conceptos', modoVista, fechaSeleccionada, fechaInicio, fechaFin],
     queryFn: async () => {
-      const params = modoVista === 'rango' 
-        ? `fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`
-        : `fecha=${fechaSeleccionada}`;
-      const response = await apiClient.get(`/reportes/desglose-conceptos?${params}`);
+      const response = await apiClient.get(`/reportes/desglose-conceptos?${queryParams}`);
       return response.data;
     },
-    enabled: !rangoInvalido,
+    enabled: reportesEnabled,
     refetchInterval: 60000,
   });
 
@@ -128,27 +134,21 @@ export default function ReportesPage() {
   const { data: mediosPagoData } = useQuery({
     queryKey: ['desglose-medios-pago', modoVista, fechaSeleccionada, fechaInicio, fechaFin],
     queryFn: async () => {
-      const params = modoVista === 'rango' 
-        ? `fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`
-        : `fecha=${fechaSeleccionada}`;
-      const response = await apiClient.get(`/reportes/desglose-medios-pago?${params}`);
+      const response = await apiClient.get(`/reportes/desglose-medios-pago?${queryParams}`);
       return response.data;
     },
-    enabled: !rangoInvalido,
+    enabled: reportesEnabled,
     refetchInterval: 60000,
   });
 
   // Query: Trámites detallados
-  const { data: tramitesData } = useQuery({
+  const { data: tramitesData, isFetching: isFetchingTramites } = useQuery({
     queryKey: ['tramites-detallados', modoVista, fechaSeleccionada, fechaInicio, fechaFin],
     queryFn: async () => {
-      const params = modoVista === 'rango' 
-        ? `fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`
-        : `fecha=${fechaSeleccionada}`;
-      const response = await apiClient.get(`/reportes/tramites-detallados?${params}`);
+      const response = await apiClient.get(`/reportes/tramites-detallados?${queryParams}`);
       return response.data;
     },
-    enabled: !rangoInvalido,
+    enabled: reportesEnabled,
     refetchInterval: 60000,
   });
 
@@ -188,9 +188,10 @@ export default function ReportesPage() {
       ...datos.map(row => 
         headers.map(header => {
           const value = row[header];
+          if (value === null || value === undefined) return '';
           // Escapar comas y comillas
-          if (typeof value === 'string' && (value.includes(',') || value.includes('"'))) {
-            return `"${value.replace(/"/g, '""')}"`;
+          if (typeof value === 'string' && (value.includes(',') || value.includes('"') || value.includes('\n'))) {
+            return `"${value.replace(/"/g, '""').replace(/\n/g, ' ')}"`;
           }
           return value;
         }).join(',')
@@ -198,7 +199,8 @@ export default function ReportesPage() {
     ].join('\n');
 
     // Crear blob y descargar
-    const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+    const bom = '\uFEFF';
+    const blob = new Blob([bom + csvContent], { type: 'text/csv;charset=utf-8;' });
     const link = document.createElement('a');
     const url = URL.createObjectURL(blob);
     link.setAttribute('href', url);
@@ -209,7 +211,7 @@ export default function ReportesPage() {
     document.body.removeChild(link);
   };
 
-  if (isLoading) {
+  if (dashboardEnabled && isLoading) {
     return (
       <Layout title="Reportes">
         <LoadingSpinner message="Cargando panel de reportes..." />
@@ -217,7 +219,7 @@ export default function ReportesPage() {
     );
   }
 
-  if (isError || !data) {
+  if (dashboardEnabled && (isError || !data)) {
     return (
       <Layout title="Reportes">
         <div className="bg-red-50 border-2 border-red-200 rounded-lg p-6">
@@ -227,7 +229,18 @@ export default function ReportesPage() {
     );
   }
 
-  const { resumen, desglose_modulos, grafica_ingresos_7_dias } = data;
+  const resumen = data?.resumen ?? {
+    total_ingresos_dia: 0,
+    total_egresos_dia: 0,
+    utilidad_dia: 0,
+    saldo_total: 0,
+    tramites_atendidos: 0,
+  };
+  const desglose_modulos = data?.desglose_modulos ?? {
+    caja: { ingresos: 0, egresos: 0, saldo: 0 },
+    tesoreria: { ingresos: 0, egresos: 0, saldo: 0 },
+  };
+  const grafica_ingresos_7_dias = data?.grafica_ingresos_7_dias ?? [];
 
   return (
     <Layout title="Reportes - Dashboard General">
@@ -241,6 +254,9 @@ export default function ReportesPage() {
             </h2>
             <p className="text-gray-600">
               Resumen consolidado de todos los módulos
+            </p>
+            <p className="mt-1 text-sm text-primary-700 font-medium">
+              Periodo aplicado: {periodoActual}
             </p>
           </div>
 
@@ -396,9 +412,13 @@ export default function ReportesPage() {
                     saldo_tesoreria: desglose_modulos.tesoreria.saldo
                   }
                 ];
-                exportarCSV(resumenCompleto, 'reporte_completo');
+                exportarCSV(
+                  resumenCompleto,
+                  modoVista === 'rango' ? 'reporte_completo_rango' : 'reporte_completo_dia',
+                );
               }}
-              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-lg shadow-lg transition-all duration-200 hover:shadow-xl hover:scale-105"
+              disabled={rangoInvalido}
+              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold rounded-lg shadow-lg transition-all duration-200 hover:shadow-xl hover:scale-105"
             >
               <Download className="w-5 h-5" />
               Exportar Reporte Completo
@@ -563,13 +583,22 @@ export default function ReportesPage() {
               </span>
             </h3>
             <button 
-              onClick={() => exportarCSV(movimientosFiltrados, 'movimientos_dia')}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white font-semibold rounded-lg shadow-md transition-all duration-200 hover:shadow-lg"
+              onClick={() =>
+                exportarCSV(
+                  movimientosFiltrados,
+                  modoVista === 'rango' ? 'movimientos_rango' : 'movimientos_dia',
+                )
+              }
+              disabled={rangoInvalido || movimientosFiltrados.length === 0}
+              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold rounded-lg shadow-md transition-all duration-200 hover:shadow-lg"
             >
               <Download className="w-5 h-5" />
               Exportar CSV
             </button>
           </div>
+          {isFetchingMovimientos && (
+            <p className="mb-3 text-sm text-gray-500">Actualizando movimientos...</p>
+          )}
 
           {/* Barra de Filtros */}
           <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
@@ -644,6 +673,13 @@ export default function ReportesPage() {
                 </tr>
               </thead>
               <tbody>
+                {movimientosFiltrados.length === 0 && (
+                  <tr className="border-t">
+                    <td colSpan={9} className="px-3 py-6 text-center text-gray-500">
+                      No hay movimientos para los filtros seleccionados.
+                    </td>
+                  </tr>
+                )}
                 {movimientosFiltrados.map((m: Movimiento) => (
                   <tr key={m.id} className="border-t">
                     <td className="px-3 py-2">{m.hora}</td>
@@ -653,7 +689,7 @@ export default function ReportesPage() {
                     <td className="px-3 py-2">{m.concepto}</td>
                     <td className="px-3 py-2">{m.categoria}</td>
                     <td className="px-3 py-2">{m.metodo_pago}</td>
-                    <td className={`px-3 py-2 text-right font-semibold ${m.es_ingreso ? 'text-green-700' : 'text-red-700'}`}>${m.monto.toLocaleString()}</td>
+                    <td className={`px-3 py-2 text-right font-semibold ${m.es_ingreso ? 'text-green-700' : 'text-red-700'}`}>{formatCurrency(m.monto)}</td>
                     <td className="px-3 py-2">{m.usuario}</td>
                   </tr>
                 ))}
@@ -672,6 +708,10 @@ export default function ReportesPage() {
               </h3>
             </div>
             <div className="space-y-2">
+              {Object.keys(conceptosData?.ingresos_por_concepto || {}).length === 0 &&
+                Object.keys(conceptosData?.egresos_por_concepto || {}).length === 0 && (
+                  <p className="text-sm text-gray-500">No hay movimientos por concepto en este periodo.</p>
+                )}
               {Object.entries(conceptosData?.ingresos_por_concepto || {}).map(([k, v]: any) => (
                 <div key={k} className="flex justify-between text-green-700"><span>{k}</span><span className="font-semibold">${Number(v).toLocaleString()}</span></div>
               ))}
@@ -689,6 +729,9 @@ export default function ReportesPage() {
               <p className="text-sm text-gray-600">Total recaudado por método</p>
             </div>
             <div className="space-y-2">
+              {Object.keys(mediosPagoData?.medios_pago || {}).length === 0 && (
+                <p className="text-sm text-gray-500">No hay recaudo por método de pago en este periodo.</p>
+              )}
               {Object.entries(mediosPagoData?.medios_pago || {}).map(([metodo, vals]: any) => (
                 <div key={metodo} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
                   <span className="font-semibold text-gray-700 capitalize">{metodo.replace('_', ' ')}:</span>
@@ -707,13 +750,22 @@ export default function ReportesPage() {
               {modoVista === 'dia' ? 'Trámites del Día' : `Trámites (${tramitesData?.fecha || ''})`}
             </h3>
             <button 
-              onClick={() => exportarCSV(tramitesData?.tramites || [], 'tramites_dia')}
-              className="flex items-center gap-2 px-4 py-2 bg-secondary-500 hover:bg-secondary-600 text-white font-semibold rounded-lg shadow-md transition-all duration-200 hover:shadow-lg"
+              onClick={() =>
+                exportarCSV(
+                  tramitesData?.tramites || [],
+                  modoVista === 'rango' ? 'tramites_rango' : 'tramites_dia',
+                )
+              }
+              disabled={rangoInvalido || (tramitesData?.tramites || []).length === 0}
+              className="flex items-center gap-2 px-4 py-2 bg-secondary-500 hover:bg-secondary-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold rounded-lg shadow-md transition-all duration-200 hover:shadow-lg"
             >
               <Download className="w-5 h-5" />
               Exportar CSV
             </button>
           </div>
+          {isFetchingTramites && (
+            <p className="mb-3 text-sm text-gray-500">Actualizando trámites...</p>
+          )}
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead>
@@ -732,6 +784,13 @@ export default function ReportesPage() {
                 </tr>
               </thead>
               <tbody>
+                {(tramitesData?.tramites || []).length === 0 && (
+                  <tr className="border-t">
+                    <td colSpan={11} className="px-3 py-6 text-center text-gray-500">
+                      No hay trámites para el periodo seleccionado.
+                    </td>
+                  </tr>
+                )}
                 {(tramitesData?.tramites || []).map((t: Tramite) => (
                   <tr key={t.id} className="border-t">
                     <td className="px-3 py-2">{t.hora_registro}</td>
@@ -739,9 +798,9 @@ export default function ReportesPage() {
                     <td className="px-3 py-2">{t.tipo_vehiculo}</td>
                     <td className="px-3 py-2">{t.cliente}</td>
                     <td className="px-3 py-2">{t.documento}</td>
-                    <td className="px-3 py-2 text-right">${t.valor_rtm.toLocaleString()}</td>
-                    <td className="px-3 py-2 text-right">${t.comision_soat.toLocaleString()}</td>
-                    <td className="px-3 py-2 text-right font-semibold">${t.total_cobrado.toLocaleString()}</td>
+                    <td className="px-3 py-2 text-right">{formatCurrency(t.valor_rtm)}</td>
+                    <td className="px-3 py-2 text-right">{formatCurrency(t.comision_soat)}</td>
+                    <td className="px-3 py-2 text-right font-semibold">{formatCurrency(t.total_cobrado)}</td>
                     <td className="px-3 py-2">{t.metodo_pago}</td>
                     <td className="px-3 py-2">{t.estado}</td>
                     <td className="px-3 py-2">{t.registrado_por}</td>
