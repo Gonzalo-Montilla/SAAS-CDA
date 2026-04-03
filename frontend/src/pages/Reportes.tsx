@@ -1,9 +1,10 @@
 import { lazy, Suspense, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { BarChart3, TrendingUp, TrendingDown, Wallet, Building2, FileText, Download, DollarSign, ArrowUpCircle, ArrowDownCircle, CalendarDays } from 'lucide-react';
+import { BarChart3, TrendingUp, TrendingDown, Wallet, Building2, FileText, Download, DollarSign, ArrowUpCircle, ArrowDownCircle, CalendarDays, TimerReset, AlertTriangle, GaugeCircle } from 'lucide-react';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import apiClient from '../api/client';
+import { reportesApi } from '../api/reportes';
 
 const ReportesIngresosChart = lazy(() => import('../components/ReportesIngresosChart'));
 
@@ -148,6 +149,19 @@ export default function ReportesPage() {
       const response = await apiClient.get(`/reportes/tramites-detallados?${queryParams}`);
       return response.data;
     },
+    enabled: reportesEnabled,
+    refetchInterval: 60000,
+  });
+
+  const { data: operativoData } = useQuery({
+    queryKey: ['dashboard-operativo', modoVista, fechaSeleccionada, fechaInicio, fechaFin],
+    queryFn: () =>
+      reportesApi.getDashboardOperativo({
+        modoVista,
+        fechaSeleccionada,
+        fechaInicio,
+        fechaFin,
+      }),
     enabled: reportesEnabled,
     refetchInterval: 60000,
   });
@@ -573,6 +587,83 @@ export default function ReportesPage() {
         )}
 
         {/* Tabla: Movimientos */}
+        <div className="card-pos">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+              <GaugeCircle className="w-6 h-6 text-primary-600" />
+              Dashboard Operativo (SLA y Colas)
+            </h3>
+            <p className="text-sm text-gray-600">Periodo: {operativoData?.periodo || periodoActual}</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+            <div className="rounded-lg border border-slate-200 p-3 bg-white">
+              <p className="text-xs text-slate-500">Pendientes caja</p>
+              <p className="text-2xl font-bold text-amber-700">{operativoData?.resumen_operativo.pendientes_caja ?? 0}</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 p-3 bg-white">
+              <p className="text-xs text-slate-500">Pendientes pista</p>
+              <p className="text-2xl font-bold text-blue-700">{operativoData?.resumen_operativo.pendientes_pista ?? 0}</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 p-3 bg-white">
+              <p className="text-xs text-slate-500">En pista</p>
+              <p className="text-2xl font-bold text-indigo-700">{operativoData?.resumen_operativo.en_pista ?? 0}</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 p-3 bg-white">
+              <p className="text-xs text-slate-500">SLA promedio</p>
+              <p className="text-2xl font-bold text-emerald-700">{operativoData?.sla.promedio_minutos ?? 0} min</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 p-3 bg-white">
+              <p className="text-xs text-slate-500">SLA p90</p>
+              <p className="text-2xl font-bold text-violet-700">{operativoData?.sla.p90_minutos ?? 0} min</p>
+            </div>
+            <div className="rounded-lg border border-slate-200 p-3 bg-white">
+              <p className="text-xs text-slate-500">Cumplimiento SLA</p>
+              <p className="text-2xl font-bold text-slate-900">{operativoData?.sla.cumplimiento_objetivo_pct ?? 0}%</p>
+            </div>
+          </div>
+
+          <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <p className="text-sm font-semibold text-slate-800 mb-3 flex items-center gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-600" />
+              Casos en riesgo por espera en caja
+            </p>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="text-left text-gray-600">
+                    <th className="px-3 py-2">Placa</th>
+                    <th className="px-3 py-2">Cliente</th>
+                    <th className="px-3 py-2">Estado</th>
+                    <th className="px-3 py-2 text-right">Espera (min)</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(operativoData?.casos_en_riesgo || []).length === 0 && (
+                    <tr className="border-t">
+                      <td colSpan={4} className="px-3 py-4 text-center text-gray-500">
+                        Sin casos críticos en cola para este momento.
+                      </td>
+                    </tr>
+                  )}
+                  {(operativoData?.casos_en_riesgo || []).map((caso) => (
+                    <tr key={caso.id} className="border-t">
+                      <td className="px-3 py-2 font-mono">{caso.placa}</td>
+                      <td className="px-3 py-2">{caso.cliente}</td>
+                      <td className="px-3 py-2 capitalize">{caso.estado.replace('_', ' ')}</td>
+                      <td className="px-3 py-2 text-right font-semibold">{caso.minutos_espera}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <p className="text-xs text-slate-500 mt-2 flex items-center gap-2">
+              <TimerReset className="w-3.5 h-3.5" />
+              Objetivo SLA: {operativoData?.sla.objetivo_minutos ?? 30} min registro → pago (muestra: {operativoData?.sla.muestra ?? 0}).
+            </p>
+          </div>
+        </div>
+
         <div className="card-pos">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">

@@ -13,7 +13,7 @@ from app.core.deps import get_db, get_contador_or_admin
 from app.models.usuario import Usuario
 from app.models.caja import MovimientoCaja
 from app.models.tesoreria import MovimientoTesoreria
-from app.models.vehiculo import VehiculoProceso
+from app.models.vehiculo import VehiculoProceso, EstadoVehiculo
 
 router = APIRouter()
 
@@ -195,6 +195,146 @@ def obtener_dashboard_general(
         "desglose_modulos": desglose_modulos,
         "grafica_ingresos_7_dias": ingresos_7_dias,
         "fecha_generacion": datetime.now(timezone.utc).isoformat()
+    }
+
+
+@router.get("/dashboard-operativo")
+def obtener_dashboard_operativo(
+    fecha: Optional[date] = Query(None, description="Fecha específica (default: hoy)"),
+    fecha_inicio: Optional[date] = Query(None, description="Fecha inicio para rango"),
+    fecha_fin: Optional[date] = Query(None, description="Fecha fin para rango"),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """
+    Dashboard operativo:
+    - Colas actuales por estado de operación.
+    - SLA de atención (registro -> pago).
+    - Casos más antiguos para priorización.
+    """
+    try:
+        fecha_inicio_dt, fecha_fin_dt, etiqueta_fecha = resolve_report_date_window(
+            fecha=fecha,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+        )
+    except ValueError as exc:
+        from fastapi import HTTPException, status
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    now_ts = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    # Base de operación del periodo (ingresos a flujo por recepción).
+    base_periodo_q = db.query(VehiculoProceso).filter(
+        and_(
+            VehiculoProceso.tenant_id == current_user.tenant_id,
+            VehiculoProceso.fecha_registro >= fecha_inicio_dt,
+            VehiculoProceso.fecha_registro <= fecha_fin_dt,
+        )
+    )
+
+    total_ingresados = base_periodo_q.count()
+
+    pagados_periodo = (
+        db.query(VehiculoProceso)
+        .filter(
+            and_(
+                VehiculoProceso.tenant_id == current_user.tenant_id,
+                VehiculoProceso.fecha_pago.isnot(None),
+                VehiculoProceso.fecha_pago >= fecha_inicio_dt,
+                VehiculoProceso.fecha_pago <= fecha_fin_dt,
+            )
+        )
+        .all()
+    )
+
+    # SLA registro -> pago (minutos).
+    tiempos_minutos = []
+    for row in pagados_periodo:
+        if row.fecha_registro and row.fecha_pago and row.fecha_pago >= row.fecha_registro:
+            delta_min = (row.fecha_pago - row.fecha_registro).total_seconds() / 60
+            tiempos_minutos.append(delta_min)
+    tiempos_minutos.sort()
+
+    def percentile(values: list[float], p: float) -> float:
+        if not values:
+            return 0.0
+        idx = int((len(values) - 1) * p)
+        return round(values[idx], 2)
+
+    promedio_min = round(sum(tiempos_minutos) / len(tiempos_minutos), 2) if tiempos_minutos else 0.0
+    p50_min = percentile(tiempos_minutos, 0.5)
+    p90_min = percentile(tiempos_minutos, 0.9)
+    cumplimiento_objetivo_30m = (
+        round((sum(1 for t in tiempos_minutos if t <= 30) / len(tiempos_minutos)) * 100, 2)
+        if tiempos_minutos
+        else 0.0
+    )
+
+    # Colas actuales (snapshot actual, no solo periodo).
+    cola_registrado_q = db.query(VehiculoProceso).filter(
+        VehiculoProceso.tenant_id == current_user.tenant_id,
+        VehiculoProceso.estado == EstadoVehiculo.REGISTRADO,
+    )
+    cola_pagado_q = db.query(VehiculoProceso).filter(
+        VehiculoProceso.tenant_id == current_user.tenant_id,
+        VehiculoProceso.estado == EstadoVehiculo.PAGADO,
+    )
+    cola_en_pista_q = db.query(VehiculoProceso).filter(
+        VehiculoProceso.tenant_id == current_user.tenant_id,
+        VehiculoProceso.estado == EstadoVehiculo.EN_PISTA,
+    )
+
+    pendientes_caja = cola_registrado_q.count()
+    pendientes_pista = cola_pagado_q.count()
+    en_pista = cola_en_pista_q.count()
+
+    # Casos en riesgo por antigüedad en cola de caja.
+    oldest_registrados = (
+        cola_registrado_q.order_by(VehiculoProceso.fecha_registro.asc()).limit(8).all()
+    )
+    casos_en_riesgo = []
+    for row in oldest_registrados:
+        wait_min = max(int((now_ts - row.fecha_registro.replace(tzinfo=None)).total_seconds() // 60), 0)
+        casos_en_riesgo.append(
+            {
+                "id": str(row.id),
+                "placa": row.placa,
+                "cliente": row.cliente_nombre,
+                "estado": row.estado.value,
+                "minutos_espera": wait_min,
+            }
+        )
+
+    max_espera_caja_min = max((c["minutos_espera"] for c in casos_en_riesgo), default=0)
+
+    terminados_periodo = base_periodo_q.filter(
+        VehiculoProceso.estado.in_(
+            [EstadoVehiculo.APROBADO, EstadoVehiculo.RECHAZADO, EstadoVehiculo.COMPLETADO]
+        )
+    ).count()
+
+    return {
+        "periodo": etiqueta_fecha,
+        "resumen_operativo": {
+            "ingresados_periodo": total_ingresados,
+            "pagados_periodo": len(pagados_periodo),
+            "terminados_periodo": terminados_periodo,
+            "pendientes_caja": pendientes_caja,
+            "pendientes_pista": pendientes_pista,
+            "en_pista": en_pista,
+            "max_espera_caja_min": max_espera_caja_min,
+        },
+        "sla": {
+            "objetivo_minutos": 30,
+            "promedio_minutos": promedio_min,
+            "p50_minutos": p50_min,
+            "p90_minutos": p90_min,
+            "cumplimiento_objetivo_pct": cumplimiento_objetivo_30m,
+            "muestra": len(tiempos_minutos),
+        },
+        "casos_en_riesgo": casos_en_riesgo,
+        "fecha_generacion": datetime.now(timezone.utc).isoformat(),
     }
 
 
