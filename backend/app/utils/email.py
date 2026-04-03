@@ -409,6 +409,8 @@ def generar_email_confirmacion_cita(
     hora_legible: str,
     placa: str,
     tipo_servicio: str,
+    google_calendar_url: str | None = None,
+    ics_download_url: str | None = None,
 ) -> str:
     """Email de confirmación de agendamiento."""
     body_html = f"""
@@ -425,6 +427,25 @@ def generar_email_confirmacion_cita(
         donde podrás relajarte mientras cuidamos de tu vehículo.
     </p>
     <p><strong>¡Te esperamos!</strong></p>
+    {(
+        f'''
+        <p style="text-align:center;">
+            <a href="{google_calendar_url}" class="button">Agregar a Google Calendar</a>
+        </p>
+        '''
+        if google_calendar_url
+        else ''
+    )}
+    {(
+        f'''
+        <p class="muted" style="text-align:center; margin-top:8px;">
+            También puedes descargar el evento en formato calendario:
+            <a href="{ics_download_url}" style="color:#2563eb; text-decoration:none; font-weight:600;">Descargar .ics</a>
+        </p>
+        '''
+        if ics_download_url
+        else ''
+    )}
     <p class="muted">
         Saludos,<br />
         El equipo de {nombre_cda}
@@ -432,6 +453,58 @@ def generar_email_confirmacion_cita(
     """
     return _render_email_corporativo(
         title=f"Confirmación de cita - {nombre_cda}",
+        body_html=body_html,
+        label=f"Agendamiento - {nombre_cda}",
+    )
+
+
+def generar_email_recordatorio_cita(
+    nombre_cda: str,
+    nombre_cliente: str,
+    fecha_legible: str,
+    hora_legible: str,
+    placa: str,
+    tipo_servicio: str,
+    google_calendar_url: str | None = None,
+    ics_download_url: str | None = None,
+) -> str:
+    """Email de recordatorio de cita próxima."""
+    body_html = f"""
+    <p>Hola <strong>{nombre_cliente}</strong>,</p>
+    <p>Te recordamos que tu cita en <strong>{nombre_cda}</strong> está próxima:</p>
+    <div class="highlight">
+        <p style="margin:0 0 6px 0;">📌 <strong>Día:</strong> {fecha_legible}</p>
+        <p style="margin:0 0 6px 0;">⏰ <strong>Hora:</strong> {hora_legible}</p>
+        <p style="margin:0 0 6px 0;">📍 <strong>Placa:</strong> {placa}</p>
+        <p style="margin:0;">🔧 <strong>Servicio:</strong> {tipo_servicio}</p>
+    </div>
+    <p>Te recomendamos llegar unos minutos antes para agilizar tu registro.</p>
+    {(
+        f'''
+        <p style="text-align:center;">
+            <a href="{google_calendar_url}" class="button">Agregar a Google Calendar</a>
+        </p>
+        '''
+        if google_calendar_url
+        else ''
+    )}
+    {(
+        f'''
+        <p class="muted" style="text-align:center; margin-top:8px;">
+            También puedes descargar el evento en formato calendario:
+            <a href="{ics_download_url}" style="color:#2563eb; text-decoration:none; font-weight:600;">Descargar .ics</a>
+        </p>
+        '''
+        if ics_download_url
+        else ''
+    )}
+    <p class="muted">
+        Saludos,<br />
+        El equipo de {nombre_cda}
+    </p>
+    """
+    return _render_email_corporativo(
+        title=f"Recordatorio de cita - {nombre_cda}",
         body_html=body_html,
         label=f"Agendamiento - {nombre_cda}",
     )

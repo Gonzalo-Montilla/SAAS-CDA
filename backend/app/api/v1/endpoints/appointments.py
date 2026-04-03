@@ -2,10 +2,12 @@
 Endpoints de agendamiento (público + gestión interna por tenant).
 """
 from datetime import datetime, date, time, timedelta, timezone
+import hashlib
 from typing import Optional
 from zoneinfo import ZoneInfo
+from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel, Field, EmailStr, field_validator
 from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
@@ -15,7 +17,11 @@ from app.core.deps import get_current_user, get_db, get_agendamiento_or_admin
 from app.models.appointment import Appointment
 from app.models.tenant import Tenant
 from app.models.usuario import Usuario
-from app.utils.email import enviar_email, generar_email_confirmacion_cita
+from app.utils.email import (
+    enviar_email,
+    generar_email_confirmacion_cita,
+    generar_email_recordatorio_cita,
+)
 
 router = APIRouter()
 
@@ -24,6 +30,8 @@ SLOT_MINUTES = 30
 START_HOUR = 8
 END_HOUR = 17  # último slot inicia a las 17:00
 ACTIVE_STATUSES = {"scheduled", "confirmed"}
+REMINDER_HOURS_BEFORE = 3
+REMINDER_FALLBACK_MINUTES = 10
 MONTHS_ES = [
     "enero",
     "febrero",
@@ -170,9 +178,106 @@ def _humanize_service(tipo_vehiculo: str) -> str:
     return mapping.get(normalized, normalized.replace("_", " ").title() or "Revisión técnico-mecánica")
 
 
+def _get_colombia_timezone():
+    try:
+        return ZoneInfo(settings.TIMEZONE)
+    except Exception:
+        return timezone(timedelta(hours=-5))
+
+
+def _colombia_naive_to_utc_aware(colombia_dt: datetime) -> datetime:
+    tz_col = _get_colombia_timezone()
+    if colombia_dt.tzinfo is None:
+        aware_col = colombia_dt.replace(tzinfo=tz_col)
+    else:
+        aware_col = colombia_dt.astimezone(tz_col)
+    return aware_col.astimezone(timezone.utc)
+
+
+def _build_ics_download_url(token: str) -> str:
+    base = settings.BACKEND_PUBLIC_BASE_URL.rstrip("/")
+    return f"{base}/api/v1/appointments/public/calendar/{token}.ics"
+
+
+def _build_google_calendar_url(
+    *,
+    nombre_cda: str,
+    placa: str,
+    tipo_servicio: str,
+    scheduled_at: datetime,
+    duration_minutes: int = 60,
+) -> str:
+    start_utc = _colombia_naive_to_utc_aware(scheduled_at)
+    end_utc = start_utc + timedelta(minutes=duration_minutes)
+    start_str = start_utc.strftime("%Y%m%dT%H%M%SZ")
+    end_str = end_utc.strftime("%Y%m%dT%H%M%SZ")
+
+    title = f"Cita {nombre_cda} - {placa}"
+    details = f"Servicio: {tipo_servicio}. Llega unos minutos antes para registro."
+    location = nombre_cda
+    return (
+        "https://calendar.google.com/calendar/render?action=TEMPLATE"
+        f"&text={quote(title)}"
+        f"&dates={start_str}%2F{end_str}"
+        f"&details={quote(details)}"
+        f"&location={quote(location)}"
+    )
+
+
+def _build_ics_content(
+    *,
+    appointment: Appointment,
+    nombre_cda: str,
+    tipo_servicio: str,
+    duration_minutes: int = 60,
+) -> str:
+    start_utc = _colombia_naive_to_utc_aware(appointment.scheduled_at)
+    end_utc = start_utc + timedelta(minutes=duration_minutes)
+    created_utc = _colombia_naive_to_utc_aware(appointment.created_at)
+    uid = f"{appointment.id}@cdasoft"
+    dtstamp = created_utc.strftime("%Y%m%dT%H%M%SZ")
+    dtstart = start_utc.strftime("%Y%m%dT%H%M%SZ")
+    dtend = end_utc.strftime("%Y%m%dT%H%M%SZ")
+    summary = f"Cita {nombre_cda} - {appointment.placa}"
+    description = (
+        f"Cliente: {appointment.cliente_nombre}\\n"
+        f"Placa: {appointment.placa}\\n"
+        f"Servicio: {tipo_servicio}\\n"
+        "Te recomendamos llegar unos minutos antes."
+    )
+
+    return (
+        "BEGIN:VCALENDAR\r\n"
+        "VERSION:2.0\r\n"
+        "PRODID:-//CDASOFT//Agendamiento//ES\r\n"
+        "CALSCALE:GREGORIAN\r\n"
+        "METHOD:PUBLISH\r\n"
+        "BEGIN:VEVENT\r\n"
+        f"UID:{uid}\r\n"
+        f"DTSTAMP:{dtstamp}\r\n"
+        f"DTSTART:{dtstart}\r\n"
+        f"DTEND:{dtend}\r\n"
+        f"SUMMARY:{summary}\r\n"
+        f"DESCRIPTION:{description}\r\n"
+        f"LOCATION:{nombre_cda}\r\n"
+        "STATUS:CONFIRMED\r\n"
+        "END:VEVENT\r\n"
+        "END:VCALENDAR\r\n"
+    )
+
+
+def _compute_reminder_scheduled_at(scheduled_at: datetime) -> datetime:
+    now = _now_colombia_naive()
+    target = scheduled_at - timedelta(hours=REMINDER_HOURS_BEFORE)
+    if target <= now:
+        return now + timedelta(minutes=REMINDER_FALLBACK_MINUTES)
+    return target
+
+
 def _send_appointment_email_notification(
     tenant: Tenant,
     *,
+    appointment: Appointment,
     cliente_email: str | None,
     cliente_nombre: str,
     scheduled_at: datetime,
@@ -184,13 +289,23 @@ def _send_appointment_email_notification(
     fecha_legible = _format_fecha_es(scheduled_at.date())
     hora_legible = scheduled_at.strftime("%H:%M")
     nombre_cda = tenant.nombre_comercial if tenant and tenant.nombre_comercial else tenant.nombre
+    tipo_servicio = _humanize_service(tipo_vehiculo)
+    google_calendar_url = _build_google_calendar_url(
+        nombre_cda=nombre_cda,
+        placa=placa,
+        tipo_servicio=tipo_servicio,
+        scheduled_at=scheduled_at,
+    )
+    ics_download_url = _build_ics_download_url(appointment.public_token)
     html = generar_email_confirmacion_cita(
         nombre_cda=nombre_cda,
         nombre_cliente=cliente_nombre,
         fecha_legible=fecha_legible,
         hora_legible=hora_legible,
         placa=placa,
-        tipo_servicio=_humanize_service(tipo_vehiculo),
+        tipo_servicio=tipo_servicio,
+        google_calendar_url=google_calendar_url,
+        ics_download_url=ics_download_url,
     )
     asunto = f"{nombre_cda} - Confirmación de cita"
     try:
@@ -198,6 +313,87 @@ def _send_appointment_email_notification(
     except Exception:
         # No bloquear agendamiento por fallas SMTP.
         pass
+
+
+def _send_appointment_reminder_notification(
+    tenant: Tenant,
+    *,
+    appointment: Appointment,
+) -> bool:
+    if not appointment.cliente_email:
+        return False
+
+    nombre_cda = tenant.nombre_comercial if tenant and tenant.nombre_comercial else tenant.nombre
+    tipo_servicio = _humanize_service(appointment.tipo_vehiculo)
+    google_calendar_url = _build_google_calendar_url(
+        nombre_cda=nombre_cda,
+        placa=appointment.placa,
+        tipo_servicio=tipo_servicio,
+        scheduled_at=appointment.scheduled_at,
+    )
+    ics_download_url = _build_ics_download_url(appointment.public_token)
+
+    html = generar_email_recordatorio_cita(
+        nombre_cda=nombre_cda,
+        nombre_cliente=appointment.cliente_nombre,
+        fecha_legible=_format_fecha_es(appointment.scheduled_at.date()),
+        hora_legible=appointment.scheduled_at.strftime("%H:%M"),
+        placa=appointment.placa,
+        tipo_servicio=tipo_servicio,
+        google_calendar_url=google_calendar_url,
+        ics_download_url=ics_download_url,
+    )
+    asunto = f"{nombre_cda} - Recordatorio de cita"
+    return enviar_email(appointment.cliente_email, asunto, html)
+
+
+def process_due_appointment_reminders(
+    db: Session,
+    *,
+    tenant_id=None,
+    limit: int = 100,
+) -> int:
+    now = _now_colombia_naive()
+    query = db.query(Appointment).filter(
+        Appointment.status.in_(ACTIVE_STATUSES),
+        Appointment.cliente_email.isnot(None),
+        Appointment.reminder_sent_at.is_(None),
+        Appointment.reminder_scheduled_at.isnot(None),
+        Appointment.reminder_scheduled_at <= now,
+        Appointment.scheduled_at > now,
+    )
+    if tenant_id is not None:
+        query = query.filter(Appointment.tenant_id == tenant_id)
+
+    appointments = query.order_by(Appointment.reminder_scheduled_at.asc()).limit(limit).all()
+    if not appointments:
+        return 0
+
+    tenant_ids = {appt.tenant_id for appt in appointments}
+    tenants = db.query(Tenant).filter(Tenant.id.in_(tenant_ids)).all()
+    tenant_map = {t.id: t for t in tenants}
+
+    sent_count = 0
+    for appt in appointments:
+        appt.reminder_attempted_at = now
+        tenant = tenant_map.get(appt.tenant_id)
+        if not tenant:
+            appt.reminder_status = "failed"
+            continue
+        try:
+            ok = _send_appointment_reminder_notification(tenant, appointment=appt)
+            if ok:
+                appt.reminder_sent_at = now
+                appt.reminder_status = "sent"
+                sent_count += 1
+            else:
+                appt.reminder_status = "failed"
+        except Exception:
+            appt.reminder_status = "failed"
+        appt.updated_at = now
+
+    db.commit()
+    return sent_count
 
 
 @router.get("/public/{tenant_slug}/availability", response_model=list[AppointmentSlot])
@@ -254,6 +450,8 @@ def book_public_appointment(
         status="scheduled",
         source="public_link",
         notes=(payload.notes or "").strip() or None,
+        reminder_scheduled_at=_compute_reminder_scheduled_at(scheduled_at),
+        reminder_status="pending",
         created_by_user_id=None,
         created_at=_now_naive(),
         updated_at=_now_naive(),
@@ -263,6 +461,7 @@ def book_public_appointment(
     db.refresh(appointment)
     _send_appointment_email_notification(
         tenant,
+        appointment=appointment,
         cliente_email=appointment.cliente_email,
         cliente_nombre=appointment.cliente_nombre,
         scheduled_at=appointment.scheduled_at,
@@ -291,6 +490,7 @@ def list_appointments(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_agendamiento_or_admin),
 ):
+    process_due_appointment_reminders(db, tenant_id=current_user.tenant_id, limit=100)
     query = db.query(Appointment).filter(Appointment.tenant_id == current_user.tenant_id)
     if fecha:
         target_date = _parse_date(fecha)
@@ -350,6 +550,8 @@ def create_internal_appointment(
         status="scheduled",
         source=(payload.source or "manual").strip().lower(),
         notes=(payload.notes or "").strip() or None,
+        reminder_scheduled_at=_compute_reminder_scheduled_at(scheduled_at),
+        reminder_status="pending",
         created_by_user_id=current_user.id,
         created_at=_now_naive(),
         updated_at=_now_naive(),
@@ -359,6 +561,7 @@ def create_internal_appointment(
     db.refresh(appointment)
     _send_appointment_email_notification(
         tenant,
+        appointment=appointment,
         cliente_email=appointment.cliente_email,
         cliente_nombre=appointment.cliente_nombre,
         scheduled_at=appointment.scheduled_at,
@@ -377,6 +580,41 @@ def create_internal_appointment(
         source=appointment.source,
         notes=appointment.notes,
         created_at=appointment.created_at,
+    )
+
+
+@router.post("/process-reminders")
+def process_appointment_reminders(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_agendamiento_or_admin),
+):
+    processed = process_due_appointment_reminders(db, tenant_id=current_user.tenant_id, limit=200)
+    return {"processed": processed}
+
+
+@router.get("/public/calendar/{token}.ics")
+def download_public_calendar_event(token: str, db: Session = Depends(get_db)):
+    appointment = (
+        db.query(Appointment)
+        .filter(Appointment.public_token == token, Appointment.status.in_(ACTIVE_STATUSES))
+        .first()
+    )
+    if not appointment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Evento no encontrado")
+
+    tenant = db.query(Tenant).filter(Tenant.id == appointment.tenant_id, Tenant.activo == True).first()
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado")
+
+    nombre_cda = tenant.nombre_comercial if tenant.nombre_comercial else tenant.nombre
+    tipo_servicio = _humanize_service(appointment.tipo_vehiculo)
+    ics = _build_ics_content(appointment=appointment, nombre_cda=nombre_cda, tipo_servicio=tipo_servicio)
+    file_hash = hashlib.md5(str(appointment.id).encode("utf-8")).hexdigest()[:10]
+    filename = f"cita-{file_hash}.ics"
+    return Response(
+        content=ics,
+        media_type="text/calendar",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

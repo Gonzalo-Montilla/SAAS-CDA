@@ -474,6 +474,24 @@ def ensure_usuario_roles_schema(db):
         db.execute(text(f"ALTER TYPE {enum_type_name} ADD VALUE IF NOT EXISTS 'comercial'"))
 
 
+def ensure_appointments_schema(db):
+    """
+    Asegura compatibilidad de columnas de agendamiento.
+    """
+    db.execute(text("ALTER TABLE IF EXISTS appointments ADD COLUMN IF NOT EXISTS public_token VARCHAR(120)"))
+    db.execute(text("ALTER TABLE IF EXISTS appointments ADD COLUMN IF NOT EXISTS reminder_scheduled_at TIMESTAMP WITHOUT TIME ZONE"))
+    db.execute(text("ALTER TABLE IF EXISTS appointments ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMP WITHOUT TIME ZONE"))
+    db.execute(text("ALTER TABLE IF EXISTS appointments ADD COLUMN IF NOT EXISTS reminder_attempted_at TIMESTAMP WITHOUT TIME ZONE"))
+    db.execute(text("ALTER TABLE IF EXISTS appointments ADD COLUMN IF NOT EXISTS reminder_status VARCHAR(20)"))
+
+    db.execute(text("UPDATE appointments SET reminder_status = COALESCE(reminder_status, 'pending')"))
+    db.execute(text("UPDATE appointments SET public_token = COALESCE(NULLIF(public_token, ''), md5(random()::text || clock_timestamp()::text))"))
+
+    db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_appointments_public_token ON appointments(public_token)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_appointments_reminder_scheduled_at ON appointments(reminder_scheduled_at)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_appointments_reminder_status ON appointments(reminder_status)"))
+
+
 def get_db():
     """
     Dependency para obtener sesión de base de datos
@@ -519,6 +537,7 @@ def init_db():
         ensure_onboarding_security_schema(db)
         ensure_support_schema(db)
         ensure_usuario_roles_schema(db)
+        ensure_appointments_schema(db)
         db.commit()
 
         # Verificar y crear owner global SaaS
