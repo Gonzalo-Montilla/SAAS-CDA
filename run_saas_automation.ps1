@@ -5,7 +5,8 @@
 
 param(
     [int]$AppointmentsLimit = 200,
-    [int]$QualityLimit = 100
+    [int]$QualityLimit = 100,
+    [int]$RtmLimit = 100
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,6 +26,7 @@ if (!(Test-Path $LogDir)) {
 
 if ($env:APPOINTMENTS_LIMIT) { $AppointmentsLimit = [int]$env:APPOINTMENTS_LIMIT }
 if ($env:QUALITY_LIMIT) { $QualityLimit = [int]$env:QUALITY_LIMIT }
+if ($env:RTM_LIMIT) { $RtmLimit = [int]$env:RTM_LIMIT }
 
 $pythonExe = Join-Path $BackendDir ".venv\Scripts\python.exe"
 if (!(Test-Path $pythonExe)) {
@@ -37,7 +39,7 @@ Add-Content -Path $LogFile -Value "[RUN] $timestamp"
 
 Push-Location $BackendDir
 try {
-    $output = & $pythonExe "scripts/run_saas_automation.py" "--appointments-limit" "$AppointmentsLimit" "--quality-limit" "$QualityLimit" 2>&1
+    $output = & $pythonExe "scripts/run_saas_automation.py" "--appointments-limit" "$AppointmentsLimit" "--quality-limit" "$QualityLimit" "--rtm-limit" "$RtmLimit" 2>&1
     $output | Add-Content -Path $LogFile
     Write-Host "[OK] Automatización ejecutada. Revisa: $LogFile"
 }

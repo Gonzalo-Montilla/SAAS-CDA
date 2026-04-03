@@ -492,6 +492,41 @@ def ensure_appointments_schema(db):
     db.execute(text("CREATE INDEX IF NOT EXISTS ix_appointments_reminder_status ON appointments(reminder_status)"))
 
 
+def ensure_rtm_reminders_schema(db):
+    """
+    Asegura tabla de recordatorios de próxima RTM.
+    """
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS rtm_renewal_reminders (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id),
+                vehiculo_id UUID NOT NULL REFERENCES vehiculos_proceso(id) UNIQUE,
+                placa VARCHAR(10) NOT NULL,
+                tipo_vehiculo VARCHAR(40) NOT NULL,
+                cliente_nombre VARCHAR(200) NOT NULL,
+                cliente_email VARCHAR(255),
+                cliente_celular VARCHAR(30),
+                last_paid_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+                next_due_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+                scheduled_send_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                sent_at TIMESTAMP WITHOUT TIME ZONE,
+                send_error TEXT,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE
+            )
+            """
+        )
+    )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_rtm_reminders_tenant_id ON rtm_renewal_reminders(tenant_id)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_rtm_reminders_scheduled_send_at ON rtm_renewal_reminders(scheduled_send_at)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_rtm_reminders_status ON rtm_renewal_reminders(status)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_rtm_reminders_next_due_at ON rtm_renewal_reminders(next_due_at)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_rtm_reminders_cliente_email ON rtm_renewal_reminders(cliente_email)"))
+
+
 def get_db():
     """
     Dependency para obtener sesión de base de datos
@@ -516,6 +551,7 @@ def init_db():
     from app.models.support_ticket import SaaSSupportTicket
     from app.models.quality import QualitySurveyInvite, QualitySurveyResponse
     from app.models.appointment import Appointment
+    from app.models.rtm_reminder import RTMRenewalReminder
     from app.core.security import get_password_hash
     from datetime import date
     
@@ -538,6 +574,7 @@ def init_db():
         ensure_support_schema(db)
         ensure_usuario_roles_schema(db)
         ensure_appointments_schema(db)
+        ensure_rtm_reminders_schema(db)
         db.commit()
 
         # Verificar y crear owner global SaaS

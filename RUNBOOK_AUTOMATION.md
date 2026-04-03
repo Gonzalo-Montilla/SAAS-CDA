@@ -5,6 +5,7 @@ Este runbook deja operativas las tareas automáticas críticas:
 - Cambio de estado de tenants demo/pago vencido.
 - Recordatorios de citas (Agendamiento).
 - Envío de encuestas pendientes (Calidad).
+- Recordatorios de próxima RTM.
 
 ## Scripts incluidos
 
@@ -23,7 +24,7 @@ Este runbook deja operativas las tareas automáticas críticas:
 Variables opcionales:
 
 ```bash
-APPOINTMENTS_LIMIT=300 QUALITY_LIMIT=150 ./run_saas_automation.sh
+APPOINTMENTS_LIMIT=300 QUALITY_LIMIT=150 RTM_LIMIT=150 ./run_saas_automation.sh
 ```
 
 ### Windows PowerShell
@@ -37,6 +38,7 @@ Variables opcionales:
 ```powershell
 $env:APPOINTMENTS_LIMIT=300
 $env:QUALITY_LIMIT=150
+$env:RTM_LIMIT=150
 .\run_saas_automation.ps1
 ```
 

@@ -22,6 +22,7 @@ from app.utils.email import (
     generar_email_recibo_pago_cliente,
 )
 from app.utils.quality import create_quality_survey_invite
+from app.utils.rtm_reminders import schedule_rtm_renewal_reminder_for_vehicle
 from app.schemas.vehiculo import (
     VehiculoRegistro,
     VehiculoEdicion,
@@ -756,6 +757,14 @@ def cobrar_vehiculo(
         except Exception as quality_exc:
             db.rollback()
             print(f"[WARN] No se pudo programar encuesta de calidad: {quality_exc}")
+
+        # Programar recordatorio de próxima RTM (no bloquea flujo de cobro).
+        try:
+            schedule_rtm_renewal_reminder_for_vehicle(db, vehiculo)
+            db.commit()
+        except Exception as reminder_exc:
+            db.rollback()
+            print(f"[WARN] No se pudo programar recordatorio de próxima RTM: {reminder_exc}")
 
         from app.utils.audit import audit_caja_operation
         from app.models.audit_log import AuditAction
