@@ -1,18 +1,22 @@
 """
 Endpoints de calidad (encuestas de satisfacción por tenant).
 """
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from statistics import mean
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.deps import get_current_user, get_db
 from app.models.quality import QualitySurveyInvite, QualitySurveyResponse
+from app.models.rtm_reminder import RTMRenewalReminder
 from app.models.tenant import Tenant
 from app.models.usuario import Usuario
 from app.utils.quality import process_due_quality_invites, utcnow_naive
+from app.utils.rtm_reminders import process_due_rtm_renewal_reminders
+from app.utils.email import enviar_email, generar_email_recordatorio_proxima_rtm
 
 router = APIRouter()
 
@@ -78,6 +82,60 @@ class QualityPublicSurveySubmitRequest(BaseModel):
     comentario: str | None = Field(default=None, max_length=2000)
 
 
+class RTMReminderItem(BaseModel):
+    id: str
+    vehiculo_id: str
+    cliente_nombre: str
+    cliente_email: str | None = None
+    cliente_celular: str | None = None
+    placa: str
+    tipo_vehiculo: str
+    next_due_at: datetime
+    days_until_due: int
+    urgency_window_days: int
+    agendamiento_url: str | None = None
+    nombre_cda: str | None = None
+    status: str
+    commercial_status: str
+    commercial_notes: str | None = None
+    assigned_to_name: str | None = None
+    last_management_at: datetime | None = None
+    last_management_channel: str | None = None
+    management_count: int = 0
+    next_contact_at: datetime | None = None
+    sent_at: datetime | None = None
+    last_manual_sent_at: datetime | None = None
+    created_at: datetime
+
+
+class RTMReminderSummary(BaseModel):
+    total_upcoming: int
+    due_30d: int
+    due_15d: int
+    due_8d: int
+    no_management: int
+    managed_count: int
+    agendados: int
+    conversion_agendado_pct: float
+
+
+class RTMReminderCommercialUpdateRequest(BaseModel):
+    commercial_status: str = Field(min_length=3, max_length=30)
+    commercial_notes: str | None = Field(default=None, max_length=2000)
+    assigned_to_name: str | None = Field(default=None, max_length=200)
+    next_contact_at: datetime | None = None
+
+
+class RTMReminderManualSendResponse(BaseModel):
+    sent: bool
+    message: str
+
+
+class RTMReminderTouchManagementRequest(BaseModel):
+    channel: str = Field(min_length=3, max_length=30)
+    auto_status: str | None = Field(default=None, max_length=30)
+
+
 def _invite_to_item(invite: QualitySurveyInvite, response: QualitySurveyResponse | None) -> QualityInviteItem:
     return QualityInviteItem(
         id=str(invite.id),
@@ -94,6 +152,78 @@ def _invite_to_item(invite: QualitySurveyInvite, response: QualitySurveyResponse
         atencion_general=response.atencion_general if response else None,
         comentario=response.comentario if response else None,
         created_at=invite.created_at,
+    )
+
+
+def _humanize_service(tipo_vehiculo: str) -> str:
+    normalized = (tipo_vehiculo or "").strip().lower()
+    mapping = {
+        "moto": "Revisión técnico-mecánica de moto",
+        "liviano_particular": "Revisión técnico-mecánica vehículo liviano particular",
+        "liviano_publico": "Revisión técnico-mecánica vehículo liviano público",
+        "pesado": "Revisión técnico-mecánica vehículo pesado",
+        "preventiva": "Servicio preventiva",
+    }
+    return mapping.get(normalized, normalized.replace("_", " ").title() or "Revisión técnico-mecánica")
+
+
+def _format_fecha_es(target_date: datetime) -> str:
+    months = [
+        "enero",
+        "febrero",
+        "marzo",
+        "abril",
+        "mayo",
+        "junio",
+        "julio",
+        "agosto",
+        "septiembre",
+        "octubre",
+        "noviembre",
+        "diciembre",
+    ]
+    return f"{target_date.day} de {months[target_date.month - 1]} de {target_date.year}"
+
+
+def _resolve_urgency_window(days_until_due: int) -> int:
+    if days_until_due <= 8:
+        return 8
+    if days_until_due <= 15:
+        return 15
+    return 30
+
+
+def _to_rtm_item(
+    reminder: RTMRenewalReminder,
+    now: datetime,
+    agendamiento_url: str | None = None,
+    nombre_cda: str | None = None,
+) -> RTMReminderItem:
+    days_until_due = (reminder.next_due_at.date() - now.date()).days
+    return RTMReminderItem(
+        id=str(reminder.id),
+        vehiculo_id=str(reminder.vehiculo_id),
+        cliente_nombre=reminder.cliente_nombre,
+        cliente_email=reminder.cliente_email,
+        cliente_celular=reminder.cliente_celular,
+        placa=reminder.placa,
+        tipo_vehiculo=reminder.tipo_vehiculo,
+        next_due_at=reminder.next_due_at,
+        days_until_due=days_until_due,
+        urgency_window_days=_resolve_urgency_window(days_until_due),
+        agendamiento_url=agendamiento_url,
+        nombre_cda=nombre_cda,
+        status=reminder.status,
+        commercial_status=reminder.commercial_status or "pendiente",
+        commercial_notes=reminder.commercial_notes,
+        assigned_to_name=reminder.assigned_to_name,
+        last_management_at=reminder.last_management_at,
+        last_management_channel=reminder.last_management_channel,
+        management_count=reminder.management_count or 0,
+        next_contact_at=reminder.next_contact_at,
+        sent_at=reminder.sent_at,
+        last_manual_sent_at=reminder.last_manual_sent_at,
+        created_at=reminder.created_at,
     )
 
 
@@ -258,4 +388,228 @@ def submit_public_quality_survey(
     invite.updated_at = now
     db.commit()
     return {"success": True, "message": "Gracias por compartir tu experiencia."}
+
+
+@router.get("/rtm-reminders/summary", response_model=RTMReminderSummary)
+def get_rtm_reminders_summary(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    now = _now_naive()
+    horizon = now + timedelta(days=30)
+    rows = (
+        db.query(RTMRenewalReminder)
+        .filter(RTMRenewalReminder.tenant_id == current_user.tenant_id)
+        .filter(RTMRenewalReminder.next_due_at >= now)
+        .filter(RTMRenewalReminder.next_due_at <= horizon)
+        .all()
+    )
+    due_30d = len(rows)
+    due_15d = sum(1 for row in rows if (row.next_due_at.date() - now.date()).days <= 15)
+    due_8d = sum(1 for row in rows if (row.next_due_at.date() - now.date()).days <= 8)
+    no_management = sum(1 for row in rows if (row.commercial_status or "pendiente") == "pendiente")
+    managed_count = sum(1 for row in rows if (row.commercial_status or "pendiente") != "pendiente")
+    agendados = sum(1 for row in rows if (row.commercial_status or "") == "agendado")
+    conversion = round((agendados / due_30d) * 100, 2) if due_30d else 0.0
+    return RTMReminderSummary(
+        total_upcoming=due_30d,
+        due_30d=due_30d,
+        due_15d=due_15d,
+        due_8d=due_8d,
+        no_management=no_management,
+        managed_count=managed_count,
+        agendados=agendados,
+        conversion_agendado_pct=conversion,
+    )
+
+
+@router.get("/rtm-reminders", response_model=list[RTMReminderItem])
+def list_rtm_reminders(
+    days_window: int = 30,
+    commercial_status: str | None = None,
+    search: str | None = None,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    if days_window not in {8, 15, 30}:
+        days_window = 30
+    now = _now_naive()
+    upper = now + timedelta(days=days_window)
+    query = (
+        db.query(RTMRenewalReminder)
+        .filter(RTMRenewalReminder.tenant_id == current_user.tenant_id)
+        .filter(RTMRenewalReminder.next_due_at >= now)
+        .filter(RTMRenewalReminder.next_due_at <= upper)
+    )
+    if commercial_status and commercial_status.strip().lower() != "todos":
+        query = query.filter(RTMRenewalReminder.commercial_status == commercial_status.strip().lower())
+    rows = query.order_by(RTMRenewalReminder.next_due_at.asc()).limit(500).all()
+
+    if search:
+        q = search.strip().lower()
+        rows = [
+            row
+            for row in rows
+            if q in (row.cliente_nombre or "").lower()
+            or q in (row.placa or "").lower()
+            or q in (row.cliente_celular or "").lower()
+            or q in (row.cliente_email or "").lower()
+        ]
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    nombre_cda = (
+        tenant.nombre_comercial
+        if tenant and tenant.nombre_comercial
+        else (tenant.nombre if tenant else "CDASOFT")
+    )
+    agendamiento_url = (
+        f"{settings.FRONTEND_URL.rstrip('/')}/agendar/{tenant.slug}"
+        if tenant and tenant.slug
+        else None
+    )
+    return [_to_rtm_item(row, now, agendamiento_url, nombre_cda) for row in rows]
+
+
+@router.patch("/rtm-reminders/{reminder_id}", response_model=RTMReminderItem)
+def update_rtm_reminder_commercial(
+    reminder_id: str,
+    payload: RTMReminderCommercialUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    reminder = (
+        db.query(RTMRenewalReminder)
+        .filter(RTMRenewalReminder.id == reminder_id, RTMRenewalReminder.tenant_id == current_user.tenant_id)
+        .first()
+    )
+    if not reminder:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recordatorio no encontrado")
+
+    reminder.commercial_status = payload.commercial_status.strip().lower()
+    reminder.commercial_notes = (payload.commercial_notes or "").strip() or None
+    reminder.assigned_to_name = (payload.assigned_to_name or "").strip() or None
+    reminder.next_contact_at = payload.next_contact_at
+    reminder.last_management_at = _now_naive()
+    reminder.last_management_channel = "manual_update"
+    reminder.management_count = int(reminder.management_count or 0) + 1
+    reminder.updated_at = _now_naive()
+    db.commit()
+    db.refresh(reminder)
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    nombre_cda = (
+        tenant.nombre_comercial
+        if tenant and tenant.nombre_comercial
+        else (tenant.nombre if tenant else "CDASOFT")
+    )
+    agendamiento_url = (
+        f"{settings.FRONTEND_URL.rstrip('/')}/agendar/{tenant.slug}"
+        if tenant and tenant.slug
+        else None
+    )
+    return _to_rtm_item(reminder, _now_naive(), agendamiento_url, nombre_cda)
+
+
+@router.post("/rtm-reminders/{reminder_id}/send-now", response_model=RTMReminderManualSendResponse)
+def send_rtm_reminder_now(
+    reminder_id: str,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    reminder = (
+        db.query(RTMRenewalReminder)
+        .filter(RTMRenewalReminder.id == reminder_id, RTMRenewalReminder.tenant_id == current_user.tenant_id)
+        .first()
+    )
+    if not reminder:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recordatorio no encontrado")
+    if not reminder.cliente_email:
+        return RTMReminderManualSendResponse(sent=False, message="El cliente no tiene correo registrado.")
+
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    nombre_cda = (
+        tenant.nombre_comercial
+        if tenant and tenant.nombre_comercial
+        else (tenant.nombre if tenant else "CDASOFT")
+    )
+    tenant_slug = tenant.slug if tenant and tenant.slug else None
+    agendamiento_url = (
+        f"{settings.FRONTEND_URL.rstrip('/')}/agendar/{tenant_slug}"
+        if tenant_slug
+        else None
+    )
+
+    html = generar_email_recordatorio_proxima_rtm(
+        nombre_cda=nombre_cda,
+        nombre_cliente=reminder.cliente_nombre,
+        placa=reminder.placa,
+        tipo_servicio=_humanize_service(reminder.tipo_vehiculo),
+        fecha_sugerida=_format_fecha_es(reminder.next_due_at),
+        agendamiento_url=agendamiento_url,
+    )
+    sent = enviar_email(reminder.cliente_email, f"{nombre_cda} - Recordatorio de próxima RTM", html)
+    now = _now_naive()
+    reminder.last_manual_sent_at = now
+    reminder.last_management_at = now
+    reminder.last_management_channel = "email_manual"
+    reminder.management_count = int(reminder.management_count or 0) + 1
+    if (reminder.commercial_status or "pendiente") == "pendiente":
+        reminder.commercial_status = "contactado"
+    reminder.updated_at = now
+    reminder.send_error = None if sent else "No fue posible enviar email manual"
+    db.commit()
+    return RTMReminderManualSendResponse(
+        sent=bool(sent),
+        message="Recordatorio enviado correctamente." if sent else "No fue posible enviar el recordatorio.",
+    )
+
+
+@router.post("/rtm-reminders/process")
+def process_pending_rtm_reminders(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    processed = process_due_rtm_renewal_reminders(db, tenant_id=current_user.tenant_id, limit=200)
+    return {"processed": processed}
+
+
+@router.post("/rtm-reminders/{reminder_id}/touch-management", response_model=RTMReminderItem)
+def touch_rtm_management(
+    reminder_id: str,
+    payload: RTMReminderTouchManagementRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    reminder = (
+        db.query(RTMRenewalReminder)
+        .filter(RTMRenewalReminder.id == reminder_id, RTMRenewalReminder.tenant_id == current_user.tenant_id)
+        .first()
+    )
+    if not reminder:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recordatorio no encontrado")
+
+    now = _now_naive()
+    reminder.last_management_at = now
+    reminder.last_management_channel = (payload.channel or "").strip().lower()
+    reminder.management_count = int(reminder.management_count or 0) + 1
+    if payload.auto_status:
+        next_status = payload.auto_status.strip().lower()
+        if next_status in {"contactado", "interesado", "agendado", "no responde", "descartado", "pendiente"}:
+            reminder.commercial_status = next_status
+    elif (reminder.commercial_status or "pendiente") == "pendiente":
+        reminder.commercial_status = "contactado"
+    reminder.updated_at = now
+    db.commit()
+    db.refresh(reminder)
+
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    nombre_cda = (
+        tenant.nombre_comercial
+        if tenant and tenant.nombre_comercial
+        else (tenant.nombre if tenant else "CDASOFT")
+    )
+    agendamiento_url = (
+        f"{settings.FRONTEND_URL.rstrip('/')}/agendar/{tenant.slug}"
+        if tenant and tenant.slug
+        else None
+    )
+    return _to_rtm_item(reminder, now, agendamiento_url, nombre_cda)
 

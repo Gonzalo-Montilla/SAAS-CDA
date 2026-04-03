@@ -512,7 +512,15 @@ def ensure_rtm_reminders_schema(db):
                 next_due_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
                 scheduled_send_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
                 status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                commercial_status VARCHAR(30) NOT NULL DEFAULT 'pendiente',
+                commercial_notes TEXT,
+                assigned_to_name VARCHAR(200),
+                last_management_at TIMESTAMP WITHOUT TIME ZONE,
+                last_management_channel VARCHAR(30),
+                management_count INTEGER NOT NULL DEFAULT 0,
+                next_contact_at TIMESTAMP WITHOUT TIME ZONE,
                 sent_at TIMESTAMP WITHOUT TIME ZONE,
+                last_manual_sent_at TIMESTAMP WITHOUT TIME ZONE,
                 send_error TEXT,
                 created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMP WITHOUT TIME ZONE
@@ -525,6 +533,18 @@ def ensure_rtm_reminders_schema(db):
     db.execute(text("CREATE INDEX IF NOT EXISTS ix_rtm_reminders_status ON rtm_renewal_reminders(status)"))
     db.execute(text("CREATE INDEX IF NOT EXISTS ix_rtm_reminders_next_due_at ON rtm_renewal_reminders(next_due_at)"))
     db.execute(text("CREATE INDEX IF NOT EXISTS ix_rtm_reminders_cliente_email ON rtm_renewal_reminders(cliente_email)"))
+    db.execute(text("ALTER TABLE IF EXISTS rtm_renewal_reminders ADD COLUMN IF NOT EXISTS commercial_status VARCHAR(30)"))
+    db.execute(text("ALTER TABLE IF EXISTS rtm_renewal_reminders ADD COLUMN IF NOT EXISTS commercial_notes TEXT"))
+    db.execute(text("ALTER TABLE IF EXISTS rtm_renewal_reminders ADD COLUMN IF NOT EXISTS assigned_to_name VARCHAR(200)"))
+    db.execute(text("ALTER TABLE IF EXISTS rtm_renewal_reminders ADD COLUMN IF NOT EXISTS last_management_at TIMESTAMP WITHOUT TIME ZONE"))
+    db.execute(text("ALTER TABLE IF EXISTS rtm_renewal_reminders ADD COLUMN IF NOT EXISTS last_management_channel VARCHAR(30)"))
+    db.execute(text("ALTER TABLE IF EXISTS rtm_renewal_reminders ADD COLUMN IF NOT EXISTS management_count INTEGER"))
+    db.execute(text("ALTER TABLE IF EXISTS rtm_renewal_reminders ADD COLUMN IF NOT EXISTS next_contact_at TIMESTAMP WITHOUT TIME ZONE"))
+    db.execute(text("ALTER TABLE IF EXISTS rtm_renewal_reminders ADD COLUMN IF NOT EXISTS last_manual_sent_at TIMESTAMP WITHOUT TIME ZONE"))
+    db.execute(text("UPDATE rtm_renewal_reminders SET commercial_status = COALESCE(commercial_status, 'pendiente')"))
+    db.execute(text("UPDATE rtm_renewal_reminders SET management_count = COALESCE(management_count, 0)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_rtm_reminders_commercial_status ON rtm_renewal_reminders(commercial_status)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_rtm_reminders_next_contact_at ON rtm_renewal_reminders(next_contact_at)"))
 
 
 def get_db():

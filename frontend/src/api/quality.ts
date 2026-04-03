@@ -3,6 +3,8 @@ import type {
   QualityInviteDetail,
   QualityInviteItem,
   QualityPublicSurveyInfo,
+  RTMReminderItem,
+  RTMReminderSummary,
   QualitySummary,
 } from '../types';
 
@@ -13,6 +15,13 @@ export interface QualitySurveySubmitPayload {
   agrado_visita: number;
   atencion_general: number;
   comentario?: string;
+}
+
+export interface RTMReminderUpdatePayload {
+  commercial_status: string;
+  commercial_notes?: string;
+  assigned_to_name?: string;
+  next_contact_at?: string;
 }
 
 export const qualityApi = {
@@ -35,6 +44,43 @@ export const qualityApi = {
 
   processPending: async (): Promise<{ processed: number }> => {
     const response = await apiClient.post<{ processed: number }>('/quality/process-pending');
+    return response.data;
+  },
+
+  getRTMSummary: async (): Promise<RTMReminderSummary> => {
+    const response = await apiClient.get<RTMReminderSummary>('/quality/rtm-reminders/summary');
+    return response.data;
+  },
+
+  listRTMReminders: async (params?: {
+    days_window?: 8 | 15 | 30;
+    commercial_status?: string;
+    search?: string;
+  }): Promise<RTMReminderItem[]> => {
+    const response = await apiClient.get<RTMReminderItem[]>('/quality/rtm-reminders', { params });
+    return response.data;
+  },
+
+  updateRTMReminder: async (reminderId: string, payload: RTMReminderUpdatePayload): Promise<RTMReminderItem> => {
+    const response = await apiClient.patch<RTMReminderItem>(`/quality/rtm-reminders/${reminderId}`, payload);
+    return response.data;
+  },
+
+  sendRTMReminderNow: async (reminderId: string): Promise<{ sent: boolean; message: string }> => {
+    const response = await apiClient.post<{ sent: boolean; message: string }>(`/quality/rtm-reminders/${reminderId}/send-now`);
+    return response.data;
+  },
+
+  processRTMReminders: async (): Promise<{ processed: number }> => {
+    const response = await apiClient.post<{ processed: number }>('/quality/rtm-reminders/process');
+    return response.data;
+  },
+
+  touchRTMManagement: async (
+    reminderId: string,
+    payload: { channel: string; auto_status?: string }
+  ): Promise<RTMReminderItem> => {
+    const response = await apiClient.post<RTMReminderItem>(`/quality/rtm-reminders/${reminderId}/touch-management`, payload);
     return response.data;
   },
 

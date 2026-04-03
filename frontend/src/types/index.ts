@@ -246,6 +246,43 @@ export interface QualityPublicSurveyInfo {
   tipo_vehiculo: string;
 }
 
+export interface RTMReminderItem {
+  id: string;
+  vehiculo_id: string;
+  cliente_nombre: string;
+  cliente_email?: string | null;
+  cliente_celular?: string | null;
+  placa: string;
+  tipo_vehiculo: string;
+  next_due_at: string;
+  days_until_due: number;
+  urgency_window_days: 8 | 15 | 30;
+  agendamiento_url?: string | null;
+  nombre_cda?: string | null;
+  status: 'pending' | 'sent' | 'failed';
+  commercial_status: 'pendiente' | 'contactado' | 'interesado' | 'agendado' | 'no responde' | 'descartado' | string;
+  commercial_notes?: string | null;
+  assigned_to_name?: string | null;
+  last_management_at?: string | null;
+  last_management_channel?: string | null;
+  management_count: number;
+  next_contact_at?: string | null;
+  sent_at?: string | null;
+  last_manual_sent_at?: string | null;
+  created_at: string;
+}
+
+export interface RTMReminderSummary {
+  total_upcoming: number;
+  due_30d: number;
+  due_15d: number;
+  due_8d: number;
+  no_management: number;
+  managed_count: number;
+  agendados: number;
+  conversion_agendado_pct: number;
+}
+
 export interface AppointmentSlot {
   hora: string;
   disponible: boolean;

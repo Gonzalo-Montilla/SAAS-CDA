@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { CalendarClock, CheckCircle2, Copy, ExternalLink, MessageCircle, Plus } from 'lucide-react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { appointmentsApi, type AppointmentCreatePayload } from '../api/appointments';
 import apiClient from '../api/client';
@@ -20,6 +20,7 @@ const todayIso = new Date().toISOString().slice(0, 10);
 
 export default function Agendamiento() {
   const navigate = useNavigate();
+  const location = useLocation();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [fecha, setFecha] = useState(todayIso);
@@ -76,6 +77,32 @@ export default function Agendamiento() {
       setFeedback({ type: 'error', message: error?.response?.data?.detail || 'No fue posible marcar check-in' });
     },
   });
+
+  useEffect(() => {
+    const state = location.state as
+      | {
+          agendamiento_comercial_prefill?: Partial<AppointmentCreatePayload>;
+        }
+      | undefined;
+    const prefill = state?.agendamiento_comercial_prefill;
+    if (!prefill) return;
+
+    setForm((prev) => ({
+      ...prev,
+      cliente_nombre: (prefill.cliente_nombre || prev.cliente_nombre || '').toUpperCase(),
+      cliente_email: (prefill.cliente_email || prev.cliente_email || '').toLowerCase(),
+      cliente_celular: prefill.cliente_celular || prev.cliente_celular || '',
+      placa: (prefill.placa || prev.placa || '').toUpperCase(),
+      tipo_vehiculo: prefill.tipo_vehiculo || prev.tipo_vehiculo,
+      notes: prefill.notes || prev.notes || '',
+    }));
+    setFeedback({
+      type: 'success',
+      message: 'Datos del cliente precargados desde vencimientos RTM. Solo define fecha y hora.',
+    });
+
+    navigate(location.pathname, { replace: true, state: {} });
+  }, [location.pathname, location.state, navigate]);
 
   const stats = useMemo(() => {
     const rows = query.data || [];

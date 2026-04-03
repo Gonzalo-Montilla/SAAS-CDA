@@ -4,7 +4,7 @@ Recordatorios de próxima RTM por tenant.
 from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import Column, String, DateTime, Text, ForeignKey
+from sqlalchemy import Column, String, DateTime, Text, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.db.database import Base
@@ -25,7 +25,15 @@ class RTMRenewalReminder(Base):
     next_due_at = Column(DateTime, nullable=False, index=True)
     scheduled_send_at = Column(DateTime, nullable=False, index=True)
     status = Column(String(20), nullable=False, default="pending", index=True)
+    commercial_status = Column(String(30), nullable=False, default="pendiente", index=True)
+    commercial_notes = Column(Text, nullable=True)
+    assigned_to_name = Column(String(200), nullable=True)
+    last_management_at = Column(DateTime, nullable=True)
+    last_management_channel = Column(String(30), nullable=True)
+    management_count = Column(Integer, nullable=False, default=0)
+    next_contact_at = Column(DateTime, nullable=True, index=True)
     sent_at = Column(DateTime, nullable=True)
+    last_manual_sent_at = Column(DateTime, nullable=True)
     send_error = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(

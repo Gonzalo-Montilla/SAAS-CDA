@@ -85,6 +85,8 @@ def schedule_rtm_renewal_reminder_for_vehicle(db: Session, vehiculo: VehiculoPro
         existing.next_due_at = next_due_at
         existing.scheduled_send_at = scheduled_send_at
         existing.status = "pending"
+        if not existing.commercial_status:
+            existing.commercial_status = "pendiente"
         existing.sent_at = None
         existing.send_error = None
         existing.updated_at = utcnow_naive()
@@ -102,6 +104,7 @@ def schedule_rtm_renewal_reminder_for_vehicle(db: Session, vehiculo: VehiculoPro
         next_due_at=next_due_at,
         scheduled_send_at=scheduled_send_at,
         status="pending",
+        commercial_status="pendiente",
         created_at=utcnow_naive(),
         updated_at=utcnow_naive(),
     )
@@ -155,6 +158,11 @@ def process_due_rtm_renewal_reminders(db: Session, *, tenant_id=None, limit: int
             if sent:
                 reminder.status = "sent"
                 reminder.sent_at = now
+                reminder.last_management_at = now
+                reminder.last_management_channel = "email_auto"
+                reminder.management_count = int(reminder.management_count or 0) + 1
+                if (reminder.commercial_status or "pendiente") == "pendiente":
+                    reminder.commercial_status = "contactado"
                 reminder.send_error = None
                 sent_count += 1
             else:
