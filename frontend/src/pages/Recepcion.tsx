@@ -437,7 +437,7 @@ export default function Recepcion() {
         <div className="lg:col-span-2">
           <form onSubmit={handleSubmit} className="section-card p-6">
             <div className="flex items-center justify-between mb-6">
-              <h3 className="text-xl font-bold text-gray-900">
+              <h3 className="text-xl font-bold text-slate-900">
                 {modoEdicion ? 'Editando Vehículo' : 'Datos del Vehículo y Cliente'}
               </h3>
               {modoEdicion && (
@@ -452,7 +452,7 @@ export default function Recepcion() {
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Placa */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
                   Placa <span className="text-red-600">*</span>
                 </label>
                 <input
@@ -468,7 +468,7 @@ export default function Recepcion() {
 
               {/* Tipo de Vehículo */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
                   Tipo de Vehículo <span className="text-red-600">*</span>
                 </label>
                 <select
@@ -489,7 +489,7 @@ export default function Recepcion() {
 
               {/* Marca */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
                   Marca
                 </label>
                 <input
@@ -561,7 +561,7 @@ export default function Recepcion() {
 
               {/* Modelo */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
                   Modelo
                 </label>
                 <input
@@ -575,7 +575,7 @@ export default function Recepcion() {
 
               {/* Año del Modelo */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
                   Año del Modelo <span className="text-red-600">*</span>
                 </label>
                 <input
@@ -587,7 +587,7 @@ export default function Recepcion() {
                   min={1950}
                   max={anoActual}
                 />
-                <p className="mt-1 text-xs text-gray-500">
+                <p className="mt-1 text-xs text-slate-500">
                   Rango permitido: 1950 a {anoActual}.
                 </p>
               </div>
@@ -599,9 +599,9 @@ export default function Recepcion() {
                     type="checkbox"
                     checked={formData.tiene_soat}
                     onChange={(e) => handleInputChange('tiene_soat', e.target.checked)}
-                    className="w-6 h-6 text-primary-600 border-gray-300 rounded focus:ring-primary-500"
+                    className="w-6 h-6 text-primary-600 border-slate-300 rounded focus:ring-primary-500"
                   />
-                  <span className="ml-3 text-lg font-medium text-gray-900">
+                  <span className="ml-3 text-lg font-medium text-slate-900">
                     ¿Compra SOAT?
                   </span>
                 </label>
@@ -610,12 +610,12 @@ export default function Recepcion() {
 
             <hr className="my-6" />
 
-            <h4 className="text-lg font-bold text-gray-900 mb-4">Datos del Cliente</h4>
+            <h4 className="text-lg font-bold text-slate-900 mb-4">Datos del Cliente</h4>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               {/* Nombre del Cliente */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
                   Nombre Completo <span className="text-red-600">*</span>
                 </label>
                 <input
@@ -630,7 +630,7 @@ export default function Recepcion() {
 
               {/* Documento */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
                   Documento <span className="text-red-600">*</span>
                 </label>
                 <input
@@ -652,7 +652,7 @@ export default function Recepcion() {
 
               {/* Teléfono */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
                   Teléfono
                 </label>
                 <input
@@ -666,7 +666,7 @@ export default function Recepcion() {
 
               {/* Correo electrónico (opcional) */}
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
                   Correo electrónico
                 </label>
                 <input
@@ -681,7 +681,7 @@ export default function Recepcion() {
 
             {/* Observaciones */}
             <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700 mb-2">
+              <label className="block text-sm font-medium text-slate-700 mb-2">
                 Observaciones
               </label>
               <textarea
@@ -744,7 +744,7 @@ export default function Recepcion() {
         {/* Resumen de Tarifa */}
         <div className="lg:col-span-1">
           <div className="section-card bg-primary-50/80 border-2 border-primary-200 p-5 sticky top-4">
-            <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+            <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
               <DollarSign className="w-6 h-6 text-primary-600" />
               Tarifa a Cobrar
             </h3>
@@ -782,12 +782,12 @@ export default function Recepcion() {
                     </p>
                   </div>
                 ) : (
-                  <div className="mt-4 p-3 rounded-lg bg-gray-50 border-2 border-gray-200">
+                  <div className="mt-4 p-3 rounded-lg bg-slate-50 border border-slate-200">
                     <p className="text-xs font-medium mb-1 flex items-center gap-1">
                       <Camera className="w-4 h-4" />
                       <span>Sin Fotos</span>
                     </p>
-                    <p className="text-sm font-bold text-gray-500">
+                    <p className="text-sm font-bold text-slate-500">
                       <span>0 fotos</span>
                     </p>
                   </div>
@@ -797,21 +797,21 @@ export default function Recepcion() {
               <div>
                 <div className="space-y-3 mb-6">
                   <div className="bg-white rounded-lg p-3">
-                    <p className="text-xs text-gray-600">Año del Vehículo</p>
-                    <p className="text-lg font-bold text-gray-900">{formData.ano_modelo}</p>
-                    <p className="text-xs text-gray-500">{tarifaCalculada.descripcion_antiguedad}</p>
+                    <p className="text-xs text-slate-600">Año del Vehículo</p>
+                    <p className="text-lg font-bold text-slate-900">{formData.ano_modelo}</p>
+                    <p className="text-xs text-slate-500">{tarifaCalculada.descripcion_antiguedad}</p>
                   </div>
 
                   <div className="bg-white rounded-lg p-3">
-                    <p className="text-xs text-gray-600">RTM</p>
-                    <p className="text-lg font-bold text-gray-900">
+                    <p className="text-xs text-slate-600">RTM</p>
+                    <p className="text-lg font-bold text-slate-900">
                       ${Number(tarifaCalculada.valor_rtm).toLocaleString()}
                     </p>
                   </div>
 
                   <div className="bg-white rounded-lg p-3">
-                    <p className="text-xs text-gray-600">Terceros</p>
-                    <p className="text-lg font-bold text-gray-900">
+                    <p className="text-xs text-slate-600">Terceros</p>
+                    <p className="text-lg font-bold text-slate-900">
                       ${Number(tarifaCalculada.valor_terceros).toLocaleString()}
                     </p>
                   </div>
@@ -845,12 +845,12 @@ export default function Recepcion() {
                     </p>
                   </div>
                 ) : (
-                  <div className="mt-4 p-3 rounded-lg bg-gray-50 border-2 border-gray-200">
+                  <div className="mt-4 p-3 rounded-lg bg-slate-50 border border-slate-200">
                     <p className="text-xs font-medium mb-1 flex items-center gap-1">
                       <Camera className="w-4 h-4" />
                       <span>Sin Fotos</span>
                     </p>
-                    <p className="text-sm font-bold text-gray-500">
+                    <p className="text-sm font-bold text-slate-500">
                       <span>0 fotos</span>
                     </p>
                   </div>
@@ -883,7 +883,7 @@ export default function Recepcion() {
               </div>
             ) : (
               <div className="text-center py-8">
-                <p className="text-gray-500">
+                <p className="text-slate-500">
                   Ingrese el año del modelo para calcular la tarifa
                 </p>
               </div>
@@ -897,11 +897,11 @@ export default function Recepcion() {
         {/* Header con título y estadísticas */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-6">
           <div>
-            <h3 className="text-2xl font-bold text-gray-900 mb-1 flex items-center gap-2">
+            <h3 className="text-2xl font-bold text-slate-900 mb-1 flex items-center gap-2">
               <Car className="w-7 h-7 text-primary-600" />
               Vehículos Registrados
             </h3>
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-slate-600">
               {totalVehiculos} {totalVehiculos === 1 ? 'vehículo encontrado' : 'vehículos encontrados'}
             </p>
           </div>
@@ -914,7 +914,7 @@ export default function Recepcion() {
             <div className="lg:col-span-5">
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                  <Search className="h-5 w-5 text-gray-400" />
+                  <Search className="h-5 w-5 text-slate-400" />
                 </div>
                 <input
                   type="text"
@@ -924,7 +924,7 @@ export default function Recepcion() {
                     setPaginaActual(1); // Reset a primera página al buscar
                   }}
                   placeholder="Buscar por placa, cédula o nombre..."
-                  className="w-full pl-10 pr-4 py-2.5 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition"
+                  className="w-full pl-10 pr-4 py-2.5 border border-slate-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-primary-500 transition"
                 />
                 {buscar && (
                   <button
@@ -934,7 +934,7 @@ export default function Recepcion() {
                     }}
                     className="absolute inset-y-0 right-0 pr-3 flex items-center"
                   >
-                    <X className="h-5 w-5 text-gray-400 hover:text-gray-600" />
+                    <X className="h-5 w-5 text-slate-400 hover:text-slate-600" />
                   </button>
                 )}
               </div>
@@ -950,7 +950,7 @@ export default function Recepcion() {
                 className={`px-4 py-2 rounded-lg font-semibold transition ${
                   filtroFecha === 'hoy'
                   ? 'bg-primary-600 text-white shadow-md'
-                  : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
               }`}
               >
                 <Calendar className="w-4 h-4 inline mr-2" />
@@ -964,7 +964,7 @@ export default function Recepcion() {
                 className={`px-4 py-2 rounded-lg font-semibold transition ${
                   filtroFecha === 'semana'
                     ? 'bg-primary-600 text-white shadow-md'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
               >
                 <CalendarDays className="w-4 h-4 inline mr-2" />
@@ -978,7 +978,7 @@ export default function Recepcion() {
                 className={`px-4 py-2 rounded-lg font-semibold transition ${
                   filtroFecha === 'mes'
                     ? 'bg-primary-600 text-white shadow-md'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
               >
                 <CalendarRange className="w-4 h-4 inline mr-2" />
@@ -989,7 +989,7 @@ export default function Recepcion() {
                 className={`px-4 py-2 rounded-lg font-semibold transition ${
                   filtroFecha === 'personalizado'
                     ? 'bg-primary-600 text-white shadow-md'
-                    : 'bg-gray-100 text-gray-700 hover:bg-gray-200'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                 }`}
               >
                 <BarChart3 className="w-4 h-4 inline mr-2" />
@@ -1000,9 +1000,9 @@ export default function Recepcion() {
 
           {/* Filtro de fecha personalizado */}
           {filtroFecha === 'personalizado' && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t-2 border-gray-200">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4 pt-4 border-t border-slate-200">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
                   Fecha Desde
                 </label>
                 <input
@@ -1016,7 +1016,7 @@ export default function Recepcion() {
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-2">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
                   Fecha Hasta
                 </label>
                 <input
@@ -1057,44 +1057,44 @@ export default function Recepcion() {
                         className="w-full h-32 object-cover rounded-t-lg"
                       />
                       {fotos.length > 1 && (
-                        <div className="absolute top-2 right-2 bg-black bg-opacity-70 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
+                        <div className="absolute top-2 right-2 bg-slate-900/70 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
                           <Camera className="w-3 h-3" /> {fotos.length}
                         </div>
                       )}
                     </div>
                   ) : (
-                    <div className="relative mb-3 -mx-4 -mt-4 bg-gray-100 h-32 flex items-center justify-center rounded-t-lg">
+                    <div className="relative mb-3 -mx-4 -mt-4 bg-slate-100 h-32 flex items-center justify-center rounded-t-lg">
                       <div className="text-center">
-                        <Car className="w-12 h-12 text-gray-400 mb-1" />
-                        <p className="text-xs text-gray-500">Sin foto</p>
+                        <Car className="w-12 h-12 text-slate-400 mb-1" />
+                        <p className="text-xs text-slate-500">Sin foto</p>
                       </div>
                     </div>
                   )}
 
                   <div className="flex justify-between items-start mb-2">
                     <div>
-                      <p className="text-2xl font-bold text-gray-900">{vehiculo.placa}</p>
-                      <p className="text-sm text-gray-600 capitalize">{vehiculo.tipo_vehiculo}</p>
+                      <p className="text-2xl font-bold text-slate-900">{vehiculo.placa}</p>
+                      <p className="text-sm text-slate-600 capitalize">{vehiculo.tipo_vehiculo}</p>
                     </div>
                     <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
                       vehiculo.estado === 'registrado' ? 'bg-yellow-100 text-yellow-800' :
                       vehiculo.estado === 'pagado' ? 'bg-green-100 text-green-800' :
                       vehiculo.estado === 'en_pista' ? 'bg-blue-100 text-blue-800' :
                       vehiculo.estado === 'aprobado' ? 'bg-green-100 text-green-800' :
-                      'bg-gray-100 text-gray-800'
+                      'bg-slate-100 text-slate-800'
                     }`}>
                       {vehiculo.estado.toUpperCase()}
                     </span>
                   </div>
 
                   <div className="space-y-1 text-sm">
-                    <p className="text-gray-700">
+                    <p className="text-slate-700">
                       <span className="font-semibold">Cliente:</span> {vehiculo.cliente_nombre}
                     </p>
-                    <p className="text-gray-700">
+                    <p className="text-slate-700">
                       <span className="font-semibold">Doc:</span> {vehiculo.cliente_documento}
                     </p>
-                    <p className="text-gray-700">
+                    <p className="text-slate-700">
                       <span className="font-semibold">Modelo:</span> {vehiculo.ano_modelo}
                     </p>
                     <p className="text-lg font-bold text-primary-600 mt-2">
@@ -1122,15 +1122,15 @@ export default function Recepcion() {
               <div className="card-pos mt-6">
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
                   {/* Info de página */}
-                  <div className="text-sm text-gray-600">
-                    Página <span className="font-bold text-gray-900">{paginaActual}</span> de{' '}
-                    <span className="font-bold text-gray-900">{totalPaginas}</span>
+                  <div className="text-sm text-slate-600">
+                    Página <span className="font-bold text-slate-900">{paginaActual}</span> de{' '}
+                    <span className="font-bold text-slate-900">{totalPaginas}</span>
                     <span className="mx-2">•</span>
                     Mostrando{' '}
-                    <span className="font-bold text-gray-900">
+                    <span className="font-bold text-slate-900">
                       {skip + 1}-{Math.min(skip + registrosPorPagina, totalVehiculos)}
                     </span>{' '}
-                    de <span className="font-bold text-gray-900">{totalVehiculos}</span> registros
+                    de <span className="font-bold text-slate-900">{totalVehiculos}</span> registros
                   </div>
 
                   {/* Botones de paginación */}
@@ -1139,7 +1139,7 @@ export default function Recepcion() {
                     <button
                       onClick={() => setPaginaActual(1)}
                       disabled={paginaActual === 1}
-                      className="px-3 py-2 rounded-lg border-2 border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                      className="px-3 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition"
                       title="Primera página"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1151,7 +1151,7 @@ export default function Recepcion() {
                     <button
                       onClick={() => setPaginaActual(p => Math.max(1, p - 1))}
                       disabled={paginaActual === 1}
-                      className="px-4 py-2 rounded-lg border-2 border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition"
+                      className="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition"
                     >
                       ← Anterior
                     </button>
@@ -1177,7 +1177,7 @@ export default function Recepcion() {
                             className={`w-10 h-10 rounded-lg font-bold transition ${
                               paginaActual === pageNum
                                 ? 'bg-primary-600 text-white shadow-lg'
-                                : 'border-2 border-gray-300 hover:bg-gray-100'
+                                : 'border border-slate-300 hover:bg-slate-100'
                             }`}
                           >
                             {pageNum}
@@ -1190,7 +1190,7 @@ export default function Recepcion() {
                     <button
                       onClick={() => setPaginaActual(p => Math.min(totalPaginas, p + 1))}
                       disabled={paginaActual === totalPaginas}
-                      className="px-4 py-2 rounded-lg border-2 border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition"
+                      className="px-4 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed font-semibold transition"
                     >
                       Siguiente →
                     </button>
@@ -1199,7 +1199,7 @@ export default function Recepcion() {
                     <button
                       onClick={() => setPaginaActual(totalPaginas)}
                       disabled={paginaActual === totalPaginas}
-                      className="px-3 py-2 rounded-lg border-2 border-gray-300 hover:bg-gray-100 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                      className="px-3 py-2 rounded-lg border border-slate-300 hover:bg-slate-100 disabled:opacity-50 disabled:cursor-not-allowed transition"
                       title="Última página"
                     >
                       <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -1213,9 +1213,9 @@ export default function Recepcion() {
           </div>
         ) : (
           <div className="card-pos text-center py-12">
-            <Search className="w-16 h-16 text-gray-400 mx-auto mb-4" />
-            <p className="text-xl font-semibold text-gray-900 mb-2">No se encontraron vehículos</p>
-            <p className="text-gray-500">
+            <Search className="w-16 h-16 text-slate-400 mx-auto mb-4" />
+            <p className="text-xl font-semibold text-slate-900 mb-2">No se encontraron vehículos</p>
+            <p className="text-slate-500">
               {buscar
                 ? 'Intenta con otros términos de búsqueda'
                 : 'No hay vehículos registrados en el período seleccionado'}

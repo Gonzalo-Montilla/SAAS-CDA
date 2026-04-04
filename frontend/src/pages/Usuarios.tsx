@@ -322,7 +322,7 @@ export default function UsuariosPage() {
       'contador': 'bg-purple-100 text-purple-800',
       'comercial': 'bg-cyan-100 text-cyan-800',
     };
-    return colors[rol] || 'bg-gray-100 text-gray-800';
+    return colors[rol] || 'bg-slate-100 text-slate-800';
   };
 
   if (isLoading) {
@@ -351,17 +351,17 @@ export default function UsuariosPage() {
         {/* Header */}
         <div className="flex justify-between items-center">
           <div>
-            <h2 className="text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3">
+            <h2 className="text-3xl font-bold text-slate-900 mb-2 flex items-center gap-3">
               <Users className="w-8 h-8 text-primary-600" />
               Gestión de Usuarios
             </h2>
-            <p className="text-gray-600">
+            <p className="text-slate-600">
               Administra los usuarios del sistema CDA
             </p>
           </div>
           <button
             onClick={handleCrear}
-            className="flex items-center gap-2 px-5 py-2.5 bg-secondary-500 hover:bg-secondary-600 text-white font-bold rounded-lg shadow-lg transition-all duration-200 hover:shadow-xl hover:scale-105"
+            className="flex items-center gap-2 btn-primary-solid"
           >
             <UserPlus className="w-5 h-5" />
             Crear Usuario
@@ -425,7 +425,7 @@ export default function UsuariosPage() {
         <div className="card-pos">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+              <label className="block text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
                 <Search className="w-4 h-4 text-primary-600" />
                 Buscar
               </label>
@@ -438,7 +438,7 @@ export default function UsuariosPage() {
               />
             </div>
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
                 Filtrar por Rol
               </label>
               <select
@@ -455,7 +455,7 @@ export default function UsuariosPage() {
               </select>
             </div>
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
+              <label className="block text-sm font-semibold text-slate-700 mb-2">
                 Filtrar por Estado
               </label>
               <select
@@ -470,7 +470,7 @@ export default function UsuariosPage() {
             </div>
           </div>
           <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-slate-600">
               Mostrando {usuarios?.length || 0} usuario(s) con los filtros actuales.
             </p>
             <button
@@ -481,7 +481,7 @@ export default function UsuariosPage() {
                 setFiltroRol('');
                 setFiltroActivo('');
               }}
-              className="px-3 py-2 rounded-lg border border-gray-300 text-gray-700 text-sm font-semibold hover:bg-gray-50"
+              className="px-3 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm font-semibold hover:bg-slate-50"
             >
               Limpiar filtros
             </button>
@@ -493,7 +493,7 @@ export default function UsuariosPage() {
           <div className="overflow-x-auto">
             <table className="min-w-full">
               <thead>
-                <tr className="text-left text-gray-600 border-b-2">
+                <tr className="text-left text-slate-600 border-b border-slate-200">
                   <th className="px-4 py-3">Usuario</th>
                   <th className="px-4 py-3">Rol</th>
                   <th className="px-4 py-3">Estado</th>
@@ -504,11 +504,11 @@ export default function UsuariosPage() {
               <tbody>
                 {usuarios && usuarios.length > 0 ? (
                   usuarios.map((usuario) => (
-                    <tr key={usuario.id} className="border-b hover:bg-gray-50">
+                    <tr key={usuario.id} className="border-b border-slate-200 hover:bg-slate-50">
                       <td className="px-4 py-3">
                         <div>
-                          <p className="font-semibold text-gray-900">{usuario.nombre_completo}</p>
-                          <p className="text-sm text-gray-600">{usuario.email}</p>
+                          <p className="font-semibold text-slate-900">{usuario.nombre_completo}</p>
+                          <p className="text-sm text-slate-600">{usuario.email}</p>
                         </div>
                       </td>
                       <td className="px-4 py-3">
@@ -518,12 +518,12 @@ export default function UsuariosPage() {
                       </td>
                       <td className="px-4 py-3">
                         <span className={`px-3 py-1 rounded-full text-sm font-semibold flex items-center gap-1 ${
-                          usuario.activo ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'
+                          usuario.activo ? 'bg-green-100 text-green-800' : 'bg-slate-100 text-slate-800'
                         }`}>
                           {usuario.activo ? <><CheckCircle2 className="w-3 h-3" /> Activo</> : <><XCircle className="w-3 h-3" /> Inactivo</>}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-gray-600">
+                      <td className="px-4 py-3 text-slate-600">
                         {new Date(usuario.created_at).toLocaleDateString('es-CO')}
                       </td>
                       <td className="px-4 py-3">
@@ -566,7 +566,7 @@ export default function UsuariosPage() {
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-gray-500">
+                    <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
                       No se encontraron usuarios
                     </td>
                   </tr>
@@ -578,10 +578,10 @@ export default function UsuariosPage() {
 
         {/* Modal: Crear/Editar Usuario */}
         {mostrarFormulario && (
-          <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-            <div className="bg-white rounded-2xl shadow-2xl max-w-lg w-full max-h-[90vh] overflow-hidden border-2 border-gray-100 animate-fade-in">
+          <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+            <div className="modal-panel glass-card max-w-lg w-full border border-slate-200/70 animate-fade-in">
               {/* Header del Modal */}
-              <div className={`p-6 border-b-2 ${
+              <div className={`modal-header-sticky -mx-6 px-6 pt-4 pb-4 border-b-2 ${
                 usuarioEditando 
                   ? 'bg-gradient-to-r from-blue-500 to-blue-600' 
                   : 'bg-gradient-to-r from-green-500 to-green-600'
@@ -614,11 +614,11 @@ export default function UsuariosPage() {
               </div>
 
               {/* Contenido del Modal */}
-              <div className="p-6 overflow-y-auto" style={{ maxHeight: 'calc(90vh - 180px)' }}>
+              <div className="p-6 modal-body-scroll">
                 <form onSubmit={handleSubmit} className="space-y-5">
                   {/* Nombre Completo */}
                   <div className="group">
-                    <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
+                    <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
                       <User className="w-4 h-4 text-blue-500" />
                       Nombre Completo *
                     </label>
@@ -626,7 +626,7 @@ export default function UsuariosPage() {
                       type="text"
                       value={formData.nombre_completo}
                       onChange={(e) => setFormData({ ...formData, nombre_completo: e.target.value })}
-                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all placeholder-gray-400"
+                      className="input-corporate w-full px-4 py-3"
                       placeholder="Ej: Juan Pérez García"
                       required
                     />
@@ -634,7 +634,7 @@ export default function UsuariosPage() {
 
                   {/* Email */}
                   <div className="group">
-                    <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
+                    <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
                       <Mail className="w-4 h-4 text-purple-500" />
                       Email *
                     </label>
@@ -642,7 +642,7 @@ export default function UsuariosPage() {
                       type="email"
                       value={formData.email}
                       onChange={(e) => setFormData({ ...formData, email: e.target.value })}
-                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-purple-500 focus:border-purple-500 transition-all placeholder-gray-400"
+                      className="input-corporate w-full px-4 py-3"
                       placeholder="usuario@ejemplo.com"
                       required
                     />
@@ -651,7 +651,7 @@ export default function UsuariosPage() {
                   {/* Contraseña (solo al crear) */}
                   {!usuarioEditando && (
                     <div className="group">
-                      <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
+                      <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
                         <Lock className="w-4 h-4 text-yellow-500" />
                         Contraseña *
                       </label>
@@ -659,7 +659,7 @@ export default function UsuariosPage() {
                         type="password"
                         value={formData.password}
                         onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                        className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-yellow-500 focus:border-yellow-500 transition-all placeholder-gray-400"
+                        className="input-corporate w-full px-4 py-3"
                         placeholder="Mínimo 10, con mayúscula, minúscula, número y símbolo"
                         required
                       />
@@ -668,14 +668,14 @@ export default function UsuariosPage() {
 
                   {/* Rol */}
                   <div className="group">
-                    <label className="block text-sm font-bold text-gray-700 mb-2 flex items-center gap-2">
+                    <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
                       <UserCog className="w-4 h-4 text-green-500" />
                       Rol *
                     </label>
                     <select
                       value={formData.rol}
                       onChange={(e) => setFormData({ ...formData, rol: e.target.value })}
-                      className="w-full px-4 py-3 border-2 border-gray-300 rounded-xl focus:ring-2 focus:ring-green-500 focus:border-green-500 transition-all bg-white cursor-pointer"
+                      className="input-corporate w-full px-4 py-3 cursor-pointer"
                       required
                     >
                       <option value="cajero">Cajero</option>
@@ -684,7 +684,7 @@ export default function UsuariosPage() {
                       <option value="comercial">Comercial</option>
                       <option value="administrador">Administrador</option>
                     </select>
-                    <p className="text-xs text-gray-500 mt-2">
+                    <p className="text-xs text-slate-500 mt-2">
                       {formData.rol === 'administrador' && 'Acceso total al sistema'}
                       {formData.rol === 'cajero' && 'Acceso a caja y cobros'}
                       {formData.rol === 'recepcionista' && 'Acceso a recepción y registro'}
@@ -711,7 +711,7 @@ export default function UsuariosPage() {
               </div>
 
               {/* Footer con botones */}
-              <div className="p-6 bg-gray-50 border-t-2 border-gray-100 flex gap-3">
+              <div className="modal-footer-sticky -mx-6 px-6 bg-slate-50 flex gap-3">
                 <button
                   type="button"
                   onClick={() => {
@@ -719,7 +719,7 @@ export default function UsuariosPage() {
                     setUsuarioEditando(null);
                     resetForm();
                   }}
-                  className="flex-1 px-6 py-3 bg-white border-2 border-gray-300 hover:bg-gray-100 text-gray-700 rounded-xl font-bold transition-all hover:scale-105 flex items-center justify-center gap-2"
+                  className="flex-1 btn-corporate-muted px-6 flex items-center justify-center gap-2"
                 >
                   <X className="w-5 h-5" />
                   Cancelar
@@ -743,16 +743,18 @@ export default function UsuariosPage() {
 
         {/* Modal: Cambiar Contraseña */}
         {mostrarCambiarPassword && (
-          <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-lg shadow-2xl max-w-md w-full">
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+            <div className="modal-panel glass-card max-w-md w-full border border-slate-200/70">
               <div className="p-6">
-                <h3 className="text-2xl font-bold mb-4 flex items-center gap-2">
-                  <Key className="w-7 h-7 text-yellow-600" />
-                  Cambiar Contraseña
-                </h3>
+                <div className="modal-header-sticky -mx-6 px-6 pt-1 pb-4 mb-4 border-b border-slate-200">
+                  <h3 className="text-2xl font-bold flex items-center gap-2 text-slate-900">
+                    <Key className="w-7 h-7 text-yellow-600" />
+                    Cambiar Contraseña
+                  </h3>
+                </div>
                 <form onSubmit={handleCambiarPassword} className="space-y-4">
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-2">
+                    <label className="block text-sm font-semibold text-slate-700 mb-2">
                       Nueva Contraseña *
                     </label>
                     <input
@@ -765,20 +767,20 @@ export default function UsuariosPage() {
                     />
                   </div>
 
-                  <div className="flex gap-3 pt-4">
+                  <div className="modal-footer-sticky -mx-6 px-6 flex gap-3">
                     <button
                       type="button"
                       onClick={() => {
                         setMostrarCambiarPassword(null);
                         setPasswordData({ password: '' });
                       }}
-                      className="flex-1 px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg font-semibold"
+                      className="flex-1 btn-corporate-muted px-4"
                     >
                       Cancelar
                     </button>
                     <button
                       type="submit"
-                      className="flex-1 px-4 py-2 bg-yellow-600 hover:bg-yellow-700 text-white rounded-lg font-semibold"
+                      className="flex-1 btn-primary-solid px-4"
                     >
                       Cambiar Contraseña
                     </button>

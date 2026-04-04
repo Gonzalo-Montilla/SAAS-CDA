@@ -55,8 +55,8 @@ export default function CalidadEncuesta() {
   const brandPrimary = infoQuery.data?.color_primario || '#2563eb';
 
   return (
-    <div className="min-h-screen bg-slate-50 py-10 px-4">
-      <div className="max-w-3xl mx-auto bg-white border border-slate-200 rounded-2xl shadow-sm p-6 md:p-8">
+    <div className="corporate-shell py-10 px-4">
+      <div className="max-w-3xl mx-auto section-card p-6 md:p-8">
         {infoQuery.isLoading && <p className="text-slate-600">Cargando encuesta...</p>}
         {infoQuery.isError && <p className="text-red-600">No fue posible cargar esta encuesta.</p>}
 

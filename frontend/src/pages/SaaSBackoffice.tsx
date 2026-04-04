@@ -29,7 +29,7 @@ interface SaaSPermissionsResponse {
 type BackofficeModule = 'resumen' | 'tenants' | 'facturacion' | 'soporte' | 'usuarios' | 'auditoria' | 'seguridad';
 
 export default function SaaSBackoffice() {
-  const { user, logout } = useAuth();
+  const { user, logout, getLogoutRedirectPath } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [copiedTenantId, setCopiedTenantId] = useState<string | null>(null);
@@ -467,8 +467,9 @@ export default function SaaSBackoffice() {
   });
 
   const handleLogout = () => {
+    const redirectPath = getLogoutRedirectPath();
     logout();
-    navigate('/saas/login');
+    navigate(redirectPath);
   };
 
   const handleCopyLoginUrl = async (tenantId: string, loginUrl: string) => {
@@ -1002,20 +1003,22 @@ export default function SaaSBackoffice() {
 
           {supportReplyTicketId && (
             <div
-              className="fixed inset-0 z-50 bg-slate-900/50 flex items-center justify-center p-4"
+              className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4"
               onClick={() => {
                 setSupportReplyTicketId(null);
                 setSupportReplyMessage('');
               }}
             >
               <div
-                className="w-full max-w-2xl glass-card border border-slate-200/70 p-5"
+                className="w-full max-w-2xl modal-panel glass-card border border-slate-200/70 p-5"
                 onClick={(e) => e.stopPropagation()}
               >
-                <p className="text-sm font-semibold text-slate-800 mb-2">Respuesta al CDA</p>
-                <p className="text-xs text-slate-500 mb-3">
-                  Este mensaje será visible para el CDA en su módulo de soporte.
-                </p>
+                <div className="modal-header-sticky -mx-5 px-5 pt-1 pb-3 mb-3 border-b border-slate-200">
+                  <p className="text-sm font-semibold text-slate-800 mb-2">Respuesta al CDA</p>
+                  <p className="text-xs text-slate-500 mb-1">
+                    Este mensaje será visible para el CDA en su módulo de soporte.
+                  </p>
+                </div>
                 <textarea
                   value={supportReplyMessage}
                   onChange={(e) => setSupportReplyMessage(e.target.value)}
@@ -1023,7 +1026,7 @@ export default function SaaSBackoffice() {
                   placeholder="Ej: Se realizó la anulación del pago 14698115 y la caja quedó actualizada."
                   required
                 />
-                <div className="flex items-center justify-end gap-2">
+                <div className="modal-footer-sticky -mx-5 px-5 flex items-center justify-end gap-2">
                   <button
                     type="button"
                     className="btn-corporate-muted px-4"
@@ -1243,18 +1246,18 @@ export default function SaaSBackoffice() {
 
   return (
     <div className="corporate-shell">
-      <header className="bg-white/85 backdrop-blur-md border-b border-slate-200/70 sticky top-0 z-30">
-        <div className="max-w-6xl mx-auto px-3 sm:px-4 py-3 sm:py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      <header className="app-header !z-30">
+        <div className="app-header-inner">
           <div className="flex items-center gap-3">
-            <img src={logoCdaSoft} alt="CDASOFT" className="h-14 sm:h-20 lg:h-24 w-auto object-contain" />
+            <img src={logoCdaSoft} alt="CDASOFT" className="h-14 sm:h-18 lg:h-20 w-auto object-contain" />
             <div>
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Panel ejecutivo</p>
               <p className="text-sm font-semibold text-slate-900">CDASOFT SaaS Backoffice</p>
-              <p className="text-xs text-slate-500">Gestión global de plataforma</p>
             </div>
           </div>
           <button
             onClick={handleLogout}
-            className="px-4 py-2 text-sm rounded-lg text-white transition shadow-sm hover:shadow-md flex items-center gap-2 bg-gradient-to-r from-rose-600 to-red-700 hover:from-rose-700 hover:to-red-800"
+            className="px-4 btn-corporate-danger flex items-center gap-2"
           >
             <LogOut className="w-4 h-4" />
             Salir
@@ -1262,7 +1265,7 @@ export default function SaaSBackoffice() {
         </div>
       </header>
 
-      <main className="max-w-6xl mx-auto px-3 sm:px-4 py-6 sm:py-8 relative">
+      <main className="app-main relative">
         <div className="section-card p-4 sm:p-6 mb-6">
           <p className="text-sm text-slate-500 mb-1">Sesión global activa</p>
           <h1 className="text-xl sm:text-2xl font-bold text-slate-900 mb-2">
@@ -1315,19 +1318,19 @@ export default function SaaSBackoffice() {
 
       {selectedTenantId && (
         <div
-          className="fixed inset-0 z-50 bg-slate-900/50 flex items-start sm:items-center justify-center p-2 sm:p-4"
+          className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-start sm:items-center justify-center p-2 sm:p-4"
           onClick={() => setSelectedTenantId(null)}
         >
           <div
-            className="w-full max-w-5xl max-h-[95vh] sm:max-h-[90vh] overflow-y-auto glass-card border border-slate-200/70 p-4 sm:p-6"
+            className="w-full max-w-5xl modal-panel max-h-[95vh] sm:max-h-[90vh] glass-card border border-slate-200/70 p-4 sm:p-6"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between mb-4">
+            <div className="modal-header-sticky -mx-4 sm:-mx-6 px-4 sm:px-6 pt-1 pb-3 flex items-center justify-between mb-4 border-b border-slate-200">
               <p className="text-sm font-semibold text-slate-800">Hoja de vida del CDA</p>
               <button
                 type="button"
                 onClick={() => setSelectedTenantId(null)}
-                className="text-xs px-2 py-1 rounded border border-slate-200 hover:bg-slate-50"
+                className="btn-corporate-muted text-xs px-3 py-1"
               >
                 Cerrar perfil
               </button>

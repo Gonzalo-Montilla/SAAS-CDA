@@ -3,6 +3,25 @@
 @tailwind utilities;
 
 @layer base {
+  :root {
+    --ui-bg: #f3f7fd;
+    --ui-surface: #ffffff;
+    --ui-surface-muted: #f8fafc;
+    --ui-border: #d9e2ef;
+    --ui-text: #0f172a;
+    --ui-text-soft: #475569;
+    --ui-primary: #1f4ed8;
+    --ui-primary-strong: #1d325f;
+    --ui-info: #2563eb;
+    --ui-success: #0f766e;
+    --ui-warning: #b45309;
+    --ui-danger: #b91c1c;
+    --ui-radius-lg: 0.85rem;
+    --ui-radius-xl: 1.15rem;
+    --ui-shadow-soft: 0 10px 30px -18px rgba(15, 23, 42, 0.35);
+    --ui-shadow-panel: 0 20px 50px -30px rgba(15, 23, 42, 0.45);
+  }
+
   body {
     @apply text-slate-900 font-sans antialiased;
     background:
@@ -60,6 +79,35 @@
     @apply min-h-screen relative;
   }
 
+  .app-shell {
+    @apply min-h-screen relative;
+  }
+
+  .app-header {
+    @apply sticky top-0 z-40 border-b backdrop-blur-md;
+    background-color: rgba(255, 255, 255, 0.9);
+    border-color: rgba(217, 226, 239, 0.9);
+  }
+
+  .app-header-inner {
+    @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-3 sm:py-4 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3;
+  }
+
+  .app-main {
+    @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8;
+  }
+
+  .app-user-chip {
+    @apply flex items-center gap-3 px-3 py-2 rounded-xl border;
+    background-color: rgba(248, 250, 252, 0.85);
+    border-color: var(--ui-border);
+  }
+
+  .btn-corporate-danger {
+    @apply rounded-lg text-white text-sm font-semibold py-2.5 transition shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed;
+    background: linear-gradient(120deg, #be123c 0%, #dc2626 60%, #b91c1c 100%);
+  }
+
   .corporate-shell::before {
     content: '';
     @apply absolute inset-0 pointer-events-none;
@@ -70,14 +118,19 @@
 
   .glass-card {
     @apply backdrop-blur-sm border rounded-2xl shadow-[0_18px_42px_-24px_rgba(15,23,42,0.45)];
-    background-color: rgba(255, 255, 255, 0.92);
+    background-color: rgba(255, 255, 255, 0.94);
     border-color: rgba(255, 255, 255, 0.6);
   }
 
   .section-card {
-    @apply rounded-2xl border bg-white shadow-sm;
-    border-color: rgba(226, 232, 240, 0.75);
-    background-color: rgba(255, 255, 255, 0.9);
+    @apply rounded-2xl border bg-white shadow-sm transition-shadow duration-200;
+    border-color: var(--ui-border);
+    background-color: rgba(255, 255, 255, 0.94);
+    box-shadow: var(--ui-shadow-soft);
+  }
+
+  .section-card:hover {
+    box-shadow: var(--ui-shadow-panel);
   }
 
   .kpi-card {
@@ -131,7 +184,14 @@
   }
 
   .btn-chip {
-    @apply inline-flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 hover:bg-slate-50 transition disabled:opacity-50;
+    @apply inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium transition disabled:opacity-50;
+    border-color: var(--ui-border);
+    background-color: #fff;
+    color: var(--ui-text-soft);
+  }
+
+  .btn-chip:hover {
+    background-color: var(--ui-surface-muted);
   }
 
   @media (min-width: 1024px) {
@@ -141,16 +201,86 @@
   }
 
   .input-corporate {
-    @apply w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-700 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-200 focus:border-blue-500 transition;
+    @apply w-full rounded-lg border bg-white px-3 py-2.5 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 transition;
+    border-color: var(--ui-border);
+    color: var(--ui-text-soft);
+  }
+
+  .input-corporate:focus {
+    border-color: rgba(37, 99, 235, 0.6);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
   }
 
   .btn-corporate-primary {
     @apply rounded-lg text-white text-sm font-semibold py-2.5 transition shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed;
-    background: linear-gradient(120deg, #1d4ed8 0%, #2563eb 45%, #0f172a 100%);
+    background: linear-gradient(125deg, var(--ui-primary) 0%, #2f67f6 45%, var(--ui-primary-strong) 100%);
   }
 
   .btn-corporate-muted {
-    @apply rounded-lg border border-slate-300 bg-white hover:bg-slate-50 text-slate-700 text-sm font-medium py-2.5 transition;
+    @apply rounded-lg border bg-white text-sm font-medium py-2.5 transition;
+    border-color: var(--ui-border);
+    color: var(--ui-text-soft);
+  }
+
+  .btn-corporate-muted:hover {
+    background-color: var(--ui-surface-muted);
+  }
+
+  .btn-primary-solid {
+    @apply rounded-lg text-white text-sm font-semibold py-2.5 px-4 transition shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed;
+    background: linear-gradient(125deg, var(--ui-primary) 0%, #2f67f6 45%, var(--ui-primary-strong) 100%);
+  }
+
+  .btn-success-solid {
+    @apply rounded-lg text-white text-sm font-semibold py-2.5 px-4 transition shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed;
+    background: linear-gradient(120deg, #059669 0%, #10b981 60%, #0f766e 100%);
+  }
+
+  .input {
+    @apply input-corporate;
+  }
+
+  .table-base {
+    @apply w-full text-sm;
+  }
+
+  .table-base thead th {
+    @apply px-3 py-2 text-left text-slate-600 font-semibold;
+  }
+
+  .table-base tbody tr {
+    @apply border-t border-slate-200;
+  }
+
+  .table-base tbody td {
+    @apply px-3 py-2 text-slate-700;
+  }
+
+  .table-corporate {
+    @apply table-enterprise;
+  }
+
+  .modal-panel {
+    @apply section-card;
+    max-height: 92vh;
+    overflow-y: auto;
+  }
+
+  .modal-header-sticky {
+    @apply sticky top-0 z-10 bg-white/95 backdrop-blur-sm;
+  }
+
+  .modal-footer-sticky {
+    @apply sticky bottom-0 z-10 bg-white/95 backdrop-blur-sm border-t border-slate-200 pt-4 mt-6;
+  }
+
+  .modal-close-btn {
+    @apply h-10 w-10 rounded-lg border border-slate-300 text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition;
+  }
+
+  .modal-body-scroll {
+    @apply overflow-y-auto;
+    max-height: calc(92vh - 150px);
   }
 
   .module-hero {
@@ -167,7 +297,7 @@
 
   /* Botones POS - Diseño Profesional */
   .btn-pos {
-    @apply px-6 py-3 rounded-xl font-semibold text-base shadow-sm hover:shadow-lg transition-all duration-200 transform hover:scale-105 active:scale-95 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100;
+    @apply px-6 py-3 rounded-xl font-semibold text-base shadow-sm transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100;
   }
   
   .btn-primary {
@@ -183,22 +313,42 @@
   }
   
   .btn-secondary {
-    @apply bg-white text-gray-700 hover:bg-gray-50 border-2 border-gray-200 hover:border-gray-300;
+    @apply bg-white text-slate-700 hover:bg-slate-50 border border-slate-300;
   }
   
   /* Tarjetas - Diseño Limpio */
   .card-pos {
-    @apply bg-white rounded-2xl shadow-sm border border-gray-100 p-6 hover:shadow-xl hover:border-primary-100 transition-all duration-300 transform hover:-translate-y-1;
+    @apply bg-white rounded-2xl border p-6 transition-all duration-300 transform hover:-translate-y-1;
+    border-color: var(--ui-border);
+    box-shadow: var(--ui-shadow-soft);
+  }
+
+  .card-pos:hover {
+    box-shadow: var(--ui-shadow-panel);
   }
   
   /* Tarjetas de vehículos */
   .vehicle-card {
-    @apply bg-white rounded-xl shadow-sm p-5 border-2 border-gray-100 hover:border-primary-400 hover:shadow-xl transition-all duration-300 cursor-pointer transform hover:-translate-y-2 hover:scale-105;
+    @apply bg-white rounded-xl p-5 border cursor-pointer transition-all duration-300 transform hover:-translate-y-1 hover:scale-[1.01];
+    border-color: var(--ui-border);
+    box-shadow: var(--ui-shadow-soft);
+  }
+
+  .vehicle-card:hover {
+    border-color: rgba(47, 103, 246, 0.45);
+    box-shadow: var(--ui-shadow-panel);
   }
   
   /* Inputs */
   .input-pos {
-    @apply w-full px-4 py-3 text-base border-2 border-gray-200 rounded-xl focus:outline-none focus:border-primary-500 focus:ring-2 focus:ring-primary-100 transition-all placeholder:text-gray-400;
+    @apply w-full px-4 py-3 text-base rounded-xl focus:outline-none transition-all placeholder:text-slate-400;
+    border: 1px solid var(--ui-border);
+    color: var(--ui-text-soft);
+  }
+
+  .input-pos:focus {
+    border-color: rgba(37, 99, 235, 0.6);
+    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
   }
   
   /* Badges */
@@ -207,19 +357,23 @@
   }
   
   .badge-success {
-    @apply bg-emerald-100 text-emerald-800;
+    @apply text-emerald-800;
+    background-color: rgba(16, 185, 129, 0.16);
   }
   
   .badge-warning {
-    @apply bg-amber-100 text-amber-800;
+    @apply text-amber-800;
+    background-color: rgba(245, 158, 11, 0.18);
   }
   
   .badge-danger {
-    @apply bg-red-100 text-red-800;
+    @apply text-red-800;
+    background-color: rgba(239, 68, 68, 0.16);
   }
   
   .badge-info {
-    @apply bg-blue-100 text-blue-800;
+    @apply text-blue-800;
+    background-color: rgba(59, 130, 246, 0.16);
   }
   
   /* Modales profesionales */

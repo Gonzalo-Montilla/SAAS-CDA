@@ -179,7 +179,7 @@ export default function Agendamiento() {
               <button
                 type="button"
                 onClick={handleCopyPublicLink}
-                className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-blue-200 bg-blue-50 text-blue-700 font-medium shadow-sm hover:bg-blue-100 hover:border-blue-300 hover:shadow transition-all duration-200 active:scale-[0.98] disabled:opacity-60"
+                className="btn-chip inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl shadow-sm hover:shadow transition-all duration-200 active:scale-[0.98] disabled:opacity-60"
                 disabled={!publicLink}
                 title={publicLink || 'Tenant sin slug disponible'}
               >
@@ -189,7 +189,7 @@ export default function Agendamiento() {
               <button
                 type="button"
                 onClick={() => window.open(publicLink, '_blank', 'noopener,noreferrer')}
-                className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 font-medium shadow-sm hover:bg-slate-50 hover:border-slate-300 hover:shadow transition-all duration-200 active:scale-[0.98] disabled:opacity-60"
+                className="btn-chip inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl shadow-sm hover:shadow transition-all duration-200 active:scale-[0.98] disabled:opacity-60"
                 disabled={!publicLink}
               >
                 <ExternalLink className="w-4 h-4" />
@@ -198,7 +198,7 @@ export default function Agendamiento() {
               <button
                 type="button"
                 onClick={() => window.open(whatsappShareUrl, '_blank', 'noopener,noreferrer')}
-                className="inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl border border-emerald-500 bg-emerald-600 text-white font-semibold shadow-sm hover:bg-emerald-700 hover:border-emerald-600 hover:shadow transition-all duration-200 active:scale-[0.98] disabled:opacity-60"
+                className="btn-success-solid inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl transition-all duration-200 active:scale-[0.98] disabled:opacity-60"
                 disabled={!publicLink}
               >
                 <MessageCircle className="w-4 h-4" />

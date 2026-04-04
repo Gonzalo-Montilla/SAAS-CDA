@@ -90,9 +90,9 @@ export default function AgendarPublico() {
   }, [tenantSlug, hora, form.cliente_nombre, form.placa]);
 
   return (
-    <div className="min-h-screen bg-slate-50 px-4 py-8">
+    <div className="corporate-shell px-4 py-8">
       <div className="max-w-3xl mx-auto">
-        <div className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <div className="section-card overflow-hidden">
           <div className="p-6 text-white" style={{ background: `linear-gradient(135deg, ${primary} 0%, ${secondary} 100%)` }}>
             {!logoError && (
               <img

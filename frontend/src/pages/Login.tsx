@@ -112,6 +112,7 @@ export default function Login() {
         colorSecundario: tenantBrandingPreview.color_secundario || brand.colorSecundario,
       }
     : brand;
+  const isDefaultBrandLogin = !tenantSlug && !tenantBrandingPreview;
 
   useEffect(() => {
     return () => {
@@ -399,11 +400,15 @@ export default function Login() {
       <div className="flex-1 flex items-center justify-center p-4">
         <div className="w-full max-w-md glass-card px-7 py-8">
           <div className="mb-8 flex flex-col items-center text-center">
-            <img
-              src={effectiveBrand.logoSrc}
-              alt={effectiveBrand.nombreComercial}
-              className="h-48 w-auto mb-5 object-contain"
-            />
+            <div className="w-full flex justify-center">
+              <img
+                src={effectiveBrand.logoSrc}
+                alt={effectiveBrand.nombreComercial}
+                className={`block h-48 w-auto max-w-[92%] mb-5 object-contain object-center mx-auto ${
+                  isDefaultBrandLogin ? '-translate-x-2' : ''
+                }`}
+              />
+            </div>
             <p className="text-[13px] text-slate-500">Sistema de Gestión</p>
           </div>
 
@@ -532,18 +537,18 @@ export default function Login() {
 
       {/* Modal: Olvidé mi contraseña */}
       {mostrarForgotPassword && (
-        <div className="fixed inset-0 bg-slate-900/55 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-          <div className="glass-card max-w-md w-full p-6 border border-slate-200/70">
+        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="modal-panel glass-card max-w-md w-full p-6 border border-slate-200/70">
               {/* Header */}
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-xl font-bold text-gray-800">Recuperar contraseña</h3>
+              <div className="modal-header-sticky -mx-6 px-6 pt-1 pb-4 flex items-center justify-between mb-4 border-b border-slate-200">
+              <h3 className="text-xl font-bold text-slate-800">Recuperar contraseña</h3>
                 <button
                   onClick={() => {
                     setMostrarForgotPassword(false);
                     setForgotEmail('');
                     setMensajeForgot('');
                   }}
-                  className="text-gray-500 hover:text-gray-700"
+                  className="modal-close-btn inline-flex items-center justify-center"
                 >
                   <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -551,14 +556,14 @@ export default function Login() {
                 </button>
               </div>
 
-              <p className="text-sm text-gray-600 mb-4">
+              <p className="text-sm text-slate-600 mb-4">
                 Ingresa tu email y te enviaremos instrucciones para restablecer tu contraseña.
               </p>
 
               {/* Formulario */}
               <form onSubmit={handleForgotPassword} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-bold text-gray-700 mb-2">
+                  <label className="block text-sm font-bold text-slate-700 mb-2">
                     Email *
                   </label>
                   <input
@@ -581,7 +586,7 @@ export default function Login() {
                   </div>
                 )}
 
-                <div className="flex gap-3">
+                <div className="modal-footer-sticky -mx-6 px-6 flex gap-3">
                   <button
                     type="button"
                     onClick={() => {
@@ -608,10 +613,10 @@ export default function Login() {
 
       {/* Modal: Registro de tenant CDA */}
       {mostrarRegistroTenant && (
-        <div className="fixed inset-0 bg-slate-900/55 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
-          <div className="glass-card max-w-lg w-full p-6 border border-slate-200/70">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-gray-800">Crear CDA</h3>
+        <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-50 p-4 backdrop-blur-sm">
+          <div className="modal-panel glass-card max-w-lg w-full p-6 border border-slate-200/70">
+            <div className="modal-header-sticky -mx-6 px-6 pt-1 pb-4 flex items-center justify-between mb-4 border-b border-slate-200">
+              <h3 className="text-xl font-bold text-slate-800">Crear CDA</h3>
               <button
                 onClick={() => {
                   setMostrarRegistroTenant(false);
@@ -622,7 +627,7 @@ export default function Login() {
                   setEmailCodeTarget('');
                   setRegisterLogoFile(null);
                 }}
-                className="text-gray-500 hover:text-gray-700"
+                className="modal-close-btn inline-flex items-center justify-center"
               >
                 <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                   <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
@@ -630,7 +635,7 @@ export default function Login() {
               </button>
             </div>
 
-            <p className="text-sm text-gray-600 mb-4">
+            <p className="text-sm text-slate-600 mb-4">
               Registra tu CDA y crea el usuario administrador inicial.
             </p>
 
@@ -651,7 +656,7 @@ export default function Login() {
                 type="text"
                 value={registerNombreCda}
                 onChange={(e) => setRegisterNombreCda(e.target.value.toUpperCase())}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg"
+                className="input-corporate"
                 placeholder="Nombre de tu CDA / Marca"
                 required
               />
@@ -659,7 +664,7 @@ export default function Login() {
                 type="text"
                 value={registerNitCda}
                 onChange={(e) => setRegisterNitCda(normalizeNitInput(e.target.value))}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg"
+                className="input-corporate"
                 placeholder="NIT del CDA"
                 required
               />
@@ -667,7 +672,7 @@ export default function Login() {
                 type="text"
                 value={registerRepresentanteNombre}
                 onChange={(e) => setRegisterRepresentanteNombre(e.target.value.toUpperCase())}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg"
+                className="input-corporate"
                 placeholder="Nombre representante legal o administrador"
                 required
               />
@@ -675,7 +680,7 @@ export default function Login() {
                 type="email"
                 value={registerCorreoElectronico}
                 onChange={(e) => setRegisterCorreoElectronico(e.target.value)}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg"
+                className="input-corporate"
                 placeholder="Correo electrónico"
                 required
               />
@@ -683,7 +688,7 @@ export default function Login() {
                 type="tel"
                 value={registerCelular}
                 onChange={(e) => setRegisterCelular(normalizePhoneInput(e.target.value))}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg"
+                className="input-corporate"
                 placeholder="Celular"
                 required
               />
@@ -693,7 +698,7 @@ export default function Login() {
                 max={100}
                 value={registerSedesTotales}
                 onChange={(e) => setRegisterSedesTotales(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
-                className="w-full px-4 py-2.5 border border-gray-300 rounded-lg"
+                className="input-corporate"
                 placeholder="Total sedes (principal + sucursales)"
                 required
               />
@@ -798,18 +803,18 @@ export default function Login() {
                 </div>
               )}
 
-              <div className="flex gap-3 pt-1">
+              <div className="modal-footer-sticky -mx-6 px-6 flex gap-3">
                 <button
                   type="button"
                   onClick={() => setMostrarRegistroTenant(false)}
-                  className="flex-1 px-4 py-2 bg-gray-200 hover:bg-gray-300 text-gray-800 rounded-lg font-semibold transition"
+                  className="flex-1 btn-corporate-muted px-4"
                 >
                   Cancelar
                 </button>
                 <button
                   type="submit"
                   disabled={registerTenantMutation.isLoading}
-                  className="flex-1 px-4 py-2 text-white rounded-lg font-semibold transition disabled:opacity-50"
+                  className="flex-1 btn-corporate-primary px-4 disabled:opacity-50"
                   style={{ backgroundColor: effectiveBrand.colorPrimario }}
                 >
                   {registerTenantMutation.isLoading ? 'Creando...' : 'Crear CDA'}

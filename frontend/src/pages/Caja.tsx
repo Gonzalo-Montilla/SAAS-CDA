@@ -797,6 +797,7 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
   const { user } = useAuth();
   const brand = useBrand();
   const isMountedRef = useRef(true);
+  const metodoPagoFocusRef = useRef<HTMLButtonElement>(null);
   const [metodoPago, setMetodoPago] = useState<string>('efectivo');
   const [registros, setRegistros] = useState({
     registrado_runt: false,
@@ -944,6 +945,27 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
     });
   };
 
+  useEffect(() => {
+    metodoPagoFocusRef.current?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        if (!cobrarMutation.isLoading && puedeConfirmarCobro) {
+          event.preventDefault();
+          handleCobrar();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose, cobrarMutation.isLoading, puedeConfirmarCobro]);
+
   const getMetodoStyles = (metodoPago: string, selectedMetodo: string) => {
     const isSelected = metodoPago === selectedMetodo;
     
@@ -975,28 +997,28 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
   };
 
   const metodosPago = [
-    { id: 'efectivo', nombre: 'Efectivo', Icono: Banknote, descripcion: 'Entra a caja' },
-    { id: 'tarjeta_debito', nombre: 'Tarjeta Débito', Icono: CreditCard, descripcion: 'No entra a caja' },
-    { id: 'tarjeta_credito', nombre: 'Tarjeta Crédito', Icono: CreditCard, descripcion: 'No entra a caja' },
-    { id: 'transferencia', nombre: 'Transferencia', Icono: Smartphone, descripcion: 'No entra a caja' },
-    { id: 'credismart', nombre: 'CrediSmart', Icono: Building2, descripcion: 'Crédito CDA' },
-    { id: 'sistecredito', nombre: 'SisteCredito', Icono: Landmark, descripcion: 'Crédito CDA' },
-    { id: 'mixto', nombre: 'Pago Mixto', Icono: CreditCard, descripcion: 'Múltiples métodos' },
+    { id: 'efectivo', nombre: 'Efectivo', Icono: Banknote, canal: 'Caja', nota: 'Ingresa a caja' },
+    { id: 'tarjeta_debito', nombre: 'Tarjeta Débito', Icono: CreditCard, canal: 'Electrónico', nota: 'No entra a caja' },
+    { id: 'tarjeta_credito', nombre: 'Tarjeta Crédito', Icono: CreditCard, canal: 'Electrónico', nota: 'No entra a caja' },
+    { id: 'transferencia', nombre: 'Transferencia', Icono: Smartphone, canal: 'Electrónico', nota: 'No entra a caja' },
+    { id: 'credismart', nombre: 'CrediSmart', Icono: Building2, canal: 'Crédito CDA', nota: 'Cartera del CDA' },
+    { id: 'sistecredito', nombre: 'SisteCredito', Icono: Landmark, canal: 'Crédito CDA', nota: 'Cartera del CDA' },
+    { id: 'mixto', nombre: 'Pago Mixto', Icono: CreditCard, canal: 'Combinado', nota: 'Múltiples métodos' },
   ];
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-3xl w-full max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="modal-panel max-w-4xl w-full">
         <div className="p-6">
           {/* Header */}
-          <div className="flex justify-between items-start mb-6">
+          <div className="modal-header-sticky -mx-6 px-6 pt-1 pb-4 flex justify-between items-start mb-6 border-b border-slate-200">
             <div>
-              <h3 className="text-3xl font-bold text-gray-900">Cobrar Vehículo</h3>
+              <h3 className="text-3xl font-bold text-slate-900">Cobrar Vehículo</h3>
               <p className="text-xl font-bold text-primary-600 mt-1">{vehiculo.placa}</p>
             </div>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 text-3xl"
+              className="h-10 w-10 rounded-lg border border-slate-300 text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition flex items-center justify-center text-2xl"
             >
               ×
             </button>
@@ -1011,78 +1033,80 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
             </div>
           )}
 
-          {/* Resumen del Vehículo */}
-          <div className="bg-gray-50 rounded-lg p-4 mb-6">
-            <div className="grid grid-cols-2 gap-4 text-sm">
-              <div>
-                <p className="text-gray-600">Cliente</p>
-                <p className="font-semibold">{vehiculo.cliente_nombre}</p>
-              </div>
-              <div>
-                <p className="text-gray-600">Documento</p>
-                <p className="font-semibold">{vehiculo.cliente_documento}</p>
-              </div>
-              <div>
-                <p className="text-gray-600">Tipo</p>
-                <p className="font-semibold capitalize">{vehiculo.tipo_vehiculo}</p>
-              </div>
-              <div>
-                <p className="text-gray-600">Modelo</p>
-                <p className="font-semibold">{vehiculo.ano_modelo}</p>
+          <div className="grid grid-cols-1 xl:grid-cols-5 gap-4 mb-6">
+            {/* Resumen del Vehículo */}
+            <div className="xl:col-span-2 bg-slate-50 rounded-lg p-4 border border-slate-200 h-full">
+              <div className="grid grid-cols-2 gap-4 text-sm">
+                <div>
+                  <p className="text-slate-600">Cliente</p>
+                  <p className="font-semibold">{vehiculo.cliente_nombre}</p>
+                </div>
+                <div>
+                  <p className="text-slate-600">Documento</p>
+                  <p className="font-semibold">{vehiculo.cliente_documento}</p>
+                </div>
+                <div>
+                  <p className="text-slate-600">Tipo</p>
+                  <p className="font-semibold capitalize">{vehiculo.tipo_vehiculo}</p>
+                </div>
+                <div>
+                  <p className="text-slate-600">Modelo</p>
+                  <p className="font-semibold">{vehiculo.ano_modelo}</p>
+                </div>
               </div>
             </div>
-          </div>
 
-          {/* Total a Cobrar */}
-          <div className="bg-gradient-to-r from-secondary-600 to-secondary-700 text-white rounded-xl p-6 mb-6">
-            {esPreventiva ? (
-              <div>
-                <p className="text-sm opacity-90 mb-3">SERVICIO PREVENTIVA - Ingrese el valor</p>
-                <div className="bg-white rounded-lg p-4 mb-3">
-                  <input
-                    type="number"
-                    value={valorPreventiva}
-                    onChange={(e) => setValorPreventiva(e.target.value)}
-                    placeholder="Ej: 50000"
-                    min="0"
-                    step="1000"
-                    className="w-full text-4xl font-bold text-gray-900 border-none focus:ring-0 p-0 text-center"
-                  />
+            {/* Total a Cobrar */}
+            <div className="xl:col-span-3 bg-gradient-to-r from-secondary-600 to-secondary-700 text-white rounded-xl p-6 h-full">
+              {esPreventiva ? (
+                <div>
+                  <p className="text-sm opacity-90 mb-3">SERVICIO PREVENTIVA - Ingrese el valor</p>
+                  <div className="bg-white rounded-lg p-4 mb-3">
+                    <input
+                      type="number"
+                      value={valorPreventiva}
+                      onChange={(e) => setValorPreventiva(e.target.value)}
+                      placeholder="Ej: 50000"
+                      min="0"
+                      step="1000"
+                      className="w-full text-4xl font-bold text-gray-900 border-none focus:ring-0 p-0 text-center"
+                    />
+                  </div>
+                  {vehiculo.tiene_soat && clientePagaSOAT && (
+                    <p className="text-sm opacity-90 flex items-center justify-center gap-1">
+                      <CheckCircle2 className="w-4 h-4" />
+                      + Comisión SOAT: ${vehiculo.comision_soat.toLocaleString()}
+                    </p>
+                  )}
+                  {parseFloat(valorPreventiva) > 0 && (
+                    <div className="mt-3 pt-3 border-t border-white border-opacity-30">
+                      <p className="text-sm opacity-90 mb-1">TOTAL A COBRAR</p>
+                      <p className="text-3xl font-bold">${totalAjustado.toLocaleString()}</p>
+                    </div>
+                  )}
                 </div>
-                {vehiculo.tiene_soat && clientePagaSOAT && (
-                  <p className="text-sm opacity-90 flex items-center justify-center gap-1">
-                    <CheckCircle2 className="w-4 h-4" />
-                    + Comisión SOAT: ${vehiculo.comision_soat.toLocaleString()}
-                  </p>
-                )}
-                {parseFloat(valorPreventiva) > 0 && (
-                  <div className="mt-3 pt-3 border-t border-white border-opacity-30">
-                    <p className="text-sm opacity-90 mb-1">TOTAL A COBRAR</p>
-                    <p className="text-3xl font-bold">${totalAjustado.toLocaleString()}</p>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div>
-                <p className="text-sm opacity-90 mb-1">TOTAL A COBRAR</p>
-                <p className="text-4xl font-bold">${totalAjustado.toLocaleString()}</p>
-                {vehiculo.tiene_soat && (
-                  <div className="mt-3">
-                    {clientePagaSOAT ? (
-                      <p className="text-sm opacity-90 flex items-center justify-center gap-1">
-                        <CheckCircle2 className="w-4 h-4" />
-                        Incluye comisión SOAT: ${vehiculo.comision_soat.toLocaleString()}
-                      </p>
-                    ) : (
-                      <p className="text-sm opacity-90 flex items-center justify-center gap-1">
-                        <XCircle className="w-4 h-4" />
-                        SIN comisión SOAT (cliente se retractó)
-                      </p>
-                    )}
-                  </div>
-                )}
-              </div>
-            )}
+              ) : (
+                <div>
+                  <p className="text-sm opacity-90 mb-1">TOTAL A COBRAR</p>
+                  <p className="text-4xl font-bold">${totalAjustado.toLocaleString()}</p>
+                  {vehiculo.tiene_soat && (
+                    <div className="mt-3">
+                      {clientePagaSOAT ? (
+                        <p className="text-sm opacity-90 flex items-center justify-center gap-1">
+                          <CheckCircle2 className="w-4 h-4" />
+                          Incluye comisión SOAT: ${vehiculo.comision_soat.toLocaleString()}
+                        </p>
+                      ) : (
+                        <p className="text-sm opacity-90 flex items-center justify-center gap-1">
+                          <XCircle className="w-4 h-4" />
+                          SIN comisión SOAT (cliente se retractó)
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Control de Comisión SOAT (si aplica) */}
@@ -1124,23 +1148,37 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
 
           {/* Métodos de Pago */}
           <div className="mb-6">
-            <label className="block text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
+            <label className="block text-lg font-bold text-slate-900 mb-3 flex items-center gap-2">
               <CreditCard className="w-5 h-5" />
               Método de Pago
             </label>
-            <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-3">
               {metodosPago.map((metodo) => (
                 <button
                   key={metodo.id}
                   type="button"
                   onClick={() => setMetodoPago(metodo.id)}
+                  ref={metodo.id === 'efectivo' ? metodoPagoFocusRef : undefined}
                   className={`p-4 rounded-lg border-2 font-semibold transition-all ${getMetodoStyles(metodo.id, metodoPago)}`}
                 >
                   <div className="flex justify-center mb-2">
                     <metodo.Icono className="w-8 h-8" />
                   </div>
-                  <div className="mb-1">{metodo.nombre}</div>
-                  <div className="text-xs opacity-75">{metodo.descripcion}</div>
+                  <div className="mb-1 text-sm">{metodo.nombre}</div>
+                  <div
+                    className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                      metodo.canal === 'Caja'
+                        ? 'bg-emerald-100 text-emerald-800'
+                        : metodo.canal === 'Electrónico'
+                          ? 'bg-blue-100 text-blue-800'
+                          : metodo.canal === 'Crédito CDA'
+                            ? 'bg-amber-100 text-amber-800'
+                            : 'bg-teal-100 text-teal-800'
+                    }`}
+                  >
+                    {metodo.canal}
+                  </div>
+                  <div className="text-[11px] mt-1 opacity-80">{metodo.nota}</div>
                 </button>
               ))}
             </div>
@@ -1180,17 +1218,17 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
                 
                 <div className="grid grid-cols-2 gap-3 mb-3">
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    <label className="block text-sm font-semibold text-slate-700 mb-1">
                       <Banknote className="w-4 h-4 inline mr-1" />
                       Efectivo
                     </label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
                       <input
                         type="number"
                         value={desgloseMixto.efectivo || ''}
                         onChange={(e) => setDesgloseMixto({ ...desgloseMixto, efectivo: parseFloat(e.target.value) || 0 })}
-                        className="w-full pl-8 pr-3 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                        className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
                         placeholder="0"
                         min="0"
                       />
@@ -1198,17 +1236,17 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
                   </div>
                   
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    <label className="block text-sm font-semibold text-slate-700 mb-1">
                       <CreditCard className="w-4 h-4 inline mr-1" />
                       T. Débito
                     </label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
                       <input
                         type="number"
                         value={desgloseMixto.tarjeta_debito || ''}
                         onChange={(e) => setDesgloseMixto({ ...desgloseMixto, tarjeta_debito: parseFloat(e.target.value) || 0 })}
-                        className="w-full pl-8 pr-3 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                        className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
                         placeholder="0"
                         min="0"
                       />
@@ -1216,17 +1254,17 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
                   </div>
                   
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    <label className="block text-sm font-semibold text-slate-700 mb-1">
                       <CreditCard className="w-4 h-4 inline mr-1" />
                       T. Crédito
                     </label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
                       <input
                         type="number"
                         value={desgloseMixto.tarjeta_credito || ''}
                         onChange={(e) => setDesgloseMixto({ ...desgloseMixto, tarjeta_credito: parseFloat(e.target.value) || 0 })}
-                        className="w-full pl-8 pr-3 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                        className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
                         placeholder="0"
                         min="0"
                       />
@@ -1234,17 +1272,17 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
                   </div>
                   
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    <label className="block text-sm font-semibold text-slate-700 mb-1">
                       <Smartphone className="w-4 h-4 inline mr-1" />
                       Transferencia
                     </label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
                       <input
                         type="number"
                         value={desgloseMixto.transferencia || ''}
                         onChange={(e) => setDesgloseMixto({ ...desgloseMixto, transferencia: parseFloat(e.target.value) || 0 })}
-                        className="w-full pl-8 pr-3 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                        className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
                         placeholder="0"
                         min="0"
                       />
@@ -1252,17 +1290,17 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
                   </div>
                   
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    <label className="block text-sm font-semibold text-slate-700 mb-1">
                       <Building2 className="w-4 h-4 inline mr-1" />
                       CrediSmart
                     </label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
                       <input
                         type="number"
                         value={desgloseMixto.credismart || ''}
                         onChange={(e) => setDesgloseMixto({ ...desgloseMixto, credismart: parseFloat(e.target.value) || 0 })}
-                        className="w-full pl-8 pr-3 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                        className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
                         placeholder="0"
                         min="0"
                       />
@@ -1270,17 +1308,17 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
                   </div>
                   
                   <div>
-                    <label className="block text-sm font-semibold text-gray-700 mb-1">
+                    <label className="block text-sm font-semibold text-slate-700 mb-1">
                       <Landmark className="w-4 h-4 inline mr-1" />
                       SisteCredito
                     </label>
                     <div className="relative">
-                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500">$</span>
+                      <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
                       <input
                         type="number"
                         value={desgloseMixto.sistecredito || ''}
                         onChange={(e) => setDesgloseMixto({ ...desgloseMixto, sistecredito: parseFloat(e.target.value) || 0 })}
-                        className="w-full pl-8 pr-3 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                        className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
                         placeholder="0"
                         min="0"
                       />
@@ -1501,7 +1539,7 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
           </div>
 
           {/* Botones */}
-          <div className="flex gap-4">
+          <div className="modal-footer-sticky -mx-6 px-6 flex gap-4">
             <button
               onClick={onClose}
               className="flex-1 btn-pos btn-secondary"
@@ -1535,6 +1573,8 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const brand = useBrand();
+  const formRef = useRef<HTMLFormElement>(null);
+  const montoInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
     tipo: 'gasto',
     monto: '',
@@ -1610,6 +1650,27 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
     });
   };
 
+  useEffect(() => {
+    montoInputRef.current?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        if (!registrarGastoMutation.isLoading) {
+          event.preventDefault();
+          formRef.current?.requestSubmit();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose, registrarGastoMutation.isLoading]);
+
   const tiposGasto = [
     { id: 'gasto', nombre: 'Gasto', Icono: ArrowRight, descripcion: 'Compras, servicios, etc.' },
     { id: 'devolucion', nombre: 'Devolución', Icono: CornerUpLeft, descripcion: 'Devolución a cliente' },
@@ -1639,16 +1700,16 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
   // Modal de éxito
   if (mostrarExito) {
     return (
-      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-        <div className="bg-white rounded-xl shadow-2xl max-w-md w-full">
+      <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+        <div className="modal-panel max-w-4xl w-full">
           <div className="p-6 text-center">
             <div className="flex justify-center mb-4">
               <CheckCircle2 className="w-16 h-16 text-green-500" />
             </div>
-            <h3 className="text-2xl font-bold text-gray-900 mb-3">
+            <h3 className="text-2xl font-bold text-slate-900 mb-3">
               Gasto Registrado
             </h3>
-            <p className="text-gray-600 mb-2">
+            <p className="text-slate-600 mb-2">
               Se registró un egreso de:
             </p>
             <p className="text-3xl font-bold text-red-600 mb-4">
@@ -1681,7 +1742,7 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
                 onSuccess();
                 onClose();
               }}
-              className="w-full btn-pos btn-primary inline-flex items-center justify-center gap-2"
+              className="w-full btn-primary-solid inline-flex items-center justify-center gap-2"
             >
               <CheckCircle2 className="w-5 h-5" />
               Entendido
@@ -1693,21 +1754,21 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
   }
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="modal-panel max-w-4xl w-full">
         <div className="p-6">
           {/* Header */}
-          <div className="flex justify-between items-start mb-6">
+          <div className="modal-header-sticky -mx-6 px-6 pt-1 pb-4 flex justify-between items-start mb-6 border-b border-slate-200">
             <div>
-              <h3 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
+              <h3 className="text-3xl font-bold text-slate-900 flex items-center gap-2">
                 <ArrowRight className="w-8 h-8" />
                 Registrar Gasto
               </h3>
-              <p className="text-sm text-gray-600 mt-1">Registra salidas de efectivo de la caja</p>
+              <p className="text-sm text-slate-600 mt-1">Registra salidas de efectivo de la caja</p>
             </div>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 text-3xl"
+              className="h-10 w-10 rounded-lg border border-slate-300 text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition flex items-center justify-center text-2xl"
             >
               ×
             </button>
@@ -1722,10 +1783,10 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
             </div>
           )}
 
-          <form onSubmit={handleSubmit}>
+          <form ref={formRef} onSubmit={handleSubmit}>
             {/* Tipo de Movimiento */}
             <div className="mb-6">
-              <label className="block text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
+              <label className="block text-lg font-bold text-slate-900 mb-3 flex items-center gap-2">
                 <FileText className="w-5 h-5" />
                 Tipo de Movimiento
               </label>
@@ -1747,66 +1808,69 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
               </div>
             </div>
 
-            {/* Monto */}
-            <div className="mb-6">
-              <label className="block text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
-                <DollarSign className="w-5 h-5" />
-                Monto del Gasto
-              </label>
-              <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-3xl font-bold text-gray-400">$</span>
-                <input
-                  type="number"
-                  value={formData.monto}
-                  onChange={(e) => setFormData({ ...formData, monto: e.target.value })}
-                  className="input-pos text-3xl text-center font-bold pl-12"
-                  placeholder="0"
-                  step="any"
-                  min="1"
+            <div className="grid grid-cols-1 xl:grid-cols-5 gap-4 mb-6">
+              {/* Monto */}
+              <div className="xl:col-span-2">
+                <label className="block text-lg font-bold text-slate-900 mb-3 flex items-center gap-2">
+                  <DollarSign className="w-5 h-5" />
+                  Monto del Gasto
+                </label>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-3xl font-bold text-slate-400">$</span>
+                  <input
+                    type="number"
+                    value={formData.monto}
+                    onChange={(e) => setFormData({ ...formData, monto: e.target.value })}
+                    ref={montoInputRef}
+                    className="input-pos text-3xl text-center font-bold pl-12"
+                    placeholder="0"
+                    step="any"
+                    min="1"
+                    required
+                  />
+                </div>
+                {montoNumerico > 0 && (
+                  <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
+                    <p className="text-sm text-red-800 text-center flex items-center justify-center gap-2">
+                      <AlertTriangle className="w-5 h-5" />
+                      Este monto <strong>saldrá</strong> del efectivo en caja
+                    </p>
+                  </div>
+                )}
+              </div>
+
+              {/* Concepto */}
+              <div className="xl:col-span-3">
+                <label className="block text-lg font-bold text-slate-900 mb-3 flex items-center gap-2">
+                  <FileText className="w-5 h-5" />
+                  Concepto (Detalle del gasto)
+                </label>
+                <textarea
+                  value={formData.concepto}
+                  onChange={(e) => setFormData({ ...formData, concepto: e.target.value })}
+                  className="input-pos"
+                  rows={5}
+                  placeholder="Ej: Compra de papel higiénico, pago de agua, devolución a cliente Juan Pérez..."
+                  minLength={5}
                   required
                 />
+                <p className="text-xs text-slate-500 mt-2">
+                  Mínimo 5 caracteres - Sé específico para la auditoría
+                </p>
               </div>
-              {montoNumerico > 0 && (
-                <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-                  <p className="text-sm text-red-800 text-center flex items-center justify-center gap-2">
-                    <AlertTriangle className="w-5 h-5" />
-                    Este monto <strong>saldrá</strong> del efectivo en caja
-                  </p>
-                </div>
-              )}
-            </div>
-
-            {/* Concepto */}
-            <div className="mb-6">
-              <label className="block text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
-                <FileText className="w-5 h-5" />
-                Concepto (Detalle del gasto)
-              </label>
-              <textarea
-                value={formData.concepto}
-                onChange={(e) => setFormData({ ...formData, concepto: e.target.value })}
-                className="input-pos"
-                rows={3}
-                placeholder="Ej: Compra de papel higiénico, pago de agua, devolución a cliente Juan Pérez..."
-                minLength={5}
-                required
-              />
-              <p className="text-xs text-gray-500 mt-2">
-                Mínimo 5 caracteres - Sé específico para la auditoría
-              </p>
             </div>
 
             {/* Vista Previa */}
             {montoNumerico > 0 && formData.concepto.length >= 5 && (
-              <div className="mb-6 p-4 bg-gray-50 border-2 border-gray-200 rounded-lg">
-                <p className="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-2">
+              <div className="mb-6 p-4 bg-slate-50 border border-slate-200 rounded-lg">
+                <p className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
                   <Eye className="w-5 h-5" />
                   Vista Previa:
                 </p>
-                <div className="flex justify-between items-center">
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
                   <div>
-                    <p className="text-sm text-gray-600">Se registrará:</p>
-                    <p className="font-bold text-gray-900">{formData.concepto}</p>
+                    <p className="text-sm text-slate-600">Se registrará:</p>
+                    <p className="font-bold text-slate-900">{formData.concepto}</p>
                   </div>
                   <p className="text-2xl font-bold text-red-600">
                     -${montoNumerico.toLocaleString()}
@@ -1816,7 +1880,7 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
             )}
 
             {/* Botones */}
-            <div className="flex gap-4">
+            <div className="modal-footer-sticky -mx-6 px-6 flex gap-4">
               <button
                 type="button"
                 onClick={onClose}
@@ -2894,6 +2958,8 @@ function VehiculosCobradosHoy({ vehiculos, loading }: { vehiculos: Vehiculo[], l
 // Modal para cambiar método de pago
 function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => void }) {
   const queryClient = useQueryClient();
+  const formRef = useRef<HTMLFormElement>(null);
+  const motivoInputRef = useRef<HTMLTextAreaElement>(null);
   const [nuevoMetodo, setNuevoMetodo] = useState(vehiculo.metodo_pago || 'efectivo');
   const [motivo, setMotivo] = useState('');
 
@@ -2924,31 +2990,52 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
     cambiarMetodoMutation.mutate();
   };
 
+  useEffect(() => {
+    motivoInputRef.current?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        if (!cambiarMetodoMutation.isLoading) {
+          event.preventDefault();
+          formRef.current?.requestSubmit();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose, cambiarMetodoMutation.isLoading]);
+
   const metodosPago = [
-    { id: 'efectivo', nombre: 'Efectivo', Icono: Banknote },
-    { id: 'tarjeta_debito', nombre: 'Tarjeta Débito', Icono: CreditCard },
-    { id: 'tarjeta_credito', nombre: 'Tarjeta Crédito', Icono: CreditCard },
-    { id: 'transferencia', nombre: 'Transferencia', Icono: Smartphone },
-    { id: 'credismart', nombre: 'CrediSmart', Icono: Building2 },
-    { id: 'sistecredito', nombre: 'SisteCredito', Icono: Landmark },
+    { id: 'efectivo', nombre: 'Efectivo', Icono: Banknote, canal: 'Caja', nota: 'Ingresa a caja' },
+    { id: 'tarjeta_debito', nombre: 'Tarjeta Débito', Icono: CreditCard, canal: 'Electrónico', nota: 'No entra a caja' },
+    { id: 'tarjeta_credito', nombre: 'Tarjeta Crédito', Icono: CreditCard, canal: 'Electrónico', nota: 'No entra a caja' },
+    { id: 'transferencia', nombre: 'Transferencia', Icono: Smartphone, canal: 'Electrónico', nota: 'No entra a caja' },
+    { id: 'credismart', nombre: 'CrediSmart', Icono: Building2, canal: 'Crédito CDA', nota: 'Cartera del CDA' },
+    { id: 'sistecredito', nombre: 'SisteCredito', Icono: Landmark, canal: 'Crédito CDA', nota: 'Cartera del CDA' },
   ];
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="modal-panel max-w-4xl w-full">
         <div className="p-6">
-          <div className="flex justify-between items-start mb-6">
+          <div className="modal-header-sticky -mx-6 px-6 pt-1 pb-4 flex justify-between items-start mb-6 border-b border-slate-200">
             <div>
-              <h3 className="text-2xl font-bold text-gray-900 mb-1">
+              <h3 className="text-2xl font-bold text-slate-900 mb-1">
                 Cambiar Método de Pago
               </h3>
-              <p className="text-sm text-gray-600">
-                Vehículo: <span className="font-bold text-gray-900">{vehiculo.placa}</span> - {vehiculo.cliente_nombre}
+              <p className="text-sm text-slate-600">
+                Vehículo: <span className="font-bold text-slate-900">{vehiculo.placa}</span> - {vehiculo.cliente_nombre}
               </p>
             </div>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 text-3xl"
+              className="h-10 w-10 rounded-lg border border-slate-300 text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition flex items-center justify-center text-2xl"
             >
               ×
             </button>
@@ -2960,14 +3047,14 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
             </p>
           </div>
 
-          <form onSubmit={handleSubmit}>
+          <form ref={formRef} onSubmit={handleSubmit}>
             <div className="space-y-6">
               {/* Nuevo Método de Pago */}
               <div>
-                <label className="block text-lg font-bold text-gray-900 mb-3">
+                <label className="block text-lg font-bold text-slate-900 mb-3">
                   Nuevo Método de Pago <span className="text-red-600">*</span>
                 </label>
-                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
                   {metodosPago.map((metodo) => (
                     <button
                       key={metodo.id}
@@ -2976,40 +3063,60 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
                       className={`p-4 rounded-lg border-2 font-semibold transition-all ${
                         nuevoMetodo === metodo.id
                           ? 'border-blue-600 bg-blue-50 text-blue-900 scale-105'
-                          : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                          : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400'
                       }`}
                     >
                       <div className="flex justify-center mb-2">
                         <metodo.Icono className="w-6 h-6" />
                       </div>
-                      <div className="text-sm">{metodo.nombre}</div>
+                      <div className="text-sm mb-1">{metodo.nombre}</div>
+                      <div
+                        className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          metodo.canal === 'Caja'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : metodo.canal === 'Electrónico'
+                              ? 'bg-blue-100 text-blue-800'
+                              : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {metodo.canal}
+                      </div>
+                      <div className="text-[11px] mt-1 opacity-80">{metodo.nota}</div>
                     </button>
                   ))}
+                </div>
+                <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  {metodosPago.find((m) => m.id === nuevoMetodo)?.canal === 'Caja'
+                    ? 'El ajuste impacta arqueo de caja.'
+                    : metodosPago.find((m) => m.id === nuevoMetodo)?.canal === 'Electrónico'
+                      ? 'El ajuste impacta conciliación bancaria.'
+                      : 'El ajuste impacta cartera del CDA.'}
                 </div>
               </div>
 
               {/* Motivo */}
               <div>
-                <label className="block text-lg font-bold text-gray-900 mb-3">
+                <label className="block text-lg font-bold text-slate-900 mb-3">
                   Motivo del Cambio <span className="text-red-600">*</span>
                 </label>
                 <textarea
                   value={motivo}
                   onChange={(e) => setMotivo(e.target.value)}
+                  ref={motivoInputRef}
                   className="input-pos"
                   rows={3}
                   placeholder="Ej: Cliente cambió de opinión, error al registrar, etc."
                   minLength={10}
                   required
                 />
-                <p className="text-xs text-gray-500 mt-1">
+                <p className="text-xs text-slate-500 mt-1">
                   Mínimo 10 caracteres
                 </p>
               </div>
             </div>
 
             {/* Botones */}
-            <div className="flex gap-4 mt-6">
+            <div className="modal-footer-sticky -mx-6 px-6 flex gap-4">
               <button
                 type="button"
                 onClick={onClose}
@@ -3044,6 +3151,8 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
 function ModalVentaSOAT({ onClose, onSuccess }: { onClose: () => void, onSuccess: () => void }) {
   const { user } = useAuth();
   const brand = useBrand();
+  const formRef = useRef<HTMLFormElement>(null);
+  const placaInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
     placa: '',
     tipo_vehiculo: 'moto' as 'moto' | 'carro',
@@ -3099,30 +3208,51 @@ function ModalVentaSOAT({ onClose, onSuccess }: { onClose: () => void, onSuccess
     });
   };
 
+  useEffect(() => {
+    placaInputRef.current?.focus();
+
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+        if (!ventaSOATMutation.isLoading) {
+          event.preventDefault();
+          formRef.current?.requestSubmit();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [onClose, ventaSOATMutation.isLoading]);
+
   const metodosPago = [
-    { id: 'efectivo', nombre: 'Efectivo', Icono: Banknote },
-    { id: 'tarjeta_debito', nombre: 'Tarjeta Débito', Icono: CreditCard },
-    { id: 'tarjeta_credito', nombre: 'Tarjeta Crédito', Icono: CreditCard },
-    { id: 'transferencia', nombre: 'Transferencia', Icono: Smartphone },
-    { id: 'credismart', nombre: 'CrediSmart', Icono: Building2 },
+    { id: 'efectivo', nombre: 'Efectivo', Icono: Banknote, canal: 'Caja', nota: 'Ingresa a caja' },
+    { id: 'tarjeta_debito', nombre: 'Tarjeta Débito', Icono: CreditCard, canal: 'Electrónico', nota: 'No entra a caja' },
+    { id: 'tarjeta_credito', nombre: 'Tarjeta Crédito', Icono: CreditCard, canal: 'Electrónico', nota: 'No entra a caja' },
+    { id: 'transferencia', nombre: 'Transferencia', Icono: Smartphone, canal: 'Electrónico', nota: 'No entra a caja' },
+    { id: 'credismart', nombre: 'CrediSmart', Icono: Building2, canal: 'Crédito CDA', nota: 'Cartera del CDA' },
   ];
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="modal-panel max-w-4xl w-full">
         <div className="p-6">
           {/* Header */}
-          <div className="flex justify-between items-start mb-6">
+          <div className="modal-header-sticky -mx-6 px-6 pt-1 pb-4 flex justify-between items-start mb-6 border-b border-slate-200">
             <div>
-              <h3 className="text-3xl font-bold text-gray-900 flex items-center gap-2">
+              <h3 className="text-3xl font-bold text-slate-900 flex items-center gap-2">
                 <Shield className="w-8 h-8 text-teal-600" />
                 Venta Solo SOAT
               </h3>
-              <p className="text-sm text-gray-600 mt-1">Cliente compra SOAT sin revisión técnica</p>
+              <p className="text-sm text-slate-600 mt-1">Cliente compra SOAT sin revisión técnica</p>
             </div>
             <button
               onClick={onClose}
-              className="text-gray-400 hover:text-gray-600 text-3xl"
+              className="h-10 w-10 rounded-lg border border-slate-300 text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition flex items-center justify-center text-2xl"
             >
               ×
             </button>
@@ -3137,82 +3267,96 @@ function ModalVentaSOAT({ onClose, onSuccess }: { onClose: () => void, onSuccess
             </div>
           )}
 
-          <form onSubmit={handleSubmit}>
+          <form ref={formRef} onSubmit={handleSubmit}>
             <div className="space-y-6">
-              {/* Placa */}
-              <div>
-                <label className="block text-lg font-bold text-gray-900 mb-3">
-                  Placa del Vehículo <span className="text-red-600">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={formData.placa}
-                  onChange={(e) => setFormData({ ...formData, placa: e.target.value.toUpperCase() })}
-                  className="input-pos uppercase text-center text-2xl font-bold"
-                  placeholder="ABC123"
-                  maxLength={6}
-                  required
-                />
-              </div>
+              <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
+                {/* Placa */}
+                <div>
+                  <label className="block text-lg font-bold text-slate-900 mb-3">
+                    Placa del Vehículo <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.placa}
+                    onChange={(e) => setFormData({ ...formData, placa: e.target.value.toUpperCase() })}
+                    ref={placaInputRef}
+                    className="input-pos uppercase text-center text-2xl font-bold"
+                    placeholder="ABC123"
+                    maxLength={6}
+                    required
+                  />
+                </div>
 
-              {/* Tipo de Vehículo */}
-              <div>
-                <label className="block text-lg font-bold text-gray-900 mb-3">
-                  Tipo de Vehículo <span className="text-red-600">*</span>
-                </label>
-                <div className="grid grid-cols-2 gap-4">
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, tipo_vehiculo: 'moto' })}
-                    className={`p-4 rounded-lg border-2 font-semibold transition-all ${
-                      formData.tipo_vehiculo === 'moto'
-                        ? 'border-primary-600 bg-primary-50 text-primary-900 scale-105'
-                        : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
-                    }`}
-                  >
-                    🏍️ Moto
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setFormData({ ...formData, tipo_vehiculo: 'carro' })}
-                    className={`p-4 rounded-lg border-2 font-semibold transition-all ${
-                      formData.tipo_vehiculo === 'carro'
-                        ? 'border-primary-600 bg-primary-50 text-primary-900 scale-105'
-                        : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
-                    }`}
-                  >
-                    🚗 Carro
-                  </button>
+                {/* Tipo de Vehículo */}
+                <div>
+                  <label className="block text-lg font-bold text-slate-900 mb-3">
+                    Tipo de Vehículo <span className="text-red-600">*</span>
+                  </label>
+                  <div className="grid grid-cols-2 gap-4">
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, tipo_vehiculo: 'moto' })}
+                      className={`p-4 rounded-lg border-2 font-semibold transition-all ${
+                        formData.tipo_vehiculo === 'moto'
+                          ? 'border-primary-600 bg-primary-50 text-primary-900 scale-105'
+                          : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400'
+                      }`}
+                    >
+                      🏍️ Moto
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setFormData({ ...formData, tipo_vehiculo: 'carro' })}
+                      className={`p-4 rounded-lg border-2 font-semibold transition-all ${
+                        formData.tipo_vehiculo === 'carro'
+                          ? 'border-primary-600 bg-primary-50 text-primary-900 scale-105'
+                          : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400'
+                      }`}
+                    >
+                      🚗 Carro
+                    </button>
+                  </div>
                 </div>
               </div>
 
-              {/* Valor Comercial del SOAT */}
-              <div>
-                <label className="block text-lg font-bold text-gray-900 mb-3">
-                  Valor Comercial del SOAT <span className="text-red-600">*</span>
-                </label>
-                <p className="text-sm text-gray-600 mb-2">
-                  Valor que el cliente pagó por el SOAT (informativo, no ingresa a caja)
-                </p>
-                <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-2xl font-bold text-gray-400">$</span>
-                  <input
-                    type="number"
-                    value={formData.valor_soat_comercial}
-                    onChange={(e) => setFormData({ ...formData, valor_soat_comercial: e.target.value })}
-                    className="input-pos text-2xl text-center font-bold pl-12"
-                    placeholder="500000"
-                    step="any"
-                    min="1"
-                    required
-                  />
+              <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
+                {/* Valor Comercial del SOAT */}
+                <div className="xl:col-span-3">
+                  <label className="block text-lg font-bold text-slate-900 mb-3">
+                    Valor Comercial del SOAT <span className="text-red-600">*</span>
+                  </label>
+                  <p className="text-sm text-slate-600 mb-2">
+                    Valor que el cliente pagó por el SOAT (informativo, no ingresa a caja)
+                  </p>
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-2xl font-bold text-slate-400">$</span>
+                    <input
+                      type="number"
+                      value={formData.valor_soat_comercial}
+                      onChange={(e) => setFormData({ ...formData, valor_soat_comercial: e.target.value })}
+                      className="input-pos text-2xl text-center font-bold pl-12"
+                      placeholder="500000"
+                      step="any"
+                      min="1"
+                      required
+                    />
+                  </div>
+                </div>
+
+                {/* Comisión a Cobrar */}
+                <div className="xl:col-span-2 bg-gradient-to-r from-secondary-600 to-secondary-700 text-white rounded-xl p-6">
+                  <p className="text-sm opacity-90 mb-1">COMISIÓN A COBRAR</p>
+                  <p className="text-4xl font-bold">${comisionSOAT.toLocaleString()}</p>
+                  <p className="text-sm mt-2 opacity-90">
+                    {formData.tipo_vehiculo === 'moto' ? '🏍️ Moto' : '🚗 Carro'} - Este es el ÚNICO monto que ingresa a caja
+                  </p>
                 </div>
               </div>
 
               {/* Datos del Cliente */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-lg font-bold text-gray-900 mb-3">
+                  <label className="block text-lg font-bold text-slate-900 mb-3">
                     Nombre del Cliente <span className="text-red-600">*</span>
                   </label>
                   <input
@@ -3225,7 +3369,7 @@ function ModalVentaSOAT({ onClose, onSuccess }: { onClose: () => void, onSuccess
                   />
                 </div>
                 <div>
-                  <label className="block text-lg font-bold text-gray-900 mb-3">
+                  <label className="block text-lg font-bold text-slate-900 mb-3">
                     Documento <span className="text-red-600">*</span>
                   </label>
                   <input
@@ -3245,21 +3389,12 @@ function ModalVentaSOAT({ onClose, onSuccess }: { onClose: () => void, onSuccess
                 </div>
               </div>
 
-              {/* Comisión a Cobrar */}
-              <div className="bg-gradient-to-r from-secondary-600 to-secondary-700 text-white rounded-xl p-6">
-                <p className="text-sm opacity-90 mb-1">COMISIÓN A COBRAR</p>
-                <p className="text-4xl font-bold">${comisionSOAT.toLocaleString()}</p>
-                <p className="text-sm mt-2 opacity-90">
-                  {formData.tipo_vehiculo === 'moto' ? '🏍️ Moto' : '🚗 Carro'} - Este es el ÚNICO monto que ingresa a caja
-                </p>
-              </div>
-
               {/* Método de Pago */}
               <div>
-                <label className="block text-lg font-bold text-gray-900 mb-3">
+                <label className="block text-lg font-bold text-slate-900 mb-3">
                   Método de Pago <span className="text-red-600">*</span>
                 </label>
-                <div className="grid grid-cols-2 lg:grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
                   {metodosPago.map((metodo) => (
                     <button
                       key={metodo.id}
@@ -3268,21 +3403,40 @@ function ModalVentaSOAT({ onClose, onSuccess }: { onClose: () => void, onSuccess
                       className={`p-4 rounded-lg border-2 font-semibold transition-all ${
                         formData.metodo_pago === metodo.id
                           ? 'border-primary-600 bg-primary-50 text-primary-900 scale-105'
-                          : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400'
+                          : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400'
                       }`}
                     >
                       <div className="flex justify-center mb-2">
                         <metodo.Icono className="w-6 h-6" />
                       </div>
-                      <div className="text-sm">{metodo.nombre}</div>
+                      <div className="text-sm mb-1">{metodo.nombre}</div>
+                      <div
+                        className={`inline-flex px-2 py-0.5 rounded-full text-[10px] font-bold ${
+                          metodo.canal === 'Caja'
+                            ? 'bg-emerald-100 text-emerald-800'
+                            : metodo.canal === 'Electrónico'
+                              ? 'bg-blue-100 text-blue-800'
+                              : 'bg-amber-100 text-amber-800'
+                        }`}
+                      >
+                        {metodo.canal}
+                      </div>
+                      <div className="text-[11px] mt-1 opacity-80">{metodo.nota}</div>
                     </button>
                   ))}
+                </div>
+                <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
+                  {metodosPago.find((m) => m.id === formData.metodo_pago)?.canal === 'Caja'
+                    ? 'Este método se refleja en arqueo de caja.'
+                    : metodosPago.find((m) => m.id === formData.metodo_pago)?.canal === 'Electrónico'
+                      ? 'Este método se concilia por extracto bancario, no por arqueo físico.'
+                      : 'Este método genera cartera (cuenta por cobrar) para seguimiento comercial.'}
                 </div>
               </div>
             </div>
 
             {/* Botones */}
-            <div className="flex gap-4 mt-6">
+            <div className="modal-footer-sticky -mx-6 px-6 flex gap-4">
               <button
                 type="button"
                 onClick={onClose}

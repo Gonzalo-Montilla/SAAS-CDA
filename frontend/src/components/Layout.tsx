@@ -9,20 +9,21 @@ interface LayoutProps {
 }
 
 export default function Layout({ children, title }: LayoutProps) {
-  const { user, logout } = useAuth();
+  const { user, logout, getLogoutRedirectPath } = useAuth();
   const brand = useBrand();
   const navigate = useNavigate();
 
   const handleLogout = () => {
+    const redirectPath = getLogoutRedirectPath();
     logout();
-    navigate('/login');
+    navigate(redirectPath);
   };
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="app-shell">
       {/* Header */}
-      <header className="sticky top-0 z-50 bg-white border-b border-gray-200 shadow-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 flex justify-between items-center">
+      <header className="app-header">
+        <div className="app-header-inner">
           <div className="flex items-center gap-4">
             <button
               onClick={() => navigate('/dashboard')}
@@ -31,33 +32,34 @@ export default function Layout({ children, title }: LayoutProps) {
               <img 
                 src={brand.logoSrc}
                 alt={brand.nombreComercial}
-                className="h-20 rounded-2xl shadow-md"
+                className="h-16 sm:h-20 rounded-2xl shadow-soft"
               />
               <div>
-                <p className="text-sm text-primary-600 font-medium">{title}</p>
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{brand.nombreComercial}</p>
+                <p className="text-sm text-primary-600 font-semibold">{title}</p>
               </div>
             </button>
           </div>
           <div className="flex items-center gap-3">
             <button
               onClick={() => navigate('/dashboard')}
-              className="px-4 py-2 text-sm bg-white text-gray-700 border-2 border-gray-200 rounded-xl hover:border-gray-300 hover:bg-gray-50 transition-all flex items-center gap-2"
+              className="px-4 btn-corporate-muted flex items-center gap-2"
             >
               <Home className="w-4 h-4" />
               Inicio
             </button>
-            <div className="flex items-center gap-3 px-4 py-2 bg-gray-50 rounded-xl border border-gray-200">
+            <div className="app-user-chip">
               <div className="w-8 h-8 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center">
                 <User className="w-4 h-4" />
               </div>
               <div className="text-right">
-                <p className="text-sm font-semibold text-gray-900">{user?.nombre_completo}</p>
-                <p className="text-xs text-gray-500 capitalize">{user?.rol}</p>
+                <p className="text-sm font-semibold text-slate-900">{user?.nombre_completo}</p>
+                <p className="text-xs text-slate-500 capitalize">{user?.rol}</p>
               </div>
             </div>
             <button
               onClick={handleLogout}
-              className="px-4 py-2 text-sm bg-red-600 text-white rounded-xl hover:bg-red-700 transition-colors flex items-center gap-2"
+              className="px-4 btn-corporate-danger flex items-center gap-2"
             >
               <LogOut className="w-4 h-4" />
               Salir
@@ -67,7 +69,7 @@ export default function Layout({ children, title }: LayoutProps) {
       </header>
 
       {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="app-main">
         {children}
       </main>
     </div>

@@ -236,7 +236,7 @@ export default function ReportesPage() {
   if (dashboardEnabled && (isError || !data)) {
     return (
       <Layout title="Reportes">
-        <div className="bg-red-50 border-2 border-red-200 rounded-lg p-6">
+        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
           <p className="text-red-800 font-bold">No fue posible cargar los datos del dashboard.</p>
         </div>
       </Layout>
@@ -262,11 +262,11 @@ export default function ReportesPage() {
         {/* Header */}
         <div className="flex justify-between items-center">
           <div>
-            <h2 className="text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3">
+            <h2 className="text-3xl font-bold text-slate-900 mb-2 flex items-center gap-3">
               <BarChart3 className="w-8 h-8 text-primary-600" />
               Dashboard General del CDA
             </h2>
-            <p className="text-gray-600">
+            <p className="text-slate-600">
               Resumen consolidado de todos los módulos
             </p>
             <p className="mt-1 text-sm text-primary-700 font-medium">
@@ -432,7 +432,7 @@ export default function ReportesPage() {
                 );
               }}
               disabled={rangoInvalido}
-              className="flex items-center gap-2 px-5 py-2.5 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-bold rounded-lg shadow-lg transition-all duration-200 hover:shadow-xl hover:scale-105"
+              className="flex items-center gap-2 btn-primary-solid disabled:bg-slate-300 disabled:cursor-not-allowed"
             >
               <Download className="w-5 h-5" />
               Exportar Reporte Completo
@@ -589,11 +589,11 @@ export default function ReportesPage() {
         {/* Tabla: Movimientos */}
         <div className="card-pos">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+            <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
               <GaugeCircle className="w-6 h-6 text-primary-600" />
               Dashboard Operativo (SLA y Colas)
             </h3>
-            <p className="text-sm text-gray-600">Periodo: {operativoData?.periodo || periodoActual}</p>
+            <p className="text-sm text-slate-600">Periodo: {operativoData?.periodo || periodoActual}</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
@@ -631,7 +631,7 @@ export default function ReportesPage() {
             <div className="overflow-x-auto">
               <table className="min-w-full text-sm">
                 <thead>
-                  <tr className="text-left text-gray-600">
+                  <tr className="text-left text-slate-600">
                     <th className="px-3 py-2">Placa</th>
                     <th className="px-3 py-2">Cliente</th>
                     <th className="px-3 py-2">Estado</th>
@@ -641,7 +641,7 @@ export default function ReportesPage() {
                 <tbody>
                   {(operativoData?.casos_en_riesgo || []).length === 0 && (
                     <tr className="border-t">
-                      <td colSpan={4} className="px-3 py-4 text-center text-gray-500">
+                      <td colSpan={4} className="px-3 py-4 text-center text-slate-500">
                         Sin casos críticos en cola para este momento.
                       </td>
                     </tr>
@@ -666,10 +666,10 @@ export default function ReportesPage() {
 
         <div className="card-pos">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+            <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
               <FileText className="w-6 h-6 text-primary-600" />
               {modoVista === 'dia' ? 'Movimientos del Día' : `Movimientos (${movimientosData?.fecha || ''})`}
-              <span className="text-sm text-gray-500 font-normal">
+              <span className="text-sm text-slate-500 font-normal">
                 ({movimientosFiltrados.length} de {movimientosData?.total_movimientos || 0})
               </span>
             </h3>
@@ -681,27 +681,27 @@ export default function ReportesPage() {
                 )
               }
               disabled={rangoInvalido || movimientosFiltrados.length === 0}
-              className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold rounded-lg shadow-md transition-all duration-200 hover:shadow-lg"
+              className="flex items-center gap-2 btn-success-solid disabled:bg-slate-300 disabled:cursor-not-allowed"
             >
               <Download className="w-5 h-5" />
               Exportar CSV
             </button>
           </div>
           {isFetchingMovimientos && (
-            <p className="mb-3 text-sm text-gray-500">Actualizando movimientos...</p>
+            <p className="mb-3 text-sm text-slate-500">Actualizando movimientos...</p>
           )}
 
           {/* Barra de Filtros */}
-          <div className="mb-4 p-4 bg-gray-50 rounded-lg border border-gray-200">
+          <div className="mb-4 p-4 bg-slate-50 rounded-lg border border-slate-200">
             <div className="flex flex-wrap items-end gap-4">
               <div className="flex-1 min-w-[200px]">
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                <label className="block text-sm font-semibold text-slate-700 mb-1">
                   Filtrar por Tipo:
                 </label>
                 <select
                   value={filtroTipo}
                   onChange={(e) => setFiltroTipo(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="input-corporate w-full px-3 py-2"
                 >
                   <option value="todos">Todos</option>
                   {tiposUnicos.map((tipo) => (
@@ -711,13 +711,13 @@ export default function ReportesPage() {
               </div>
 
               <div className="flex-1 min-w-[200px]">
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                <label className="block text-sm font-semibold text-slate-700 mb-1">
                   Filtrar por Método de Pago:
                 </label>
                 <select
                   value={filtroMetodo}
                   onChange={(e) => setFiltroMetodo(e.target.value)}
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="input-corporate w-full px-3 py-2"
                 >
                   <option value="todos">Todos</option>
                   {metodosUnicos.map((metodo) => (
@@ -727,7 +727,7 @@ export default function ReportesPage() {
               </div>
 
               <div className="flex-1 min-w-[200px]">
-                <label className="block text-sm font-semibold text-gray-700 mb-1">
+                <label className="block text-sm font-semibold text-slate-700 mb-1">
                   Buscar por Concepto:
                 </label>
                 <input
@@ -735,13 +735,13 @@ export default function ReportesPage() {
                   value={filtroConcepto}
                   onChange={(e) => setFiltroConcepto(e.target.value)}
                   placeholder="Escribir para buscar..."
-                  className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  className="input-corporate w-full px-3 py-2"
                 />
               </div>
 
               <button
                 onClick={limpiarFiltros}
-                className="px-4 py-2 bg-gray-300 hover:bg-gray-400 text-gray-800 font-semibold rounded-lg transition-all"
+                className="px-4 py-2 bg-slate-300 hover:bg-slate-400 text-slate-800 font-semibold rounded-lg transition-all"
               >
                 Limpiar Filtros
               </button>
@@ -751,7 +751,7 @@ export default function ReportesPage() {
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead>
-                <tr className="text-left text-gray-600">
+                <tr className="text-left text-slate-600">
                   <th className="px-3 py-2">Hora</th>
                   <th className="px-3 py-2">Módulo</th>
                   <th className="px-3 py-2">Turno</th>
@@ -766,7 +766,7 @@ export default function ReportesPage() {
               <tbody>
                 {movimientosFiltrados.length === 0 && (
                   <tr className="border-t">
-                    <td colSpan={9} className="px-3 py-6 text-center text-gray-500">
+                    <td colSpan={9} className="px-3 py-6 text-center text-slate-500">
                       No hay movimientos para los filtros seleccionados.
                     </td>
                   </tr>
@@ -793,7 +793,7 @@ export default function ReportesPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="card-pos">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+              <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
                 <DollarSign className="w-6 h-6 text-primary-600" />
                 Desglose por Conceptos
               </h3>
@@ -801,7 +801,7 @@ export default function ReportesPage() {
             <div className="space-y-2">
               {Object.keys(conceptosData?.ingresos_por_concepto || {}).length === 0 &&
                 Object.keys(conceptosData?.egresos_por_concepto || {}).length === 0 && (
-                  <p className="text-sm text-gray-500">No hay movimientos por concepto en este periodo.</p>
+                  <p className="text-sm text-slate-500">No hay movimientos por concepto en este periodo.</p>
                 )}
               {Object.entries(conceptosData?.ingresos_por_concepto || {}).map(([k, v]: any) => (
                 <div key={k} className="flex justify-between text-green-700"><span>{k}</span><span className="font-semibold">${Number(v).toLocaleString()}</span></div>
@@ -813,19 +813,19 @@ export default function ReportesPage() {
           </div>
           <div className="card-pos">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+              <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
                 <CalendarDays className="w-6 h-6 text-primary-600" />
                 Métodos de Pago
               </h3>
-              <p className="text-sm text-gray-600">Total recaudado por método</p>
+              <p className="text-sm text-slate-600">Total recaudado por método</p>
             </div>
             <div className="space-y-2">
               {Object.keys(mediosPagoData?.medios_pago || {}).length === 0 && (
-                <p className="text-sm text-gray-500">No hay recaudo por método de pago en este periodo.</p>
+                <p className="text-sm text-slate-500">No hay recaudo por método de pago en este periodo.</p>
               )}
               {Object.entries(mediosPagoData?.medios_pago || {}).map(([metodo, vals]: any) => (
-                <div key={metodo} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition">
-                  <span className="font-semibold text-gray-700 capitalize">{metodo.replace('_', ' ')}:</span>
+                <div key={metodo} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition">
+                  <span className="font-semibold text-slate-700 capitalize">{metodo.replace('_', ' ')}:</span>
                   <span className="text-xl font-bold text-green-600">${Number((vals as any).total).toLocaleString()}</span>
                 </div>
               ))}
@@ -836,7 +836,7 @@ export default function ReportesPage() {
         {/* Tabla: Trámites */}
         <div className="card-pos">
           <div className="flex items-center justify-between mb-4">
-            <h3 className="text-xl font-bold text-gray-900 flex items-center gap-2">
+            <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
               <FileText className="w-6 h-6 text-primary-600" />
               {modoVista === 'dia' ? 'Trámites del Día' : `Trámites (${tramitesData?.fecha || ''})`}
             </h3>
@@ -848,19 +848,19 @@ export default function ReportesPage() {
                 )
               }
               disabled={rangoInvalido || (tramitesData?.tramites || []).length === 0}
-              className="flex items-center gap-2 px-4 py-2 bg-secondary-500 hover:bg-secondary-600 disabled:bg-gray-300 disabled:cursor-not-allowed text-white font-semibold rounded-lg shadow-md transition-all duration-200 hover:shadow-lg"
+              className="flex items-center gap-2 btn-primary-solid disabled:bg-slate-300 disabled:cursor-not-allowed"
             >
               <Download className="w-5 h-5" />
               Exportar CSV
             </button>
           </div>
           {isFetchingTramites && (
-            <p className="mb-3 text-sm text-gray-500">Actualizando trámites...</p>
+            <p className="mb-3 text-sm text-slate-500">Actualizando trámites...</p>
           )}
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">
               <thead>
-                <tr className="text-left text-gray-600">
+                <tr className="text-left text-slate-600">
                   <th className="px-3 py-2">Hora</th>
                   <th className="px-3 py-2">Placa</th>
                   <th className="px-3 py-2">Tipo</th>
@@ -877,7 +877,7 @@ export default function ReportesPage() {
               <tbody>
                 {(tramitesData?.tramites || []).length === 0 && (
                   <tr className="border-t">
-                    <td colSpan={11} className="px-3 py-6 text-center text-gray-500">
+                    <td colSpan={11} className="px-3 py-6 text-center text-slate-500">
                       No hay trámites para el periodo seleccionado.
                     </td>
                   </tr>

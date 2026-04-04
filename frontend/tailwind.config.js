@@ -6,6 +6,17 @@ export default {
   ],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['Inter', 'ui-sans-serif', 'system-ui', 'sans-serif'],
+      },
+      borderRadius: {
+        xl: '0.85rem',
+        '2xl': '1.15rem',
+      },
+      boxShadow: {
+        soft: '0 10px 30px -18px rgba(15, 23, 42, 0.35)',
+        panel: '0 20px 50px -30px rgba(15, 23, 42, 0.45)',
+      },
       colors: {
         // Azul Navy del logo - Color principal
         primary: {
@@ -32,6 +43,18 @@ export default {
           700: '#b45309',  // Ámbar
           800: '#92400e',  // Ámbar oscuro
           900: '#78350f',  // Ámbar muy oscuro
+        },
+        brand: {
+          50: '#eef4ff',
+          100: '#dce7ff',
+          200: '#bfd2ff',
+          300: '#93b3ff',
+          400: '#5c8cff',
+          500: '#2f67f6',
+          600: '#1f4ed8',
+          700: '#1d3ea8',
+          800: '#1f3a7a',
+          900: '#1d325f',
         },
       },
     },
