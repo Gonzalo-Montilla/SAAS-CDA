@@ -14,6 +14,7 @@ from typing import Optional
 import os
 from pathlib import Path
 from urllib.parse import urlparse
+from urllib.request import urlopen
 
 from app.core.config import settings
 
@@ -71,6 +72,23 @@ def _resolve_tenant_logo_path(tenant_logo_url: Optional[str]) -> Optional[str]:
             return str(candidate)
 
     return None
+
+
+def _download_remote_logo(tenant_logo_url: Optional[str]) -> Optional[BytesIO]:
+    """Descarga logo remoto (http/https) y lo retorna como buffer listo para reportlab."""
+    if not tenant_logo_url:
+        return None
+    raw = str(tenant_logo_url).strip()
+    if not (raw.startswith("http://") or raw.startswith("https://")):
+        return None
+    try:
+        with urlopen(raw, timeout=4) as response:
+            content = response.read()
+            if not content:
+                return None
+            return BytesIO(content)
+    except Exception:
+        return None
 
 
 def generar_comprobante_cierre_caja(
@@ -179,13 +197,22 @@ def generar_comprobante_cierre_caja(
     # Elementos del documento
     elementos = []
     
-    # Logo: priorizar tenant actual; fallback al heredado local.
-    logo_path = _resolve_tenant_logo_path(tenant_logo_url)
-    if not logo_path:
-        logo_path = os.path.join(os.path.dirname(__file__), 'logo_cda.png')
-    if os.path.exists(logo_path):
+    # Logo: priorizar tenant actual (local o remoto); fallback al heredado local.
+    tenant_logo_local_path = _resolve_tenant_logo_path(tenant_logo_url)
+    tenant_logo_remote_buffer = _download_remote_logo(tenant_logo_url)
+    fallback_logo_path = os.path.join(os.path.dirname(__file__), 'logo_cda.png')
+
+    logo_source = None
+    if tenant_logo_local_path and os.path.exists(tenant_logo_local_path):
+        logo_source = tenant_logo_local_path
+    elif tenant_logo_remote_buffer:
+        logo_source = tenant_logo_remote_buffer
+    elif os.path.exists(fallback_logo_path):
+        logo_source = fallback_logo_path
+
+    if logo_source:
         # Aumentar el área máxima del logo manteniendo proporción.
-        logo = Image(logo_path, width=1.9*inch, height=1.1*inch, kind='proportional')
+        logo = Image(logo_source, width=1.9*inch, height=1.1*inch, kind='proportional')
         logo.hAlign = 'CENTER'
         elementos.append(logo)
         elementos.append(Spacer(1, 0.05*inch))

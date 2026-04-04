@@ -263,3 +263,124 @@ def generar_comprobante_egreso(
     buffer.seek(0)
     
     return buffer
+
+
+def generar_recibo_pago_vehiculo_pdf(
+    nombre_cda: str,
+    placa: str,
+    tipo_vehiculo: str,
+    cliente_nombre: str,
+    cliente_documento: str,
+    valor_rtm: Decimal,
+    comision_soat: Decimal,
+    total_cobrado: Decimal,
+    metodo_pago: str,
+    fecha_pago: datetime,
+    nombre_cajero: str,
+) -> bytes:
+    """Genera PDF simple de recibo de pago para envío por correo."""
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5 * inch, bottomMargin=0.5 * inch)
+    styles = getSampleStyleSheet()
+
+    title_style = ParagraphStyle(
+        "TitleReciboPago",
+        parent=styles["Heading1"],
+        fontSize=18,
+        textColor=colors.HexColor("#0a1d3d"),
+        alignment=TA_CENTER,
+        spaceAfter=8,
+        fontName="Helvetica-Bold",
+    )
+    subtitle_style = ParagraphStyle(
+        "SubtitleReciboPago",
+        parent=styles["Normal"],
+        fontSize=10,
+        textColor=colors.HexColor("#334155"),
+        alignment=TA_CENTER,
+        spaceAfter=16,
+    )
+
+    elementos = []
+    logo_path = os.path.join(os.path.dirname(__file__), "logo_cda.png")
+    if os.path.exists(logo_path):
+        logo = Image(logo_path, width=1.5 * inch, height=0.9 * inch, kind="proportional")
+        logo.hAlign = "CENTER"
+        elementos.append(logo)
+        elementos.append(Spacer(1, 0.08 * inch))
+
+    elementos.append(Paragraph("RECIBO DE PAGO", title_style))
+    elementos.append(Paragraph(nombre_cda, subtitle_style))
+
+    metodo_label = {
+        "efectivo": "Efectivo",
+        "tarjeta_debito": "Tarjeta débito",
+        "tarjeta_credito": "Tarjeta crédito",
+        "transferencia": "Transferencia",
+        "credismart": "Credismart",
+        "sistecredito": "Sistecredito",
+        "mixto": "Mixto",
+    }.get((metodo_pago or "").lower(), str(metodo_pago or "").replace("_", " ").title())
+
+    data = [
+        ["Fecha de pago", fecha_pago.strftime("%d/%m/%Y %H:%M:%S"), "Placa", placa],
+        ["Cliente", cliente_nombre, "Documento", cliente_documento],
+        ["Tipo vehículo", tipo_vehiculo.replace("_", " ").title(), "Atendido por", nombre_cajero],
+        ["Método de pago", metodo_label, "", ""],
+    ]
+    info_table = Table(data, colWidths=[1.3 * inch, 2.2 * inch, 1.2 * inch, 2.1 * inch])
+    info_table.setStyle(
+        TableStyle(
+            [
+                ("GRID", (0, 0), (-1, -1), 0.6, colors.HexColor("#d1d5db")),
+                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f8fafc")),
+                ("BACKGROUND", (2, 0), (2, -1), colors.HexColor("#f8fafc")),
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("FONTNAME", (2, 0), (2, -1), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 9),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 6),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    elementos.append(info_table)
+    elementos.append(Spacer(1, 0.18 * inch))
+
+    cobro_data = [
+        ["Concepto", "Valor"],
+        ["Revisión técnico-mecánica (RTM)", f"${float(valor_rtm):,.0f}"],
+        ["Comisión SOAT", f"${float(comision_soat):,.0f}"],
+        ["TOTAL PAGADO", f"${float(total_cobrado):,.0f}"],
+    ]
+    cobro_table = Table(cobro_data, colWidths=[4.2 * inch, 2.6 * inch])
+    cobro_table.setStyle(
+        TableStyle(
+            [
+                ("GRID", (0, 0), (-1, -1), 0.7, colors.HexColor("#cbd5e1")),
+                ("BACKGROUND", (0, 0), (-1, 0), colors.HexColor("#e2e8f0")),
+                ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+                ("FONTNAME", (0, 3), (-1, 3), "Helvetica-Bold"),
+                ("BACKGROUND", (0, 3), (-1, 3), colors.HexColor("#dcfce7")),
+                ("ALIGN", (0, 0), (0, -1), "LEFT"),
+                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                ("FONTSIZE", (0, 0), (-1, -1), 10),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ]
+        )
+    )
+    elementos.append(cobro_table)
+    elementos.append(Spacer(1, 0.22 * inch))
+
+    footer_style = ParagraphStyle(
+        "FooterReciboPago",
+        parent=styles["Normal"],
+        fontSize=8,
+        textColor=colors.HexColor("#64748b"),
+        alignment=TA_CENTER,
+    )
+    elementos.append(Paragraph("Documento generado automáticamente por CDASOFT.", footer_style))
+
+    doc.build(elementos)
+    return buffer.getvalue()
