@@ -31,24 +31,22 @@ export default function TesoreriaPage() {
 
   return (
     <Layout title="Tesorería - Caja Fuerte">
-      <div className="mb-6">
-        <h2 className="text-3xl font-bold text-gray-900 mb-2 flex items-center gap-3">
-          <Vault className="w-8 h-8" />
+      <section className="module-hero">
+        <p className="module-hero-title flex items-center gap-3">
+          <Vault className="w-7 h-7 text-primary-600" />
           Tesorería - Caja Fuerte
-        </h2>
-        <p className="text-gray-600">
-          Gestión centralizada del dinero del CDA
         </p>
-      </div>
+        <p className="module-hero-subtitle">Gestión centralizada del dinero del CDA</p>
+      </section>
 
       {/* Navegación de vistas */}
-      <div className="flex gap-4 mb-6">
+      <div className="flex flex-wrap gap-2 mb-6">
         <button
           onClick={() => setVistaActual('dashboard')}
-          className={`px-6 py-3 rounded-lg font-semibold transition-colors inline-flex items-center gap-2 ${
+          className={`btn-chip px-4 py-2 text-sm sm:text-base ${
             vistaActual === 'dashboard'
-              ? 'bg-primary-600 text-white shadow-lg'
-              : 'bg-white text-gray-700 border-2 border-gray-300 hover:border-primary-600'
+              ? 'bg-primary-600 text-white border-primary-600 shadow-sm'
+              : 'text-slate-700'
           }`}
         >
           <BarChart3 className="w-5 h-5" />
@@ -56,10 +54,10 @@ export default function TesoreriaPage() {
         </button>
         <button
           onClick={() => setVistaActual('registrar')}
-          className={`px-6 py-3 rounded-lg font-semibold transition-colors inline-flex items-center gap-2 ${
+          className={`btn-chip px-4 py-2 text-sm sm:text-base ${
             vistaActual === 'registrar'
-              ? 'bg-secondary-500 text-white shadow-lg'
-              : 'bg-white text-gray-700 border-2 border-gray-300 hover:border-secondary-500'
+              ? 'bg-secondary-500 text-white border-secondary-500 shadow-sm'
+              : 'text-slate-700'
           }`}
         >
           <Plus className="w-5 h-5" />
@@ -67,10 +65,10 @@ export default function TesoreriaPage() {
         </button>
         <button
           onClick={() => setVistaActual('historial')}
-          className={`px-6 py-3 rounded-lg font-semibold transition-colors inline-flex items-center gap-2 ${
+          className={`btn-chip px-4 py-2 text-sm sm:text-base ${
             vistaActual === 'historial'
-              ? 'bg-purple-600 text-white'
-              : 'bg-white text-gray-700 border-2 border-gray-300 hover:border-purple-600'
+              ? 'bg-purple-600 text-white border-purple-600 shadow-sm'
+              : 'text-slate-700'
           }`}
         >
           <FileText className="w-5 h-5" />
@@ -216,7 +214,7 @@ function Dashboard() {
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Tarjeta 1: Medios Electrónicos */}
         <div className="card-pos bg-gradient-to-br from-blue-50 to-purple-50 border-2 border-blue-200">
-          <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+          <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
             <Building2 className="w-6 h-6 text-blue-600" />
             Medios Electrónicos
           </h3>
@@ -224,12 +222,12 @@ function Dashboard() {
             {loadingDesglose ? (
               <div className="text-center py-8">
                 <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-                <p className="text-sm text-gray-500 mt-2">Cargando detalle...</p>
+                <p className="text-sm text-slate-500 mt-2">Cargando detalle...</p>
               </div>
             ) : desglose && (
               <>
                 <div className="flex justify-between items-center p-3 bg-white rounded-lg">
-                  <span className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <span className="text-sm font-semibold text-slate-700 flex items-center gap-2">
                     <ArrowUpCircle className="w-4 h-4 text-blue-600" />
                     Transferencia
                   </span>
@@ -238,7 +236,7 @@ function Dashboard() {
                   </span>
                 </div>
                 <div className="flex justify-between items-center p-3 bg-white rounded-lg">
-                  <span className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <span className="text-sm font-semibold text-slate-700 flex items-center gap-2">
                     <Package className="w-4 h-4 text-orange-600" />
                     Consignación
                   </span>
@@ -247,7 +245,7 @@ function Dashboard() {
                   </span>
                 </div>
                 <div className="flex justify-between items-center p-3 bg-white rounded-lg">
-                  <span className="text-sm font-semibold text-gray-700 flex items-center gap-2">
+                  <span className="text-sm font-semibold text-slate-700 flex items-center gap-2">
                     <Receipt className="w-4 h-4 text-purple-600" />
                     Cheque
                   </span>
@@ -257,7 +255,7 @@ function Dashboard() {
                 </div>
                 <div className="border-t-2 border-blue-300 pt-3 mt-3">
                   <div className="flex justify-between items-center">
-                    <span className="text-lg font-bold text-gray-900">Total Electrónico:</span>
+                    <span className="text-lg font-bold text-slate-900">Total Electrónico:</span>
                     <span className="text-2xl font-bold text-blue-700">
                       ${formatCurrency(
                         (desglose.desglose.transferencia || 0) +
@@ -274,7 +272,7 @@ function Dashboard() {
 
         {/* Tarjeta 2: Efectivo con Desglose */}
         <div className="card-pos bg-gradient-to-br from-green-50 to-yellow-50 border-2 border-green-200">
-          <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+          <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
             <Banknote className="w-6 h-6 text-green-600" />
             Efectivo en Caja
           </h3>
@@ -287,7 +285,7 @@ function Dashboard() {
 
           {desgloseEfectivo && (
             <div className="space-y-2">
-              <p className="text-sm font-bold text-gray-700 mb-2 flex items-center gap-1">
+              <p className="text-sm font-bold text-slate-700 mb-2 flex items-center gap-1">
                 <Banknote className="w-4 h-4" />
                 Desglose por Denominación:
               </p>
@@ -375,20 +373,20 @@ function Dashboard() {
       </div>
 
       {/* Últimos movimientos */}
-      <div className="card-pos">
-        <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+      <div className="section-card p-5 sm:p-6">
+        <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
           <Clock className="w-6 h-6 text-primary-600" />
           Movimientos Recientes
         </h3>
         {loadingMovimientos ? (
           <div className="text-center py-8">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary-600 mx-auto"></div>
-            <p className="text-sm text-gray-500 mt-2">Cargando movimientos recientes...</p>
+            <p className="text-sm text-slate-500 mt-2">Cargando movimientos recientes...</p>
           </div>
         ) : movimientos && movimientos.length > 0 ? (
           <div className="space-y-3">
             {movimientos.map((mov) => (
-              <div key={mov.id} className="flex justify-between items-center p-3 bg-gray-50 rounded-lg">
+              <div key={mov.id} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg">
                 <div className="flex-1">
                   <div className="flex items-center gap-2 mb-1">
                     <span className={`px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 ${
@@ -402,11 +400,11 @@ function Dashboard() {
                         <><ArrowUpCircle className="w-3 h-3" /> Egreso</>
                       )}
                     </span>
-                    <span className="text-xs text-gray-500">
+                    <span className="text-xs text-slate-500">
                       {new Date(mov.fecha_movimiento).toLocaleDateString('es-CO')}
                     </span>
                   </div>
-                  <p className="text-sm font-medium text-gray-900">{mov.concepto}</p>
+                  <p className="text-sm font-medium text-slate-900">{mov.concepto}</p>
                 </div>
                 <p className={`text-xl font-bold ml-4 ${
                   mov.tipo === 'ingreso' ? 'text-green-600' : 'text-red-600'
@@ -417,7 +415,7 @@ function Dashboard() {
             ))}
           </div>
         ) : (
-          <p className="text-center text-gray-500 py-8">No hay movimientos recientes</p>
+          <p className="text-center text-slate-500 py-8">No hay movimientos recientes</p>
         )}
       </div>
     </div>
@@ -635,8 +633,8 @@ function RegistrarMovimiento() {
 
   return (
     <div className="max-w-3xl mx-auto">
-      <div className="card-pos">
-        <h3 className="text-2xl font-bold text-gray-900 mb-6 flex items-center gap-2">
+      <div className="section-card p-5 sm:p-6">
+        <h3 className="text-2xl font-bold text-slate-900 mb-6 flex items-center gap-2">
           <Plus className="w-7 h-7 text-primary-600" />
           Registrar Movimiento
         </h3>
@@ -665,7 +663,7 @@ function RegistrarMovimiento() {
         <form onSubmit={handleSubmit}>
           {/* Tipo de movimiento */}
           <div className="mb-6">
-            <label className="block text-lg font-bold text-gray-900 mb-3">
+            <label className="block text-lg font-bold text-slate-900 mb-3">
               Tipo de Movimiento
             </label>
             <div className="grid grid-cols-2 gap-4">
@@ -700,7 +698,7 @@ function RegistrarMovimiento() {
 
           {/* Categoría */}
           <div className="mb-6">
-            <label className="block text-lg font-bold text-gray-900 mb-3">
+            <label className="block text-lg font-bold text-slate-900 mb-3">
               Categoría
             </label>
             <select
@@ -720,7 +718,7 @@ function RegistrarMovimiento() {
 
           {/* Monto */}
           <div className="mb-6">
-            <label className="block text-lg font-bold text-gray-900 mb-3">
+            <label className="block text-lg font-bold text-slate-900 mb-3">
               Monto
             </label>
             <div className="relative">
@@ -746,7 +744,7 @@ function RegistrarMovimiento() {
               />
             </div>
             {formData.monto && parseFloat(formData.monto) > 0 && (
-              <p className="mt-2 text-lg text-center text-gray-700 font-semibold">
+              <p className="mt-2 text-lg text-center text-slate-700 font-semibold">
                 Valor: <span className="text-primary-600">${formatCurrency(parseFloat(formData.monto))}</span>
               </p>
             )}
@@ -755,7 +753,7 @@ function RegistrarMovimiento() {
           {/* Beneficiario (solo para egresos) */}
           {tipoMovimiento === 'egreso' && (
             <div className="mb-6">
-              <label className="block text-lg font-bold text-gray-900 mb-3">
+              <label className="block text-lg font-bold text-slate-900 mb-3">
                 Beneficiario / Pagado a
               </label>
               <input
@@ -772,7 +770,7 @@ function RegistrarMovimiento() {
 
           {/* Concepto */}
           <div className="mb-6">
-            <label className="block text-lg font-bold text-gray-900 mb-3">
+            <label className="block text-lg font-bold text-slate-900 mb-3">
               Concepto / Detalle
             </label>
             <textarea
@@ -788,7 +786,7 @@ function RegistrarMovimiento() {
 
           {/* Método de pago */}
           <div className="mb-6">
-            <label className="block text-lg font-bold text-gray-900 mb-3">
+            <label className="block text-lg font-bold text-slate-900 mb-3">
               Método de Pago
             </label>
             <select
@@ -811,7 +809,7 @@ function RegistrarMovimiento() {
 
           {/* Número de comprobante */}
           <div className="mb-6">
-            <label className="block text-lg font-bold text-gray-900 mb-3">
+            <label className="block text-lg font-bold text-slate-900 mb-3">
               Número de Comprobante (Opcional)
             </label>
             <input
@@ -956,15 +954,15 @@ function Historial() {
 
   return (
     <div>
-      <div className="card-pos mb-6">
-        <h3 className="text-2xl font-bold text-gray-900 mb-4 flex items-center gap-2">
+      <div className="section-card p-5 sm:p-6 mb-6">
+        <h3 className="text-2xl font-bold text-slate-900 mb-4 flex items-center gap-2">
           <Search className="w-6 h-6 text-primary-600" />
           Filtros
         </h3>
         
         {/* Búsqueda de texto */}
         <div className="mb-4">
-          <label className="block text-sm font-medium text-gray-700 mb-2 flex items-center gap-1">
+          <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-1">
             <Search className="w-4 h-4" />
             Buscar en Concepto o Número de Comprobante
           </label>
@@ -979,7 +977,7 @@ function Historial() {
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-slate-700 mb-2">
               Tipo
             </label>
             <select
@@ -993,7 +991,7 @@ function Historial() {
             </select>
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-slate-700 mb-2">
               Desde
             </label>
             <input
@@ -1004,7 +1002,7 @@ function Historial() {
             />
           </div>
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-2">
+            <label className="block text-sm font-medium text-slate-700 mb-2">
               Hasta
             </label>
             <input
@@ -1017,7 +1015,7 @@ function Historial() {
         </div>
       </div>
 
-      <div className="card-pos">
+      <div className="section-card p-5 sm:p-6">
         {feedback && (
           <div
             className={`mb-4 rounded-lg border p-3 text-sm ${
@@ -1031,13 +1029,13 @@ function Historial() {
         )}
 
         <div className="flex justify-between items-center mb-4">
-          <h3 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+          <h3 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <FileText className="w-7 h-7 text-primary-600" />
             Historial de Movimientos
           </h3>
           <button
             onClick={exportarExcel}
-            className="btn-pos btn-primary flex items-center gap-2"
+            className="btn-corporate-primary px-4 flex items-center gap-2"
             disabled={!movimientos || movimientos.length === 0}
           >
             <Download className="w-5 h-5" />
@@ -1048,24 +1046,24 @@ function Historial() {
         {isLoading ? (
           <LoadingSpinner message="Cargando historial de movimientos..." />
         ) : movimientos && movimientos.length > 0 ? (
-          <div className="overflow-x-auto">
-            <table className="w-full">
+          <div className="table-shell">
+            <table className="table-enterprise">
               <thead>
-                <tr className="border-b-2 border-gray-200">
-                  <th className="text-left p-3 text-sm font-semibold text-gray-700">Fecha</th>
-                  <th className="text-left p-3 text-sm font-semibold text-gray-700">Tipo</th>
-                  <th className="text-left p-3 text-sm font-semibold text-gray-700">Concepto</th>
-                  <th className="text-right p-3 text-sm font-semibold text-gray-700">Monto</th>
-                  <th className="text-center p-3 text-sm font-semibold text-gray-700">Acciones</th>
+                <tr>
+                  <th className="pl-3 text-left">Fecha</th>
+                  <th className="pl-3 text-left">Tipo</th>
+                  <th className="pl-3 text-left">Concepto</th>
+                  <th className="pl-3 text-right">Monto</th>
+                  <th className="pl-3 text-center">Acciones</th>
                 </tr>
               </thead>
               <tbody>
                 {movimientos.map((mov) => (
-                  <tr key={mov.id} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="p-3 text-sm text-gray-600">
+                  <tr key={mov.id}>
+                    <td className="pl-3 text-sm text-slate-600">
                       {new Date(mov.fecha_movimiento).toLocaleDateString('es-CO')}
                     </td>
-                    <td className="p-3">
+                    <td className="pl-3">
                       <span className={`px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 w-fit ${
                         mov.tipo === 'ingreso'
                           ? 'bg-blue-100 text-blue-800'
@@ -1078,13 +1076,13 @@ function Historial() {
                         )}
                       </span>
                     </td>
-                    <td className="p-3 text-sm text-gray-900">{mov.concepto}</td>
-                    <td className={`p-3 text-right text-lg font-bold ${
+                    <td className="pl-3 text-sm text-slate-900">{mov.concepto}</td>
+                    <td className={`pl-3 text-right text-lg font-bold ${
                       mov.tipo === 'ingreso' ? 'text-green-600' : 'text-red-600'
                     }`}>
                       {mov.tipo === 'ingreso' ? '+' : '-'}${formatCurrency(Math.abs(mov.monto))}
                     </td>
-                    <td className="p-3 text-center">
+                    <td className="pl-3 text-center">
                       {mov.tipo === 'egreso' && (
                         <button
                           onClick={async () => {
@@ -1098,7 +1096,7 @@ function Historial() {
                               });
                             }
                           }}
-                          className="px-3 py-1 bg-red-600 text-white text-xs rounded hover:bg-red-700 inline-flex items-center gap-1"
+                          className="btn-chip border-red-300 bg-red-50 text-red-700 hover:bg-red-100 px-3 py-1 inline-flex items-center gap-1"
                           title="Descargar comprobante de egreso"
                         >
                           <Download className="w-3 h-3" />
@@ -1112,7 +1110,7 @@ function Historial() {
             </table>
           </div>
         ) : (
-          <p className="text-center text-gray-500 py-8">No hay movimientos para mostrar</p>
+          <p className="text-center text-slate-500 py-8">No hay movimientos para mostrar</p>
         )}
       </div>
     </div>

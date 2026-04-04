@@ -236,7 +236,7 @@ export default function Soporte() {
                 setStatusFilter('todos');
                 setPriorityFilter('todos');
               }}
-              className="px-3 py-2 rounded-lg border border-slate-300 text-slate-700 text-sm font-semibold hover:bg-slate-50"
+              className="btn-corporate-muted px-3"
             >
               Limpiar filtros
             </button>

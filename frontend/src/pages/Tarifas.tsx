@@ -30,14 +30,24 @@ export default function TarifasPage() {
 
   return (
     <Layout title="Gestión de Tarifas">
+      <section className="module-hero">
+        <p className="module-hero-title flex items-center gap-2">
+          <DollarSign className="w-5 h-5 text-primary-600" />
+          Gestión de tarifas y comisiones
+        </p>
+        <p className="module-hero-subtitle">
+          Configura tarifas RTM y comisiones SOAT por vigencia con consistencia operativa.
+        </p>
+      </section>
+
       {/* Navegación */}
-      <div className="flex gap-4 mb-6">
+      <div className="flex flex-wrap gap-2 mb-6">
         <button
           onClick={() => setVistaActual('tarifas')}
-          className={`flex-1 py-4 rounded-lg font-semibold text-lg transition-all inline-flex items-center justify-center gap-2 ${
+          className={`btn-chip px-4 py-2 text-sm sm:text-base ${
             vistaActual === 'tarifas'
-              ? 'bg-primary-600 text-white shadow-lg'
-              : 'bg-white text-gray-700 hover:bg-gray-100'
+              ? 'bg-primary-600 text-white border-primary-600 shadow-sm'
+              : 'text-slate-700'
           }`}
         >
           <DollarSign className="w-5 h-5" />
@@ -45,10 +55,10 @@ export default function TarifasPage() {
         </button>
         <button
           onClick={() => setVistaActual('comisiones')}
-          className={`flex-1 py-4 rounded-lg font-semibold text-lg transition-all inline-flex items-center justify-center gap-2 ${
+          className={`btn-chip px-4 py-2 text-sm sm:text-base ${
             vistaActual === 'comisiones'
-              ? 'bg-primary-600 text-white shadow-lg'
-              : 'bg-white text-gray-700 hover:bg-gray-100'
+              ? 'bg-primary-600 text-white border-primary-600 shadow-sm'
+              : 'text-slate-700'
           }`}
         >
           <Shield className="w-5 h-5" />
@@ -112,7 +122,7 @@ function TarifasRTM({
       {/* Header */}
       <div className="flex justify-between items-center mb-6">
         <div className="flex items-center gap-4">
-          <h2 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+          <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
             <DollarSign className="w-7 h-7" />
             Tarifas RTM
           </h2>
@@ -121,7 +131,7 @@ function TarifasRTM({
           <select
             value={anoSeleccionado}
             onChange={(e) => setAnoSeleccionado(parseInt(e.target.value))}
-            className="px-4 py-2 border-2 border-gray-300 rounded-lg font-semibold"
+            className="input-corporate max-w-[130px] py-2"
           >
             {anosDisponibles.map(ano => (
               <option key={ano} value={ano}>{ano}</option>
@@ -139,7 +149,7 @@ function TarifasRTM({
 
         <button
           onClick={() => setMostrarModalCrear(true)}
-          className="px-6 py-3 bg-secondary-500 text-white rounded-lg font-bold hover:bg-secondary-600 transition-colors inline-flex items-center gap-2 shadow-lg"
+          className="btn-corporate-primary px-4 inline-flex items-center gap-2"
         >
           <Plus className="w-5 h-5" />
           Nueva Tarifa
@@ -150,12 +160,12 @@ function TarifasRTM({
       {tarifasDelAno.length === 0 ? (
         <div className="card-pos text-center py-12">
           <div className="flex justify-center mb-4">
-            <FileText className="w-16 h-16 text-gray-400" />
+            <FileText className="w-16 h-16 text-slate-400" />
           </div>
-          <h3 className="text-xl font-bold text-gray-900 mb-2">
+          <h3 className="text-xl font-bold text-slate-900 mb-2">
             No hay tarifas para {anoSeleccionado}
           </h3>
-          <p className="text-gray-600 mb-4">
+          <p className="text-slate-600 mb-4">
             Crea la primera tarifa para este año
           </p>
           <button
@@ -167,18 +177,19 @@ function TarifasRTM({
           </button>
         </div>
       ) : (
-        <div className="card-pos overflow-x-auto">
-          <table className="w-full">
+        <div className="section-card p-5 sm:p-6">
+          <div className="table-shell">
+          <table className="table-enterprise">
             <thead>
-              <tr className="border-b-2 border-gray-200">
-                <th className="text-left py-4 px-4 font-bold text-gray-900">Tipo</th>
-                <th className="text-left py-4 px-4 font-bold text-gray-900">Antigüedad</th>
-                <th className="text-right py-4 px-4 font-bold text-gray-900">RTM</th>
-                <th className="text-right py-4 px-4 font-bold text-gray-900">Terceros</th>
-                <th className="text-right py-4 px-4 font-bold text-gray-900">Total Cliente</th>
-                <th className="text-center py-4 px-4 font-bold text-gray-900">Vigencia</th>
-                <th className="text-center py-4 px-4 font-bold text-gray-900">Estado</th>
-                <th className="text-center py-4 px-4 font-bold text-gray-900">Acciones</th>
+              <tr>
+                <th className="pl-3 text-left">Tipo</th>
+                <th className="pl-3 text-left">Antigüedad</th>
+                <th className="pl-3 text-right">RTM</th>
+                <th className="pl-3 text-right">Terceros</th>
+                <th className="pl-3 text-right">Total Cliente</th>
+                <th className="pl-3 text-center">Vigencia</th>
+                <th className="pl-3 text-center">Estado</th>
+                <th className="pl-3 text-center">Acciones</th>
               </tr>
             </thead>
             <tbody>
@@ -201,32 +212,32 @@ function TarifasRTM({
                   }[tarifa.tipo_vehiculo] || tarifa.tipo_vehiculo;
 
                   return (
-                  <tr key={tarifa.id} className="border-b border-gray-100 hover:bg-gray-50">
-                    <td className="py-4 px-4">
-                      <span className="text-xs font-semibold text-gray-600 px-2 py-1 bg-gray-100 rounded">
+                  <tr key={tarifa.id}>
+                    <td className="pl-3">
+                      <span className="text-xs font-semibold text-slate-600 px-2 py-1 bg-slate-100 rounded">
                         {tipoLabel}
                       </span>
                     </td>
-                    <td className="py-4 px-4">
+                    <td className="pl-3">
                       <span className="font-semibold">
                         {tarifa.antiguedad_min} - {tarifa.antiguedad_max || '∞'} años
                       </span>
                     </td>
-                    <td className="py-4 px-4 text-right font-semibold text-primary-700">
+                    <td className="pl-3 text-right font-semibold text-primary-700">
                       ${tarifa.valor_rtm.toLocaleString()}
                     </td>
-                    <td className="py-4 px-4 text-right font-semibold text-gray-600">
+                    <td className="pl-3 text-right font-semibold text-slate-600">
                       ${tarifa.valor_terceros.toLocaleString()}
                     </td>
-                    <td className="py-4 px-4 text-right font-bold text-secondary-700 text-lg">
+                    <td className="pl-3 text-right font-bold text-secondary-700 text-lg">
                       ${tarifa.valor_total.toLocaleString()}
                     </td>
-                    <td className="py-4 px-4 text-center text-sm text-gray-600">
+                    <td className="pl-3 text-center text-sm text-slate-600">
                       {new Date(tarifa.vigencia_inicio).toLocaleDateString('es-CO')}
                       <br />
                       {new Date(tarifa.vigencia_fin).toLocaleDateString('es-CO')}
                     </td>
-                    <td className="py-4 px-4 text-center">
+                    <td className="pl-3 text-center">
                       <span
                         className={`px-3 py-1 rounded-full text-xs font-bold inline-flex items-center gap-1 ${
                           tarifa.activa
@@ -247,10 +258,10 @@ function TarifasRTM({
                         )}
                       </span>
                     </td>
-                    <td className="py-4 px-4 text-center">
+                    <td className="pl-3 text-center">
                       <button
                         onClick={() => setTarifaEditar(tarifa)}
-                        className="px-3 py-1 bg-primary-600 text-white rounded-lg text-sm font-semibold hover:bg-primary-700 inline-flex items-center gap-1"
+                        className="btn-chip border-primary-300 bg-primary-50 text-primary-700 hover:bg-primary-100 px-3 py-1 inline-flex items-center gap-1"
                       >
                         <Edit className="w-4 h-4" />
                         Editar
@@ -261,6 +272,7 @@ function TarifasRTM({
                 })}
             </tbody>
           </table>
+          </div>
         </div>
       )}
 
@@ -348,20 +360,20 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="modal-panel max-w-2xl w-full">
         <div className="p-6">
           {/* Header */}
-          <div className="flex justify-between items-start mb-6">
+          <div className="modal-header-sticky -mx-6 px-6 pt-1 pb-4 flex justify-between items-start mb-6 border-b border-slate-200">
             <div>
-              <h3 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              <h3 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
                 <Plus className="w-7 h-7" />
                 Nueva Tarifa RTM
               </h3>
-              <p className="text-sm text-gray-600 mt-1">Configura la tarifa para un rango de antigüedad</p>
+              <p className="text-sm text-slate-600 mt-1">Configura la tarifa para un rango de antigüedad</p>
             </div>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-3xl">
-              ×
+            <button onClick={onClose} className="modal-close-btn inline-flex items-center justify-center text-2xl">
+              <span aria-hidden>×</span>
             </button>
           </div>
 
@@ -423,7 +435,7 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
             </div>
 
             {/* Vigencias */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-bold text-gray-900 mb-2">
                   Inicio Vigencia
@@ -457,7 +469,7 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
             </div>
 
             {/* Antigüedad */}
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
               <div>
                 <label className="block text-sm font-bold text-gray-900 mb-2 flex items-center gap-2">
                   <Car className="w-4 h-4" />
@@ -502,7 +514,7 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
             </div>
 
             {/* Valores */}
-            <div className="bg-gray-50 rounded-lg p-4 space-y-4">
+            <div className="bg-slate-50 rounded-lg p-4 space-y-4 border border-slate-200">
               <div>
                 <label className="block text-sm font-bold text-gray-900 mb-2 flex items-center gap-2">
                   <DollarSign className="w-4 h-4" />
@@ -543,7 +555,7 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
                 />
               </div>
 
-              <div className="pt-4 border-t-2 border-gray-300">
+              <div className="pt-4 border-t-2 border-slate-300">
                 <label className="block text-sm font-bold text-gray-900 mb-2 flex items-center gap-2">
                   <Banknote className="w-4 h-4" />
                   Valor Total (Cliente Paga)
@@ -575,7 +587,7 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
             </div>
 
             {/* Botones */}
-            <div className="flex gap-4">
+            <div className="modal-footer-sticky -mx-6 px-6 flex gap-4">
               <button
                 type="button"
                 onClick={onClose}
@@ -660,21 +672,21 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
   };
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-xl w-full">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="modal-panel max-w-xl w-full">
         <div className="p-6">
-          <div className="flex justify-between items-start mb-6">
+          <div className="modal-header-sticky -mx-6 px-6 pt-1 pb-4 flex justify-between items-start mb-6 border-b border-slate-200">
             <div>
-              <h3 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
+              <h3 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
                 <Edit className="w-7 h-7" />
                 Editar Tarifa
               </h3>
-              <p className="text-sm text-gray-600 mt-1">
+              <p className="text-sm text-slate-600 mt-1">
                 {tarifa.antiguedad_min} - {tarifa.antiguedad_max || '∞'} años ({tarifa.ano_vigencia})
               </p>
             </div>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-3xl">
-              ×
+            <button onClick={onClose} className="modal-close-btn inline-flex items-center justify-center text-2xl">
+              <span aria-hidden>×</span>
             </button>
           </div>
 
@@ -734,7 +746,7 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
               />
             </div>
 
-            <div className="pt-4 border-t-2 border-gray-300">
+            <div className="pt-4 border-t-2 border-slate-300">
               <label className="block text-sm font-bold text-gray-900 mb-2 flex items-center gap-2">
                 <Banknote className="w-4 h-4" />
                 Valor Total
@@ -771,7 +783,7 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
                   onChange={(e) => setFormData({ ...formData, activa: e.target.checked })}
                   className="w-5 h-5"
                 />
-                <span className="font-semibold text-gray-900 flex items-center gap-2">
+                <span className="font-semibold text-slate-900 flex items-center gap-2">
                   {formData.activa ? (
                     <>
                       <CheckCircle2 className="w-4 h-4" />
@@ -787,7 +799,7 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
               </label>
             </div>
 
-            <div className="flex gap-4 pt-4">
+            <div className="modal-footer-sticky -mx-6 px-6 flex gap-4">
               <button
                 type="button"
                 onClick={onClose}
@@ -849,17 +861,17 @@ function ComisionesSOAT() {
     <div>
        <div className="mb-6 flex items-center justify-between">
           <div>
-            <h2 className="text-2xl font-bold text-gray-900 mb-2 flex items-center gap-2">
+            <h2 className="text-2xl font-bold text-slate-900 mb-2 flex items-center gap-2">
               <Shield className="w-7 h-7" />
               Comisiones SOAT
             </h2>
-            <p className="text-gray-600">
+            <p className="text-slate-600">
               Configura cuánto recibes por cada SOAT vendido según el tipo de vehículo
             </p>
           </div>
           <button
             onClick={() => setComisionEditar({ id: null })}
-            className="px-6 py-3 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-700 transition-colors inline-flex items-center gap-2"
+            className="btn-corporate-primary px-4 inline-flex items-center gap-2"
           >
             <Plus className="w-5 h-5" />
             Nueva Comisión
@@ -871,8 +883,8 @@ function ComisionesSOAT() {
           <div className="flex justify-center mb-4">
             <AlertTriangle className="w-16 h-16 text-yellow-500" />
           </div>
-          <h3 className="text-xl font-bold text-gray-900 mb-2">No hay comisiones configuradas</h3>
-          <p className="text-gray-600 mb-4">
+          <h3 className="text-xl font-bold text-slate-900 mb-2">No hay comisiones configuradas</h3>
+          <p className="text-slate-600 mb-4">
             Configura una comisión para iniciar el registro de ventas SOAT.
           </p>
         </div>
@@ -891,16 +903,16 @@ function ComisionesSOAT() {
                     <IconoVehiculo className="w-16 h-16 text-primary-600" />
                   </div>
                   <div className="flex-1">
-                    <h4 className="text-2xl font-bold text-gray-900 capitalize mb-2">
+                    <h4 className="text-2xl font-bold text-slate-900 capitalize mb-2">
                       {comision.tipo_vehiculo}
                     </h4>
-                    <p className="text-sm text-gray-600 mb-3">
+                    <p className="text-sm text-slate-600 mb-3">
                       Vigencia: {fechaInicio.toLocaleDateString('es-CO')}
                       {fechaFin && ` - ${fechaFin.toLocaleDateString('es-CO')}`}
                     </p>
                     
                     <div className="mb-4">
-                      <p className="text-xs text-gray-600 mb-1">Comisión por SOAT vendido</p>
+                      <p className="text-xs text-slate-600 mb-1">Comisión por SOAT vendido</p>
                       <p className="text-3xl font-bold text-secondary-700">
                         ${comision.valor_comision.toLocaleString()}
                       </p>
@@ -909,7 +921,7 @@ function ComisionesSOAT() {
                     <div className="flex gap-2">
                       <button
                         onClick={() => setComisionEditar(comision)}
-                        className="flex-1 px-4 py-2 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-700 transition-colors inline-flex items-center justify-center gap-2"
+                        className="flex-1 btn-corporate-primary px-4 inline-flex items-center justify-center gap-2"
                       >
                         <Edit className="w-4 h-4" />
                         Editar
@@ -917,7 +929,7 @@ function ComisionesSOAT() {
                       <button
                         onClick={() => handleEliminar(comision)}
                         disabled={eliminarMutation.isLoading}
-                        className="px-4 py-2 bg-red-600 text-white rounded-lg font-semibold hover:bg-red-700 transition-colors disabled:opacity-50 inline-flex items-center justify-center"
+                        className="btn-corporate-danger px-4 disabled:opacity-50 inline-flex items-center justify-center"
                         title="Eliminar"
                       >
                         <Trash2 className="w-5 h-5" />
@@ -995,24 +1007,24 @@ function ModalEditarComisionSOAT({ comision, onClose }: { comision: any; onClose
   const IconoVehiculo = formData.tipo_vehiculo === 'moto' ? Bike : Car;
 
   return (
-    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
-      <div className="bg-white rounded-xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="modal-panel max-w-2xl w-full">
         <div className="p-6">
           {/* Header */}
-          <div className="flex justify-between items-start mb-6">
+          <div className="modal-header-sticky -mx-6 px-6 pt-1 pb-4 flex justify-between items-start mb-6 border-b border-slate-200">
             <div className="flex items-center gap-3">
               <IconoVehiculo className="w-10 h-10 text-primary-600" />
               <div>
-                <h3 className="text-2xl font-bold text-gray-900 capitalize">
+                <h3 className="text-2xl font-bold text-slate-900 capitalize">
                   {esNuevo ? 'Nueva' : 'Editar'} Comisión SOAT
                 </h3>
-                <p className="text-sm text-gray-600 mt-1">
+                <p className="text-sm text-slate-600 mt-1">
                   {esNuevo ? 'Configura una nueva comisión' : 'Ajusta el valor de la comisión'}
                 </p>
               </div>
             </div>
-            <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-3xl">
-              ×
+            <button onClick={onClose} className="modal-close-btn inline-flex items-center justify-center text-2xl">
+              <span aria-hidden>×</span>
             </button>
           </div>
 
@@ -1032,14 +1044,14 @@ function ModalEditarComisionSOAT({ comision, onClose }: { comision: any; onClose
                 <label className="block text-sm font-bold text-gray-900 mb-2">
                   Tipo de Vehículo
                 </label>
-                <div className="grid grid-cols-2 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <button
                     type="button"
                     onClick={() => setFormData({ ...formData, tipo_vehiculo: 'moto' })}
                     className={`p-4 rounded-lg border-2 transition-all ${
                       formData.tipo_vehiculo === 'moto'
                         ? 'border-primary-600 bg-primary-50'
-                        : 'border-gray-300 hover:border-gray-400'
+                        : 'border-slate-300 hover:border-slate-400'
                     }`}
                   >
                     <Bike className="w-8 h-8 mx-auto mb-2" />
@@ -1051,7 +1063,7 @@ function ModalEditarComisionSOAT({ comision, onClose }: { comision: any; onClose
                     className={`p-4 rounded-lg border-2 transition-all ${
                       formData.tipo_vehiculo === 'carro'
                         ? 'border-primary-600 bg-primary-50'
-                        : 'border-gray-300 hover:border-gray-400'
+                        : 'border-slate-300 hover:border-slate-400'
                     }`}
                   >
                     <Car className="w-8 h-8 mx-auto mb-2" />
@@ -1068,7 +1080,7 @@ function ModalEditarComisionSOAT({ comision, onClose }: { comision: any; onClose
                 Valor de la Comisión
               </label>
               <div className="relative">
-                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-2xl font-bold text-gray-400">$</span>
+                <span className="absolute left-4 top-1/2 -translate-y-1/2 text-2xl font-bold text-slate-400">$</span>
                 <input
                   type="number"
                   value={formData.valor_comision}
@@ -1082,14 +1094,14 @@ function ModalEditarComisionSOAT({ comision, onClose }: { comision: any; onClose
                   min={0}
                 />
               </div>
-              <p className="text-xs text-gray-500 mt-2 text-center">
+              <p className="text-xs text-slate-500 mt-2 text-center">
                 Comisión que recibe el CDA por cada SOAT vendido
               </p>
             </div>
 
             {/* Vigencia - solo en crear */}
             {esNuevo && (
-              <div className="grid grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <div>
                   <label className="block text-sm font-bold text-gray-900 mb-2">
                     Vigencia Inicio
@@ -1118,7 +1130,7 @@ function ModalEditarComisionSOAT({ comision, onClose }: { comision: any; onClose
 
             {/* Estado Activo/Inactivo */}
             <div>
-              <label className="flex items-center gap-3 cursor-pointer p-4 border-2 border-gray-300 rounded-lg hover:bg-gray-50 transition-colors">
+              <label className="flex items-center gap-3 cursor-pointer p-4 border-2 border-slate-300 rounded-lg hover:bg-slate-50 transition-colors">
                 <input
                   type="checkbox"
                   checked={formData.activa}
@@ -1126,7 +1138,7 @@ function ModalEditarComisionSOAT({ comision, onClose }: { comision: any; onClose
                   className="w-5 h-5"
                 />
                 <div>
-                  <span className="font-semibold text-gray-900 block flex items-center gap-2">
+                  <span className="font-semibold text-slate-900 block flex items-center gap-2">
                     {formData.activa ? (
                       <>
                         <CheckCircle2 className="w-4 h-4" />
@@ -1139,7 +1151,7 @@ function ModalEditarComisionSOAT({ comision, onClose }: { comision: any; onClose
                       </>
                     )}
                   </span>
-                  <span className="text-sm text-gray-600">
+                  <span className="text-sm text-slate-600">
                     {formData.activa ? 'Se aplicará en las ventas de SOAT' : 'No se aplicará automáticamente'}
                   </span>
                 </div>
@@ -1147,18 +1159,18 @@ function ModalEditarComisionSOAT({ comision, onClose }: { comision: any; onClose
             </div>
 
             {/* Botones */}
-            <div className="flex gap-3 pt-4">
+            <div className="modal-footer-sticky -mx-6 px-6 flex gap-3">
               <button
                 type="button"
                 onClick={onClose}
-                className="flex-1 px-6 py-3 border-2 border-gray-300 text-gray-700 rounded-lg font-semibold hover:bg-gray-100 transition-colors"
+                className="flex-1 btn-pos btn-secondary"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
                 disabled={mutation.isLoading}
-                className="flex-1 px-6 py-3 bg-primary-600 text-white rounded-lg font-semibold hover:bg-primary-700 transition-colors disabled:opacity-50"
+                className="flex-1 btn-pos btn-primary disabled:opacity-50"
               >
                 {mutation.isLoading ? 'Guardando...' : esNuevo ? 'Crear Comisión' : 'Guardar Cambios'}
               </button>
