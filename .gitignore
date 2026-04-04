@@ -26,6 +26,7 @@ wheels/
 # Virtual environments
 backend/venv/
 backend/env/
+backend/.venv/
 
 # Environment variables
 .env
@@ -52,6 +53,9 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Runtime uploads
+backend/uploads/
 
 # Node.js (para frontend)
 node_modules/
