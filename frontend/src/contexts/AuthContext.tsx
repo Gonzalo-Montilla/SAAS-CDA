@@ -1,6 +1,7 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 import type { Usuario, SaaSUser, LoginCredentials, LoginResponse, AuthScope } from '../types';
 import apiClient from '../api/client';
+import { getStoredTenantLoginPath, getTenantLoginPath, persistTenantSlug } from '../utils/authRedirect';
 
 interface AuthContextType {
   user: Usuario | SaaSUser | null;
@@ -8,6 +9,7 @@ interface AuthContextType {
   loading: boolean;
   login: (credentials: LoginCredentials, scope?: AuthScope) => Promise<void>;
   logout: () => void;
+  getLogoutRedirectPath: () => string;
   isAuthenticated: boolean;
 }
 
@@ -37,6 +39,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authScope, setAuthScope] = useState<AuthScope | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const getTenantSlugFromCurrentUser = (): string | undefined => {
+    if (!user || authScope !== 'tenant') {
+      return undefined;
+    }
+    if ('tenant_slug' in user) {
+      return (user as Usuario).tenant_slug || undefined;
+    }
+    return undefined;
+  };
+
   useEffect(() => {
     // Verificar si hay token al cargar
     const token = localStorage.getItem('access_token');
@@ -65,6 +77,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           const response = await apiClient.get<Usuario | SaaSUser>(meEndpoint);
           setUser(response.data);
+          if (scope === 'tenant' && 'tenant_slug' in response.data) {
+            persistTenantSlug((response.data as Usuario).tenant_slug);
+          }
           return;
         } catch (error: any) {
           lastError = error;
@@ -106,9 +121,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.setItem('access_token', access_token);
     localStorage.setItem('refresh_token', refresh_token);
     localStorage.setItem('auth_scope', scope);
+    if (scope === 'tenant') {
+      persistTenantSlug(credentials.tenant_slug);
+    }
     setAuthScope(scope);
 
     await fetchCurrentUser(scope);
+  };
+
+  const getLogoutRedirectPath = (): string => {
+    if (authScope === 'saas') {
+      return '/saas/login';
+    }
+    const tenantSlug = getTenantSlugFromCurrentUser();
+    return tenantSlug ? getTenantLoginPath(tenantSlug) : getStoredTenantLoginPath();
   };
 
   const logout = () => {
@@ -127,6 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         loading,
         login,
         logout,
+        getLogoutRedirectPath,
         isAuthenticated: !!user,
       }}
     >

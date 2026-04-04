@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { getStoredTenantLoginPath } from '../utils/authRedirect';
 
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
 
@@ -56,7 +57,7 @@ apiClient.interceptors.response.use(
         localStorage.removeItem('access_token');
         localStorage.removeItem('refresh_token');
         localStorage.removeItem('auth_scope');
-        window.location.href = currentScope === 'saas' ? '/saas/login' : '/login';
+        window.location.href = currentScope === 'saas' ? '/saas/login' : getStoredTenantLoginPath();
         return Promise.reject(refreshError);
       }
     }
