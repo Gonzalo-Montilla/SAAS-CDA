@@ -38,6 +38,7 @@ class VehiculoProceso(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    sucursal_id = Column(UUID(as_uuid=True), ForeignKey("sucursales.id"), nullable=True, index=True)
     
     # Datos del vehículo
     placa = Column(String(10), nullable=False, index=True)

@@ -10,6 +10,7 @@ from uuid import UUID
 
 from app.db.database import get_db
 from app.core.security import decode_token
+from app.core.sucursal_scope import resolve_active_sucursal_id
 from app.models.usuario import Usuario, RolEnum
 from app.models.saas_user import SaaSUser
 from app.models.tenant import Tenant
@@ -20,9 +21,9 @@ oauth2_scheme_saas = OAuth2PasswordBearer(tokenUrl="/api/v1/saas/auth/login")
 
 
 def get_current_user(
+    request: Request,
     token: str = Depends(oauth2_scheme),
     db: Session = Depends(get_db),
-    request: Request = None,
 ) -> Usuario:
     """
     Obtener usuario actual desde token JWT
@@ -76,9 +77,11 @@ def get_current_user(
     if user.tenant_id != token_tenant_uuid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Contexto de tenant inválido",
+            detail="Contexto de tenant inv?lido",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    request.state.tenant_jwt_payload = payload
 
     tenant = db.query(Tenant).filter(Tenant.id == user.tenant_id).first()
     if tenant is None:
@@ -99,12 +102,27 @@ def get_current_user(
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail=(
-                "El tenant está en estado pendiente_de_plan. "
-                "La operación de escritura está bloqueada hasta asignar un plan de pago."
+                "El tenant est? en estado pendiente_de_plan. "
+                "La operaci?n de escritura est? bloqueada hasta asignar un plan de pago."
             ),
         )
     
     return user
+
+
+def get_active_sucursal_id(
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+) -> UUID:
+    """Sede operativa efectiva (validada) para el request actual."""
+    payload = getattr(request.state, "tenant_jwt_payload", None)
+    if not isinstance(payload, dict):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="No se pudo resolver la sede activa",
+        )
+    return resolve_active_sucursal_id(db, current_user, payload)
 
 
 def get_current_saas_user(
@@ -142,7 +160,7 @@ def get_current_saas_user(
     if token_session_version is not None and user.session_version != token_session_version:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Sesión global invalidada",
+            detail="Sesi?n global invalidada",
             headers={"WWW-Authenticate": "Bearer"},
         )
 
@@ -157,7 +175,7 @@ def require_role(allowed_roles: list[str]):
         if current_user.rol not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"Permiso denegado. Roles permitidos: {', '.join(allowed_roles)}"
+                detail=f"Permiso denegado. Roles permitidos: {', '.join(allowed_roles)}",
             )
         return current_user
     
@@ -177,13 +195,13 @@ def require_saas_role(allowed_roles: list[str]):
     return role_checker
 
 
-# Dependencias específicas por rol
+# Dependencias espec?ficas por rol
 def get_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
     """Solo administradores"""
     if current_user.rol != RolEnum.ADMINISTRADOR:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo administradores pueden realizar esta acción"
+            detail="Solo administradores pueden realizar esta acci?n"
         )
     return current_user
 
@@ -193,7 +211,7 @@ def get_cajero_or_admin(current_user: Usuario = Depends(get_current_user)) -> Us
     if current_user.rol not in [RolEnum.CAJERO, RolEnum.ADMINISTRADOR]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo cajeros o administradores pueden realizar esta acción"
+            detail="Solo cajeros o administradores pueden realizar esta acci?n"
         )
     return current_user
 
@@ -203,7 +221,7 @@ def get_recepcionista_or_admin(current_user: Usuario = Depends(get_current_user)
     if current_user.rol not in [RolEnum.RECEPCIONISTA, RolEnum.ADMINISTRADOR]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo recepcionistas o administradores pueden realizar esta acción"
+            detail="Solo recepcionistas o administradores pueden realizar esta acci?n"
         )
     return current_user
 
@@ -213,7 +231,7 @@ def get_agendamiento_or_admin(current_user: Usuario = Depends(get_current_user))
     if current_user.rol not in [RolEnum.RECEPCIONISTA, RolEnum.COMERCIAL, RolEnum.ADMINISTRADOR]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo recepcionistas, comerciales o administradores pueden realizar esta acción"
+            detail="Solo recepcionistas, comerciales o administradores pueden realizar esta acci?n"
         )
     return current_user
 
@@ -223,7 +241,7 @@ def get_contador_or_admin(current_user: Usuario = Depends(get_current_user)) -> 
     if current_user.rol not in [RolEnum.CONTADOR, RolEnum.ADMINISTRADOR]:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo contadores o administradores pueden realizar esta acción"
+            detail="Solo contadores o administradores pueden realizar esta acci?n"
         )
     return current_user
 
@@ -233,6 +251,6 @@ def get_saas_owner(current_user: SaaSUser = Depends(get_current_saas_user)) -> S
     if current_user.rol_global != "owner":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo owner SaaS puede realizar esta acción"
+            detail="Solo owner SaaS puede realizar esta acci?n"
         )
     return current_user

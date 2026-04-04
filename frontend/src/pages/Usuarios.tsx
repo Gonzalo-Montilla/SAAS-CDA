@@ -75,7 +75,7 @@ const validatePasswordPolicy = (password: string): string | null => {
   return null;
 };
 
-export default function UsuariosPage() {
+export default function UsuariosPage({ embedded = false }: { embedded?: boolean } = {}) {
   const queryClient = useQueryClient();
   const [buscarInput, setBuscarInput] = useState('');
   const [buscar, setBuscar] = useState('');
@@ -326,6 +326,13 @@ export default function UsuariosPage() {
   };
 
   if (isLoading) {
+    if (embedded) {
+      return (
+        <div className="flex justify-center py-16">
+          <LoadingSpinner message="Cargando usuarios..." />
+        </div>
+      );
+    }
     return (
       <Layout title="Usuarios">
         <LoadingSpinner message="Cargando usuarios..." />
@@ -333,8 +340,7 @@ export default function UsuariosPage() {
     );
   }
 
-  return (
-    <Layout title="Gestión de Usuarios">
+  const body = (
       <div className="space-y-6">
         {feedback && (
           <div
@@ -791,6 +797,15 @@ export default function UsuariosPage() {
           </div>
         )}
       </div>
+  );
+
+  if (embedded) {
+    return body;
+  }
+
+  return (
+    <Layout title="Gestión de Usuarios">
+      {body}
     </Layout>
   );
 }

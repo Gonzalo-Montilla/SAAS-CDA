@@ -40,7 +40,8 @@ class Caja(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
-    
+    sucursal_id = Column(UUID(as_uuid=True), ForeignKey("sucursales.id"), nullable=True, index=True)
+
     # Usuario responsable
     usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False)
     
@@ -60,6 +61,7 @@ class Caja(Base):
     estado = Column(SQLEnum(EstadoCaja), default=EstadoCaja.ABIERTA, nullable=False)
     
     # Relaciones
+    sucursal = relationship("Sucursal", foreign_keys=[sucursal_id])
     usuario = relationship("Usuario", backref="cajas")
     vehiculos = relationship("VehiculoProceso", back_populates="caja")
     movimientos = relationship("MovimientoCaja", back_populates="caja", cascade="all, delete-orphan")

@@ -18,6 +18,7 @@ from app.core.deps import get_db
 from app.core.security import get_password_hash
 from app.models.tenant import Tenant
 from app.models.usuario import Usuario, RolEnum
+from app.models.sucursal import Sucursal
 from app.schemas.onboarding import (
     OnboardingSendCodeRequest,
     OnboardingSendCodeResponse,
@@ -473,8 +474,19 @@ def register_tenant_self_service(
     db.add(tenant)
     db.flush()
 
+    sede_principal = Sucursal(
+        tenant_id=tenant.id,
+        nombre="Sede principal",
+        codigo=None,
+        activa=True,
+        es_principal=True,
+    )
+    db.add(sede_principal)
+    db.flush()
+
     admin = Usuario(
         tenant_id=tenant.id,
+        sucursal_id=sede_principal.id,
         email=normalized_email,
         hashed_password=get_password_hash(admin_password),
         nombre_completo=nombre_representante_legal_o_administrador.strip(),

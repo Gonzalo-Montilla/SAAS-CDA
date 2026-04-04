@@ -1,6 +1,23 @@
 import { useNavigate } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { ShieldCheck, LogOut, Users, Copy, Check, Building2, Shield, FileClock, Wallet, LifeBuoy } from 'lucide-react';
+import {
+  ShieldCheck,
+  LogOut,
+  Users,
+  Copy,
+  Check,
+  Building2,
+  Shield,
+  FileClock,
+  Wallet,
+  LifeBuoy,
+  Star,
+  Link2,
+  CreditCard,
+  KeyRound,
+  UserPlus,
+} from 'lucide-react';
+import { BackofficeSectionHeading } from '../components/BackofficeSectionHeading';
 import { useAuth } from '../contexts/AuthContext';
 import { apiClient } from '../api/client';
 import { useState } from 'react';
@@ -567,7 +584,12 @@ export default function SaaSBackoffice() {
             </div>
           </div>
           <div className="section-card p-6">
-            <p className="text-sm font-semibold text-slate-800 mb-3">Permisos efectivos</p>
+            <BackofficeSectionHeading
+              className="mb-4"
+              icon={KeyRound}
+              title="Permisos efectivos"
+              description="Permisos globales de tu rol en la plataforma"
+            />
             {permissionsQuery.isLoading && <LoadingBlock lines={2} />}
             {permissionsQuery.isError && (
               <p className="text-sm text-red-600">No se pudieron cargar permisos globales.</p>
@@ -593,12 +615,17 @@ export default function SaaSBackoffice() {
       return (
         <div className="space-y-6">
           <div className="section-card p-6">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-sm font-semibold text-slate-800">Tenants CDA</p>
-              <span className="text-xs rounded-full bg-slate-100 px-2 py-1 text-slate-600">
-                Total: {tenantsQuery.data?.length || 0}
-              </span>
-            </div>
+            <BackofficeSectionHeading
+              className="mb-4"
+              icon={Building2}
+              title="Tenants CDA"
+              description="Centros de diagnóstico registrados y su estado comercial"
+              right={
+                <span className="text-xs font-medium rounded-full bg-white/90 px-2.5 py-1 text-slate-700 ring-1 ring-slate-200/80 shadow-sm">
+                  Total: {tenantsQuery.data?.length || 0}
+                </span>
+              }
+            />
             {tenantsQuery.isLoading && <LoadingBlock lines={4} />}
             {tenantsQuery.isError && <p className="text-sm text-red-600">No fue posible cargar la lista de tenants.</p>}
             {tenantsQuery.data && (
@@ -608,7 +635,7 @@ export default function SaaSBackoffice() {
               <div className="table-shell">
                 <table className="table-enterprise">
                   <thead>
-                    <tr className="text-left border-b border-slate-200">
+                    <tr>
                       <th>CDA</th>
                       <th>Slug</th>
                       <th>Contacto</th>
@@ -616,13 +643,13 @@ export default function SaaSBackoffice() {
                       <th>Sucursales</th>
                       <th>Estado</th>
                       <th>Próx. cobro</th>
-                      <th>Acciones</th>
+                      <th className="table-enterprise-col-actions">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
                     {tenantsQuery.data.map((tenant) => (
                       <tr key={tenant.id}>
-                        <td className="font-medium text-slate-900">{tenant.nombre_comercial}</td>
+                        <td className="font-semibold uppercase tracking-tight text-slate-900">{tenant.nombre_comercial}</td>
                         <td>/{tenant.slug}</td>
                         <td>{tenant.correo_electronico || '-'}</td>
                         <td className="uppercase">{tenant.plan_actual}</td>
@@ -637,8 +664,8 @@ export default function SaaSBackoffice() {
                         <td>
                           {tenant.next_billing_at ? new Date(tenant.next_billing_at).toLocaleDateString() : '-'}
                         </td>
-                        <td>
-                          <div className="flex flex-wrap items-center gap-2">
+                        <td className="table-enterprise-col-actions">
+                          <div className="flex flex-wrap items-center justify-end gap-2">
                             <button
                               type="button"
                               onClick={() => openTenantSheet(tenant)}
@@ -683,7 +710,12 @@ export default function SaaSBackoffice() {
       return (
         <div className="space-y-6">
           <div className="section-card p-6">
-            <p className="text-sm font-semibold text-slate-800 mb-3">Usuarios SaaS internos</p>
+            <BackofficeSectionHeading
+              className="mb-4"
+              icon={Users}
+              title="Usuarios SaaS internos"
+              description="Equipo interno con acceso al backoffice"
+            />
             {usersQuery.isLoading && <LoadingBlock lines={3} />}
             {usersQuery.isError && <p className="text-sm text-red-600">No fue posible cargar los usuarios SaaS.</p>}
             {usersQuery.data && (
@@ -693,7 +725,7 @@ export default function SaaSBackoffice() {
               <div className="table-shell">
                 <table className="table-enterprise">
                   <thead>
-                    <tr className="text-left border-b border-slate-200">
+                    <tr>
                       <th>Nombre</th>
                       <th>Email</th>
                       <th>Rol global</th>
@@ -703,8 +735,8 @@ export default function SaaSBackoffice() {
                   <tbody>
                     {usersQuery.data.map((u) => (
                       <tr key={u.id}>
-                        <td>{u.nombre_completo}</td>
-                        <td>{u.email}</td>
+                        <td className="font-semibold text-slate-900">{u.nombre_completo}</td>
+                        <td className="text-slate-600">{u.email}</td>
                         <td className="capitalize">{u.rol_global}</td>
                         <td>
                           <span className={u.activo ? 'badge badge-success' : 'badge badge-danger'}>
@@ -721,7 +753,12 @@ export default function SaaSBackoffice() {
           </div>
 
           <div className="section-card p-6">
-            <p className="text-sm font-semibold text-slate-800 mb-3">Crear usuario SaaS</p>
+            <BackofficeSectionHeading
+              className="mb-4"
+              icon={UserPlus}
+              title="Crear usuario SaaS"
+              description="Alta de cuentas para el equipo CDA Soft"
+            />
             {!isOwner && (
               <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-3 mb-3">
                 Solo el rol owner puede crear usuarios SaaS.
@@ -800,7 +837,12 @@ export default function SaaSBackoffice() {
       return (
         <div className="space-y-6">
           <div className="section-card p-6">
-            <p className="text-sm font-semibold text-slate-800 mb-3">Resumen global de facturación por tenant</p>
+            <BackofficeSectionHeading
+              className="mb-4"
+              icon={Wallet}
+              title="Resumen global de facturación por tenant"
+              description="Cobros, planes y últimos pagos por tenant"
+            />
             {billingOverviewQuery.isLoading && <LoadingBlock lines={4} />}
             {billingOverviewQuery.isError && <p className="text-sm text-red-600">No fue posible cargar el resumen de facturación.</p>}
             {billingOverviewQuery.data && (
@@ -810,7 +852,7 @@ export default function SaaSBackoffice() {
               <div className="table-shell">
                 <table className="table-enterprise">
                   <thead>
-                    <tr className="text-left border-b border-slate-200">
+                    <tr>
                       <th>Tenant</th>
                       <th>Plan</th>
                       <th>Sucursales</th>
@@ -818,7 +860,7 @@ export default function SaaSBackoffice() {
                       <th>Próx. cobro</th>
                       <th>Último pago</th>
                       <th>Recibo</th>
-                      <th>Acciones</th>
+                      <th className="table-enterprise-col-actions">Acciones</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -826,7 +868,7 @@ export default function SaaSBackoffice() {
                       const tenant = (tenantsQuery.data || []).find((t) => t.id === item.tenant_id);
                       return (
                       <tr key={item.tenant_id}>
-                        <td className="font-medium">{item.tenant_nombre}</td>
+                        <td className="font-semibold text-slate-900">{item.tenant_nombre}</td>
                         <td>{item.plan_label}</td>
                         <td>{item.sedes_totales} / {item.sucursales_facturables} fact.</td>
                         <td>
@@ -839,8 +881,8 @@ export default function SaaSBackoffice() {
                           {item.last_payment_amount != null ? `${item.last_payment_amount.toLocaleString('es-CO')} (${item.last_payment_at ? new Date(item.last_payment_at).toLocaleDateString() : '-'})` : '-'}
                         </td>
                         <td>{item.last_receipt_reference || '-'}</td>
-                        <td>
-                          <div className="flex flex-wrap items-center gap-2">
+                        <td className="table-enterprise-col-actions">
+                          <div className="flex flex-wrap items-center justify-end gap-2">
                             <button
                               type="button"
                               onClick={() => tenant && openTenantSheet(tenant)}
@@ -876,7 +918,11 @@ export default function SaaSBackoffice() {
       return (
         <div className="space-y-6">
           <div className="section-card p-6 space-y-4">
-            <p className="text-sm font-semibold text-slate-800">Tickets de soporte</p>
+            <BackofficeSectionHeading
+              icon={LifeBuoy}
+              title="Tickets de soporte"
+              description="Seguimiento de solicitudes de los CDAs"
+            />
             {supportActionError && (
               <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">{supportActionError}</p>
             )}
@@ -936,7 +982,7 @@ export default function SaaSBackoffice() {
                 <div className="table-shell">
                   <table className="table-enterprise">
                     <thead>
-                      <tr className="text-left border-b border-slate-200">
+                      <tr>
                         <th>Fecha</th>
                         <th>Tenant</th>
                         <th>Asunto</th>
@@ -944,7 +990,7 @@ export default function SaaSBackoffice() {
                         <th>Estado</th>
                         <th>Asignado</th>
                         <th>Respuesta al CDA</th>
-                        <th>Acciones</th>
+                        <th className="table-enterprise-col-actions">Acciones</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -953,8 +999,8 @@ export default function SaaSBackoffice() {
                           <td>{new Date(ticket.created_at).toLocaleString()}</td>
                           <td>{ticket.tenant_nombre}</td>
                           <td>
-                            <p className="font-medium text-slate-900">{ticket.title}</p>
-                            <p className="text-xs text-slate-500">{ticket.description}</p>
+                            <p className="font-semibold text-slate-900">{ticket.title}</p>
+                            <p className="text-xs text-slate-500 mt-0.5">{ticket.description}</p>
                           </td>
                           <td className="capitalize">{ticket.priority}</td>
                           <td>
@@ -968,8 +1014,8 @@ export default function SaaSBackoffice() {
                               <span className="text-xs text-slate-400">Pendiente de respuesta</span>
                             )}
                           </td>
-                          <td>
-                            <div className="flex flex-wrap items-center gap-2">
+                          <td className="table-enterprise-col-actions">
+                            <div className="flex flex-wrap items-center justify-end gap-2">
                               <button
                                 type="button"
                                 onClick={() => updateSupportTicketMutation.mutate({ ticketId: ticket.id, status: 'en_progreso' })}
@@ -1062,16 +1108,16 @@ export default function SaaSBackoffice() {
     if (activeModule === 'auditoria') {
       return (
         <div className="section-card p-6 space-y-4">
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-sm font-semibold text-slate-800">Auditoría global</p>
-            <button
-              type="button"
-              onClick={handleExportAuditCsv}
-              className="btn-chip shadow-sm"
-            >
-              Exportar CSV
-            </button>
-          </div>
+          <BackofficeSectionHeading
+            icon={FileClock}
+            title="Auditoría global"
+            description="Registro de acciones y eventos del sistema"
+            right={
+              <button type="button" onClick={handleExportAuditCsv} className="btn-chip shadow-sm">
+                Exportar CSV
+              </button>
+            }
+          />
           <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
             <input
               type="text"
@@ -1121,7 +1167,7 @@ export default function SaaSBackoffice() {
             <div className="table-shell">
               <table className="table-enterprise">
                 <thead>
-                  <tr className="text-left border-b border-slate-200">
+                  <tr>
                     <th>Fecha</th>
                     <th>Acción</th>
                     <th>Descripción</th>
@@ -1157,7 +1203,12 @@ export default function SaaSBackoffice() {
     return (
       <div className="space-y-4">
         <div className="section-card p-6">
-          <p className="text-sm font-semibold text-slate-800 mb-3">Seguridad SaaS</p>
+          <BackofficeSectionHeading
+            className="mb-4"
+            icon={Shield}
+            title="Seguridad SaaS"
+            description="Métricas de cuentas y protección de acceso"
+          />
           {securitySummaryQuery.isLoading && <LoadingBlock lines={2} />}
           {securitySummaryQuery.isError && <p className="text-sm text-red-600">No fue posible cargar el resumen de seguridad.</p>}
           {securitySummaryQuery.data && (
@@ -1171,7 +1222,12 @@ export default function SaaSBackoffice() {
         </div>
 
         <div className="section-card p-6">
-          <p className="text-sm font-semibold text-slate-800 mb-3">Usuarios y controles de seguridad</p>
+          <BackofficeSectionHeading
+            className="mb-4"
+            icon={ShieldCheck}
+            title="Usuarios y controles de seguridad"
+            description="MFA, bloqueos y acciones sobre cuentas internas"
+          />
           {securityActionError && (
             <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3 mb-3">{securityActionError}</p>
           )}
@@ -1187,20 +1243,20 @@ export default function SaaSBackoffice() {
             <div className="table-shell">
               <table className="table-enterprise">
                 <thead>
-                  <tr className="text-left border-b border-slate-200">
+                  <tr>
                     <th>Usuario</th>
                     <th>Rol</th>
                     <th>MFA</th>
                     <th>Bloqueo</th>
-                    <th>Acciones</th>
+                    <th className="table-enterprise-col-actions">Acciones</th>
                   </tr>
                 </thead>
                 <tbody>
                   {securityUsersQuery.data.map((u) => (
                     <tr key={u.id}>
                       <td>
-                        <p className="font-medium">{u.nombre_completo}</p>
-                        <p className="text-xs text-slate-500">{u.email}</p>
+                        <p className="font-semibold text-slate-900">{u.nombre_completo}</p>
+                        <p className="text-xs text-slate-500 mt-0.5">{u.email}</p>
                       </td>
                       <td className="capitalize">{u.rol_global}</td>
                       <td>
@@ -1209,8 +1265,8 @@ export default function SaaSBackoffice() {
                         </span>
                       </td>
                       <td>{u.bloqueado_hasta ? `Hasta ${new Date(u.bloqueado_hasta).toLocaleString()}` : 'No'}</td>
-                      <td>
-                        <div className="flex flex-wrap items-center gap-2">
+                      <td className="table-enterprise-col-actions">
+                        <div className="flex flex-wrap items-center justify-end gap-2">
                           <button
                             type="button"
                             onClick={() => toggleMfaMutation.mutate(u.id)}
@@ -1355,212 +1411,442 @@ export default function SaaSBackoffice() {
                     )}
                     <p className="text-xs text-slate-500">Marca del CDA</p>
                   </div>
-                  <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div><span className="text-slate-500">Nombre comercial:</span> <span className="font-medium">{tenantProfileQuery.data.nombre_comercial}</span></div>
-                    <div><span className="text-slate-500">Slug:</span> /{tenantProfileQuery.data.slug}</div>
-                    <div><span className="text-slate-500">NIT:</span> {tenantProfileQuery.data.nit_cda || '-'}</div>
-                    <div><span className="text-slate-500">Correo:</span> {tenantProfileQuery.data.correo_electronico || '-'}</div>
-                    <div><span className="text-slate-500">Representante:</span> {tenantProfileQuery.data.nombre_representante || '-'}</div>
-                    <div><span className="text-slate-500">Celular:</span> {tenantProfileQuery.data.celular || '-'}</div>
-                    <div><span className="text-slate-500">Plan actual:</span> <span className="font-medium uppercase">{tenantProfileQuery.data.plan_actual}</span></div>
-                    <div><span className="text-slate-500">Estado suscripción:</span> <span className={statusBadgeClass(tenantProfileQuery.data.subscription_status)}>{subscriptionStatusLabel(tenantProfileQuery.data.subscription_status)}</span></div>
-                    <div><span className="text-slate-500">Sucursales totales:</span> <span className="font-medium">{tenantProfileQuery.data.sedes_totales}</span></div>
-                    <div><span className="text-slate-500">Sucursales facturables:</span> <span className="font-medium">{tenantProfileQuery.data.sucursales_facturables}</span></div>
-                    <div><span className="text-slate-500">Próximo cobro:</span> {tenantProfileQuery.data.next_billing_at ? new Date(tenantProfileQuery.data.next_billing_at).toLocaleDateString() : '-'}</div>
-                    <div><span className="text-slate-500">Último pago:</span> {tenantProfileQuery.data.last_payment_at ? new Date(tenantProfileQuery.data.last_payment_at).toLocaleDateString() : '-'}</div>
-                    <div className="md:col-span-2">
-                      <span className="text-slate-500">URL personalizada:</span>{' '}
-                      <span className="font-medium break-all">{tenantProfileQuery.data.login_url}</span>
+                  <div className="md:col-span-2 space-y-4">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                        Información del CDA
+                      </p>
+                      <div className="rounded-xl border border-slate-200 bg-gradient-to-b from-white to-slate-50/90 p-4 shadow-sm ring-1 ring-slate-900/5">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                          <div className="space-y-1">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Nombre comercial</p>
+                            <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.nombre_comercial}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Slug</p>
+                            <p className="text-sm font-mono font-semibold text-slate-900">/{tenantProfileQuery.data.slug}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">NIT</p>
+                            <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.nit_cda || '—'}</p>
+                          </div>
+                          <div className="space-y-1 min-w-0">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Correo</p>
+                            <p className="text-sm font-semibold text-slate-900 break-all">{tenantProfileQuery.data.correo_electronico || '—'}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Representante</p>
+                            <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.nombre_representante || '—'}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Celular</p>
+                            <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.celular || '—'}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Plan actual</p>
+                            <p className="text-sm font-semibold uppercase text-slate-900">{tenantProfileQuery.data.plan_actual}</p>
+                          </div>
+                          <div className="space-y-1.5">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Estado suscripción</p>
+                            <span className={statusBadgeClass(tenantProfileQuery.data.subscription_status)}>
+                              {subscriptionStatusLabel(tenantProfileQuery.data.subscription_status)}
+                            </span>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Sucursales totales</p>
+                            <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.sedes_totales}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Sucursales facturables</p>
+                            <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.sucursales_facturables}</p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Próximo cobro</p>
+                            <p className="text-sm font-semibold text-slate-900">
+                              {tenantProfileQuery.data.next_billing_at
+                                ? new Date(tenantProfileQuery.data.next_billing_at).toLocaleDateString()
+                                : '—'}
+                            </p>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Último pago</p>
+                            <p className="text-sm font-semibold text-slate-900">
+                              {tenantProfileQuery.data.last_payment_at
+                                ? new Date(tenantProfileQuery.data.last_payment_at).toLocaleDateString()
+                                : '—'}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                        URL de acceso (login del CDA)
+                      </p>
+                      <div className="flex flex-col sm:flex-row gap-2 sm:items-stretch">
+                        <div className="flex min-w-0 flex-1 items-start gap-2.5 rounded-xl border border-slate-200 bg-gradient-to-b from-white to-slate-50/90 px-3 py-2.5 shadow-sm ring-1 ring-slate-900/5">
+                          <Link2
+                            className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600"
+                            aria-hidden
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">
+                              URL personalizada
+                            </p>
+                            <p className="mt-0.5 text-sm font-mono text-slate-900 leading-snug break-all">
+                              {tenantProfileQuery.data.login_url}
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            handleCopyLoginUrl(tenantProfileQuery.data.id, tenantProfileQuery.data.login_url)
+                          }
+                          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 hover:border-slate-300 transition-colors sm:self-stretch"
+                        >
+                          {copiedTenantId === tenantProfileQuery.data.id ? (
+                            <>
+                              <Check className="h-4 w-4 text-emerald-600" aria-hidden />
+                              Copiado
+                            </>
+                          ) : (
+                            <>
+                              <Copy className="h-4 w-4 text-slate-500" aria-hidden />
+                              Copiar enlace
+                            </>
+                          )}
+                        </button>
+                      </div>
+                      <p className="mt-2 text-xs text-slate-500">
+                        Comparte este enlace con el CDA para que sus usuarios inicien sesión en su espacio.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                {(() => {
+                  const sedes = tenantProfileQuery.data.sucursales_activas || [];
+                  const n = sedes.length;
+                  const totalesPlan = tenantProfileQuery.data.sedes_totales;
+                  return (
+                    <div className="section-card p-4">
+                      <div className="rounded-xl border border-slate-200/90 bg-white shadow-sm overflow-hidden ring-1 ring-slate-900/5">
+                      <BackofficeSectionHeading
+                        embedded
+                        icon={Building2}
+                        title="Red de sedes"
+                        description={
+                          n === 0
+                            ? 'Sin sedes activas registradas'
+                            : `${n} sede${n === 1 ? '' : 's'} operativa${n === 1 ? '' : 's'} · ${totalesPlan} contratada${totalesPlan === 1 ? '' : 's'} en plan`
+                        }
+                        right={
+                          n > 0 ? (
+                            <span className="rounded-md bg-white/80 px-2 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200/80">
+                              {n}/{totalesPlan} activas
+                            </span>
+                          ) : undefined
+                        }
+                      />
+                      {n === 0 ? (
+                        <div className="px-4 py-8 text-center">
+                          <p className="text-sm text-slate-500">El tenant aún no tiene sedes activas en el sistema.</p>
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="table-enterprise min-w-full">
+                            <thead>
+                              <tr>
+                                <th>Sede</th>
+                                <th>Código</th>
+                                <th>Estado</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {sedes.map((s) => (
+                                <tr key={s.id}>
+                                  <td className="font-semibold text-slate-900">{s.nombre}</td>
+                                  <td className="font-mono text-xs text-slate-600">{s.codigo || '—'}</td>
+                                  <td>
+                                    {s.es_principal ? (
+                                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 pl-2 pr-2.5 py-1 text-xs font-semibold text-amber-900 ring-1 ring-amber-200/90">
+                                        <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-600" aria-hidden />
+                                        Principal
+                                      </span>
+                                    ) : (
+                                      <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 ring-1 ring-emerald-200/70">
+                                        Activa
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div className="section-card p-4">
+                  <div className="rounded-xl border border-slate-200/90 bg-white shadow-sm overflow-hidden ring-1 ring-slate-900/5">
+                    <BackofficeSectionHeading
+                      embedded
+                      icon={CreditCard}
+                      title="Gestión de plan y pago"
+                      description="Asignar plan, cotización y registro de pagos"
+                    />
+                    <div className="p-4 space-y-3">
+                      {billingActionError && (
+                        <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">{billingActionError}</p>
+                      )}
+                      {billingActionSuccess && (
+                        <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-3">{billingActionSuccess}</p>
+                      )}
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <select
+                          value={billingPlanCode}
+                          onChange={(e) => setBillingPlanCode(e.target.value)}
+                          className="input-corporate"
+                        >
+                          {(billingPlansQuery.data || []).map((plan) => (
+                            <option key={plan.code} value={plan.code}>
+                              {plan.label}
+                            </option>
+                          ))}
+                        </select>
+                        <input
+                          type="number"
+                          min={1}
+                          value={billingSedesTotales}
+                          onChange={(e) => setBillingSedesTotales(Math.max(1, Number(e.target.value) || 1))}
+                          className="input-corporate"
+                          placeholder="Sedes totales"
+                        />
+                        <button
+                          type="button"
+                          disabled={!billingQuoteQuery.data || assignPlanMutation.isLoading}
+                          onClick={() => {
+                            setBillingActionError('');
+                            setBillingActionSuccess('');
+                            assignPlanMutation.mutate();
+                          }}
+                          className="px-4 btn-corporate-primary disabled:opacity-50"
+                        >
+                          {assignPlanMutation.isLoading ? 'Aplicando plan...' : 'Asignar plan y activar periodo'}
+                        </button>
+                      </div>
+
+                      <div>
+                        {billingQuoteQuery.isLoading && <LoadingBlock lines={1} />}
+                        {billingQuoteQuery.isError && (
+                          <p className="text-sm text-red-600">No fue posible calcular la cotización.</p>
+                        )}
+                        {billingQuoteQuery.data && (
+                          <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-xs text-violet-900 shadow-sm">
+                            Resumen: {billingQuoteQuery.data.sedes_totales} sedes totales |{' '}
+                            {billingQuoteQuery.data.included_branches} incluidas |{' '}
+                            {billingQuoteQuery.data.chargeable_additional_branches} facturables | Total:{' '}
+                            {billingQuoteQuery.data.total.toLocaleString('es-CO')}
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="flex flex-wrap items-center gap-3">
+                        <input
+                          type="number"
+                          min={1}
+                          step="1000"
+                          value={paymentAmount}
+                          onChange={(e) => setPaymentAmount(e.target.value)}
+                          placeholder="Monto pago"
+                          className="input-corporate w-40"
+                        />
+                        <input
+                          type="text"
+                          value={paymentNotes}
+                          onChange={(e) => setPaymentNotes(e.target.value)}
+                          placeholder="Notas pago (opcional)"
+                          className="input-corporate min-w-[220px]"
+                        />
+                        <button
+                          type="button"
+                          disabled={!billingTenantId || Number(paymentAmount) <= 0 || registerPaymentMutation.isLoading}
+                          onClick={() => {
+                            setBillingActionError('');
+                            setBillingActionSuccess('');
+                            registerPaymentMutation.mutate();
+                          }}
+                          className="px-4 btn-corporate-primary disabled:opacity-50"
+                        >
+                          {registerPaymentMutation.isLoading ? 'Registrando pago...' : 'Registrar pago'}
+                        </button>
+                      </div>
+
+                      {lastPaymentReceipt && (
+                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm space-y-1">
+                          <p className="font-semibold text-emerald-800">Recibo de pago registrado</p>
+                          <p>
+                            <span className="text-emerald-700">Referencia:</span> {lastPaymentReceipt.comprobante_referencia}
+                          </p>
+                          <p>
+                            <span className="text-emerald-700">Plan:</span> {lastPaymentReceipt.plan_label}
+                          </p>
+                          <p>
+                            <span className="text-emerald-700">Monto:</span> {lastPaymentReceipt.amount.toLocaleString('es-CO')}
+                          </p>
+                          <p>
+                            <span className="text-emerald-700">Fecha pago:</span>{' '}
+                            {new Date(lastPaymentReceipt.paid_at).toLocaleString()}
+                          </p>
+                          <p>
+                            <span className="text-emerald-700">Sucursales:</span> {lastPaymentReceipt.sedes_totales} total /{' '}
+                            {lastPaymentReceipt.sucursales_facturables} facturables
+                          </p>
+                          <p>
+                            <span className="text-emerald-700">Próximo cobro:</span>{' '}
+                            {lastPaymentReceipt.next_billing_at
+                              ? new Date(lastPaymentReceipt.next_billing_at).toLocaleDateString()
+                              : 'N/A'}
+                          </p>
+                          <p>
+                            <span className="text-emerald-700">Correo enviado:</span>{' '}
+                            {lastPaymentReceipt.receipt_email_sent ? 'Si' : 'No (revisar SMTP/correo tenant)'}
+                          </p>
+                          <div className="pt-2">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                handleDownloadReceipt(
+                                  lastPaymentReceipt.receipt_download_url,
+                                  lastPaymentReceipt.comprobante_referencia
+                                )
+                              }
+                              className="btn-chip bg-emerald-700 text-white border-emerald-700 hover:bg-emerald-600 hover:border-emerald-600"
+                            >
+                              Descargar recibo PDF
+                            </button>
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
                 </div>
 
                 <div className="section-card p-4">
-                  <p className="text-sm font-semibold text-slate-800 mb-3">Gestión de plan y pago</p>
-                  {billingActionError && (
-                    <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3 mb-3">{billingActionError}</p>
+                  {tenantPaymentsQuery.isLoading && <LoadingBlock lines={3} />}
+                  {tenantPaymentsQuery.isError && (
+                    <p className="text-sm text-red-600">No fue posible cargar el historial de pagos.</p>
                   )}
-                  {billingActionSuccess && (
-                    <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-3 mb-3">{billingActionSuccess}</p>
+                  {tenantPaymentsQuery.data && (
+                    <div className="rounded-xl border border-slate-200/90 bg-white shadow-sm overflow-hidden ring-1 ring-slate-900/5">
+                      <BackofficeSectionHeading
+                        embedded
+                        icon={Wallet}
+                        title="Historial de pagos"
+                        description="Últimos 10 movimientos registrados"
+                      />
+                      {tenantPaymentsQuery.data.length === 0 ? (
+                        <div className="px-4 py-8 text-center">
+                          <p className="text-sm text-slate-500">Este tenant aún no tiene pagos registrados.</p>
+                        </div>
+                      ) : (
+                        <div className="overflow-x-auto">
+                          <table className="table-enterprise min-w-full">
+                            <thead>
+                              <tr>
+                                <th>Fecha</th>
+                                <th>Monto</th>
+                                <th>Plan</th>
+                                <th>Recibo</th>
+                                <th>Próx. cobro</th>
+                                <th className="table-enterprise-col-actions">Acción</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {tenantPaymentsQuery.data.map((p) => (
+                                <tr key={p.id}>
+                                  <td className="whitespace-nowrap text-slate-600">
+                                    {new Date(p.paid_at).toLocaleString()}
+                                  </td>
+                                  <td className="font-semibold text-slate-900">
+                                    {p.amount.toLocaleString('es-CO')}
+                                  </td>
+                                  <td>{p.plan_label || p.plan_code || '—'}</td>
+                                  <td className="font-mono text-xs">{p.comprobante_referencia || '—'}</td>
+                                  <td>
+                                    {p.next_billing_at ? new Date(p.next_billing_at).toLocaleDateString() : '—'}
+                                  </td>
+                                  <td className="table-enterprise-col-actions">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleDownloadReceipt(p.receipt_download_url, p.comprobante_referencia)}
+                                      className="btn-chip"
+                                    >
+                                      Descargar PDF
+                                    </button>
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
                   )}
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <select
-                      value={billingPlanCode}
-                      onChange={(e) => setBillingPlanCode(e.target.value)}
-                      className="input-corporate"
-                    >
-                      {(billingPlansQuery.data || []).map((plan) => (
-                        <option key={plan.code} value={plan.code}>
-                          {plan.label}
-                        </option>
-                      ))}
-                    </select>
-                    <input
-                      type="number"
-                      min={1}
-                      value={billingSedesTotales}
-                      onChange={(e) => setBillingSedesTotales(Math.max(1, Number(e.target.value) || 1))}
-                      className="input-corporate"
-                      placeholder="Sedes totales"
-                    />
-                    <button
-                      type="button"
-                      disabled={!billingQuoteQuery.data || assignPlanMutation.isLoading}
-                      onClick={() => {
-                        setBillingActionError('');
-                        setBillingActionSuccess('');
-                        assignPlanMutation.mutate();
-                      }}
-                      className="px-4 btn-corporate-primary disabled:opacity-50"
-                    >
-                      {assignPlanMutation.isLoading ? 'Aplicando plan...' : 'Asignar plan y activar periodo'}
-                    </button>
-                  </div>
+                </div>
 
-                  <div className="mt-3">
-                    {billingQuoteQuery.isLoading && <LoadingBlock lines={1} />}
-                    {billingQuoteQuery.isError && <p className="text-sm text-red-600">No fue posible calcular la cotización.</p>}
-                    {billingQuoteQuery.data && (
-                    <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-xs text-violet-900 shadow-sm">
-                        Resumen: {billingQuoteQuery.data.sedes_totales} sedes totales | {billingQuoteQuery.data.included_branches} incluidas | {billingQuoteQuery.data.chargeable_additional_branches} facturables | Total: {billingQuoteQuery.data.total.toLocaleString('es-CO')}
+                <div className="section-card p-4">
+                  <div className="rounded-xl border border-slate-200/90 bg-white shadow-sm overflow-hidden ring-1 ring-slate-900/5">
+                    <BackofficeSectionHeading
+                      embedded
+                      icon={Users}
+                      title="Usuarios recientes"
+                      description={`${tenantProfileQuery.data.total_usuarios} usuario${
+                        tenantProfileQuery.data.total_usuarios === 1 ? '' : 's'
+                      } en el tenant`}
+                    />
+                    {tenantProfileQuery.data.usuarios_recientes.length === 0 ? (
+                      <div className="px-4 py-8 text-center">
+                        <p className="text-sm text-slate-500">No hay usuarios recientes para este tenant.</p>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="table-enterprise min-w-full">
+                          <thead>
+                            <tr>
+                              <th>Nombre</th>
+                              <th>Email</th>
+                              <th>Rol</th>
+                              <th>Estado</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {tenantProfileQuery.data.usuarios_recientes.map((u) => (
+                              <tr key={u.id}>
+                                <td className="font-semibold text-slate-900">{u.nombre_completo}</td>
+                                <td className="text-slate-600 break-all">{u.email}</td>
+                                <td>
+                                  <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-xs font-medium capitalize text-slate-700">
+                                    {u.rol}
+                                  </span>
+                                </td>
+                                <td>
+                                  <span className={u.activo ? 'badge badge-success' : 'badge badge-danger'}>
+                                    {u.activo ? 'Activo' : 'Inactivo'}
+                                  </span>
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
                       </div>
                     )}
                   </div>
-
-                  <div className="mt-3 flex flex-wrap items-center gap-3">
-                    <input
-                      type="number"
-                      min={1}
-                      step="1000"
-                      value={paymentAmount}
-                      onChange={(e) => setPaymentAmount(e.target.value)}
-                      placeholder="Monto pago"
-                      className="input-corporate w-40"
-                    />
-                    <input
-                      type="text"
-                      value={paymentNotes}
-                      onChange={(e) => setPaymentNotes(e.target.value)}
-                      placeholder="Notas pago (opcional)"
-                      className="input-corporate min-w-[220px]"
-                    />
-                    <button
-                      type="button"
-                      disabled={!billingTenantId || Number(paymentAmount) <= 0 || registerPaymentMutation.isLoading}
-                      onClick={() => {
-                        setBillingActionError('');
-                        setBillingActionSuccess('');
-                        registerPaymentMutation.mutate();
-                      }}
-                      className="px-4 btn-corporate-primary disabled:opacity-50"
-                    >
-                      {registerPaymentMutation.isLoading ? 'Registrando pago...' : 'Registrar pago'}
-                    </button>
-                  </div>
-
-                  {lastPaymentReceipt && (
-                    <div className="mt-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm space-y-1">
-                      <p className="font-semibold text-emerald-800">Recibo de pago registrado</p>
-                      <p><span className="text-emerald-700">Referencia:</span> {lastPaymentReceipt.comprobante_referencia}</p>
-                      <p><span className="text-emerald-700">Plan:</span> {lastPaymentReceipt.plan_label}</p>
-                      <p><span className="text-emerald-700">Monto:</span> {lastPaymentReceipt.amount.toLocaleString('es-CO')}</p>
-                      <p><span className="text-emerald-700">Fecha pago:</span> {new Date(lastPaymentReceipt.paid_at).toLocaleString()}</p>
-                      <p><span className="text-emerald-700">Sucursales:</span> {lastPaymentReceipt.sedes_totales} total / {lastPaymentReceipt.sucursales_facturables} facturables</p>
-                      <p><span className="text-emerald-700">Próximo cobro:</span> {lastPaymentReceipt.next_billing_at ? new Date(lastPaymentReceipt.next_billing_at).toLocaleDateString() : 'N/A'}</p>
-                      <p><span className="text-emerald-700">Correo enviado:</span> {lastPaymentReceipt.receipt_email_sent ? 'Si' : 'No (revisar SMTP/correo tenant)'}</p>
-                      <div className="pt-2">
-                        <button
-                          type="button"
-                          onClick={() => handleDownloadReceipt(lastPaymentReceipt.receipt_download_url, lastPaymentReceipt.comprobante_referencia)}
-                          className="btn-chip bg-emerald-700 text-white border-emerald-700 hover:bg-emerald-600 hover:border-emerald-600"
-                        >
-                          Descargar recibo PDF
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <p className="text-sm font-semibold text-slate-800 mb-2">Historial de pagos (últimos 10)</p>
-                  {tenantPaymentsQuery.isLoading && <LoadingBlock lines={3} />}
-                  {tenantPaymentsQuery.isError && <p className="text-sm text-red-600">No fue posible cargar el historial de pagos.</p>}
-                  {tenantPaymentsQuery.data && (
-                    tenantPaymentsQuery.data.length === 0 ? (
-                      <EmptyState message="Este tenant aún no tiene pagos registrados." />
-                    ) : (
-                    <div className="table-shell">
-                      <table className="table-enterprise">
-                        <thead>
-                          <tr className="text-left border-b border-slate-200">
-                            <th>Fecha</th>
-                            <th>Monto</th>
-                            <th>Plan</th>
-                            <th>Recibo</th>
-                            <th>Próx. cobro</th>
-                            <th>Acción</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {tenantPaymentsQuery.data.map((p) => (
-                            <tr key={p.id}>
-                              <td>{new Date(p.paid_at).toLocaleString()}</td>
-                              <td>{p.amount.toLocaleString('es-CO')}</td>
-                              <td>{p.plan_label || p.plan_code || '-'}</td>
-                              <td>{p.comprobante_referencia || '-'}</td>
-                              <td>{p.next_billing_at ? new Date(p.next_billing_at).toLocaleDateString() : '-'}</td>
-                              <td>
-                                <button
-                                  type="button"
-                                  onClick={() => handleDownloadReceipt(p.receipt_download_url, p.comprobante_referencia)}
-                                  className="btn-chip"
-                                >
-                                  Descargar PDF
-                                </button>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                    )
-                  )}
-                </div>
-
-                <div>
-                  <p className="text-sm font-semibold text-slate-800 mb-2">
-                    Usuarios recientes ({tenantProfileQuery.data.total_usuarios} total)
-                  </p>
-                  {tenantProfileQuery.data.usuarios_recientes.length === 0 ? (
-                    <EmptyState message="No hay usuarios recientes para este tenant." />
-                  ) : (
-                    <div className="table-shell">
-                      <table className="table-enterprise">
-                        <thead>
-                          <tr className="text-left border-b border-slate-200">
-                            <th>Nombre</th>
-                            <th>Email</th>
-                            <th>Rol</th>
-                            <th>Estado</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {tenantProfileQuery.data.usuarios_recientes.map((u) => (
-                            <tr key={u.id}>
-                              <td>{u.nombre_completo}</td>
-                              <td>{u.email}</td>
-                              <td className="capitalize">{u.rol}</td>
-                              <td>
-                                <span className={u.activo ? 'badge badge-success' : 'badge badge-danger'}>
-                                  {u.activo ? 'Activo' : 'Inactivo'}
-                                </span>
-                              </td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  )}
                 </div>
               </div>
             )}

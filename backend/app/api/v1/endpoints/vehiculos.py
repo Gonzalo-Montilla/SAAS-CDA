@@ -7,8 +7,15 @@ from sqlalchemy import and_, func
 from datetime import datetime, date, timezone
 from typing import List, Dict
 from decimal import Decimal
+from uuid import UUID
 
-from app.core.deps import get_db, get_current_user, get_cajero_or_admin, get_recepcionista_or_admin
+from app.core.deps import (
+    get_db,
+    get_current_user,
+    get_cajero_or_admin,
+    get_recepcionista_or_admin,
+    get_active_sucursal_id,
+)
 from app.models.usuario import Usuario
 from app.models.tenant import Tenant
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo, MetodoPago
@@ -35,6 +42,14 @@ from app.schemas.vehiculo import (
 )
 
 router = APIRouter()
+
+
+def _filtro_vehiculo_sede(q, tenant_id, sucursal_id: UUID):
+    return q.filter(
+        VehiculoProceso.tenant_id == tenant_id,
+        VehiculoProceso.sucursal_id == sucursal_id,
+    )
+
 
 VALID_PAYMENT_METHODS = {
     "efectivo",
@@ -150,7 +165,8 @@ def calcular_tarifa_por_antiguedad(ano_modelo: int, tipo_vehiculo: str, tenant_i
 def registrar_vehiculo(
     vehiculo_data: VehiculoRegistro,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_recepcionista_or_admin)
+    current_user: Usuario = Depends(get_recepcionista_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Registrar vehículo (Recepción)
@@ -229,6 +245,7 @@ def registrar_vehiculo(
     cliente_email_normalizado = (vehiculo_data.cliente_email or "").strip().lower() or None
     nuevo_vehiculo = VehiculoProceso(
         tenant_id=current_user.tenant_id,
+        sucursal_id=active_sucursal_id,
         placa=placa_upper,
         tipo_vehiculo=vehiculo_data.tipo_vehiculo,
         marca=vehiculo_data.marca,
@@ -277,17 +294,19 @@ def editar_vehiculo(
     vehiculo_id: str,
     vehiculo_data: VehiculoEdicion,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_recepcionista_or_admin)
+    current_user: Usuario = Depends(get_recepcionista_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Editar vehículo registrado (solo antes de cobrar)
     """
     # Buscar vehículo
-    vehiculo = db.query(VehiculoProceso).filter(
-        VehiculoProceso.id == vehiculo_id,
-        VehiculoProceso.tenant_id == current_user.tenant_id
-    ).first()
-    
+    vehiculo = _filtro_vehiculo_sede(
+        db.query(VehiculoProceso),
+        current_user.tenant_id,
+        active_sucursal_id,
+    ).filter(VehiculoProceso.id == vehiculo_id).first()
+
     if not vehiculo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -399,16 +418,18 @@ def editar_vehiculo(
 @router.get("/pendientes", response_model=VehiculosPendientes)
 def listar_pendientes(
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_cajero_or_admin)
+    current_user: Usuario = Depends(get_cajero_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Listar vehículos pendientes de pago (para Caja)
     """
-    vehiculos = db.query(VehiculoProceso).filter(
-        VehiculoProceso.estado == EstadoVehiculo.REGISTRADO,
-        VehiculoProceso.tenant_id == current_user.tenant_id
-    ).order_by(VehiculoProceso.fecha_registro).all()
-    
+    vehiculos = _filtro_vehiculo_sede(
+        db.query(VehiculoProceso),
+        current_user.tenant_id,
+        active_sucursal_id,
+    ).filter(VehiculoProceso.estado == EstadoVehiculo.REGISTRADO).order_by(VehiculoProceso.fecha_registro).all()
+
     return VehiculosPendientes(
         vehiculos=vehiculos,
         total=len(vehiculos)
@@ -420,15 +441,17 @@ def notificar_paso_caja(
     vehiculo_id: str,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_cajero_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Notificar por email al cliente para pasar a caja.
     No bloquea la operación de cobro si el envío falla.
     """
-    vehiculo = db.query(VehiculoProceso).filter(
-        VehiculoProceso.id == vehiculo_id,
-        VehiculoProceso.tenant_id == current_user.tenant_id,
-    ).first()
+    vehiculo = _filtro_vehiculo_sede(
+        db.query(VehiculoProceso),
+        current_user.tenant_id,
+        active_sucursal_id,
+    ).filter(VehiculoProceso.id == vehiculo_id).first()
     if not vehiculo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -477,12 +500,14 @@ async def enviar_recibo_pago_email(
     receipt_file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_cajero_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """Envía por email el recibo PDF generado en caja para el vehículo indicado."""
-    vehiculo = db.query(VehiculoProceso).filter(
-        VehiculoProceso.id == vehiculo_id,
-        VehiculoProceso.tenant_id == current_user.tenant_id,
-    ).first()
+    vehiculo = _filtro_vehiculo_sede(
+        db.query(VehiculoProceso),
+        current_user.tenant_id,
+        active_sucursal_id,
+    ).filter(VehiculoProceso.id == vehiculo_id).first()
     if not vehiculo:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehículo no encontrado")
 
@@ -528,19 +553,20 @@ def cobrar_vehiculo(
     request: Request,
     cobro_data: VehiculoCobro,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_cajero_or_admin)
+    current_user: Usuario = Depends(get_cajero_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Cobrar vehículo (Caja)
     """
     metodo_pago = _normalize_payment_method(cobro_data.metodo_pago)
 
-    # Buscar vehículo
-    vehiculo = db.query(VehiculoProceso).filter(
-        VehiculoProceso.id == cobro_data.vehiculo_id,
-        VehiculoProceso.tenant_id == current_user.tenant_id
-    ).first()
-    
+    vehiculo = _filtro_vehiculo_sede(
+        db.query(VehiculoProceso),
+        current_user.tenant_id,
+        active_sucursal_id,
+    ).filter(VehiculoProceso.id == cobro_data.vehiculo_id).first()
+
     if not vehiculo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -558,16 +584,17 @@ def cobrar_vehiculo(
         and_(
             Caja.usuario_id == current_user.id,
             Caja.tenant_id == current_user.tenant_id,
-            Caja.estado == EstadoCaja.ABIERTA
+            Caja.sucursal_id == active_sucursal_id,
+            Caja.estado == EstadoCaja.ABIERTA,
         )
     ).first()
-    
+
     if not caja_abierta:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No tienes una caja abierta. Debes abrir caja antes de cobrar."
         )
-    
+
     try:
         # Si es PREVENTIVA y viene valor manual, actualizar
         if vehiculo.tipo_vehiculo == "preventiva":
@@ -801,7 +828,8 @@ def cobrar_vehiculo(
 def venta_solo_soat(
     venta_data: VentaSOAT,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_cajero_or_admin)
+    current_user: Usuario = Depends(get_cajero_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Venta solo de comisión SOAT (sin revisión técnica)
@@ -812,17 +840,17 @@ def venta_solo_soat(
         and_(
             Caja.usuario_id == current_user.id,
             Caja.tenant_id == current_user.tenant_id,
-            Caja.estado == EstadoCaja.ABIERTA
+            Caja.sucursal_id == active_sucursal_id,
+            Caja.estado == EstadoCaja.ABIERTA,
         )
     ).first()
-    
+
     if not caja_abierta:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="No tienes una caja abierta. Debes abrir caja antes de registrar ventas."
         )
-    
-    # Validar placa
+
     placa_upper = venta_data.placa.upper()
     
     # Obtener comisión SOAT desde la base de datos
@@ -849,6 +877,7 @@ def venta_solo_soat(
         # Crear vehículo con estado PAGADO (no pasa por recepción ni inspección)
         vehiculo_soat = VehiculoProceso(
             tenant_id=current_user.tenant_id,
+            sucursal_id=active_sucursal_id,
             placa=placa_upper,
             tipo_vehiculo=venta_data.tipo_vehiculo,
             marca=None,
@@ -909,7 +938,8 @@ def venta_solo_soat(
 @router.get("/cobrados-hoy", response_model=List[VehiculoResponse])
 def listar_cobrados_hoy(
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_cajero_or_admin)
+    current_user: Usuario = Depends(get_cajero_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Listar vehículos cobrados hoy en la caja del usuario actual
@@ -919,39 +949,45 @@ def listar_cobrados_hoy(
     hoy = date.today()
 
     if current_role == "administrador":
-        # Admin: supervisa cobrados de hoy en todas las cajas ABIERTAS del tenant.
         cajas_abiertas_subq = db.query(Caja.id).filter(
             and_(
                 Caja.tenant_id == current_user.tenant_id,
+                Caja.sucursal_id == active_sucursal_id,
                 Caja.estado == EstadoCaja.ABIERTA,
             )
         ).subquery()
 
-        vehiculos = db.query(VehiculoProceso).filter(
+        vehiculos = _filtro_vehiculo_sede(
+            db.query(VehiculoProceso),
+            current_user.tenant_id,
+            active_sucursal_id,
+        ).filter(
             and_(
                 VehiculoProceso.caja_id.in_(cajas_abiertas_subq),
-                VehiculoProceso.tenant_id == current_user.tenant_id,
                 VehiculoProceso.estado == EstadoVehiculo.PAGADO,
                 func.date(VehiculoProceso.fecha_pago) == hoy,
             )
         ).order_by(VehiculoProceso.fecha_pago.desc()).all()
         return vehiculos
 
-    # Cajero/recepcionista con permisos de caja: solo su caja activa.
     caja_abierta = db.query(Caja).filter(
         and_(
             Caja.usuario_id == current_user.id,
             Caja.tenant_id == current_user.tenant_id,
+            Caja.sucursal_id == active_sucursal_id,
             Caja.estado == EstadoCaja.ABIERTA,
         )
     ).first()
     if not caja_abierta:
         return []
 
-    vehiculos = db.query(VehiculoProceso).filter(
+    vehiculos = _filtro_vehiculo_sede(
+        db.query(VehiculoProceso),
+        current_user.tenant_id,
+        active_sucursal_id,
+    ).filter(
         and_(
             VehiculoProceso.caja_id == caja_abierta.id,
-            VehiculoProceso.tenant_id == current_user.tenant_id,
             VehiculoProceso.estado == EstadoVehiculo.PAGADO,
             func.date(VehiculoProceso.fecha_pago) == hoy,
         )
@@ -967,7 +1003,8 @@ def cambiar_metodo_pago(
     motivo: str,
     request: Request,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_cajero_or_admin)
+    current_user: Usuario = Depends(get_cajero_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Cambiar método de pago de un vehículo ya cobrado
@@ -991,12 +1028,12 @@ def cambiar_metodo_pago(
             detail="No se puede cambiar a método 'mixto'. El pago mixto solo es válido al momento del cobro inicial."
         )
     
-    # Buscar vehículo
-    vehiculo = db.query(VehiculoProceso).filter(
-        VehiculoProceso.id == vehiculo_id,
-        VehiculoProceso.tenant_id == current_user.tenant_id
-    ).first()
-    
+    vehiculo = _filtro_vehiculo_sede(
+        db.query(VehiculoProceso),
+        current_user.tenant_id,
+        active_sucursal_id,
+    ).filter(VehiculoProceso.id == vehiculo_id).first()
+
     if not vehiculo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1020,7 +1057,8 @@ def cambiar_metodo_pago(
     # Obtener caja
     caja = db.query(Caja).filter(
         Caja.id == vehiculo.caja_id,
-        Caja.tenant_id == current_user.tenant_id
+        Caja.tenant_id == current_user.tenant_id,
+        Caja.sucursal_id == active_sucursal_id,
     ).first()
     if not caja:
         raise HTTPException(
@@ -1206,16 +1244,18 @@ def calcular_tarifa(
 def obtener_vehiculo(
     vehiculo_id: str,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user)
+    current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Obtener detalles de un vehículo
     """
-    vehiculo = db.query(VehiculoProceso).filter(
-        VehiculoProceso.id == vehiculo_id,
-        VehiculoProceso.tenant_id == current_user.tenant_id
-    ).first()
-    
+    vehiculo = _filtro_vehiculo_sede(
+        db.query(VehiculoProceso),
+        current_user.tenant_id,
+        active_sucursal_id,
+    ).filter(VehiculoProceso.id == vehiculo_id).first()
+
     if not vehiculo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -1234,7 +1274,8 @@ def listar_vehiculos(
     skip: int = 0,
     limit: int = 20,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user)
+    current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Listar vehículos con filtros avanzados y paginación
@@ -1248,9 +1289,13 @@ def listar_vehiculos(
     - limit: Límite de registros (default 20)
     """
     from sqlalchemy import or_, func
-    
-    query = db.query(VehiculoProceso).filter(VehiculoProceso.tenant_id == current_user.tenant_id)
-    
+
+    query = _filtro_vehiculo_sede(
+        db.query(VehiculoProceso),
+        current_user.tenant_id,
+        active_sucursal_id,
+    )
+
     # Filtro de búsqueda (placa o cédula)
     if buscar:
         buscar_term = f"%{buscar.upper()}%"
@@ -1297,16 +1342,21 @@ def contar_vehiculos(
     fecha_desde: str = None,
     fecha_hasta: str = None,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user)
+    current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Contar total de vehículos con los mismos filtros que listar_vehiculos
     Útil para calcular paginación en el frontend
     """
     from sqlalchemy import or_, func
-    
-    query = db.query(VehiculoProceso).filter(VehiculoProceso.tenant_id == current_user.tenant_id)
-    
+
+    query = _filtro_vehiculo_sede(
+        db.query(VehiculoProceso),
+        current_user.tenant_id,
+        active_sucursal_id,
+    )
+
     # Aplicar los mismos filtros
     if buscar:
         buscar_term = f"%{buscar.upper()}%"

@@ -11,6 +11,10 @@ interface AuthContextType {
   logout: () => void;
   getLogoutRedirectPath: () => string;
   isAuthenticated: boolean;
+  switchSucursal: (sucursalId: string) => Promise<void>;
+  canSwitchSucursal: boolean;
+  /** Actualiza usuario/sucursales tras cambios en sedes o perfil (tenant). */
+  refreshTenantUser: () => Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -109,6 +113,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (scope === 'tenant' && credentials.tenant_slug) {
       formData.append('tenant_slug', credentials.tenant_slug);
     }
+    if (scope === 'tenant') {
+      const pref = localStorage.getItem('preferred_sucursal_id');
+      if (pref) {
+        formData.append('sucursal_id', pref);
+      }
+    }
 
     const loginEndpoint = scope === 'saas' ? '/saas/auth/login' : '/auth/login';
     const response = await apiClient.post<LoginResponse>(loginEndpoint, formData, {
@@ -141,8 +151,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     localStorage.removeItem('access_token');
     localStorage.removeItem('refresh_token');
     localStorage.removeItem('auth_scope');
+    localStorage.removeItem('preferred_sucursal_id');
     setUser(null);
     setAuthScope(null);
+  };
+
+  const canSwitchSucursal =
+    !!user &&
+    authScope === 'tenant' &&
+    'sucursales' in (user || {}) &&
+    Array.isArray((user as Usuario).sucursales) &&
+    ((user as Usuario).sucursales?.length || 0) > 1 &&
+    ((user as Usuario).rol === 'administrador' || (user as Usuario).rol === 'contador');
+
+  const switchSucursal = async (sucursalId: string) => {
+    const response = await apiClient.post<{ access_token: string; refresh_token: string; token_type: string }>(
+      '/auth/switch-sucursal',
+      { sucursal_id: sucursalId }
+    );
+    localStorage.setItem('access_token', response.data.access_token);
+    localStorage.setItem('refresh_token', response.data.refresh_token);
+    localStorage.setItem('preferred_sucursal_id', sucursalId);
+    await fetchCurrentUser('tenant');
+  };
+
+  const refreshTenantUser = async () => {
+    if (authScope === 'tenant') {
+      await fetchCurrentUser('tenant');
+    }
   };
 
   return (
@@ -155,6 +191,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         logout,
         getLogoutRedirectPath,
         isAuthenticated: !!user,
+        switchSucursal,
+        canSwitchSucursal: !!canSwitchSucursal,
+        refreshTenantUser,
       }}
     >
       {children}

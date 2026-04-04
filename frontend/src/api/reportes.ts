@@ -35,12 +35,17 @@ export const reportesApi = {
     fechaSeleccionada: string;
     fechaInicio: string;
     fechaFin: string;
+    /** e.g. `&consolidar_todas=true` or `&sucursal_id=uuid` */
+    sedeQuerySuffix?: string;
   }): Promise<DashboardOperativoResponse> => {
     const query =
       params.modoVista === 'rango'
         ? `fecha_inicio=${params.fechaInicio}&fecha_fin=${params.fechaFin}`
         : `fecha=${params.fechaSeleccionada}`;
-    const response = await apiClient.get<DashboardOperativoResponse>(`/reportes/dashboard-operativo?${query}`);
+    const suffix = params.sedeQuerySuffix ?? '';
+    const response = await apiClient.get<DashboardOperativoResponse>(
+      `/reportes/dashboard-operativo?${query}${suffix}`,
+    );
     return response.data;
   },
 };

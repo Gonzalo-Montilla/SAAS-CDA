@@ -16,7 +16,7 @@ const Caja = lazy(() => import('./pages/Caja'));
 const Tarifas = lazy(() => import('./pages/Tarifas'));
 const Tesoreria = lazy(() => import('./pages/Tesoreria'));
 const Reportes = lazy(() => import('./pages/Reportes'));
-const Usuarios = lazy(() => import('./pages/Usuarios'));
+const Organizacion = lazy(() => import('./pages/Organizacion'));
 const Soporte = lazy(() => import('./pages/Soporte'));
 const Calidad = lazy(() => import('./pages/Calidad'));
 const CalidadEncuesta = lazy(() => import('./pages/CalidadEncuesta'));
@@ -148,11 +148,12 @@ function App() {
                 </ProtectedRoute>
               }
             />
+            <Route path="/usuarios" element={<Navigate to="/organizacion?tab=usuarios" replace />} />
             <Route
-              path="/usuarios"
+              path="/organizacion"
               element={
                 <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador']}>
-                  <Usuarios />
+                  <Organizacion />
                 </ProtectedRoute>
               }
             />

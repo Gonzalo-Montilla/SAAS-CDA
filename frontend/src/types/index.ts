@@ -6,6 +6,14 @@ export interface TenantBranding {
   color_secundario: string;
 }
 
+export interface SucursalBasica {
+  id: string;
+  nombre: string;
+  codigo?: string | null;
+  activa: boolean;
+  es_principal: boolean;
+}
+
 export interface Usuario {
   id: string;
   tenant_id: string;
@@ -17,6 +25,11 @@ export interface Usuario {
   activo: boolean;
   created_at: string;
   tenant_branding?: TenantBranding;
+  sucursal_id?: string | null;
+  active_sucursal_id?: string | null;
+  sucursales?: SucursalBasica[];
+  /** Límite de sedes del plan (registro inicial del tenant). */
+  tenant_sedes_totales?: number | null;
 }
 
 export interface SaaSUser {
@@ -64,9 +77,18 @@ export interface SaaSTenantUserSummary {
   created_at: string;
 }
 
+export interface SaaSSucursalResumen {
+  id: string;
+  nombre: string;
+  codigo?: string | null;
+  activa: boolean;
+  es_principal: boolean;
+}
+
 export interface SaaSTenantProfile extends SaaSTenantSummary {
   total_usuarios: number;
   usuarios_recientes: SaaSTenantUserSummary[];
+  sucursales_activas: SaaSSucursalResumen[];
 }
 
 export interface SaaSBillingPlanItem {

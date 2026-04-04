@@ -65,6 +65,7 @@ export const tesoreriaApi = {
     fecha_hasta?: string;
     metodo_pago?: string;
     limit?: number;
+    consolidar_todas?: boolean;
   }): Promise<MovimientoTesoreria[]> => {
     const response = await apiClient.get<MovimientoTesoreria[]>('/tesoreria/movimientos', { params });
     return response.data;
@@ -76,27 +77,31 @@ export const tesoreriaApi = {
   },
 
   // Saldo y resumen
-  obtenerSaldoActual: async (): Promise<{ saldo_actual: number; fecha_calculo: string }> => {
-    const response = await apiClient.get('/tesoreria/saldo-actual');
+  obtenerSaldoActual: async (params?: { consolidar_todas?: boolean }): Promise<{
+    saldo_actual: number;
+    fecha_calculo: string;
+  }> => {
+    const response = await apiClient.get('/tesoreria/saldo-actual', { params });
     return response.data;
   },
 
   obtenerResumen: async (params?: {
     fecha_desde?: string;
     fecha_hasta?: string;
+    consolidar_todas?: boolean;
   }): Promise<ResumenTesoreria> => {
     const response = await apiClient.get<ResumenTesoreria>('/tesoreria/resumen', { params });
     return response.data;
   },
 
   // Desglose de saldo
-  obtenerDesgloseSaldo: async (): Promise<DesgloseSaldo> => {
-    const response = await apiClient.get<DesgloseSaldo>('/tesoreria/desglose-saldo');
+  obtenerDesgloseSaldo: async (params?: { consolidar_todas?: boolean }): Promise<DesgloseSaldo> => {
+    const response = await apiClient.get<DesgloseSaldo>('/tesoreria/desglose-saldo', { params });
     return response.data;
   },
 
-  obtenerDesgloseEfectivo: async (): Promise<any> => {
-    const response = await apiClient.get('/tesoreria/desglose-efectivo');
+  obtenerDesgloseEfectivo: async (params?: { consolidar_todas?: boolean }): Promise<any> => {
+    const response = await apiClient.get('/tesoreria/desglose-efectivo', { params });
     return response.data;
   },
 

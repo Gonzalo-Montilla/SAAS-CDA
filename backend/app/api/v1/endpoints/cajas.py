@@ -8,8 +8,9 @@ from sqlalchemy import and_, func
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import List
+from uuid import UUID
 
-from app.core.deps import get_db, get_current_user, get_cajero_or_admin, get_admin
+from app.core.deps import get_db, get_current_user, get_cajero_or_admin, get_admin, get_active_sucursal_id
 from app.models.usuario import Usuario
 from app.models.caja import Caja, MovimientoCaja, TurnoEnum, EstadoCaja, TipoMovimiento, DesgloseEfectivoCierre
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo
@@ -34,7 +35,8 @@ def abrir_caja(
     request: Request,
     apertura_data: CajaApertura,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_cajero_or_admin)
+    current_user: Usuario = Depends(get_cajero_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Abrir caja de trabajo
@@ -51,7 +53,8 @@ def abrir_caja(
         and_(
             Caja.usuario_id == current_user.id,
             Caja.tenant_id == current_user.tenant_id,
-            Caja.estado == EstadoCaja.ABIERTA
+            Caja.sucursal_id == active_sucursal_id,
+            Caja.estado == EstadoCaja.ABIERTA,
         )
     ).first()
     
@@ -64,6 +67,7 @@ def abrir_caja(
     # Crear nueva caja
     nueva_caja = Caja(
         tenant_id=current_user.tenant_id,
+        sucursal_id=active_sucursal_id,
         usuario_id=current_user.id,
         monto_inicial=apertura_data.monto_inicial,
         turno=TurnoEnum(apertura_data.turno),
@@ -94,7 +98,8 @@ def abrir_caja(
 @router.get("/activa", response_model=CajaResponse)
 def obtener_caja_activa(
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_cajero_or_admin)
+    current_user: Usuario = Depends(get_cajero_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Obtener caja activa del usuario actual
@@ -103,10 +108,11 @@ def obtener_caja_activa(
         and_(
             Caja.usuario_id == current_user.id,
             Caja.tenant_id == current_user.tenant_id,
-            Caja.estado == EstadoCaja.ABIERTA
+            Caja.sucursal_id == active_sucursal_id,
+            Caja.estado == EstadoCaja.ABIERTA,
         )
     ).first()
-    
+
     if not caja:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -119,7 +125,8 @@ def obtener_caja_activa(
 @router.get("/activa/resumen", response_model=CajaResumen)
 def obtener_resumen_caja(
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_cajero_or_admin)
+    current_user: Usuario = Depends(get_cajero_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Obtener resumen de caja activa (para pre-cierre)
@@ -128,7 +135,8 @@ def obtener_resumen_caja(
         and_(
             Caja.usuario_id == current_user.id,
             Caja.tenant_id == current_user.tenant_id,
-            Caja.estado == EstadoCaja.ABIERTA
+            Caja.sucursal_id == active_sucursal_id,
+            Caja.estado == EstadoCaja.ABIERTA,
         )
     ).first()
     
@@ -215,7 +223,8 @@ def cerrar_caja(
     request: Request,
     cierre_data: CajaCierre,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_cajero_or_admin)
+    current_user: Usuario = Depends(get_cajero_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Cerrar caja de trabajo
@@ -224,7 +233,8 @@ def cerrar_caja(
         and_(
             Caja.usuario_id == current_user.id,
             Caja.tenant_id == current_user.tenant_id,
-            Caja.estado == EstadoCaja.ABIERTA
+            Caja.sucursal_id == active_sucursal_id,
+            Caja.estado == EstadoCaja.ABIERTA,
         )
     ).first()
     
@@ -234,12 +244,12 @@ def cerrar_caja(
             detail="No tienes una caja abierta para cerrar"
         )
     
-    # Validar que no haya vehículos pendientes sin cobrar en el tenant.
-    # Se alinea con la misma lógica mostrada en UI (/vehiculos/pendientes).
+    # Validar que no haya vehículos pendientes sin cobrar en la sede.
     vehiculos_pendientes = db.query(VehiculoProceso).filter(
         and_(
             VehiculoProceso.tenant_id == current_user.tenant_id,
-            VehiculoProceso.estado == EstadoVehiculo.REGISTRADO
+            VehiculoProceso.sucursal_id == active_sucursal_id,
+            VehiculoProceso.estado == EstadoVehiculo.REGISTRADO,
         )
     ).count()
     
@@ -347,7 +357,8 @@ def crear_movimiento(
     request: Request,
     movimiento_data: MovimientoCreate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_cajero_or_admin)
+    current_user: Usuario = Depends(get_cajero_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Crear movimiento manual (gasto, ajuste, etc)
@@ -356,7 +367,8 @@ def crear_movimiento(
         and_(
             Caja.usuario_id == current_user.id,
             Caja.tenant_id == current_user.tenant_id,
-            Caja.estado == EstadoCaja.ABIERTA
+            Caja.sucursal_id == active_sucursal_id,
+            Caja.estado == EstadoCaja.ABIERTA,
         )
     ).first()
     
@@ -412,7 +424,8 @@ def crear_movimiento(
 @router.get("/vehiculos-por-metodo")
 def obtener_vehiculos_por_metodo(
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_cajero_or_admin)
+    current_user: Usuario = Depends(get_cajero_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Obtener vehículos cobrados agrupados por método de pago
@@ -421,7 +434,8 @@ def obtener_vehiculos_por_metodo(
         and_(
             Caja.usuario_id == current_user.id,
             Caja.tenant_id == current_user.tenant_id,
-            Caja.estado == EstadoCaja.ABIERTA
+            Caja.sucursal_id == active_sucursal_id,
+            Caja.estado == EstadoCaja.ABIERTA,
         )
     ).first()
     
@@ -471,7 +485,8 @@ def obtener_vehiculos_por_metodo(
 @router.get("/movimientos", response_model=List[MovimientoResponse])
 def listar_movimientos(
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_cajero_or_admin)
+    current_user: Usuario = Depends(get_cajero_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Listar movimientos de la caja activa
@@ -480,7 +495,8 @@ def listar_movimientos(
         and_(
             Caja.usuario_id == current_user.id,
             Caja.tenant_id == current_user.tenant_id,
-            Caja.estado == EstadoCaja.ABIERTA
+            Caja.sucursal_id == active_sucursal_id,
+            Caja.estado == EstadoCaja.ABIERTA,
         )
     ).first()
     
@@ -500,7 +516,8 @@ def listar_movimientos(
 @router.get("/ultima-cerrada")
 def obtener_ultima_caja_cerrada(
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_cajero_or_admin)
+    current_user: Usuario = Depends(get_cajero_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Obtener resumen de la última caja cerrada del usuario
@@ -509,7 +526,8 @@ def obtener_ultima_caja_cerrada(
         and_(
             Caja.usuario_id == current_user.id,
             Caja.tenant_id == current_user.tenant_id,
-            Caja.estado == EstadoCaja.CERRADA
+            Caja.sucursal_id == active_sucursal_id,
+            Caja.estado == EstadoCaja.CERRADA,
         )
     ).order_by(Caja.fecha_cierre.desc()).first()
     
@@ -535,13 +553,17 @@ def obtener_ultima_caja_cerrada(
 def obtener_historial_cajas(
     limit: int = 10,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user)
+    current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Obtener historial de cajas (admin ve todas, cajero solo las suyas)
     """
-    query = db.query(Caja).filter(Caja.tenant_id == current_user.tenant_id)
-    
+    query = db.query(Caja).filter(
+        Caja.tenant_id == current_user.tenant_id,
+        Caja.sucursal_id == active_sucursal_id,
+    )
+
     # Si no es admin, solo ver sus propias cajas
     if current_user.rol != "administrador":
         query = query.filter(Caja.usuario_id == current_user.id)
@@ -555,14 +577,16 @@ def obtener_historial_cajas(
 def obtener_detalle_caja(
     caja_id: str,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user)
+    current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Obtener detalle completo de una caja
     """
     caja = db.query(Caja).filter(
         Caja.id == caja_id,
-        Caja.tenant_id == current_user.tenant_id
+        Caja.tenant_id == current_user.tenant_id,
+        Caja.sucursal_id == active_sucursal_id,
     ).first()
     
     if not caja:
@@ -644,14 +668,16 @@ def obtener_detalle_caja(
 def descargar_comprobante_cierre(
     caja_id: str,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user)
+    current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Descargar comprobante de cierre de caja en PDF
     """
     caja = db.query(Caja).filter(
         Caja.id == caja_id,
-        Caja.tenant_id == current_user.tenant_id
+        Caja.tenant_id == current_user.tenant_id,
+        Caja.sucursal_id == active_sucursal_id,
     ).first()
     
     if not caja:

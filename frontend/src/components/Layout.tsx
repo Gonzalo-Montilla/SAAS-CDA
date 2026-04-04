@@ -2,6 +2,8 @@ import { useAuth } from '../contexts/AuthContext';
 import { useBrand } from '../contexts/BrandContext';
 import { useNavigate } from 'react-router-dom';
 import { Home, LogOut, User } from 'lucide-react';
+import BranchSelector from './BranchSelector';
+import BranchGateModal from './BranchGateModal';
 
 interface LayoutProps {
   children: React.ReactNode;
@@ -21,6 +23,7 @@ export default function Layout({ children, title }: LayoutProps) {
 
   return (
     <div className="app-shell">
+      <BranchGateModal />
       {/* Header */}
       <header className="app-header">
         <div className="app-header-inner">
@@ -40,7 +43,8 @@ export default function Layout({ children, title }: LayoutProps) {
               </div>
             </button>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap justify-end">
+            <BranchSelector />
             <button
               onClick={() => navigate('/dashboard')}
               className="px-4 btn-corporate-muted flex items-center gap-2"

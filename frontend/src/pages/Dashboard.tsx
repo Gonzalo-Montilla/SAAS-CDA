@@ -1,6 +1,11 @@
+import { useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useBrand } from '../contexts/BrandContext';
 import { useNavigate } from 'react-router-dom';
+import BranchSelector from '../components/BranchSelector';
+import BranchGateModal from '../components/BranchGateModal';
+import apiClient from '../api/client';
+import type { Usuario } from '../types';
 import {
   ClipboardList,
   Wallet,
@@ -15,10 +20,24 @@ import {
   MessageSquareHeart,
   CalendarClock,
 } from 'lucide-react';
+const WIZARD_KEY = 'cdasoft_sedes_wizard_dismissed';
+
 export default function Dashboard() {
   const { user, logout, getLogoutRedirectPath } = useAuth();
   const brand = useBrand();
   const navigate = useNavigate();
+  const [wizardNombre, setWizardNombre] = useState('');
+  const [wizardBusy, setWizardBusy] = useState(false);
+  const [wizardError, setWizardError] = useState<string | null>(null);
+
+  const tenantUser: Usuario | null =
+    user && 'tenant_id' in user ? (user as Usuario) : null;
+
+  const showSedesWizard =
+    tenantUser?.rol === 'administrador' &&
+    tenantUser.sucursales?.length === 1 &&
+    tenantUser.sucursales[0].nombre === 'Sede principal' &&
+    !localStorage.getItem(WIZARD_KEY);
 
   const handleLogout = () => {
     const redirectPath = getLogoutRedirectPath();
@@ -28,6 +47,7 @@ export default function Dashboard() {
 
   return (
     <div className="app-shell">
+      <BranchGateModal />
       {/* Header */}
       <header className="app-header">
         <div className="app-header-inner">
@@ -42,7 +62,8 @@ export default function Dashboard() {
               <p className="text-2xl font-bold text-slate-900 leading-tight">{brand.nombreComercial}</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
+          <div className="flex items-center gap-4 flex-wrap justify-end">
+            <BranchSelector />
             <div className="app-user-chip">
               <div className="text-right">
                 <p className="text-sm font-medium text-slate-900">{user?.nombre_completo}</p>
@@ -62,6 +83,57 @@ export default function Dashboard() {
 
       {/* Main Content */}
       <main className="app-main">
+        {showSedesWizard && tenantUser?.sucursales?.[0] && (
+          <div className="mb-6 rounded-2xl border border-primary-200 bg-primary-50/80 p-5 animate-fade-in">
+            <h3 className="text-lg font-semibold text-slate-900 mb-1">Configura el nombre de tu sede</h3>
+            <p className="text-sm text-slate-600 mb-3">
+              Personaliza cómo aparecerá tu sede principal en reportes y operación (opcional).
+            </p>
+            <div className="flex flex-col sm:flex-row gap-2 sm:items-center">
+              <input
+                type="text"
+                className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                placeholder="Ej. Centro / Chía / Av. Caracas"
+                value={wizardNombre}
+                onChange={(e) => setWizardNombre(e.target.value)}
+              />
+              <button
+                type="button"
+                className="px-4 py-2 rounded-lg bg-primary-600 text-white text-sm font-medium disabled:opacity-50"
+                disabled={wizardBusy || wizardNombre.trim().length < 2}
+                onClick={async () => {
+                  setWizardError(null);
+                  setWizardBusy(true);
+                  try {
+                    await apiClient.patch(`/sucursales/${tenantUser.sucursales![0].id}`, {
+                      nombre: wizardNombre.trim(),
+                    });
+                    localStorage.setItem(WIZARD_KEY, '1');
+                    window.location.reload();
+                  } catch (e: any) {
+                    setWizardError(e?.response?.data?.detail || 'No se pudo guardar');
+                  } finally {
+                    setWizardBusy(false);
+                  }
+                }}
+              >
+                Guardar
+              </button>
+              <button
+                type="button"
+                className="px-4 py-2 text-sm text-slate-600"
+                onClick={() => {
+                  localStorage.setItem(WIZARD_KEY, '1');
+                  window.location.reload();
+                }}
+              >
+                Omitir
+              </button>
+            </div>
+            {wizardError && <p className="text-sm text-red-600 mt-2">{wizardError}</p>}
+          </div>
+        )}
+
         <div className="mb-8 animate-fade-in">
           <h2 className="text-3xl font-bold text-slate-900 mb-2">
             Bienvenido, {user?.nombre_completo}
@@ -162,15 +234,15 @@ export default function Dashboard() {
               </button>
 
               <button
-                onClick={() => navigate('/usuarios')}
+                onClick={() => navigate('/organizacion')}
                 className="card-pos text-left group animate-fade-in animate-delay-100"
               >
                 <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-rose-100 text-rose-600 mb-4 group-hover:bg-rose-600 group-hover:text-white transition-all duration-300">
                   <Users className="w-8 h-8 icon-hover" />
                 </div>
-                <h3 className="text-xl font-bold text-slate-900 mb-2">Usuarios</h3>
+                <h3 className="text-xl font-bold text-slate-900 mb-2">Sedes y usuarios</h3>
                 <p className="text-slate-600 text-sm">
-                  Gestionar usuarios del sistema
+                  Crear sedes, sede principal y usuarios del CDA
                 </p>
               </button>
 

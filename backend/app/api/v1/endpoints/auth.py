@@ -9,7 +9,7 @@ from datetime import datetime, timedelta, timezone
 import secrets
 from uuid import UUID
 
-from app.core.deps import get_db, get_current_user, get_admin
+from app.core.deps import get_db, get_current_user, get_admin, get_active_sucursal_id
 from app.core.security import (
     verify_password,
     get_password_hash,
@@ -19,16 +19,42 @@ from app.core.security import (
     validate_password_strength,
 )
 from app.core.config import settings
+from app.core.sucursal_scope import (
+    assert_sucursal_in_tenant,
+    default_sucursal_id_for_login,
+    parse_optional_sucursal_uuid,
+    resolve_active_sucursal_id,
+    resolve_refresh_sucursal_id,
+    roles_con_sede_elegible,
+    sucursal_belongs_to_tenant,
+    tenant_token_claims,
+)
 from app.models.usuario import Usuario
 from app.models.tenant import Tenant
+from app.models.sucursal import Sucursal
 from app.models.password_reset_token import PasswordResetToken
-from app.schemas.auth import Token, UserRegister, PasswordChange, RefreshTokenRequest
-from app.schemas.usuario import UsuarioResponse
+from app.schemas.auth import Token, UserRegister, PasswordChange, RefreshTokenRequest, SwitchSucursalRequest
+from app.schemas.usuario import UsuarioResponse, SucursalBasica
 from app.utils.email import enviar_email, generar_email_recuperacion_password
 from app.utils.audit import audit_login_success, audit_login_failed, create_audit_log
 from app.models.audit_log import AuditAction
 
 router = APIRouter()
+
+
+def _issue_tokens(db: Session, user: Usuario, sucursal_id) -> Token:
+    claims = tenant_token_claims(user, sucursal_id)
+    access_token = create_access_token(claims)
+    refresh_token = create_refresh_token(
+        {
+            "sub": str(user.id),
+            "tenant_id": str(user.tenant_id),
+            "sucursal_id": str(sucursal_id),
+            "auth_scope": "tenant",
+        }
+    )
+    return Token(access_token=access_token, refresh_token=refresh_token, token_type="bearer")
+
 
 def utcnow_naive() -> datetime:
     """Retorna datetime UTC sin tzinfo para columnas TIMESTAMP sin zona."""
@@ -39,7 +65,8 @@ def utcnow_naive() -> datetime:
 def register(
     user_data: UserRegister,
     db: Session = Depends(get_db),
-    admin: Usuario = Depends(get_admin)  # Solo admin puede crear usuarios
+    admin: Usuario = Depends(get_admin),  # Solo admin puede crear usuarios
+    default_sede_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Registrar nuevo usuario (solo administradores)
@@ -57,42 +84,24 @@ def register(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
-    # Crear usuario
+    target_sede = user_data.sucursal_id or default_sede_id
+    assert_sucursal_in_tenant(db, target_sede, admin.tenant_id)
+
     hashed_password = get_password_hash(user_data.password)
     new_user = Usuario(
         tenant_id=admin.tenant_id,
+        sucursal_id=target_sede,
         email=user_data.email,
         hashed_password=hashed_password,
         nombre_completo=user_data.nombre_completo,
         rol=user_data.rol,
-        activo=True
+        activo=True,
     )
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    
-    # Generar tokens
-    access_token = create_access_token(
-        data={
-            "sub": str(new_user.id),
-            "rol": new_user.rol,
-            "tenant_id": str(new_user.tenant_id),
-            "auth_scope": "tenant",
-        }
-    )
-    refresh_token = create_refresh_token(
-        data={
-            "sub": str(new_user.id),
-            "tenant_id": str(new_user.tenant_id),
-            "auth_scope": "tenant",
-        }
-    )
-    
-    return Token(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_type="bearer"
-    )
+
+    return _issue_tokens(db, new_user, target_sede)
 
 
 @router.post("/login", response_model=Token)
@@ -150,29 +159,15 @@ async def login(
     
     # Auditar login exitoso
     audit_login_success(db, user, request)
-    
-    # Generar tokens
-    access_token = create_access_token(
-        data={
-            "sub": str(user.id),
-            "rol": user.rol,
-            "tenant_id": str(user.tenant_id),
-            "auth_scope": "tenant",
-        }
-    )
-    refresh_token = create_refresh_token(
-        data={
-            "sub": str(user.id),
-            "tenant_id": str(user.tenant_id),
-            "auth_scope": "tenant",
-        }
-    )
-    
-    return Token(
-        access_token=access_token,
-        refresh_token=refresh_token,
-        token_type="bearer"
-    )
+
+    sid = default_sucursal_id_for_login(db, user)
+    raw_suc = raw_form.get("sucursal_id")
+    if user.rol in roles_con_sede_elegible():
+        parsed = parse_optional_sucursal_uuid(raw_suc)
+        if parsed and sucursal_belongs_to_tenant(db, parsed, user.tenant_id):
+            sid = parsed
+
+    return _issue_tokens(db, user, sid)
 
 
 @router.post("/refresh", response_model=Token)
@@ -231,38 +226,48 @@ def refresh_token(
             detail="Token inválido"
         )
     
-    # Generar nuevos tokens
-    access_token = create_access_token(
-        data={
-            "sub": str(user.id),
-            "rol": user.rol,
-            "tenant_id": str(user.tenant_id),
-            "auth_scope": "tenant",
-        }
-    )
-    new_refresh_token = create_refresh_token(
-        data={
-            "sub": str(user.id),
-            "tenant_id": str(user.tenant_id),
-            "auth_scope": "tenant",
-        }
-    )
-    
-    return Token(
-        access_token=access_token,
-        refresh_token=new_refresh_token,
-        token_type="bearer"
-    )
+    sid = resolve_refresh_sucursal_id(db, user, payload)
+    return _issue_tokens(db, user, sid)
+
+
+@router.post("/switch-sucursal", response_model=Token)
+def switch_sucursal(
+    body: SwitchSucursalRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """
+    Cambiar sede activa (JWT). Solo administrador y contador.
+    """
+    if current_user.rol not in roles_con_sede_elegible():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo administración o contaduría pueden cambiar de sede",
+        )
+    assert_sucursal_in_tenant(db, body.sucursal_id, current_user.tenant_id)
+    return _issue_tokens(db, current_user, body.sucursal_id)
 
 
 @router.get("/me", response_model=UsuarioResponse)
 def get_current_user_info(
-    current_user: Usuario = Depends(get_current_user)
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
 ):
     """
     Obtener información del usuario actual
     """
     tenant = current_user.tenant
+    payload = getattr(request.state, "tenant_jwt_payload", None)
+    if not isinstance(payload, dict):
+        payload = {}
+    active_sid = resolve_active_sucursal_id(db, current_user, payload)
+    sedes = (
+        db.query(Sucursal)
+        .filter(Sucursal.tenant_id == current_user.tenant_id, Sucursal.activa.is_(True))
+        .order_by(Sucursal.es_principal.desc(), Sucursal.nombre.asc())
+        .all()
+    )
     return {
         "id": current_user.id,
         "tenant_id": current_user.tenant_id,
@@ -272,6 +277,10 @@ def get_current_user_info(
         "rol": current_user.rol,
         "activo": current_user.activo,
         "created_at": current_user.created_at,
+        "sucursal_id": current_user.sucursal_id,
+        "active_sucursal_id": active_sid,
+        "sucursales": [SucursalBasica.model_validate(s) for s in sedes],
+        "tenant_sedes_totales": tenant.sedes_totales if tenant else None,
         "tenant_branding": {
             "nombre_comercial": tenant.nombre_comercial if tenant else settings.APP_NAME,
             "logo_url": tenant.logo_url if tenant else None,

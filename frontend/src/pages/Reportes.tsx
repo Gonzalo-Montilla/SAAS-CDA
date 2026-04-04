@@ -5,6 +5,8 @@ import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import apiClient from '../api/client';
 import { reportesApi } from '../api/reportes';
+import { useAuth } from '../contexts/AuthContext';
+import type { Usuario } from '../types';
 
 const ReportesIngresosChart = lazy(() => import('../components/ReportesIngresosChart'));
 
@@ -58,6 +60,7 @@ interface Movimiento {
   metodo_pago: string;
   usuario: string;
   numero_comprobante?: string;
+  sede?: string | null;
 }
 
 interface Tramite {
@@ -74,14 +77,24 @@ interface Tramite {
   estado: string;
   pagado: boolean;
   registrado_por: string;
+  sede?: string | null;
 }
 
+type ReporteSedeScope = 'activa' | 'todas' | 'sucursal';
+
 export default function ReportesPage() {
+  const { user } = useAuth();
+  const tenantUser = user && 'tenant_id' in user ? (user as Usuario) : null;
+  const puedeElegirSedeReporte =
+    !!tenantUser && (tenantUser.rol === 'administrador' || tenantUser.rol === 'contador');
+
   const todayLocal = formatLocalDate(new Date());
   const [modoVista, setModoVista] = useState<'dia' | 'rango'>('dia');
   const [fechaSeleccionada, setFechaSeleccionada] = useState<string>(todayLocal);
   const [fechaInicio, setFechaInicio] = useState<string>(todayLocal);
   const [fechaFin, setFechaFin] = useState<string>(todayLocal);
+  const [reporteSedeScope, setReporteSedeScope] = useState<ReporteSedeScope>('activa');
+  const [reporteSedeId, setReporteSedeId] = useState<string>('');
 
   // Estados para filtros locales de movimientos
   const [filtroTipo, setFiltroTipo] = useState<string>('todos');
@@ -91,18 +104,34 @@ export default function ReportesPage() {
   const periodoActual = modoVista === 'rango' ? `${fechaInicio} a ${fechaFin}` : fechaSeleccionada;
   const reportesEnabled = !rangoInvalido;
   const dashboardEnabled = modoVista === 'dia';
-  const queryParams = useMemo(() => {
-    if (modoVista === 'rango') {
-      return `fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`;
+
+  const sedeQuerySuffix = useMemo(() => {
+    if (!puedeElegirSedeReporte) return '';
+    if (reporteSedeScope === 'todas') return '&consolidar_todas=true';
+    if (reporteSedeScope === 'sucursal' && reporteSedeId) {
+      return `&sucursal_id=${encodeURIComponent(reporteSedeId)}`;
     }
-    return `fecha=${fechaSeleccionada}`;
-  }, [modoVista, fechaInicio, fechaFin, fechaSeleccionada]);
+    return '';
+  }, [puedeElegirSedeReporte, reporteSedeScope, reporteSedeId]);
+
+  const queryParams = useMemo(() => {
+    const base =
+      modoVista === 'rango'
+        ? `fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`
+        : `fecha=${fechaSeleccionada}`;
+    return base + sedeQuerySuffix;
+  }, [modoVista, fechaInicio, fechaFin, fechaSeleccionada, sedeQuerySuffix]);
+
+  const dashboardQueryString = useMemo(
+    () => `fecha=${fechaSeleccionada}${sedeQuerySuffix}`,
+    [fechaSeleccionada, sedeQuerySuffix],
+  );
 
   // Query principal: Dashboard general
   const { data, isLoading, isError } = useQuery<DashboardData>({
-    queryKey: ['dashboard-general', fechaSeleccionada],
+    queryKey: ['dashboard-general', fechaSeleccionada, sedeQuerySuffix],
     queryFn: async () => {
-      const response = await apiClient.get(`/reportes/dashboard-general?fecha=${fechaSeleccionada}`);
+      const response = await apiClient.get(`/reportes/dashboard-general?${dashboardQueryString}`);
       return response.data;
     },
     enabled: dashboardEnabled,
@@ -111,7 +140,7 @@ export default function ReportesPage() {
 
   // Query: Movimientos detallados
   const { data: movimientosData, isFetching: isFetchingMovimientos } = useQuery({
-    queryKey: ['movimientos-detallados', modoVista, fechaSeleccionada, fechaInicio, fechaFin],
+    queryKey: ['movimientos-detallados', modoVista, fechaSeleccionada, fechaInicio, fechaFin, sedeQuerySuffix],
     queryFn: async () => {
       const response = await apiClient.get(`/reportes/movimientos-detallados?${queryParams}`);
       return response.data;
@@ -122,7 +151,7 @@ export default function ReportesPage() {
 
   // Query: Desglose por conceptos
   const { data: conceptosData } = useQuery({
-    queryKey: ['desglose-conceptos', modoVista, fechaSeleccionada, fechaInicio, fechaFin],
+    queryKey: ['desglose-conceptos', modoVista, fechaSeleccionada, fechaInicio, fechaFin, sedeQuerySuffix],
     queryFn: async () => {
       const response = await apiClient.get(`/reportes/desglose-conceptos?${queryParams}`);
       return response.data;
@@ -133,7 +162,7 @@ export default function ReportesPage() {
 
   // Query: Desglose por medios de pago
   const { data: mediosPagoData } = useQuery({
-    queryKey: ['desglose-medios-pago', modoVista, fechaSeleccionada, fechaInicio, fechaFin],
+    queryKey: ['desglose-medios-pago', modoVista, fechaSeleccionada, fechaInicio, fechaFin, sedeQuerySuffix],
     queryFn: async () => {
       const response = await apiClient.get(`/reportes/desglose-medios-pago?${queryParams}`);
       return response.data;
@@ -144,7 +173,7 @@ export default function ReportesPage() {
 
   // Query: Trámites detallados
   const { data: tramitesData, isFetching: isFetchingTramites } = useQuery({
-    queryKey: ['tramites-detallados', modoVista, fechaSeleccionada, fechaInicio, fechaFin],
+    queryKey: ['tramites-detallados', modoVista, fechaSeleccionada, fechaInicio, fechaFin, sedeQuerySuffix],
     queryFn: async () => {
       const response = await apiClient.get(`/reportes/tramites-detallados?${queryParams}`);
       return response.data;
@@ -153,14 +182,35 @@ export default function ReportesPage() {
     refetchInterval: 60000,
   });
 
+  const { data: comparativoData } = useQuery({
+    queryKey: ['comparativo-sedes', fechaSeleccionada],
+    queryFn: async () => {
+      const response = await apiClient.get(`/reportes/comparativo-sedes?fecha=${fechaSeleccionada}`);
+      return response.data as {
+        fecha: string;
+        sedes: Array<{
+          sucursal_id: string;
+          nombre: string;
+          tramites_registrados: number;
+          ingresos_caja: number;
+          ingresos_tesoreria: number;
+          ingresos_total: number;
+        }>;
+      };
+    },
+    enabled: reportesEnabled && modoVista === 'dia' && puedeElegirSedeReporte,
+    refetchInterval: 60000,
+  });
+
   const { data: operativoData } = useQuery({
-    queryKey: ['dashboard-operativo', modoVista, fechaSeleccionada, fechaInicio, fechaFin],
+    queryKey: ['dashboard-operativo', modoVista, fechaSeleccionada, fechaInicio, fechaFin, sedeQuerySuffix],
     queryFn: () =>
       reportesApi.getDashboardOperativo({
         modoVista,
         fechaSeleccionada,
         fechaInicio,
         fechaFin,
+        sedeQuerySuffix,
       }),
     enabled: reportesEnabled,
     refetchInterval: 60000,
@@ -407,6 +457,40 @@ export default function ReportesPage() {
               </div>
             )}
 
+            {puedeElegirSedeReporte && (
+              <div>
+                <label className="block text-sm font-semibold text-gray-700 mb-2">
+                  Alcance reporte:
+                </label>
+                <select
+                  className="px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[220px]"
+                  value={
+                    reporteSedeScope === 'sucursal' && reporteSedeId
+                      ? `s:${reporteSedeId}`
+                      : reporteSedeScope
+                  }
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    if (v === 'activa' || v === 'todas') {
+                      setReporteSedeScope(v);
+                      setReporteSedeId('');
+                    } else if (v.startsWith('s:')) {
+                      setReporteSedeScope('sucursal');
+                      setReporteSedeId(v.slice(2));
+                    }
+                  }}
+                >
+                  <option value="activa">Sede activa (selector)</option>
+                  <option value="todas">Todas las sedes</option>
+                  {(tenantUser?.sucursales || []).map((s) => (
+                    <option key={s.id} value={`s:${s.id}`}>
+                      {s.nombre}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <button
               onClick={() => {
                 // Exportar resumen consolidado
@@ -510,6 +594,39 @@ export default function ReportesPage() {
             <p className="text-xs text-yellow-600 mt-1">Atendidos hoy</p>
           </div>
         </div>
+        )}
+
+        {modoVista === 'dia' && puedeElegirSedeReporte && (comparativoData?.sedes?.length ?? 0) > 0 && (
+          <div className="card-pos">
+            <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
+              <Building2 className="w-6 h-6 text-primary-600" />
+              Comparativo por sede ({comparativoData?.fecha})
+            </h3>
+            <div className="overflow-x-auto">
+              <table className="min-w-full text-sm">
+                <thead>
+                  <tr className="text-left text-slate-600">
+                    <th className="px-3 py-2">Sede</th>
+                    <th className="px-3 py-2 text-right">Trámites</th>
+                    <th className="px-3 py-2 text-right">Ingresos caja</th>
+                    <th className="px-3 py-2 text-right">Ingresos tesorería</th>
+                    <th className="px-3 py-2 text-right">Total ingresos</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(comparativoData?.sedes || []).map((row) => (
+                    <tr key={row.sucursal_id} className="border-t">
+                      <td className="px-3 py-2 font-medium">{row.nombre}</td>
+                      <td className="px-3 py-2 text-right">{row.tramites_registrados}</td>
+                      <td className="px-3 py-2 text-right">${row.ingresos_caja.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right">${row.ingresos_tesoreria.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right font-semibold">${row.ingresos_total.toLocaleString()}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
         )}
 
         {/* Gráfica de Ingresos - Últimos 7 Días - Solo en modo día */}
@@ -754,6 +871,7 @@ export default function ReportesPage() {
                 <tr className="text-left text-slate-600">
                   <th className="px-3 py-2">Hora</th>
                   <th className="px-3 py-2">Módulo</th>
+                  <th className="px-3 py-2">Sede</th>
                   <th className="px-3 py-2">Turno</th>
                   <th className="px-3 py-2">Tipo</th>
                   <th className="px-3 py-2">Concepto</th>
@@ -766,7 +884,7 @@ export default function ReportesPage() {
               <tbody>
                 {movimientosFiltrados.length === 0 && (
                   <tr className="border-t">
-                    <td colSpan={9} className="px-3 py-6 text-center text-slate-500">
+                    <td colSpan={10} className="px-3 py-6 text-center text-slate-500">
                       No hay movimientos para los filtros seleccionados.
                     </td>
                   </tr>
@@ -775,6 +893,7 @@ export default function ReportesPage() {
                   <tr key={m.id} className="border-t">
                     <td className="px-3 py-2">{m.hora}</td>
                     <td className="px-3 py-2">{m.modulo}</td>
+                    <td className="px-3 py-2 text-slate-600">{m.sede ?? '—'}</td>
                     <td className="px-3 py-2">{m.turno}</td>
                     <td className={`px-3 py-2 ${m.es_ingreso ? 'text-green-700' : 'text-red-700'}`}>{m.tipo_movimiento}</td>
                     <td className="px-3 py-2">{m.concepto}</td>
@@ -862,6 +981,7 @@ export default function ReportesPage() {
               <thead>
                 <tr className="text-left text-slate-600">
                   <th className="px-3 py-2">Hora</th>
+                  <th className="px-3 py-2">Sede</th>
                   <th className="px-3 py-2">Placa</th>
                   <th className="px-3 py-2">Tipo</th>
                   <th className="px-3 py-2">Cliente</th>
@@ -877,7 +997,7 @@ export default function ReportesPage() {
               <tbody>
                 {(tramitesData?.tramites || []).length === 0 && (
                   <tr className="border-t">
-                    <td colSpan={11} className="px-3 py-6 text-center text-slate-500">
+                    <td colSpan={12} className="px-3 py-6 text-center text-slate-500">
                       No hay trámites para el periodo seleccionado.
                     </td>
                   </tr>
@@ -885,6 +1005,7 @@ export default function ReportesPage() {
                 {(tramitesData?.tramites || []).map((t: Tramite) => (
                   <tr key={t.id} className="border-t">
                     <td className="px-3 py-2">{t.hora_registro}</td>
+                    <td className="px-3 py-2 text-slate-600">{t.sede ?? '—'}</td>
                     <td className="px-3 py-2 font-mono">{t.placa}</td>
                     <td className="px-3 py-2">{t.tipo_vehiculo}</td>
                     <td className="px-3 py-2">{t.cliente}</td>

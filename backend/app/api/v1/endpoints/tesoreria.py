@@ -8,8 +8,9 @@ from sqlalchemy import and_, func, desc
 from datetime import datetime, timedelta, date, timezone
 from decimal import Decimal
 from typing import List, Optional
+from uuid import UUID
 
-from app.core.deps import get_db, get_current_user, get_admin
+from app.core.deps import get_db, get_current_user, get_admin, get_active_sucursal_id
 from app.models.usuario import Usuario
 from app.models.tesoreria import (
     MovimientoTesoreria,
@@ -33,18 +34,32 @@ from app.utils.comprobantes import generar_comprobante_egreso
 router = APIRouter()
 
 
+def _tesoreria_sucursal_scope(consolidar_todas: bool, active_sucursal_id: UUID) -> Optional[UUID]:
+    """None = todas las sedes (consolidado tenant)."""
+    return None if consolidar_todas else active_sucursal_id
+
+
+def _filter_movimientos_tesoreria(q, tenant_id, scope_sid: Optional[UUID]):
+    q = q.filter(MovimientoTesoreria.tenant_id == tenant_id)
+    if scope_sid is not None:
+        q = q.filter(MovimientoTesoreria.sucursal_id == scope_sid)
+    return q
+
+
 # ==================== FUNCIONES AUXILIARES ====================
 
-def _calcular_desglose_disponible(db: Session, tenant_id) -> dict:
+def _calcular_desglose_disponible(db: Session, tenant_id, sucursal_id: Optional[UUID]) -> dict:
     """
     Calcula el desglose de denominaciones actualmente disponible en caja.
     Retorna un diccionario con las cantidades de cada denominación.
     """
-    # Obtener todos los movimientos en efectivo con su desglose
-    movimientos_efectivo = db.query(MovimientoTesoreria).filter(
+    q = db.query(MovimientoTesoreria).filter(
         MovimientoTesoreria.metodo_pago == "efectivo",
-        MovimientoTesoreria.tenant_id == tenant_id
-    ).all()
+        MovimientoTesoreria.tenant_id == tenant_id,
+    )
+    if sucursal_id is not None:
+        q = q.filter(MovimientoTesoreria.sucursal_id == sucursal_id)
+    movimientos_efectivo = q.all()
     
     # Inicializar contadores
     desglose_total = {
@@ -135,7 +150,8 @@ def _generar_sugerencia_denominaciones(monto_total: int, desglose_disponible: di
 def crear_movimiento(
     movimiento_data: MovimientoTesoreriaCreate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin)
+    current_user: Usuario = Depends(get_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Crear movimiento en tesorería (solo administrador)
@@ -171,7 +187,7 @@ def crear_movimiento(
         # Validar disponibilidad de denominaciones para EGRESOS
         if movimiento_data.tipo == "egreso":
             desglose_solicitado = movimiento_data.desglose_efectivo
-            desglose_disponible = _calcular_desglose_disponible(db, current_user.tenant_id)
+            desglose_disponible = _calcular_desglose_disponible(db, current_user.tenant_id, active_sucursal_id)
             
             # Validar cada denominación
             denominaciones_faltantes = []
@@ -225,6 +241,7 @@ def crear_movimiento(
     # Crear movimiento
     nuevo_movimiento = MovimientoTesoreria(
         tenant_id=current_user.tenant_id,
+        sucursal_id=active_sucursal_id,
         tipo=TipoMovimientoTesoreria(movimiento_data.tipo),
         categoria_ingreso=CategoriaIngresoTesoreria(movimiento_data.categoria_ingreso) if movimiento_data.categoria_ingreso else None,
         categoria_egreso=CategoriaEgresoTesoreria(movimiento_data.categoria_egreso) if movimiento_data.categoria_egreso else None,
@@ -244,6 +261,7 @@ def crear_movimiento(
     if movimiento_data.metodo_pago == "efectivo" and movimiento_data.desglose_efectivo:
         desglose = DesgloseEfectivoTesoreria(
             tenant_id=current_user.tenant_id,
+            sucursal_id=active_sucursal_id,
             movimiento_id=nuevo_movimiento.id,
             **movimiento_data.desglose_efectivo.model_dump()
         )
@@ -263,16 +281,21 @@ def listar_movimientos(
     fecha_hasta: Optional[date] = None,
     metodo_pago: Optional[str] = None,
     limit: int = Query(100, le=500),
+    consolidar_todas: bool = Query(False, description="Incluir todas las sedes (vista consolidada)"),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin)
+    current_user: Usuario = Depends(get_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Listar movimientos de tesorería con filtros (solo administrador)
     """
-    query = db.query(MovimientoTesoreria).filter(
-        MovimientoTesoreria.tenant_id == current_user.tenant_id
+    scope_sid = _tesoreria_sucursal_scope(consolidar_todas, active_sucursal_id)
+    query = _filter_movimientos_tesoreria(
+        db.query(MovimientoTesoreria),
+        current_user.tenant_id,
+        scope_sid,
     )
-    
+
     # Aplicar filtros
     if tipo:
         query = query.filter(MovimientoTesoreria.tipo == tipo)
@@ -302,17 +325,22 @@ def listar_movimientos(
 @router.get("/movimientos/{movimiento_id}", response_model=MovimientoTesoreriaResponse)
 def obtener_movimiento(
     movimiento_id: str,
+    consolidar_todas: bool = Query(False),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin)
+    current_user: Usuario = Depends(get_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Obtener detalle de un movimiento específico
     """
-    movimiento = db.query(MovimientoTesoreria).filter(
-        MovimientoTesoreria.id == movimiento_id,
-        MovimientoTesoreria.tenant_id == current_user.tenant_id
-    ).first()
-    
+    scope_sid = _tesoreria_sucursal_scope(consolidar_todas, active_sucursal_id)
+    q = _filter_movimientos_tesoreria(
+        db.query(MovimientoTesoreria),
+        current_user.tenant_id,
+        scope_sid,
+    )
+    movimiento = q.filter(MovimientoTesoreria.id == movimiento_id).first()
+
     if not movimiento:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -326,17 +354,22 @@ def obtener_movimiento(
 
 @router.get("/saldo-actual")
 def obtener_saldo_actual(
+    consolidar_todas: bool = Query(False),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin)
+    current_user: Usuario = Depends(get_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Obtener saldo actual de la caja fuerte
     """
-    # Sumar todos los movimientos (positivos y negativos)
-    saldo = db.query(func.sum(MovimientoTesoreria.monto)).filter(
-        MovimientoTesoreria.tenant_id == current_user.tenant_id
-    ).scalar() or Decimal(0)
-    
+    scope_sid = _tesoreria_sucursal_scope(consolidar_todas, active_sucursal_id)
+    q = _filter_movimientos_tesoreria(
+        db.query(func.sum(MovimientoTesoreria.monto)),
+        current_user.tenant_id,
+        scope_sid,
+    )
+    saldo = q.scalar() or Decimal(0)
+
     return {
         "saldo_actual": float(saldo),
         "fecha_calculo": datetime.now(timezone.utc).isoformat()
@@ -347,8 +380,10 @@ def obtener_saldo_actual(
 def obtener_resumen(
     fecha_desde: Optional[date] = None,
     fecha_hasta: Optional[date] = None,
+    consolidar_todas: bool = Query(False),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin)
+    current_user: Usuario = Depends(get_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Obtener resumen de tesorería en un período
@@ -362,15 +397,23 @@ def obtener_resumen(
     # Convertir date a datetime para comparación correcta con PostgreSQL
     fecha_desde_dt = datetime.combine(fecha_desde, datetime.min.time())
     fecha_hasta_dt = datetime.combine(fecha_hasta, datetime.max.time())
-    
-    # Obtener movimientos del período
-    movimientos = db.query(MovimientoTesoreria).filter(
-        and_(
-            MovimientoTesoreria.tenant_id == current_user.tenant_id,
-            MovimientoTesoreria.fecha_movimiento >= fecha_desde_dt,
-            MovimientoTesoreria.fecha_movimiento <= fecha_hasta_dt
+
+    scope_sid = _tesoreria_sucursal_scope(consolidar_todas, active_sucursal_id)
+
+    movimientos = (
+        _filter_movimientos_tesoreria(
+            db.query(MovimientoTesoreria),
+            current_user.tenant_id,
+            scope_sid,
         )
-    ).all()
+        .filter(
+            and_(
+                MovimientoTesoreria.fecha_movimiento >= fecha_desde_dt,
+                MovimientoTesoreria.fecha_movimiento <= fecha_hasta_dt,
+            )
+        )
+        .all()
+    )
     
     # Calcular totales
     total_ingresos = Decimal(0)
@@ -388,15 +431,30 @@ def obtener_resumen(
             cat = mov.categoria_egreso.value if mov.categoria_egreso else "sin_categoria"
             egresos_por_categoria[cat] = egresos_por_categoria.get(cat, Decimal(0)) + abs(mov.monto)
     
-    # Saldo actual (todos los movimientos históricos)
-    saldo_actual = db.query(func.sum(MovimientoTesoreria.monto)).filter(
-        MovimientoTesoreria.tenant_id == current_user.tenant_id
-    ).scalar() or Decimal(0)
-    
-    # Obtener configuración de alertas
-    config = db.query(ConfiguracionTesoreria).filter(
-        ConfiguracionTesoreria.tenant_id == current_user.tenant_id
-    ).first()
+    saldo_actual = (
+        _filter_movimientos_tesoreria(
+            db.query(func.sum(MovimientoTesoreria.monto)),
+            current_user.tenant_id,
+            scope_sid,
+        ).scalar()
+        or Decimal(0)
+    )
+
+    if scope_sid is None:
+        config = (
+            db.query(ConfiguracionTesoreria)
+            .filter(ConfiguracionTesoreria.tenant_id == current_user.tenant_id)
+            .first()
+        )
+    else:
+        config = (
+            db.query(ConfiguracionTesoreria)
+            .filter(
+                ConfiguracionTesoreria.tenant_id == current_user.tenant_id,
+                ConfiguracionTesoreria.sucursal_id == scope_sid,
+            )
+            .first()
+        )
     umbral_minimo = config.saldo_minimo_alerta if config else Decimal(100000)
     saldo_bajo_umbral = saldo_actual < umbral_minimo
     
@@ -416,19 +474,27 @@ def obtener_resumen(
 
 @router.get("/desglose-saldo")
 def obtener_desglose_saldo(
+    consolidar_todas: bool = Query(False),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin)
+    current_user: Usuario = Depends(get_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Obtener desglose del saldo actual por método de pago
     """
-    # Agrupar movimientos por método de pago y sumar
-    resultados = db.query(
-        MovimientoTesoreria.metodo_pago,
-        func.sum(MovimientoTesoreria.monto).label('saldo')
-    ).filter(
-        MovimientoTesoreria.tenant_id == current_user.tenant_id
-    ).group_by(MovimientoTesoreria.metodo_pago).all()
+    scope_sid = _tesoreria_sucursal_scope(consolidar_todas, active_sucursal_id)
+    resultados = (
+        _filter_movimientos_tesoreria(
+            db.query(
+                MovimientoTesoreria.metodo_pago,
+                func.sum(MovimientoTesoreria.monto).label("saldo"),
+            ),
+            current_user.tenant_id,
+            scope_sid,
+        )
+        .group_by(MovimientoTesoreria.metodo_pago)
+        .all()
+    )
     
     desglose = {}
     total = Decimal(0)
@@ -447,17 +513,24 @@ def obtener_desglose_saldo(
 
 @router.get("/desglose-efectivo")
 def obtener_desglose_efectivo(
+    consolidar_todas: bool = Query(False),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin)
+    current_user: Usuario = Depends(get_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Obtener desglose de billetes y monedas del efectivo actual en caja
     """
-    # Obtener todos los movimientos en efectivo con su desglose
-    movimientos_efectivo = db.query(MovimientoTesoreria).filter(
-        MovimientoTesoreria.metodo_pago == "efectivo",
-        MovimientoTesoreria.tenant_id == current_user.tenant_id
-    ).all()
+    scope_sid = _tesoreria_sucursal_scope(consolidar_todas, active_sucursal_id)
+    movimientos_efectivo = (
+        _filter_movimientos_tesoreria(
+            db.query(MovimientoTesoreria),
+            current_user.tenant_id,
+            scope_sid,
+        )
+        .filter(MovimientoTesoreria.metodo_pago == "efectivo")
+        .all()
+    )
     
     # Inicializar contadores
     desglose_total = {
@@ -514,8 +587,10 @@ def obtener_desglose_efectivo(
 def obtener_estadisticas(
     fecha_desde: date,
     fecha_hasta: date,
+    consolidar_todas: bool = Query(False),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin)
+    current_user: Usuario = Depends(get_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Obtener estadísticas detalladas de un período
@@ -523,13 +598,21 @@ def obtener_estadisticas(
     fecha_desde_dt = datetime.combine(fecha_desde, datetime.min.time())
     fecha_hasta_dt = datetime.combine(fecha_hasta, datetime.max.time())
 
-    movimientos = db.query(MovimientoTesoreria).filter(
-        and_(
-            MovimientoTesoreria.tenant_id == current_user.tenant_id,
-            MovimientoTesoreria.fecha_movimiento >= fecha_desde_dt,
-            MovimientoTesoreria.fecha_movimiento <= fecha_hasta_dt
+    scope_sid = _tesoreria_sucursal_scope(consolidar_todas, active_sucursal_id)
+    movimientos = (
+        _filter_movimientos_tesoreria(
+            db.query(MovimientoTesoreria),
+            current_user.tenant_id,
+            scope_sid,
         )
-    ).all()
+        .filter(
+            and_(
+                MovimientoTesoreria.fecha_movimiento >= fecha_desde_dt,
+                MovimientoTesoreria.fecha_movimiento <= fecha_hasta_dt,
+            )
+        )
+        .all()
+    )
     
     total_ingresos = Decimal(0)
     total_egresos = Decimal(0)
@@ -550,11 +633,16 @@ def obtener_estadisticas(
         categoria_mas_egreso = max(egresos_por_categoria, key=egresos_por_categoria.get)
         monto_categoria_mas_egreso = egresos_por_categoria[categoria_mas_egreso]
     
-    # Saldo inicial (antes del período)
-    saldo_inicial = db.query(func.sum(MovimientoTesoreria.monto)).filter(
-        MovimientoTesoreria.tenant_id == current_user.tenant_id,
-        MovimientoTesoreria.fecha_movimiento < fecha_desde_dt
-    ).scalar() or Decimal(0)
+    saldo_inicial = (
+        _filter_movimientos_tesoreria(
+            db.query(func.sum(MovimientoTesoreria.monto)),
+            current_user.tenant_id,
+            scope_sid,
+        )
+        .filter(MovimientoTesoreria.fecha_movimiento < fecha_desde_dt)
+        .scalar()
+        or Decimal(0)
+    )
     
     saldo_final = saldo_inicial + total_ingresos - total_egresos
     
@@ -576,19 +664,22 @@ def obtener_estadisticas(
 @router.get("/configuracion", response_model=ConfiguracionTesoreriaResponse)
 def obtener_configuracion(
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin)
+    current_user: Usuario = Depends(get_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Obtener configuración de tesorería
     """
     config = db.query(ConfiguracionTesoreria).filter(
-        ConfiguracionTesoreria.tenant_id == current_user.tenant_id
+        ConfiguracionTesoreria.tenant_id == current_user.tenant_id,
+        ConfiguracionTesoreria.sucursal_id == active_sucursal_id,
     ).first()
     
     # Si no existe, crear una por defecto
     if not config:
         config = ConfiguracionTesoreria(
             tenant_id=current_user.tenant_id,
+            sucursal_id=active_sucursal_id,
             saldo_minimo_alerta=Decimal(100000),
             notificar_saldo_bajo=True,
             updated_by=current_user.id
@@ -604,19 +695,22 @@ def obtener_configuracion(
 def actualizar_configuracion(
     config_data: ConfiguracionTesoreriaUpdate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin)
+    current_user: Usuario = Depends(get_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Actualizar configuración de tesorería
     """
     config = db.query(ConfiguracionTesoreria).filter(
-        ConfiguracionTesoreria.tenant_id == current_user.tenant_id
+        ConfiguracionTesoreria.tenant_id == current_user.tenant_id,
+        ConfiguracionTesoreria.sucursal_id == active_sucursal_id,
     ).first()
     
     if not config:
         # Crear si no existe
         config = ConfiguracionTesoreria(
             tenant_id=current_user.tenant_id,
+            sucursal_id=active_sucursal_id,
             updated_by=current_user.id
         )
         db.add(config)
@@ -645,17 +739,24 @@ def actualizar_configuracion(
 @router.get("/movimientos/{movimiento_id}/comprobante")
 async def descargar_comprobante_egreso(
     movimiento_id: str,
+    consolidar_todas: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Generar y descargar comprobante de egreso en PDF
     """
-    # Obtener movimiento
-    movimiento = db.query(MovimientoTesoreria).filter(
-        MovimientoTesoreria.id == movimiento_id,
-        MovimientoTesoreria.tenant_id == current_user.tenant_id
-    ).first()
+    scope_sid = _tesoreria_sucursal_scope(consolidar_todas, active_sucursal_id)
+    movimiento = (
+        _filter_movimientos_tesoreria(
+            db.query(MovimientoTesoreria),
+            current_user.tenant_id,
+            scope_sid,
+        )
+        .filter(MovimientoTesoreria.id == movimiento_id)
+        .first()
+    )
     
     if not movimiento:
         raise HTTPException(

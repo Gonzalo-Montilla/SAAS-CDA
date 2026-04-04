@@ -26,6 +26,7 @@ class Usuario(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    sucursal_id = Column(UUID(as_uuid=True), ForeignKey("sucursales.id"), nullable=True, index=True)
     email = Column(String(255), unique=True, nullable=False, index=True)
     hashed_password = Column(String(255), nullable=False)
     nombre_completo = Column(String(200), nullable=False)
@@ -38,6 +39,7 @@ class Usuario(Base):
     
     # Relaciones
     tenant = relationship("Tenant", back_populates="usuarios")
+    sucursal = relationship("Sucursal", foreign_keys=[sucursal_id])
     reset_tokens = relationship("PasswordResetToken", back_populates="usuario", cascade="all, delete-orphan")
     
     def __repr__(self):

@@ -7,6 +7,7 @@ from app.api.v1.endpoints import (
     auth,
     saas_auth,
     onboarding,
+    sucursales,
     vehiculos,
     cajas,
     tarifas,
@@ -26,6 +27,7 @@ api_router = APIRouter()
 api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
 api_router.include_router(saas_auth.router, prefix="/saas/auth", tags=["saas-auth"])
 api_router.include_router(onboarding.router, prefix="/onboarding", tags=["onboarding"])
+api_router.include_router(sucursales.router, prefix="/sucursales", tags=["sucursales"])
 api_router.include_router(vehiculos.router, prefix="/vehiculos", tags=["vehiculos"])
 api_router.include_router(cajas.router, prefix="/cajas", tags=["cajas"])
 api_router.include_router(tarifas.router, prefix="/tarifas", tags=["tarifas"])

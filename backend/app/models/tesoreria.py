@@ -52,7 +52,8 @@ class MovimientoTesoreria(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
-    
+    sucursal_id = Column(UUID(as_uuid=True), ForeignKey("sucursales.id"), nullable=True, index=True)
+
     # Tipo de movimiento
     tipo = Column(SQLEnum(TipoMovimientoTesoreria), nullable=False)
     
@@ -91,6 +92,7 @@ class DesgloseEfectivoTesoreria(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    sucursal_id = Column(UUID(as_uuid=True), ForeignKey("sucursales.id"), nullable=True, index=True)
     movimiento_id = Column(UUID(as_uuid=True), ForeignKey("movimientos_tesoreria.id"), nullable=False, unique=True)
     
     # Billetes
@@ -143,7 +145,8 @@ class ConfiguracionTesoreria(Base):
     
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
-    
+    sucursal_id = Column(UUID(as_uuid=True), ForeignKey("sucursales.id"), nullable=True, index=True)
+
     # Alertas
     saldo_minimo_alerta = Column(Numeric(12, 2), default=100000)  # Alerta si saldo < $100,000
     notificar_saldo_bajo = Column(Boolean, default=True)

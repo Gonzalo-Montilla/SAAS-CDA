@@ -1,6 +1,8 @@
 """
 Schemas de autenticación
 """
+from uuid import UUID
+
 from pydantic import BaseModel, EmailStr, Field
 
 
@@ -34,6 +36,11 @@ class UserRegister(BaseModel):
     password: str = Field(min_length=6)
     nombre_completo: str = Field(min_length=3, max_length=200)
     rol: str = Field(default="cajero")
+    sucursal_id: UUID | None = None
+
+
+class SwitchSucursalRequest(BaseModel):
+    sucursal_id: UUID
 
 
 class PasswordChange(BaseModel):

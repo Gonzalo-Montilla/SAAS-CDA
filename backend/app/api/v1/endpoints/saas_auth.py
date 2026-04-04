@@ -133,9 +133,21 @@ class SaaSTenantUserSummary(BaseModel):
     created_at: datetime
 
 
+class SaaSSucursalResumen(BaseModel):
+    id: str
+    nombre: str
+    codigo: str | None = None
+    activa: bool
+    es_principal: bool
+
+
 class SaaSTenantProfile(SaaSTenantSummary):
     total_usuarios: int
     usuarios_recientes: list[SaaSTenantUserSummary]
+    sucursales_activas: list[SaaSSucursalResumen] = Field(
+        default_factory=list,
+        description="Sedes activas del tenant (operativas).",
+    )
 
 
 class SaaSAuditLogItem(BaseModel):
@@ -723,6 +735,7 @@ def get_saas_tenant_profile(
 ):
     from app.models.tenant import Tenant
     from app.models.usuario import Usuario
+    from app.models.sucursal import Sucursal
 
     sync_expired_demo_tenants(db)
     try:
@@ -749,6 +762,13 @@ def get_saas_tenant_profile(
     )
     total_users = db.query(Usuario).filter(Usuario.tenant_id == tenant_uuid).count()
     base_url = settings.FRONTEND_URL.rstrip("/")
+
+    sedes_rows = (
+        db.query(Sucursal)
+        .filter(Sucursal.tenant_id == tenant_uuid, Sucursal.activa.is_(True))
+        .order_by(Sucursal.es_principal.desc(), Sucursal.nombre.asc())
+        .all()
+    )
 
     return SaaSTenantProfile(
         id=str(tenant.id),
@@ -783,6 +803,16 @@ def get_saas_tenant_profile(
                 created_at=u.created_at,
             )
             for u in recent_users
+        ],
+        sucursales_activas=[
+            SaaSSucursalResumen(
+                id=str(s.id),
+                nombre=s.nombre,
+                codigo=s.codigo,
+                activa=bool(s.activa),
+                es_principal=bool(s.es_principal),
+            )
+            for s in sedes_rows
         ],
     )
 

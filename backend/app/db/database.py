@@ -547,6 +547,148 @@ def ensure_rtm_reminders_schema(db):
     db.execute(text("CREATE INDEX IF NOT EXISTS ix_rtm_reminders_next_contact_at ON rtm_renewal_reminders(next_contact_at)"))
 
 
+def ensure_sucursales_schema(db):
+    """
+    Tabla sucursales + FKs operativos. Idempotente.
+    Crea sede principal por tenant y backfill a datos existentes.
+    """
+    import uuid as uuid_lib
+
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS sucursales (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                nombre VARCHAR(200) NOT NULL,
+                codigo VARCHAR(40),
+                activa BOOLEAN NOT NULL DEFAULT TRUE,
+                es_principal BOOLEAN NOT NULL DEFAULT FALSE,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE
+            )
+            """
+        )
+    )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_sucursales_tenant_id ON sucursales(tenant_id)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_sucursales_codigo ON sucursales(tenant_id, codigo)"))
+
+    rows = db.execute(text("SELECT id, nombre FROM tenants")).fetchall()
+    for row in rows:
+        tid = row[0]
+        cnt = db.execute(
+            text("SELECT COUNT(*) FROM sucursales WHERE tenant_id = :tid"),
+            {"tid": tid},
+        ).scalar()
+        if int(cnt or 0) == 0:
+            sid = str(uuid_lib.uuid4())
+            nombre_sede = "Sede principal"
+            db.execute(
+                text(
+                    """
+                    INSERT INTO sucursales (id, tenant_id, nombre, codigo, activa, es_principal, created_at)
+                    VALUES (:id, :tid, :nombre, NULL, TRUE, TRUE, NOW())
+                    """
+                ),
+                {"id": sid, "tid": tid, "nombre": nombre_sede},
+            )
+
+    def _add_column_if_table_exists(table: str):
+        db.execute(
+            text(
+                f"""
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.tables
+                        WHERE table_schema = 'public' AND table_name = '{table}'
+                    ) THEN
+                        EXECUTE 'ALTER TABLE {table} ADD COLUMN IF NOT EXISTS sucursal_id UUID';
+                    END IF;
+                END $$;
+                """
+            )
+        )
+
+    _add_column_if_table_exists("usuarios")
+    _add_column_if_table_exists("vehiculos_proceso")
+    _add_column_if_table_exists("cajas")
+    _add_column_if_table_exists("movimientos_tesoreria")
+    _add_column_if_table_exists("desglose_efectivo_tesoreria")
+    _add_column_if_table_exists("configuracion_tesoreria")
+
+    def _ensure_fk_sucursal(table: str):
+        db.execute(
+            text(
+                f"""
+                DO $$
+                BEGIN
+                    IF EXISTS (
+                        SELECT 1 FROM information_schema.tables
+                        WHERE table_schema = 'public' AND table_name = '{table}'
+                    ) AND NOT EXISTS (
+                        SELECT 1
+                        FROM information_schema.table_constraints tc
+                        JOIN information_schema.key_column_usage kcu
+                          ON tc.constraint_schema = kcu.constraint_schema
+                         AND tc.constraint_name = kcu.constraint_name
+                        WHERE tc.table_schema = 'public'
+                          AND tc.table_name = '{table}'
+                          AND kcu.column_name = 'sucursal_id'
+                          AND tc.constraint_type = 'FOREIGN KEY'
+                    ) THEN
+                        EXECUTE '
+                            ALTER TABLE {table}
+                            ADD CONSTRAINT fk_{table}_sucursal_id
+                            FOREIGN KEY (sucursal_id) REFERENCES sucursales(id)
+                        ';
+                    END IF;
+                END $$;
+                """
+            )
+        )
+
+    _ensure_fk_sucursal("usuarios")
+    for tbl in ("vehiculos_proceso", "cajas", "movimientos_tesoreria", "desglose_efectivo_tesoreria", "configuracion_tesoreria"):
+        _ensure_fk_sucursal(tbl)
+
+    db.execute(
+        text(
+            """
+            UPDATE usuarios u
+            SET sucursal_id = s.id
+            FROM sucursales s
+            WHERE u.tenant_id = s.tenant_id
+              AND s.es_principal = TRUE
+              AND u.sucursal_id IS NULL
+            """
+        )
+    )
+    for tbl in ("vehiculos_proceso", "cajas", "movimientos_tesoreria", "desglose_efectivo_tesoreria", "configuracion_tesoreria"):
+        db.execute(
+            text(
+                f"""
+                UPDATE {tbl} t
+                SET sucursal_id = s.id
+                FROM sucursales s
+                WHERE t.tenant_id = s.tenant_id
+                  AND s.es_principal = TRUE
+                  AND t.sucursal_id IS NULL
+                """
+            )
+        )
+
+    db.execute(
+        text(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_sucursales_one_principal_per_tenant
+            ON sucursales (tenant_id)
+            WHERE es_principal IS TRUE
+            """
+        )
+    )
+
+
 def get_db():
     """
     Dependency para obtener sesión de base de datos
@@ -572,6 +714,8 @@ def init_db():
     from app.models.quality import QualitySurveyInvite, QualitySurveyResponse
     from app.models.appointment import Appointment
     from app.models.rtm_reminder import RTMRenewalReminder
+    from app.models.sucursal import Sucursal  # noqa: F401 — register model
+    from app.models.tesoreria import MovimientoTesoreria, DesgloseEfectivoTesoreria, ConfiguracionTesoreria  # noqa: F401
     from app.core.security import get_password_hash
     from datetime import date
     
@@ -595,6 +739,7 @@ def init_db():
         ensure_usuario_roles_schema(db)
         ensure_appointments_schema(db)
         ensure_rtm_reminders_schema(db)
+        ensure_sucursales_schema(db)
         db.commit()
 
         # Verificar y crear owner global SaaS

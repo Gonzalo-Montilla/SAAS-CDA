@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import ContadorEfectivo, { type DesgloseEfectivo } from '../components/ContadorEfectivo';
@@ -86,45 +87,45 @@ export default function TesoreriaPage() {
 
 // ==================== DASHBOARD ====================
 function Dashboard() {
-  // Obtener saldo actual (prioridad 1)
+  const { user } = useAuth();
+  const [consolidarTodas, setConsolidarTodas] = useState(false);
+  const showConsolidar = user?.rol === 'administrador';
+  const scopeParams = showConsolidar && consolidarTodas ? { consolidar_todas: true } : {};
+
   const { data: saldo, isLoading: loadingSaldo } = useQuery({
-    queryKey: ['tesoreria-saldo'],
-    queryFn: tesoreriaApi.obtenerSaldoActual,
+    queryKey: ['tesoreria-saldo', consolidarTodas],
+    queryFn: () => tesoreriaApi.obtenerSaldoActual(scopeParams),
     refetchInterval: 30000,
-    staleTime: 10000, // Considerar datos frescos por 10s
+    staleTime: 10000,
   });
 
-  // Obtener resumen del mes actual (prioridad 1)
   const { data: resumen, isLoading: loadingResumen } = useQuery({
-    queryKey: ['tesoreria-resumen'],
-    queryFn: () => tesoreriaApi.obtenerResumen(),
+    queryKey: ['tesoreria-resumen', consolidarTodas],
+    queryFn: () => tesoreriaApi.obtenerResumen(scopeParams),
     refetchInterval: 60000,
     staleTime: 30000,
   });
 
-  // Obtener desglose de saldo (lazy - solo si saldo ya cargó)
   const { data: desglose, isLoading: loadingDesglose } = useQuery({
-    queryKey: ['tesoreria-desglose'],
-    queryFn: tesoreriaApi.obtenerDesgloseSaldo,
-    enabled: !!saldo, // Solo cargar después del saldo
+    queryKey: ['tesoreria-desglose', consolidarTodas],
+    queryFn: () => tesoreriaApi.obtenerDesgloseSaldo(scopeParams),
+    enabled: !!saldo,
     refetchInterval: 60000,
     staleTime: 30000,
   });
 
-  // Obtener desglose de efectivo (lazy)
   const { data: desgloseEfectivo } = useQuery({
-    queryKey: ['tesoreria-desglose-efectivo'],
-    queryFn: tesoreriaApi.obtenerDesgloseEfectivo,
-    enabled: !!saldo, // Solo cargar después del saldo
+    queryKey: ['tesoreria-desglose-efectivo', consolidarTodas],
+    queryFn: () => tesoreriaApi.obtenerDesgloseEfectivo(scopeParams),
+    enabled: !!saldo,
     refetchInterval: 60000,
     staleTime: 30000,
   });
 
-  // Obtener últimos movimientos (lazy)
   const { data: movimientos, isLoading: loadingMovimientos } = useQuery({
-    queryKey: ['tesoreria-movimientos-recientes'],
-    queryFn: () => tesoreriaApi.listarMovimientos({ limit: 5 }),
-    enabled: !!saldo, // Solo cargar después del saldo
+    queryKey: ['tesoreria-movimientos-recientes', consolidarTodas],
+    queryFn: () => tesoreriaApi.listarMovimientos({ limit: 5, ...scopeParams }),
+    enabled: !!saldo,
     refetchInterval: 60000,
     staleTime: 30000,
   });
@@ -141,6 +142,18 @@ function Dashboard() {
     <div className="space-y-6">
       {/* Notificaciones de cierre de caja */}
       <NotificacionesCierreCaja />
+
+      {showConsolidar && (
+        <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer select-none">
+          <input
+            type="checkbox"
+            checked={consolidarTodas}
+            onChange={(e) => setConsolidarTodas(e.target.checked)}
+            className="rounded border-slate-300"
+          />
+          Ver tesorería consolidada (todas las sedes)
+        </label>
+      )}
 
       {/* Alerta de saldo bajo */}
       {alertaSaldoBajo && (
@@ -446,7 +459,7 @@ function RegistrarMovimiento() {
   // Obtener inventario de denominaciones disponibles (solo para egresos en efectivo)
   const { data: inventarioDisponible } = useQuery({
     queryKey: ['tesoreria-inventario-disponible'],
-    queryFn: tesoreriaApi.obtenerDesgloseEfectivo,
+    queryFn: () => tesoreriaApi.obtenerDesgloseEfectivo(),
     enabled: tipoMovimiento === 'egreso' && formData.metodo_pago === 'efectivo',
     refetchInterval: 30000,
   });
@@ -883,6 +896,11 @@ function RegistrarMovimiento() {
 
 // ==================== HISTORIAL ====================
 function Historial() {
+  const { user } = useAuth();
+  const [consolidarTodas, setConsolidarTodas] = useState(false);
+  const showConsolidar = user?.rol === 'administrador';
+  const scopeParams = showConsolidar && consolidarTodas ? { consolidar_todas: true } : {};
+
   const [filtros, setFiltros] = useState({
     tipo: '',
     fecha_desde: '',
@@ -894,12 +912,13 @@ function Historial() {
   
 
   const { data: movimientosRaw, isLoading } = useQuery({
-    queryKey: ['tesoreria-movimientos', filtros],
+    queryKey: ['tesoreria-movimientos', filtros, consolidarTodas],
     queryFn: () => tesoreriaApi.listarMovimientos({
       tipo: filtros.tipo || undefined,
       fecha_desde: filtros.fecha_desde || undefined,
       fecha_hasta: filtros.fecha_hasta || undefined,
       limit: 100,
+      ...scopeParams,
     }),
   });
 
@@ -959,6 +978,18 @@ function Historial() {
           <Search className="w-6 h-6 text-primary-600" />
           Filtros
         </h3>
+
+        {showConsolidar && (
+          <label className="flex items-center gap-2 text-sm text-slate-700 mb-4 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={consolidarTodas}
+              onChange={(e) => setConsolidarTodas(e.target.checked)}
+              className="rounded border-slate-300"
+            />
+            Incluir todas las sedes
+          </label>
+        )}
         
         {/* Búsqueda de texto */}
         <div className="mb-4">

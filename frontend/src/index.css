@@ -146,9 +146,12 @@
   }
 
   .table-shell {
-    @apply overflow-x-auto rounded-xl border bg-white;
-    border-color: rgba(226, 232, 240, 0.8);
-    background-color: rgba(255, 255, 255, 0.72);
+    @apply overflow-x-auto rounded-xl border bg-white shadow-sm;
+    border-color: rgba(226, 232, 240, 0.95);
+    background-color: #fff;
+    box-shadow:
+      0 1px 2px 0 rgb(15 23 42 / 0.04),
+      0 0 0 1px rgb(15 23 42 / 0.04);
     scrollbar-width: thin;
     scrollbar-color: #94a3b8 transparent;
   }
@@ -167,24 +170,33 @@
   }
 
   .table-enterprise {
-    @apply w-full text-sm overflow-hidden;
+    @apply w-full text-sm border-collapse overflow-hidden;
     min-width: 760px;
   }
 
   .table-enterprise thead th {
-    @apply py-3 pr-4 text-[11px] font-semibold uppercase tracking-wide text-slate-500 bg-slate-50 border-b border-slate-200;
+    @apply py-3.5 px-4 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-600 bg-slate-50/95 border-b border-slate-200;
   }
 
   .table-enterprise tbody tr {
-    @apply border-b border-slate-100 hover:bg-slate-50 transition-colors;
+    @apply border-b border-slate-100 hover:bg-slate-50/80 transition-colors;
+  }
+
+  .table-enterprise tbody tr:last-child {
+    @apply border-b-0;
   }
 
   .table-enterprise tbody td {
-    @apply py-2.5 pr-4 text-slate-700 align-middle;
+    @apply py-3.5 px-4 text-sm text-slate-700 align-middle;
+  }
+
+  .table-enterprise th.table-enterprise-col-actions,
+  .table-enterprise td.table-enterprise-col-actions {
+    @apply text-right whitespace-nowrap;
   }
 
   .btn-chip {
-    @apply inline-flex items-center gap-1 rounded-md border px-2.5 py-1.5 text-xs font-medium transition disabled:opacity-50;
+    @apply inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition disabled:opacity-50;
     border-color: var(--ui-border);
     background-color: #fff;
     color: var(--ui-text-soft);
