@@ -47,35 +47,38 @@ def assert_sucursal_in_tenant(db: Session, sucursal_id: UUID, tenant_id: UUID) -
 
 
 def roles_con_sede_elegible() -> set[RolEnum]:
-    """Pueden fijar la sede activa vía JWT (selector)."""
-    return {RolEnum.ADMINISTRADOR, RolEnum.CONTADOR}
+    """Roles que pueden fijar la sede activa vía JWT (login, selector o refresh)."""
+    return set(RolEnum)
 
 
 def resolve_active_sucursal_id(db: Session, user: Usuario, payload: dict[str, Any]) -> UUID:
     """
     Sede efectiva para la petición.
-    - Administrador y contador: toman `sucursal_id` del JWT si es válido; si no, sede del usuario o principal.
-    - Resto: sede asignada al usuario (o principal si aún no tiene).
+    - Si el rol puede elegir sede: `sucursal_id` del JWT si es válido; si no hay en el token, sede del
+      usuario (si pertenece al tenant) o sede principal.
+    - En caso contrario: misma regla de respaldo sin leer el JWT (reservado por si se restringe un rol).
     """
     principal = get_principal_sucursal_id(db, user.tenant_id)
-    assigned = user.sucursal_id or principal
+    assigned = (
+        user.sucursal_id
+        if user.sucursal_id and sucursal_belongs_to_tenant(db, user.sucursal_id, user.tenant_id)
+        else principal
+    )
 
-    if user.rol in roles_con_sede_elegible():
-        raw = payload.get("sucursal_id")
-        if raw:
-            try:
-                sid = UUID(str(raw))
-            except ValueError:
-                raise HTTPException(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    detail="Sede activa inválida en el token",
-                )
-            assert_sucursal_in_tenant(db, sid, user.tenant_id)
-            return sid
+    if user.rol not in roles_con_sede_elegible():
         return assigned
 
-    if user.sucursal_id and not sucursal_belongs_to_tenant(db, user.sucursal_id, user.tenant_id):
-        return principal
+    raw = payload.get("sucursal_id")
+    if raw:
+        try:
+            sid = UUID(str(raw))
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Sede activa inválida en el token",
+            )
+        assert_sucursal_in_tenant(db, sid, user.tenant_id)
+        return sid
     return assigned
 
 
@@ -96,12 +99,8 @@ def resolve_refresh_sucursal_id(db: Session, user: Usuario, payload: dict[str, A
     if raw:
         try:
             sid = UUID(str(raw))
-            if sucursal_belongs_to_tenant(db, sid, user.tenant_id):
-                if user.rol in roles_con_sede_elegible():
-                    return sid
-                assigned = user.sucursal_id or get_principal_sucursal_id(db, user.tenant_id)
-                if sid == assigned:
-                    return sid
+            if sucursal_belongs_to_tenant(db, sid, user.tenant_id) and user.rol in roles_con_sede_elegible():
+                return sid
         except ValueError:
             pass
     return resolve_active_sucursal_id(db, user, payload)

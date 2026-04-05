@@ -8,6 +8,7 @@ from typing import List, Optional
 from datetime import datetime, timezone
 
 from app.core.deps import get_db, get_current_user, get_admin
+from app.core.sucursal_scope import assert_sucursal_in_tenant, default_sucursal_id_for_login
 from app.models.usuario import Usuario, RolEnum
 from app.core.security import get_password_hash, validate_password_strength
 from pydantic import BaseModel, EmailStr, field_serializer
@@ -25,6 +26,7 @@ class UsuarioCreate(BaseModel):
     password: str
     nombre_completo: str
     rol: RolEnum
+    sucursal_id: Optional[UUID] = None
 
 
 class UsuarioUpdate(BaseModel):
@@ -32,6 +34,7 @@ class UsuarioUpdate(BaseModel):
     nombre_completo: Optional[str] = None
     rol: Optional[RolEnum] = None
     activo: Optional[bool] = None
+    sucursal_id: Optional[UUID] = None
 
 
 class UsuarioChangePassword(BaseModel):
@@ -102,6 +105,7 @@ def listar_usuarios(
             "nombre_completo": u.nombre_completo,
             "rol": u.rol.value if hasattr(u.rol, 'value') else u.rol,
             "activo": u.activo,
+            "sucursal_id": str(u.sucursal_id) if u.sucursal_id else None,
             "created_at": u.created_at,
             "updated_at": u.updated_at
         }
@@ -172,6 +176,7 @@ def obtener_usuario(
         "nombre_completo": usuario.nombre_completo,
         "rol": usuario.rol.value if hasattr(usuario.rol, 'value') else usuario.rol,
         "activo": usuario.activo,
+        "sucursal_id": str(usuario.sucursal_id) if usuario.sucursal_id else None,
         "created_at": usuario.created_at,
         "updated_at": usuario.updated_at
     }
@@ -203,9 +208,16 @@ def crear_usuario(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
+    if usuario_data.sucursal_id is not None:
+        assert_sucursal_in_tenant(db, usuario_data.sucursal_id, current_user.tenant_id)
+        target_sede = usuario_data.sucursal_id
+    else:
+        target_sede = default_sucursal_id_for_login(db, current_user)
+
     # Crear usuario
     nuevo_usuario = Usuario(
         tenant_id=current_user.tenant_id,
+        sucursal_id=target_sede,
         email=usuario_data.email,
         hashed_password=get_password_hash(usuario_data.password),
         nombre_completo=usuario_data.nombre_completo,
@@ -227,7 +239,8 @@ def crear_usuario(
         metadata={
             "usuario_creado_email": nuevo_usuario.email,
             "usuario_creado_id": str(nuevo_usuario.id),
-            "rol": nuevo_usuario.rol.value
+            "rol": nuevo_usuario.rol.value,
+            "sucursal_id": str(target_sede),
         }
     )
     
@@ -238,6 +251,7 @@ def crear_usuario(
         "nombre_completo": nuevo_usuario.nombre_completo,
         "rol": nuevo_usuario.rol.value if hasattr(nuevo_usuario.rol, 'value') else nuevo_usuario.rol,
         "activo": nuevo_usuario.activo,
+        "sucursal_id": str(nuevo_usuario.sucursal_id) if nuevo_usuario.sucursal_id else None,
         "created_at": nuevo_usuario.created_at,
         "updated_at": nuevo_usuario.updated_at
     }
@@ -287,6 +301,10 @@ def actualizar_usuario(
     
     if usuario_data.activo is not None:
         usuario.activo = usuario_data.activo
+
+    if usuario_data.sucursal_id is not None:
+        assert_sucursal_in_tenant(db, usuario_data.sucursal_id, current_user.tenant_id)
+        usuario.sucursal_id = usuario_data.sucursal_id
     
     usuario.updated_at = datetime.now(timezone.utc)
     
@@ -314,6 +332,7 @@ def actualizar_usuario(
         "nombre_completo": usuario.nombre_completo,
         "rol": usuario.rol.value if hasattr(usuario.rol, 'value') else usuario.rol,
         "activo": usuario.activo,
+        "sucursal_id": str(usuario.sucursal_id) if usuario.sucursal_id else None,
         "created_at": usuario.created_at,
         "updated_at": usuario.updated_at
     }

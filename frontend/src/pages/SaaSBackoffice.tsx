@@ -21,6 +21,7 @@ import { BackofficeSectionHeading } from '../components/BackofficeSectionHeading
 import { useAuth } from '../contexts/AuthContext';
 import { apiClient } from '../api/client';
 import { useState } from 'react';
+import { formatCurrency } from '../utils/formatNumber';
 import type {
   SaaSAuditLogItem,
   SaaSBillingPlanItem,
@@ -414,7 +415,7 @@ export default function SaaSBackoffice() {
     onSuccess: (data) => {
       setBillingActionError('');
       setBillingActionSuccess(
-        `Plan ${data.plan_label} asignado a /${data.tenant_slug}. Total periodo: ${data.total.toLocaleString('es-CO')}`,
+        `Plan ${data.plan_label} asignado a /${data.tenant_slug}. Total periodo: ${formatCurrency(data.total)}`,
       );
       setLastPaymentReceipt(null);
       setPaymentAmount(formatAmountForInput(data.total));
@@ -878,7 +879,7 @@ export default function SaaSBackoffice() {
                         </td>
                         <td>{item.next_billing_at ? new Date(item.next_billing_at).toLocaleDateString() : '-'}</td>
                         <td>
-                          {item.last_payment_amount != null ? `${item.last_payment_amount.toLocaleString('es-CO')} (${item.last_payment_at ? new Date(item.last_payment_at).toLocaleDateString() : '-'})` : '-'}
+                          {item.last_payment_amount != null ? `${formatCurrency(item.last_payment_amount)} (${item.last_payment_at ? new Date(item.last_payment_at).toLocaleDateString() : '-'})` : '-'}
                         </td>
                         <td>{item.last_receipt_reference || '-'}</td>
                         <td className="table-enterprise-col-actions">
@@ -1651,7 +1652,7 @@ export default function SaaSBackoffice() {
                             Resumen: {billingQuoteQuery.data.sedes_totales} sedes totales |{' '}
                             {billingQuoteQuery.data.included_branches} incluidas |{' '}
                             {billingQuoteQuery.data.chargeable_additional_branches} facturables | Total:{' '}
-                            {billingQuoteQuery.data.total.toLocaleString('es-CO')}
+                            {formatCurrency(billingQuoteQuery.data.total)}
                           </div>
                         )}
                       </div>
@@ -1697,7 +1698,7 @@ export default function SaaSBackoffice() {
                             <span className="text-emerald-700">Plan:</span> {lastPaymentReceipt.plan_label}
                           </p>
                           <p>
-                            <span className="text-emerald-700">Monto:</span> {lastPaymentReceipt.amount.toLocaleString('es-CO')}
+                            <span className="text-emerald-700">Monto:</span> {formatCurrency(lastPaymentReceipt.amount)}
                           </p>
                           <p>
                             <span className="text-emerald-700">Fecha pago:</span>{' '}
@@ -1774,7 +1775,7 @@ export default function SaaSBackoffice() {
                                     {new Date(p.paid_at).toLocaleString()}
                                   </td>
                                   <td className="font-semibold text-slate-900">
-                                    {p.amount.toLocaleString('es-CO')}
+                                    {formatCurrency(p.amount)}
                                   </td>
                                   <td>{p.plan_label || p.plan_code || '—'}</td>
                                   <td className="font-mono text-xs">{p.comprobante_referencia || '—'}</td>

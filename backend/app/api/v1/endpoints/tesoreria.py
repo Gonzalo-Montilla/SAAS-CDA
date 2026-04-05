@@ -12,6 +12,7 @@ from uuid import UUID
 
 from app.core.deps import get_db, get_current_user, get_admin, get_active_sucursal_id
 from app.models.usuario import Usuario
+from app.models.tenant import Tenant
 from app.models.tesoreria import (
     MovimientoTesoreria,
     ConfiguracionTesoreria,
@@ -800,6 +801,8 @@ async def descargar_comprobante_egreso(
     categoria_str = movimiento.categoria_egreso.value if movimiento.categoria_egreso else "otros_gastos"
     metodo_pago_str = movimiento.metodo_pago.value if isinstance(movimiento.metodo_pago, MetodoPagoTesoreria) else str(movimiento.metodo_pago)
     
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+
     pdf_buffer = generar_comprobante_egreso(
         numero_comprobante=numero_comprobante,
         fecha=movimiento.fecha_movimiento,
@@ -809,7 +812,9 @@ async def descargar_comprobante_egreso(
         monto=abs(movimiento.monto),
         metodo_pago=metodo_pago_str,
         autorizado_por=autorizado_por,
-        desglose_efectivo=desglose_dict
+        desglose_efectivo=desglose_dict,
+        tenant_logo_url=tenant.logo_url if tenant else None,
+        nombre_comercial_cda=tenant.nombre_comercial if tenant else None,
     )
     
     # Nombre del archivo

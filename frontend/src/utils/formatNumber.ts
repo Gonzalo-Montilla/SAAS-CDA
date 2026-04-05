@@ -1,6 +1,7 @@
 /**
- * Formatea números a formato colombiano (COP) de forma confiable
- * NO depende de configuración regional del SO
+ * Formato COP entero (sin decimales) — usar en toda la app para montos en pantalla/PDF.
+ * `formatCurrency`: solo dígitos y separadores; `formatCOP`: con prefijo $.
+ * No depende del locale del sistema (evita inconsistencias entre equipos).
  */
 export function formatCurrency(value: number | string): string {
   const num = typeof value === 'string' ? parseFloat(value) : value;

@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { cargarLogoCDAConDimensiones } from './logoBase64';
+import { formatCOP } from './formatNumber';
 
 interface DatosReciboPagoPDF {
   placa: string;
@@ -153,7 +154,7 @@ export async function generarPDFReciboPagoParaEnvio(datos: DatosReciboPagoPDF): 
   doc.setFont('helvetica', 'normal');
   doc.text('Revisión Técnico-Mecánica (RTM):', leftMargin + 5, y);
   doc.setFont('helvetica', 'bold');
-  doc.text(`$${datos.valorRTM.toLocaleString('es-CO')}`, pageWidth - leftMargin - 5, y, { align: 'right' });
+  doc.text(formatCOP(datos.valorRTM), pageWidth - leftMargin - 5, y, { align: 'right' });
   y += 7;
   
   // Comisión SOAT (si aplica)
@@ -161,7 +162,7 @@ export async function generarPDFReciboPagoParaEnvio(datos: DatosReciboPagoPDF): 
     doc.setFont('helvetica', 'normal');
     doc.text('Comisión SOAT:', leftMargin + 5, y);
     doc.setFont('helvetica', 'bold');
-    doc.text(`$${datos.comisionSOAT.toLocaleString('es-CO')}`, pageWidth - leftMargin - 5, y, { align: 'right' });
+    doc.text(formatCOP(datos.comisionSOAT), pageWidth - leftMargin - 5, y, { align: 'right' });
     y += 10;
   } else {
     y += 3;
@@ -177,7 +178,7 @@ export async function generarPDFReciboPagoParaEnvio(datos: DatosReciboPagoPDF): 
   doc.text('TOTAL PAGADO:', leftMargin + 5, y + 13);
   
   doc.setFontSize(20);
-  const totalFormateado = `$${datos.totalCobrado.toLocaleString('es-CO')}`;
+  const totalFormateado = formatCOP(datos.totalCobrado);
   doc.text(totalFormateado, pageWidth - leftMargin - 5, y + 13, { align: 'right' });
   
   // Resetear color de texto

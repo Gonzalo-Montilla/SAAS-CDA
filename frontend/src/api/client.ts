@@ -1,11 +1,23 @@
 import axios from 'axios';
 import { getStoredTenantLoginPath } from '../utils/authRedirect';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+/** En desarrollo, por defecto mismo origen + proxy en vite.config (evita timeouts por CORS/red con localhost). */
+const API_URL =
+  import.meta.env.VITE_API_URL?.trim() ||
+  (import.meta.env.DEV ? '/api/v1' : 'http://127.0.0.1:8000/api/v1');
+
+/** En dev más margen por DB lenta; en prod configurable con VITE_API_TIMEOUT_MS. */
+const REQUEST_TIMEOUT_MS =
+  Number(import.meta.env.VITE_API_TIMEOUT_MS) ||
+  (import.meta.env.DEV ? 120000 : 45000);
 
 export const apiClient = axios.create({
   baseURL: API_URL,
+  timeout: REQUEST_TIMEOUT_MS,
 });
+
+/** Base URL del API (misma que usa apiClient); útil para fetch() que no pasa por axios. */
+export { API_URL as apiBaseUrl };
 
 // Interceptor para agregar el token JWT a todas las peticiones
 apiClient.interceptors.request.use(
@@ -38,9 +50,11 @@ apiClient.interceptors.response.use(
           currentScope === 'saas' ? `${API_URL}/saas/auth/refresh` : `${API_URL}/auth/refresh`;
 
         if (refreshToken) {
-          const response = await axios.post(refreshEndpoint, {
-            refresh_token: refreshToken,
-          });
+          const response = await axios.post(
+            refreshEndpoint,
+            { refresh_token: refreshToken },
+            { timeout: REQUEST_TIMEOUT_MS }
+          );
 
           const { access_token, refresh_token } = response.data;
           localStorage.setItem('access_token', access_token);

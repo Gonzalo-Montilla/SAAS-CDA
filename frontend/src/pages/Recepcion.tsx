@@ -11,6 +11,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { vehiculosApi, type TarifaCalculada } from '../api/vehiculos';
 import { tarifasApi } from '../api/tarifas';
 import type { VehiculoRegistro } from '../types';
+import { formatCOP } from '../utils/formatNumber';
 
 export default function Recepcion() {
   const queryClient = useQueryClient();
@@ -765,7 +766,7 @@ export default function Recepcion() {
                   <div className="mt-4 bg-green-50 border-2 border-green-200 rounded-lg p-3">
                     <p className="text-xs text-green-700">Comisión SOAT</p>
                     <p className="text-lg font-bold text-green-900">
-                      ${Number(comisionSOAT.valor_comision).toLocaleString()}
+                      {formatCOP(Number(comisionSOAT.valor_comision))}
                     </p>
                   </div>
                 )}
@@ -805,14 +806,14 @@ export default function Recepcion() {
                   <div className="bg-white rounded-lg p-3">
                     <p className="text-xs text-slate-600">RTM</p>
                     <p className="text-lg font-bold text-slate-900">
-                      ${Number(tarifaCalculada.valor_rtm).toLocaleString()}
+                      {formatCOP(Number(tarifaCalculada.valor_rtm))}
                     </p>
                   </div>
 
                   <div className="bg-white rounded-lg p-3">
                     <p className="text-xs text-slate-600">Terceros</p>
                     <p className="text-lg font-bold text-slate-900">
-                      ${Number(tarifaCalculada.valor_terceros).toLocaleString()}
+                      {formatCOP(Number(tarifaCalculada.valor_terceros))}
                     </p>
                   </div>
 
@@ -820,7 +821,7 @@ export default function Recepcion() {
                     <div className="bg-green-50 border-2 border-green-200 rounded-lg p-3">
                       <p className="text-xs text-green-700">Comisión SOAT</p>
                       <p className="text-lg font-bold text-green-900">
-                        ${Number(comisionSOAT.valor_comision).toLocaleString()}
+                        {formatCOP(Number(comisionSOAT.valor_comision))}
                       </p>
                     </div>
                   )}
@@ -829,7 +830,7 @@ export default function Recepcion() {
                 <div className="bg-primary-600 text-white rounded-lg p-4">
                   <p className="text-sm mb-1">TOTAL A COBRAR</p>
                   <p className="text-3xl font-bold">
-                    ${calcularTotalConSOAT().toLocaleString()}
+                    {formatCOP(calcularTotalConSOAT())}
                   </p>
                 </div>
 
@@ -1098,7 +1099,7 @@ export default function Recepcion() {
                       <span className="font-semibold">Modelo:</span> {vehiculo.ano_modelo}
                     </p>
                     <p className="text-lg font-bold text-primary-600 mt-2">
-                      ${vehiculo.total_cobrado.toLocaleString()}
+                      {formatCOP(vehiculo.total_cobrado)}
                     </p>
                   </div>
 

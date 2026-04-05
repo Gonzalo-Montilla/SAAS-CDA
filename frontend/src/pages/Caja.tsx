@@ -8,7 +8,7 @@ import { vehiculosApi } from '../api/vehiculos';
 import { configApi } from '../api/config';
 import { useAuth } from '../contexts/AuthContext';
 import { useBrand } from '../contexts/BrandContext';
-import { formatCurrency } from '../utils/formatCurrency';
+import { formatCurrency } from '../utils/formatNumber';
 import { formatDateTimeShort, formatTime24, formatDateWithWeekday } from '../utils/formatDate';
 import type { CajaApertura, Vehiculo } from '../types';
 import { 
@@ -207,7 +207,7 @@ export default function CajaPage() {
               <div>
                 <span className="opacity-80">Monto Inicial:</span>{' '}
                 <span className="font-semibold">
-                  ${cajaActiva.monto_inicial.toLocaleString()}
+                  ${formatCurrency(cajaActiva.monto_inicial)}
                 </span>
               </div>
             </div>
@@ -221,7 +221,7 @@ export default function CajaPage() {
                 Efectivo en Caja
               </p>
               <p className="text-3xl font-bold">
-                ${resumenTiempoReal.saldo_esperado.toLocaleString()}
+                ${formatCurrency(resumenTiempoReal.saldo_esperado)}
               </p>
               <p className="text-xs opacity-75 mt-1">
                 {resumenTiempoReal.vehiculos_cobrados} vehículos cobrados
@@ -398,7 +398,7 @@ function AperturaCaja() {
       }
     } else if (formData.monto_inicial < 20000) {
       const confirmar = window.confirm(
-        `El monto inicial es muy bajo ($${formData.monto_inicial.toLocaleString()}).\n\n` +
+        `El monto inicial es muy bajo ($${formatCurrency(formData.monto_inicial)}).\n\n` +
         `Podrías no tener suficiente cambio para los clientes.\n\n` +
         `¿Deseas continuar de todas formas?`
       );
@@ -454,7 +454,7 @@ function AperturaCaja() {
                 <DollarSign className="w-4 h-4" /> Ingresos
               </p>
               <p className="text-2xl font-bold text-secondary-700">
-                ${ultimaCaja.total_ingresos.toLocaleString()}
+                ${formatCurrency(ultimaCaja.total_ingresos)}
               </p>
             </div>
             <div className="bg-white rounded-lg p-4 text-center">
@@ -471,7 +471,7 @@ function AperturaCaja() {
                 {ultimaCaja.diferencia === 0 ? (
                   <CheckCircle2 className="w-6 h-6" />
                 ) : (
-                  (ultimaCaja.diferencia > 0 ? '+' : '') + '$' + ultimaCaja.diferencia.toLocaleString()
+                  (ultimaCaja.diferencia > 0 ? '+' : '') + '$' + formatCurrency(ultimaCaja.diferencia)
                 )}
               </p>
             </div>
@@ -764,7 +764,7 @@ function VehiculosPendientes({
               <div className="bg-secondary-50 border-2 border-secondary-200 rounded-lg p-3">
                 <p className="text-xs text-secondary-700 mb-1">Total a Cobrar</p>
                 <p className="text-2xl font-bold text-secondary-900">
-                  ${vehiculo.total_cobrado.toLocaleString()}
+                  ${formatCurrency(vehiculo.total_cobrado)}
                 </p>
               </div>
 
@@ -1075,26 +1075,26 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
                   {vehiculo.tiene_soat && clientePagaSOAT && (
                     <p className="text-sm opacity-90 flex items-center justify-center gap-1">
                       <CheckCircle2 className="w-4 h-4" />
-                      + Comisión SOAT: ${vehiculo.comision_soat.toLocaleString()}
+                      + Comisión SOAT: ${formatCurrency(vehiculo.comision_soat)}
                     </p>
                   )}
                   {parseFloat(valorPreventiva) > 0 && (
                     <div className="mt-3 pt-3 border-t border-white border-opacity-30">
                       <p className="text-sm opacity-90 mb-1">TOTAL A COBRAR</p>
-                      <p className="text-3xl font-bold">${totalAjustado.toLocaleString()}</p>
+                      <p className="text-3xl font-bold">${formatCurrency(totalAjustado)}</p>
                     </div>
                   )}
                 </div>
               ) : (
                 <div>
                   <p className="text-sm opacity-90 mb-1">TOTAL A COBRAR</p>
-                  <p className="text-4xl font-bold">${totalAjustado.toLocaleString()}</p>
+                  <p className="text-4xl font-bold">${formatCurrency(totalAjustado)}</p>
                   {vehiculo.tiene_soat && (
                     <div className="mt-3">
                       {clientePagaSOAT ? (
                         <p className="text-sm opacity-90 flex items-center justify-center gap-1">
                           <CheckCircle2 className="w-4 h-4" />
-                          Incluye comisión SOAT: ${vehiculo.comision_soat.toLocaleString()}
+                          Incluye comisión SOAT: ${formatCurrency(vehiculo.comision_soat)}
                         </p>
                       ) : (
                         <p className="text-sm opacity-90 flex items-center justify-center gap-1">
@@ -1119,7 +1119,7 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
                       <Shield className="w-5 h-5" />
                       Cliente registrado con SOAT
                     </p>
-                    <p className="text-xs text-secondary-700">Comisión original: ${vehiculo.comision_soat.toLocaleString()}</p>
+                    <p className="text-xs text-secondary-700">Comisión original: ${formatCurrency(vehiculo.comision_soat)}</p>
                   </div>
                 </div>
                 <label className="flex items-center p-3 bg-white border-2 border-secondary-600 rounded-lg cursor-pointer hover:bg-secondary-50 transition-colors">
@@ -1138,7 +1138,7 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
                   <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
                     <p className="text-sm text-red-800 flex items-start gap-2">
                       <AlertTriangle className="w-5 h-5 flex-shrink-0" />
-                      <span>El total se reducirá en <strong>${vehiculo.comision_soat.toLocaleString()}</strong>. El cliente NO pagará SOAT.</span>
+                      <span>El total se reducirá en <strong>${formatCurrency(vehiculo.comision_soat)}</strong>. El cliente NO pagará SOAT.</span>
                     </p>
                   </div>
                 )}
@@ -1213,7 +1213,7 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
                   Desglose de Pago Mixto
                 </h4>
                 <p className="text-sm text-teal-700 mb-4">
-                  Ingresa el monto para cada método de pago. La suma debe ser <strong>${totalAjustado.toLocaleString()}</strong>
+                  Ingresa el monto para cada método de pago. La suma debe ser <strong>${formatCurrency(totalAjustado)}</strong>
                 </p>
                 
                 <div className="grid grid-cols-2 gap-3 mb-3">
@@ -1333,12 +1333,12 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
                 }`}>
                   <div className="flex justify-between items-center text-sm">
                     <span className="font-semibold">Total ingresado:</span>
-                    <span className="text-lg font-bold">${sumaMixto.toLocaleString()}</span>
+                    <span className="text-lg font-bold">${formatCurrency(sumaMixto)}</span>
                   </div>
                   {Math.abs(sumaMixto - totalAjustado) >= 1 && (
                     <div className="mt-2 text-sm">
                       <span className="font-semibold">Falta: </span>
-                      <span className="text-red-600 font-bold">${(totalAjustado - sumaMixto).toLocaleString()}</span>
+                      <span className="text-red-600 font-bold">${formatCurrency(totalAjustado - sumaMixto)}</span>
                     </div>
                   )}
                   {Math.abs(sumaMixto - totalAjustado) < 1 && (
@@ -1629,7 +1629,7 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
     // Confirmación para gastos grandes (>$50,000)
     if (monto > 50000) {
       const confirmar = window.confirm(
-        `Monto alto detectado: $${monto.toLocaleString()}.\n\n` +
+        `Monto alto detectado: $${formatCurrency(monto)}.\n\n` +
         `Concepto: ${formData.concepto}\n\n` +
         `¿Confirmas registrar este gasto?`
       );
@@ -1713,7 +1713,7 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
               Se registró un egreso de:
             </p>
             <p className="text-3xl font-bold text-red-600 mb-4">
-              ${montoNumerico.toLocaleString()}
+              ${formatCurrency(montoNumerico)}
             </p>
             
             <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 mb-6">
@@ -1873,7 +1873,7 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
                     <p className="font-bold text-slate-900">{formData.concepto}</p>
                   </div>
                   <p className="text-2xl font-bold text-red-600">
-                    -${montoNumerico.toLocaleString()}
+                    -${formatCurrency(montoNumerico)}
                   </p>
                 </div>
               </div>
@@ -2044,7 +2044,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
       // Si no hay observaciones, exigirlas
       if (!observaciones || observaciones.trim().length < 10) {
         alert(
-          `Se detectó una diferencia alta: $${diferencia.toLocaleString()}.\n\n` +
+          `Se detectó una diferencia alta: $${formatCurrency(diferencia)}.\n\n` +
           `Debes agregar observaciones (mínimo 10 caracteres) explicando la diferencia.`
         );
         return;
@@ -2052,9 +2052,9 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
       
       // Confirmación adicional
       const confirmarDiferencia = window.confirm(
-        `${diferencia < 0 ? 'Faltante' : 'Sobrante'} de $${diferenciaAbsoluta.toLocaleString()}.\n\n` +
-        `Saldo esperado: $${resumen?.saldo_esperado.toLocaleString()}\n` +
-        `Efectivo contado: $${montoFisico?.toLocaleString()}\n\n` +
+        `${diferencia < 0 ? 'Faltante' : 'Sobrante'} de $${formatCurrency(diferenciaAbsoluta)}.\n\n` +
+        `Saldo esperado: $${formatCurrency(resumen?.saldo_esperado ?? 0)}\n` +
+        `Efectivo contado: $${formatCurrency(montoFisico ?? 0)}\n\n` +
         `Observaciones: ${observaciones}\n\n` +
         `¿Confirmas cerrar con esta diferencia?`
       );
@@ -2308,7 +2308,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                         {vehiculosPorMetodo.efectivo.map((v, idx) => (
                           <div key={idx} className="bg-green-50 border border-green-200 rounded p-2">
                             <p className="font-bold text-sm">{v.placa}</p>
-                            <p className="text-xs text-gray-600">${v.total_cobrado.toLocaleString()}</p>
+                            <p className="text-xs text-gray-600">${formatCurrency(v.total_cobrado)}</p>
                           </div>
                         ))}
                       </div>
@@ -2326,7 +2326,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                         {vehiculosPorMetodo.tarjeta_debito.map((v, idx) => (
                           <div key={idx} className="bg-blue-50 border border-blue-200 rounded p-2">
                             <p className="font-bold text-sm">{v.placa}</p>
-                            <p className="text-xs text-gray-600">${v.total_cobrado.toLocaleString()}</p>
+                            <p className="text-xs text-gray-600">${formatCurrency(v.total_cobrado)}</p>
                           </div>
                         ))}
                       </div>
@@ -2344,7 +2344,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                         {vehiculosPorMetodo.tarjeta_credito.map((v, idx) => (
                           <div key={idx} className="bg-indigo-50 border border-indigo-200 rounded p-2">
                             <p className="font-bold text-sm">{v.placa}</p>
-                            <p className="text-xs text-gray-600">${v.total_cobrado.toLocaleString()}</p>
+                            <p className="text-xs text-gray-600">${formatCurrency(v.total_cobrado)}</p>
                           </div>
                         ))}
                       </div>
@@ -2362,7 +2362,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                         {vehiculosPorMetodo.transferencia.map((v, idx) => (
                           <div key={idx} className="bg-purple-50 border border-purple-200 rounded p-2">
                             <p className="font-bold text-sm">{v.placa}</p>
-                            <p className="text-xs text-gray-600">${v.total_cobrado.toLocaleString()}</p>
+                            <p className="text-xs text-gray-600">${formatCurrency(v.total_cobrado)}</p>
                           </div>
                         ))}
                       </div>
@@ -2380,7 +2380,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                         {vehiculosPorMetodo.mixto.map((v, idx) => (
                           <div key={idx} className="bg-teal-50 border border-teal-200 rounded p-2">
                             <p className="font-bold text-sm">{v.placa}</p>
-                            <p className="text-xs text-gray-600">${v.total_cobrado.toLocaleString()}</p>
+                            <p className="text-xs text-gray-600">${formatCurrency(v.total_cobrado)}</p>
                           </div>
                         ))}
                       </div>
@@ -2398,7 +2398,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                         {vehiculosPorMetodo.credismart.map((v, idx) => (
                           <div key={idx} className="bg-orange-50 border border-orange-200 rounded p-2">
                             <p className="font-bold text-sm">{v.placa}</p>
-                            <p className="text-xs text-gray-600">${v.total_cobrado.toLocaleString()}</p>
+                            <p className="text-xs text-gray-600">${formatCurrency(v.total_cobrado)}</p>
                           </div>
                         ))}
                       </div>
@@ -2416,7 +2416,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                         {vehiculosPorMetodo.sistecredito.map((v, idx) => (
                           <div key={idx} className="bg-yellow-50 border border-yellow-200 rounded p-2">
                             <p className="font-bold text-sm">{v.placa}</p>
-                            <p className="text-xs text-gray-600">${v.total_cobrado.toLocaleString()}</p>
+                            <p className="text-xs text-gray-600">${formatCurrency(v.total_cobrado)}</p>
                           </div>
                         ))}
                       </div>
@@ -2551,7 +2551,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                     placeholder="0"
                   />
                   <p className="text-xs text-green-700 mt-1 text-center">
-                    ${((desglose[key as keyof typeof desglose] as number) * valor).toLocaleString()}
+                    ${formatCurrency((desglose[key as keyof typeof desglose] as number) * valor)}
                   </p>
                 </div>
               ))}
@@ -2586,7 +2586,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                     placeholder="0"
                   />
                   <p className="text-xs text-blue-700 mt-1 text-center">
-                    ${((desglose[key as keyof typeof desglose] as number) * valor).toLocaleString()}
+                    ${formatCurrency((desglose[key as keyof typeof desglose] as number) * valor)}
                   </p>
                 </div>
               ))}
@@ -2601,7 +2601,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                 <p className="text-xs opacity-75">Suma de todas las denominaciones</p>
               </div>
               <p className="text-4xl font-bold">
-                ${totalDesglose.toLocaleString()}
+                ${formatCurrency(totalDesglose)}
               </p>
             </div>
           </div>
@@ -2787,13 +2787,13 @@ function HistorialCajas() {
                     <div>
                       <p className="text-xs text-gray-600">Monto Inicial</p>
                       <p className="font-semibold text-gray-900">
-                        ${caja.monto_inicial.toLocaleString()}
+                        ${formatCurrency(caja.monto_inicial)}
                       </p>
                     </div>
                     <div>
                       <p className="text-xs text-gray-600">Saldo Esperado</p>
                       <p className="font-semibold text-gray-900">
-                        ${(caja as any).saldo_esperado?.toLocaleString() || '-'}
+                        ${(caja as any).saldo_esperado != null ? formatCurrency((caja as any).saldo_esperado) : '-'}
                       </p>
                     </div>
                   </div>
@@ -2808,13 +2808,13 @@ function HistorialCajas() {
                   {esCerrada && diferencia > 0 && (
                     <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg text-sm font-semibold bg-blue-100 text-blue-800">
                       <TrendingUp className="w-4 h-4" />
-                      Sobrante: +${diferencia.toLocaleString()}
+                      Sobrante: +${formatCurrency(diferencia)}
                     </div>
                   )}
                   {esCerrada && diferencia < 0 && (
                     <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg text-sm font-semibold bg-red-100 text-red-800">
                       <TrendingDown className="w-4 h-4" />
-                      Faltante: ${diferencia.toLocaleString()}
+                      Faltante: ${formatCurrency(diferencia)}
                     </div>
                   )}
                 </div>
@@ -2927,7 +2927,7 @@ function VehiculosCobradosHoy({ vehiculos, loading }: { vehiculos: Vehiculo[], l
                 </span>
               </p>
               <p className="text-gray-700">
-                <span className="font-semibold">Total:</span> ${vehiculo.total_cobrado.toLocaleString()}
+                <span className="font-semibold">Total:</span> ${formatCurrency(vehiculo.total_cobrado)}
               </p>
             </div>
 

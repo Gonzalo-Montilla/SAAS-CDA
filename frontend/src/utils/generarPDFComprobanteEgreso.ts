@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { cargarLogoCDAConDimensiones } from './logoBase64';
+import { formatCOP } from './formatNumber';
 
 interface DatosEgresoPDF {
   numeroComprobante: string;
@@ -124,7 +125,7 @@ export async function generarPDFComprobanteEgreso(datos: DatosEgresoPDF): Promis
   doc.text('MONTO:', leftMargin + 5, y + 8);
   
   doc.setFontSize(20);
-  const montoFormateado = `$${datos.monto.toLocaleString('es-CO')}`;
+  const montoFormateado = formatCOP(datos.monto);
   doc.text(montoFormateado, pageWidth - leftMargin - 5, y + 13, { align: 'right' });
   y += 26;
   

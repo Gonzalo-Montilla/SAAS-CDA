@@ -21,6 +21,7 @@ import {
   Save,
   Bike
 } from 'lucide-react';
+import { formatCurrency, formatCOP } from '../utils/formatNumber';
 
 export default function TarifasPage() {
   const [vistaActual, setVistaActual] = useState<'tarifas' | 'comisiones'>('tarifas');
@@ -37,6 +38,11 @@ export default function TarifasPage() {
         </p>
         <p className="module-hero-subtitle">
           Configura tarifas RTM y comisiones SOAT por vigencia con consistencia operativa.
+        </p>
+        <p className="mt-3 text-sm text-slate-600 max-w-3xl leading-relaxed">
+          <span className="font-medium text-slate-800">Alcance por CDA:</span> el listado es único para todo el tenant:
+          todas las sedes comparten las mismas tarifas y comisiones. Crear o editar en una sede actualiza el catálogo
+          completo; cambiar la sede activa en el encabezado no muestra otro conjunto de registros.
         </p>
       </section>
 
@@ -224,13 +230,13 @@ function TarifasRTM({
                       </span>
                     </td>
                     <td className="pl-3 text-right font-semibold text-primary-700">
-                      ${tarifa.valor_rtm.toLocaleString()}
+                      {formatCOP(tarifa.valor_rtm)}
                     </td>
                     <td className="pl-3 text-right font-semibold text-slate-600">
-                      ${tarifa.valor_terceros.toLocaleString()}
+                      {formatCOP(tarifa.valor_terceros)}
                     </td>
                     <td className="pl-3 text-right font-bold text-secondary-700 text-lg">
-                      ${tarifa.valor_total.toLocaleString()}
+                      {formatCOP(tarifa.valor_total)}
                     </td>
                     <td className="pl-3 text-center text-sm text-slate-600">
                       {new Date(tarifa.vigencia_inicio).toLocaleDateString('es-CO')}
@@ -337,7 +343,7 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
       return 'Los valores RTM, terceros y total deben ser mayores a cero.';
     }
     if (!totalCoincide) {
-      return `El valor total debe ser exactamente ${totalEsperado.toLocaleString('es-CO')}.`;
+      return `El valor total debe ser exactamente ${formatCurrency(totalEsperado)}.`;
     }
     return null;
   };
@@ -580,7 +586,7 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
                 ) : (
                   <p className="text-xs text-amber-700 mt-1 flex items-center gap-1">
                     <AlertTriangle className="w-3 h-3" />
-                    Total esperado: ${totalEsperado.toLocaleString('es-CO')}.
+                    Total esperado: ${formatCurrency(totalEsperado)}.
                   </p>
                 )}
               </div>
@@ -650,7 +656,7 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
       return 'Los valores RTM, terceros y total deben ser mayores a cero.';
     }
     if (!totalCoincide) {
-      return `El valor total debe ser exactamente ${totalEsperado.toLocaleString('es-CO')}.`;
+      return `El valor total debe ser exactamente ${formatCurrency(totalEsperado)}.`;
     }
     return null;
   };
@@ -770,7 +776,7 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
                 ) : (
                   <p className="text-xs text-amber-700 mt-1 flex items-center gap-1">
                     <AlertTriangle className="w-3 h-3" />
-                    Total esperado: ${totalEsperado.toLocaleString('es-CO')}.
+                    Total esperado: ${formatCurrency(totalEsperado)}.
                   </p>
                 )}
             </div>
@@ -848,7 +854,7 @@ function ComisionesSOAT() {
   });
 
   const handleEliminar = (comision: any) => {
-    if (window.confirm(`¿Confirmas eliminar la comisión de ${comision.tipo_vehiculo}?\n\nValor: $${comision.valor_comision.toLocaleString()}`)) {
+    if (window.confirm(`¿Confirmas eliminar la comisión de ${comision.tipo_vehiculo}?\n\nValor: ${formatCOP(comision.valor_comision)}`)) {
       eliminarMutation.mutate(comision.id);
     }
   };
@@ -914,7 +920,7 @@ function ComisionesSOAT() {
                     <div className="mb-4">
                       <p className="text-xs text-slate-600 mb-1">Comisión por SOAT vendido</p>
                       <p className="text-3xl font-bold text-secondary-700">
-                        ${comision.valor_comision.toLocaleString()}
+                        {formatCOP(comision.valor_comision)}
                       </p>
                     </div>
 

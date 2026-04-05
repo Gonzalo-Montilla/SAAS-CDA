@@ -5,8 +5,15 @@ import { useAuth } from '../contexts/AuthContext';
 import { useBrand } from '../contexts/BrandContext';
 import { apiClient } from '../api/client';
 import type { AuthScope, TenantSelfRegisterRequest } from '../types';
+import { PasswordInput } from '../components/PasswordInput';
 
 function extractApiErrorMessage(err: any, fallback: string): string {
+  if (err?.code === 'ECONNABORTED' || (typeof err?.message === 'string' && err.message.includes('timeout'))) {
+    if (import.meta.env.DEV) {
+      return 'Tiempo de espera agotado al hablar con el API. Comprueba: 1) Backend en http://127.0.0.1:8000 (abre /docs o /health). 2) Tras cambiar .env reinicia npm run dev. 3) Si la base de datos está en otro servidor, que DATABASE_URL sea alcanzable.';
+    }
+    return 'La petición expiró: el servidor no respondió a tiempo. Revisa que el backend esté arriba y que la URL del API (VITE_API_URL en el build) apunte al dominio correcto, sin mezclar HTTPS del sitio con HTTP del API bloqueado por el navegador.';
+  }
   const detail = err?.response?.data?.detail;
 
   if (typeof detail === 'string' && detail.trim()) {
@@ -467,9 +474,8 @@ export default function Login() {
               <label htmlFor="password" className="block text-xs font-medium text-slate-700 mb-2">
                 Contraseña
               </label>
-              <input
+              <PasswordInput
                 id="password"
-                type="password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -729,14 +735,14 @@ export default function Login() {
                   {sendEmailCodeMutation.isLoading ? 'Enviando...' : 'Enviar código'}
                 </button>
               </div>
-              <input
-                type="password"
+              <PasswordInput
                 value={registerAdminPassword}
                 onChange={(e) => setRegisterAdminPassword(e.target.value)}
                 className="w-full px-4 py-2.5 border border-gray-300 rounded-lg"
                 placeholder="Contraseña inicial"
                 required
                 minLength={6}
+                autoComplete="new-password"
               />
               <div className="grid grid-cols-2 gap-2">
                 <button

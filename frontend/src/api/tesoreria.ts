@@ -1,4 +1,4 @@
-import apiClient from './client';
+import apiClient, { apiBaseUrl } from './client';
 
 export interface MovimientoTesoreria {
   id: string;
@@ -132,7 +132,7 @@ export const tesoreriaApi = {
     
     // Usar fetch en lugar de axios para mejor manejo de blobs
     const response = await fetch(
-      `${import.meta.env.VITE_API_URL}/tesoreria/movimientos/${movimientoId}/comprobante`,
+      `${apiBaseUrl}/tesoreria/movimientos/${movimientoId}/comprobante`,
       {
         method: 'GET',
         headers: {

@@ -13,6 +13,12 @@ from decimal import Decimal
 from typing import Optional
 import os
 
+from app.utils.comprobantes_caja import (
+    _download_remote_logo,
+    _resolve_tenant_logo_path,
+    _safe_text,
+)
+
 
 def generar_comprobante_egreso(
     numero_comprobante: str,
@@ -23,7 +29,9 @@ def generar_comprobante_egreso(
     monto: Decimal,
     metodo_pago: str,
     autorizado_por: str,
-    desglose_efectivo: Optional[dict] = None
+    desglose_efectivo: Optional[dict] = None,
+    tenant_logo_url: Optional[str] = None,
+    nombre_comercial_cda: Optional[str] = None,
 ) -> BytesIO:
     """
     Genera un comprobante de egreso en PDF
@@ -38,6 +46,8 @@ def generar_comprobante_egreso(
         metodo_pago: Método de pago utilizado
         autorizado_por: Nombre del usuario que autoriza
         desglose_efectivo: Desglose de billetes/monedas si aplica
+        tenant_logo_url: URL o ruta del logo del tenant (misma lógica que cierre de caja)
+        nombre_comercial_cda: Nombre del CDA bajo el título (sustituye el subtítulo genérico)
     
     Returns:
         BytesIO con el PDF generado
@@ -85,17 +95,29 @@ def generar_comprobante_egreso(
     # Elementos del documento
     elementos = []
     
-    # Logo (si existe)
-    logo_path = os.path.join(os.path.dirname(__file__), 'logo_cda.png')
-    if os.path.exists(logo_path):
-        logo = Image(logo_path, width=1.5*inch, height=1.5*inch, kind='proportional')
+    # Logo: tenant actual (local/remoto) o fallback heredado
+    tenant_logo_local_path = _resolve_tenant_logo_path(tenant_logo_url)
+    tenant_logo_remote_buffer = _download_remote_logo(tenant_logo_url)
+    fallback_logo_path = os.path.join(os.path.dirname(__file__), 'logo_cda.png')
+
+    logo_source = None
+    if tenant_logo_local_path and os.path.exists(tenant_logo_local_path):
+        logo_source = tenant_logo_local_path
+    elif tenant_logo_remote_buffer:
+        logo_source = tenant_logo_remote_buffer
+    elif os.path.exists(fallback_logo_path):
+        logo_source = fallback_logo_path
+
+    if logo_source:
+        logo = Image(logo_source, width=1.5 * inch, height=1.1 * inch, kind='proportional')
         logo.hAlign = 'CENTER'
         elementos.append(logo)
-        elementos.append(Spacer(1, 0.1*inch))
-    
+        elementos.append(Spacer(1, 0.1 * inch))
+
     # Encabezado
     elementos.append(Paragraph("COMPROBANTE DE EGRESO", titulo_style))
-    elementos.append(Paragraph("CDASOFT", subtitulo_style))
+    subtitulo_texto = (nombre_comercial_cda or "").strip() or "CDASOFT"
+    elementos.append(Paragraph(_safe_text(subtitulo_texto), subtitulo_style))
     elementos.append(Spacer(1, 0.2*inch))
     
     # Información del comprobante

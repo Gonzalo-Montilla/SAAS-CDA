@@ -237,12 +237,12 @@ def switch_sucursal(
     current_user: Usuario = Depends(get_current_user),
 ):
     """
-    Cambiar sede activa (JWT). Solo administrador y contador.
+    Cambiar sede activa (JWT). Disponible para todos los roles del tenant (caja, recepción, etc.).
     """
     if current_user.rol not in roles_con_sede_elegible():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo administración o contaduría pueden cambiar de sede",
+            detail="Tu rol no permite fijar la sede activa",
         )
     assert_sucursal_in_tenant(db, body.sucursal_id, current_user.tenant_id)
     return _issue_tokens(db, current_user, body.sucursal_id)

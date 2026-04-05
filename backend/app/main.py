@@ -11,12 +11,18 @@ from app.core.config import settings
 from app.db.database import init_db
 from app.api.v1.api import api_router
 
+# Swagger/ReDoc solo en desarrollo (ENVIRONMENT por defecto en Settings es "production").
+def _is_development_environment() -> bool:
+    return (settings.ENVIRONMENT or "").strip().lower() == "development"
+
+
+_show_api_docs = _is_development_environment()
 app = FastAPI(
     title=settings.APP_NAME,
     version=settings.APP_VERSION,
     description="Sistema de Punto de Venta para Centro de Diagnóstico Automotor",
-    docs_url="/docs" if settings.ENVIRONMENT == "development" else None,
-    redoc_url="/redoc" if settings.ENVIRONMENT == "development" else None
+    docs_url="/docs" if _show_api_docs else None,
+    redoc_url="/redoc" if _show_api_docs else None,
 )
 
 # ==================== MIDDLEWARE DE SEGURIDAD ====================

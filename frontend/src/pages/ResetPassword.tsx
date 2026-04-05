@@ -3,6 +3,7 @@ import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useMutation } from '@tanstack/react-query';
 import { apiClient } from '../api/client';
 import { useBrand } from '../contexts/BrandContext';
+import { PasswordInput } from '../components/PasswordInput';
 
 export default function ResetPassword() {
   const [searchParams] = useSearchParams();
@@ -96,32 +97,34 @@ export default function ResetPassword() {
           {token && !mensaje && (
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
-                <label className="block text-xs font-medium text-slate-700 mb-2">
+                <label htmlFor="reset-password-new" className="block text-xs font-medium text-slate-700 mb-2">
                   Nueva Contraseña
                 </label>
-                <input
-                  type="password"
+                <PasswordInput
+                  id="reset-password-new"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   className="input-corporate"
                   placeholder="Mínimo 6 caracteres"
                   required
                   minLength={6}
+                  autoComplete="new-password"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-medium text-slate-700 mb-2">
+                <label htmlFor="reset-password-confirm" className="block text-xs font-medium text-slate-700 mb-2">
                   Confirmar Contraseña
                 </label>
-                <input
-                  type="password"
+                <PasswordInput
+                  id="reset-password-confirm"
                   value={confirmPassword}
                   onChange={(e) => setConfirmPassword(e.target.value)}
                   className="input-corporate"
                   placeholder="Repite la contraseña"
                   required
                   minLength={6}
+                  autoComplete="new-password"
                 />
               </div>
 

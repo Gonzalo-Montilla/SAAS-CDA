@@ -71,8 +71,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const fetchCurrentUser = async (scope: AuthScope) => {
+  const fetchCurrentUser = async (
+    scope: AuthScope,
+    options?: { throwOnFailure?: boolean }
+  ) => {
     const meEndpoint = scope === 'saas' ? '/saas/auth/me' : '/auth/me';
+    const throwOnFailure = options?.throwOnFailure === true;
 
     try {
       let lastError: any = null;
@@ -101,6 +105,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       localStorage.removeItem('refresh_token');
       localStorage.removeItem('auth_scope');
       setAuthScope(null);
+      setUser(null);
+      if (throwOnFailure) {
+        throw error;
+      }
     } finally {
       setLoading(false);
     }
@@ -136,7 +144,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     setAuthScope(scope);
 
-    await fetchCurrentUser(scope);
+    await fetchCurrentUser(scope, { throwOnFailure: true });
   };
 
   const getLogoutRedirectPath = (): string => {
@@ -161,8 +169,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     authScope === 'tenant' &&
     'sucursales' in (user || {}) &&
     Array.isArray((user as Usuario).sucursales) &&
-    ((user as Usuario).sucursales?.length || 0) > 1 &&
-    ((user as Usuario).rol === 'administrador' || (user as Usuario).rol === 'contador');
+    ((user as Usuario).sucursales?.length || 0) > 1;
 
   const switchSucursal = async (sucursalId: string) => {
     const response = await apiClient.post<{ access_token: string; refresh_token: string; token_type: string }>(

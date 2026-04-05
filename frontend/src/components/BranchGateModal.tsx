@@ -5,8 +5,8 @@ import SedePickerModal from './SedePickerModal';
 const PREF_KEY = 'preferred_sucursal_id';
 
 /**
- * Modal bloqueante: solo si el usuario puede cambiar de sede (admin/contador)
- * y hay más de una sede, y aún no hay sede preferida persistida en este navegador.
+ * Modal bloqueante: si hay más de una sede y aún no hay sede preferida en el navegador,
+ * obliga a elegir sede para que caja y operación queden acotadas a una sucursal.
  */
 export default function BranchGateModal() {
   const { user, loading, authScope, canSwitchSucursal, switchSucursal } = useAuth();

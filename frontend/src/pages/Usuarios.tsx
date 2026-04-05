@@ -1,18 +1,30 @@
 import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Users, UserPlus, Search, Edit2, Key, Ban, Check, Trash2, User, Mail, Lock, UserCog, X, Save, CheckCircle2, XCircle } from 'lucide-react';
+import { Users, UserPlus, Search, Edit2, Key, Ban, Check, Trash2, User, Mail, Lock, UserCog, X, Save, CheckCircle2, XCircle, Building2 } from 'lucide-react';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import apiClient from '../api/client';
+import { useAuth } from '../contexts/AuthContext';
+import type { Usuario as TenantProfileUser } from '../types';
 
-interface Usuario {
+interface UsuarioListItem {
   id: string;
   email: string;
   nombre_completo: string;
   rol: string;
   activo: boolean;
+  sucursal_id?: string | null;
   created_at: string;
   updated_at: string | null;
+}
+
+function defaultSedePref(u: TenantProfileUser | null): string {
+  if (!u || !('sucursales' in u)) return '';
+  const list = u.sucursales || [];
+  if (list.length === 0) return '';
+  const active = u.active_sucursal_id;
+  if (active && list.some((s) => s.id === active)) return active;
+  return list[0].id;
 }
 
 interface Estadisticas {
@@ -77,12 +89,16 @@ const validatePasswordPolicy = (password: string): string | null => {
 
 export default function UsuariosPage({ embedded = false }: { embedded?: boolean } = {}) {
   const queryClient = useQueryClient();
+  const { user: authProfile } = useAuth();
+  const tenantAuth = authProfile && 'tenant_slug' in authProfile ? (authProfile as TenantProfileUser) : null;
+  const sedesFormOptions = tenantAuth?.sucursales ?? [];
+
   const [buscarInput, setBuscarInput] = useState('');
   const [buscar, setBuscar] = useState('');
   const [filtroRol, setFiltroRol] = useState<string>('');
   const [filtroActivo, setFiltroActivo] = useState<string>('');
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
-  const [usuarioEditando, setUsuarioEditando] = useState<Usuario | null>(null);
+  const [usuarioEditando, setUsuarioEditando] = useState<UsuarioListItem | null>(null);
   const [mostrarCambiarPassword, setMostrarCambiarPassword] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
@@ -91,7 +107,8 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
     email: '',
     password: '',
     nombre_completo: '',
-    rol: 'cajero'
+    rol: 'cajero',
+    sucursal_id: '',
   });
 
   const [passwordData, setPasswordData] = useState({
@@ -105,18 +122,27 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
     return () => clearTimeout(timeout);
   }, [buscarInput]);
 
-  // Query: Listar usuarios
-  const { data: usuarios, isLoading } = useQuery<Usuario[]>({
+  // Query: Listar usuarios (keepPreviousData evita desmontar la UI/modal al cambiar filtros o al revalidar)
+  const {
+    data: usuarios,
+    isLoading,
+    isError,
+    error,
+    isFetching,
+  } = useQuery<UsuarioListItem[]>({
     queryKey: ['usuarios', buscar, filtroRol, filtroActivo],
     queryFn: async () => {
       const params = new URLSearchParams();
       if (buscar) params.append('buscar', buscar);
       if (filtroRol) params.append('rol', filtroRol);
       if (filtroActivo) params.append('activo', filtroActivo);
-      
-      const response = await apiClient.get(`/usuarios?${params.toString()}`);
+
+      // Barra final obligatoria: /usuarios?… provoca 307→/usuarios/ y el redirect puede perder Authorization (401 en bucle).
+      const q = params.toString();
+      const response = await apiClient.get(q ? `/usuarios/?${q}` : '/usuarios/');
       return response.data;
     },
+    keepPreviousData: true,
   });
 
   // Query: Estadísticas
@@ -131,7 +157,14 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
   // Mutation: Crear usuario
   const crearMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
-      const response = await apiClient.post('/usuarios/', data);
+      const payload: Record<string, string> = {
+        email: data.email,
+        password: data.password,
+        nombre_completo: data.nombre_completo,
+        rol: data.rol,
+      };
+      if (data.sucursal_id) payload.sucursal_id = data.sucursal_id;
+      const response = await apiClient.post('/usuarios/', payload);
       return response.data;
     },
     onSuccess: () => {
@@ -151,7 +184,13 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
 
   // Mutation: Actualizar usuario
   const actualizarMutation = useMutation({
-    mutationFn: async ({ id, data }: { id: string; data: Partial<typeof formData> }) => {
+    mutationFn: async ({
+      id,
+      data,
+    }: {
+      id: string;
+      data: { email: string; nombre_completo: string; rol: string; sucursal_id?: string };
+    }) => {
       const response = await apiClient.put(`/usuarios/${id}`, data);
       return response.data;
     },
@@ -231,7 +270,8 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
       email: '',
       password: '',
       nombre_completo: '',
-      rol: 'cajero'
+      rol: 'cajero',
+      sucursal_id: defaultSedePref(tenantAuth),
     });
   };
 
@@ -241,13 +281,18 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
     setMostrarFormulario(true);
   };
 
-  const handleEditar = (usuario: Usuario) => {
+  const handleEditar = (usuario: UsuarioListItem) => {
     setUsuarioEditando(usuario);
+    const sid =
+      usuario.sucursal_id && sedesFormOptions.some((s) => s.id === usuario.sucursal_id)
+        ? usuario.sucursal_id
+        : defaultSedePref(tenantAuth);
     setFormData({
       email: usuario.email,
       password: '',
       nombre_completo: usuario.nombre_completo,
-      rol: usuario.rol
+      rol: usuario.rol,
+      sucursal_id: sid,
     });
     setMostrarFormulario(true);
   };
@@ -256,9 +301,17 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
     e.preventDefault();
     
     if (usuarioEditando) {
-      // Editar (sin password)
-      const { password, ...dataToUpdate } = formData;
-      actualizarMutation.mutate({ id: usuarioEditando.id, data: dataToUpdate });
+      const { password: _p, ...rest } = formData;
+      void _p;
+      actualizarMutation.mutate({
+        id: usuarioEditando.id,
+        data: {
+          email: rest.email,
+          nombre_completo: rest.nombre_completo,
+          rol: rest.rol,
+          ...(rest.sucursal_id ? { sucursal_id: rest.sucursal_id } : {}),
+        },
+      });
     } else {
       // Crear (con password)
       if (!formData.password) {
@@ -291,13 +344,13 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
     cambiarPasswordMutation.mutate({ id: mostrarCambiarPassword, password: passwordData.password });
   };
 
-  const handleToggleEstado = (usuario: Usuario) => {
+  const handleToggleEstado = (usuario: UsuarioListItem) => {
     if (confirm(`¿Confirmas ${usuario.activo ? 'desactivar' : 'activar'} al usuario ${usuario.nombre_completo}?`)) {
       toggleEstadoMutation.mutate(usuario.id);
     }
   };
 
-  const handleEliminar = (usuario: Usuario) => {
+  const handleEliminar = (usuario: UsuarioListItem) => {
     if (confirm(`¿Confirmas eliminar permanentemente a ${usuario.nombre_completo}?\nEsta acción no se puede deshacer.`)) {
       eliminarMutation.mutate(usuario.id);
     }
@@ -325,7 +378,15 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
     return colors[rol] || 'bg-slate-100 text-slate-800';
   };
 
-  if (isLoading) {
+  const labelSedeUsuario = (sucursalId?: string | null) => {
+    if (!sucursalId) return '—';
+    const s = sedesFormOptions.find((x) => x.id === sucursalId);
+    return s?.nombre ?? `Sede (${sucursalId.slice(0, 8)}…)`;
+  };
+
+  // Solo pantalla completa de carga en la primera carga sin datos; refetch no quita el modal
+  const showFullPageLoading = isLoading && usuarios === undefined;
+  if (showFullPageLoading) {
     if (embedded) {
       return (
         <div className="flex justify-center py-16">
@@ -354,8 +415,17 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
           </div>
         )}
 
+        {isError && (
+          <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
+            No se pudo cargar la lista de usuarios.{' '}
+            {(error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+              (error as Error)?.message ||
+              'Revisa la conexión o vuelve a intentar.'}
+          </div>
+        )}
+
         {/* Header */}
-        <div className="flex justify-between items-center">
+        <div className="flex justify-between items-center flex-wrap gap-3">
           <div>
             <h2 className="text-3xl font-bold text-slate-900 mb-2 flex items-center gap-3">
               <Users className="w-8 h-8 text-primary-600" />
@@ -365,13 +435,19 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
               Administra los usuarios del sistema CDA
             </p>
           </div>
-          <button
-            onClick={handleCrear}
-            className="flex items-center gap-2 btn-primary-solid"
-          >
-            <UserPlus className="w-5 h-5" />
-            Crear Usuario
-          </button>
+          <div className="flex items-center gap-2">
+            {isFetching && usuarios !== undefined && (
+              <span className="text-xs text-slate-500">Actualizando…</span>
+            )}
+            <button
+              type="button"
+              onClick={handleCrear}
+              className="flex items-center gap-2 btn-primary-solid"
+            >
+              <UserPlus className="w-5 h-5" />
+              Crear Usuario
+            </button>
+          </div>
         </div>
 
         {/* Estadísticas */}
@@ -501,6 +577,7 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
               <thead>
                 <tr className="text-left text-slate-600 border-b border-slate-200">
                   <th className="px-4 py-3">Usuario</th>
+                  <th className="px-4 py-3">Sede</th>
                   <th className="px-4 py-3">Rol</th>
                   <th className="px-4 py-3">Estado</th>
                   <th className="px-4 py-3">Fecha Creación</th>
@@ -516,6 +593,9 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
                           <p className="font-semibold text-slate-900">{usuario.nombre_completo}</p>
                           <p className="text-sm text-slate-600">{usuario.email}</p>
                         </div>
+                      </td>
+                      <td className="px-4 py-3 text-slate-700 text-sm max-w-[10rem] truncate" title={labelSedeUsuario(usuario.sucursal_id)}>
+                        {labelSedeUsuario(usuario.sucursal_id)}
                       </td>
                       <td className="px-4 py-3">
                         <span className={`px-3 py-1 rounded-full text-sm font-semibold ${getRolColor(usuario.rol)}`}>
@@ -535,6 +615,7 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
                       <td className="px-4 py-3">
                         <div className="flex items-center justify-center gap-2">
                           <button
+                            type="button"
                             onClick={() => handleEditar(usuario)}
                             className="px-3 py-1 bg-blue-100 hover:bg-blue-200 text-blue-800 rounded transition text-sm font-semibold flex items-center gap-1"
                             title="Editar"
@@ -542,6 +623,7 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
                             <Edit2 className="w-3 h-3" /> Editar
                           </button>
                           <button
+                            type="button"
                             onClick={() => setMostrarCambiarPassword(usuario.id)}
                             className="px-2 py-1 bg-yellow-100 hover:bg-yellow-200 text-yellow-800 rounded transition text-sm font-semibold"
                             title="Cambiar contraseña"
@@ -549,6 +631,7 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
                             <Key className="w-4 h-4" />
                           </button>
                           <button
+                            type="button"
                             onClick={() => handleToggleEstado(usuario)}
                             className={`px-2 py-1 rounded transition text-sm font-semibold ${
                               usuario.activo
@@ -560,6 +643,7 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
                             {usuario.activo ? <Ban className="w-4 h-4" /> : <Check className="w-4 h-4" />}
                           </button>
                           <button
+                            type="button"
                             onClick={() => handleEliminar(usuario)}
                             className="px-2 py-1 bg-red-100 hover:bg-red-200 text-red-800 rounded transition text-sm font-semibold"
                             title="Eliminar"
@@ -572,7 +656,7 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
                   ))
                 ) : (
                   <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
+                    <td colSpan={6} className="px-4 py-8 text-center text-slate-500">
                       No se encontraron usuarios
                     </td>
                   </tr>
@@ -607,6 +691,7 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
                     </div>
                   </div>
                   <button
+                    type="button"
                     onClick={() => {
                       setMostrarFormulario(false);
                       setUsuarioEditando(null);
@@ -621,7 +706,7 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
 
               {/* Contenido del Modal */}
               <div className="p-6 modal-body-scroll">
-                <form onSubmit={handleSubmit} className="space-y-5">
+                <form id="form-usuario-crear-editar" onSubmit={handleSubmit} className="space-y-5">
                   {/* Nombre Completo */}
                   <div className="group">
                     <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
@@ -699,6 +784,35 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
                     </p>
                   </div>
 
+                  {/* Sede por defecto (BD + JWT de respaldo) */}
+                  <div className="group">
+                    <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
+                      <Building2 className="w-4 h-4 text-slate-500" />
+                      Sede asignada
+                    </label>
+                    {sedesFormOptions.length > 0 ? (
+                      <select
+                        value={formData.sucursal_id}
+                        onChange={(e) => setFormData({ ...formData, sucursal_id: e.target.value })}
+                        className="input-corporate w-full px-4 py-3 cursor-pointer"
+                      >
+                        {sedesFormOptions.map((s) => (
+                          <option key={s.id} value={s.id}>
+                            {s.nombre}
+                            {s.es_principal ? ' (principal)' : ''}
+                          </option>
+                        ))}
+                      </select>
+                    ) : (
+                      <p className="text-sm text-slate-600 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+                        Se usará la sede de tu usuario o la sede principal del centro.
+                      </p>
+                    )}
+                    <p className="text-xs text-slate-500 mt-2">
+                      Queda guardada en el perfil del usuario; al operar, puede elegir otra sede si el centro tiene varias.
+                    </p>
+                  </div>
+
                   {/* Alerta de edición */}
                   {usuarioEditando && (
                     <div className="bg-gradient-to-r from-yellow-50 to-orange-50 border-2 border-yellow-200 rounded-xl p-4 flex items-start gap-3">
@@ -713,35 +827,33 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
                       </div>
                     </div>
                   )}
-                </form>
-              </div>
 
-              {/* Footer con botones */}
-              <div className="modal-footer-sticky -mx-6 px-6 bg-slate-50 flex gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setMostrarFormulario(false);
-                    setUsuarioEditando(null);
-                    resetForm();
-                  }}
-                  className="flex-1 btn-corporate-muted px-6 flex items-center justify-center gap-2"
-                >
-                  <X className="w-5 h-5" />
-                  Cancelar
-                </button>
-                <button
-                  type="submit"
-                  onClick={handleSubmit}
-                  className={`flex-1 px-6 py-3 text-white rounded-xl font-bold transition-all hover:scale-105 shadow-lg flex items-center justify-center gap-2 ${
-                    usuarioEditando
-                      ? 'bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700'
-                      : 'bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700'
-                  }`}
-                >
-                  <Save className="w-5 h-5" />
-                  {usuarioEditando ? 'Actualizar Usuario' : 'Crear Usuario'}
-                </button>
+                  <div className="modal-footer-sticky -mx-6 px-0 pt-2 bg-slate-50 flex gap-3 rounded-b-xl">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setMostrarFormulario(false);
+                        setUsuarioEditando(null);
+                        resetForm();
+                      }}
+                      className="flex-1 btn-corporate-muted px-6 flex items-center justify-center gap-2"
+                    >
+                      <X className="w-5 h-5" />
+                      Cancelar
+                    </button>
+                    <button
+                      type="submit"
+                      className={`flex-1 px-6 py-3 text-white rounded-xl font-bold transition-all hover:scale-105 shadow-lg flex items-center justify-center gap-2 ${
+                        usuarioEditando
+                          ? 'bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700'
+                          : 'bg-gradient-to-r from-green-500 to-green-600 hover:from-green-600 hover:to-green-700'
+                      }`}
+                    >
+                      <Save className="w-5 h-5" />
+                      {usuarioEditando ? 'Actualizar Usuario' : 'Crear Usuario'}
+                    </button>
+                  </div>
+                </form>
               </div>
             </div>
           </div>

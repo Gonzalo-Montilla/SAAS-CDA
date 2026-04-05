@@ -13,9 +13,14 @@ const extractHttpUrl = (value: string): string | null => {
 
 const resolveBackendBaseUrl = (): string => {
   const rawEnv = String(import.meta.env.VITE_API_URL || '').trim();
+  // Proxy de Vite: API relativa /api/v1 → mismo origen (5173), uploads vía /uploads
+  if (import.meta.env.DEV && rawEnv.startsWith('/')) {
+    if (typeof window !== 'undefined' && window.location?.origin) {
+      return window.location.origin;
+    }
+  }
   const extractedEnvUrl = rawEnv ? extractHttpUrl(rawEnv) : null;
   const apiUrl = extractedEnvUrl || DEFAULT_API_URL;
-  // Ejemplo: http://localhost:8000/api/v1 -> http://localhost:8000
   return apiUrl.replace(/\/api\/v1\/?$/i, '').replace(/\/+$/, '');
 };
 

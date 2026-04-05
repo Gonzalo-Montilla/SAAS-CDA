@@ -8,6 +8,7 @@ import {
   Legend,
   ResponsiveContainer,
 } from 'recharts';
+import { formatCOP } from '../utils/formatNumber';
 
 interface IngresoDiaItem {
   fecha: string;
@@ -22,7 +23,7 @@ export default function ReportesIngresosChart({ data }: { data: IngresoDiaItem[]
         <CartesianGrid strokeDasharray="3 3" />
         <XAxis dataKey="dia_semana" />
         <YAxis />
-        <Tooltip formatter={(value: number | undefined) => `$${(value ?? 0).toLocaleString()}`} />
+        <Tooltip formatter={(value: number | undefined) => formatCOP(value ?? 0)} />
         <Legend />
         <Bar dataKey="ingresos" fill="#10b981" name="Ingresos" />
       </BarChart>

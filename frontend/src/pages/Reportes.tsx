@@ -7,6 +7,7 @@ import apiClient from '../api/client';
 import { reportesApi } from '../api/reportes';
 import { useAuth } from '../contexts/AuthContext';
 import type { Usuario } from '../types';
+import { formatCOP } from '../utils/formatNumber';
 
 const ReportesIngresosChart = lazy(() => import('../components/ReportesIngresosChart'));
 
@@ -16,8 +17,6 @@ const formatLocalDate = (d: Date): string => {
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
-
-const formatCurrency = (value: number): string => `$${value.toLocaleString()}`;
 
 interface DashboardData {
   fecha: string;
@@ -540,7 +539,7 @@ export default function ReportesPage() {
               Ingresos del Día
             </p>
             <p className="text-3xl font-bold text-green-900">
-              ${resumen.total_ingresos_dia.toLocaleString()}
+              {formatCOP(resumen.total_ingresos_dia)}
             </p>
           </div>
 
@@ -551,7 +550,7 @@ export default function ReportesPage() {
               Egresos del Día
             </p>
             <p className="text-3xl font-bold text-red-900">
-              ${resumen.total_egresos_dia.toLocaleString()}
+              {formatCOP(resumen.total_egresos_dia)}
             </p>
           </div>
 
@@ -566,7 +565,7 @@ export default function ReportesPage() {
               Utilidad del Día
             </p>
             <p className={`text-3xl font-bold ${resumen.utilidad_dia >= 0 ? 'text-blue-900' : 'text-orange-900'}`}>
-              ${resumen.utilidad_dia.toLocaleString()}
+              {formatCOP(resumen.utilidad_dia)}
             </p>
           </div>
 
@@ -577,7 +576,7 @@ export default function ReportesPage() {
               Saldo Total
             </p>
             <p className="text-3xl font-bold text-purple-900">
-              ${resumen.saldo_total.toLocaleString()}
+              {formatCOP(resumen.saldo_total)}
             </p>
             <p className="text-xs text-purple-600 mt-1">Caja + Tesorería</p>
           </div>
@@ -618,9 +617,9 @@ export default function ReportesPage() {
                     <tr key={row.sucursal_id} className="border-t">
                       <td className="px-3 py-2 font-medium">{row.nombre}</td>
                       <td className="px-3 py-2 text-right">{row.tramites_registrados}</td>
-                      <td className="px-3 py-2 text-right">${row.ingresos_caja.toLocaleString()}</td>
-                      <td className="px-3 py-2 text-right">${row.ingresos_tesoreria.toLocaleString()}</td>
-                      <td className="px-3 py-2 text-right font-semibold">${row.ingresos_total.toLocaleString()}</td>
+                      <td className="px-3 py-2 text-right">{formatCOP(row.ingresos_caja)}</td>
+                      <td className="px-3 py-2 text-right">{formatCOP(row.ingresos_tesoreria)}</td>
+                      <td className="px-3 py-2 text-right font-semibold">{formatCOP(row.ingresos_total)}</td>
                     </tr>
                   ))}
                 </tbody>
@@ -655,19 +654,19 @@ export default function ReportesPage() {
               <div className="flex justify-between items-center p-3 bg-green-50 rounded-lg">
                 <span className="font-semibold text-gray-700">Ingresos</span>
                 <span className="text-xl font-bold text-green-600">
-                  ${desglose_modulos.caja.ingresos.toLocaleString()}
+                  {formatCOP(desglose_modulos.caja.ingresos)}
                 </span>
               </div>
               <div className="flex justify-between items-center p-3 bg-red-50 rounded-lg">
                 <span className="font-semibold text-gray-700">Egresos</span>
                 <span className="text-xl font-bold text-red-600">
-                  ${desglose_modulos.caja.egresos.toLocaleString()}
+                  {formatCOP(desglose_modulos.caja.egresos)}
                 </span>
               </div>
               <div className="flex justify-between items-center p-3 bg-blue-50 rounded-lg border-2 border-blue-300">
                 <span className="font-bold text-gray-900">Saldo Actual</span>
                 <span className="text-2xl font-bold text-blue-700">
-                  ${desglose_modulos.caja.saldo.toLocaleString()}
+                  {formatCOP(desglose_modulos.caja.saldo)}
                 </span>
               </div>
             </div>
@@ -683,19 +682,19 @@ export default function ReportesPage() {
               <div className="flex justify-between items-center p-3 bg-green-50 rounded-lg">
                 <span className="font-semibold text-gray-700">Ingresos</span>
                 <span className="text-xl font-bold text-green-600">
-                  ${desglose_modulos.tesoreria.ingresos.toLocaleString()}
+                  {formatCOP(desglose_modulos.tesoreria.ingresos)}
                 </span>
               </div>
               <div className="flex justify-between items-center p-3 bg-red-50 rounded-lg">
                 <span className="font-semibold text-gray-700">Egresos</span>
                 <span className="text-xl font-bold text-red-600">
-                  ${desglose_modulos.tesoreria.egresos.toLocaleString()}
+                  {formatCOP(desglose_modulos.tesoreria.egresos)}
                 </span>
               </div>
               <div className="flex justify-between items-center p-3 bg-purple-50 rounded-lg border-2 border-purple-300">
                 <span className="font-bold text-gray-900">Saldo Actual</span>
                 <span className="text-2xl font-bold text-purple-700">
-                  ${desglose_modulos.tesoreria.saldo.toLocaleString()}
+                  {formatCOP(desglose_modulos.tesoreria.saldo)}
                 </span>
               </div>
             </div>
@@ -899,7 +898,7 @@ export default function ReportesPage() {
                     <td className="px-3 py-2">{m.concepto}</td>
                     <td className="px-3 py-2">{m.categoria}</td>
                     <td className="px-3 py-2">{m.metodo_pago}</td>
-                    <td className={`px-3 py-2 text-right font-semibold ${m.es_ingreso ? 'text-green-700' : 'text-red-700'}`}>{formatCurrency(m.monto)}</td>
+                    <td className={`px-3 py-2 text-right font-semibold ${m.es_ingreso ? 'text-green-700' : 'text-red-700'}`}>{formatCOP(m.monto)}</td>
                     <td className="px-3 py-2">{m.usuario}</td>
                   </tr>
                 ))}
@@ -923,10 +922,10 @@ export default function ReportesPage() {
                   <p className="text-sm text-slate-500">No hay movimientos por concepto en este periodo.</p>
                 )}
               {Object.entries(conceptosData?.ingresos_por_concepto || {}).map(([k, v]: any) => (
-                <div key={k} className="flex justify-between text-green-700"><span>{k}</span><span className="font-semibold">${Number(v).toLocaleString()}</span></div>
+                <div key={k} className="flex justify-between text-green-700"><span>{k}</span><span className="font-semibold">{formatCOP(Number(v))}</span></div>
               ))}
               {Object.entries(conceptosData?.egresos_por_concepto || {}).map(([k, v]: any) => (
-                <div key={k} className="flex justify-between text-red-700"><span>{k}</span><span className="font-semibold">${Number(v).toLocaleString()}</span></div>
+                <div key={k} className="flex justify-between text-red-700"><span>{k}</span><span className="font-semibold">{formatCOP(Number(v))}</span></div>
               ))}
             </div>
           </div>
@@ -945,7 +944,7 @@ export default function ReportesPage() {
               {Object.entries(mediosPagoData?.medios_pago || {}).map(([metodo, vals]: any) => (
                 <div key={metodo} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition">
                   <span className="font-semibold text-slate-700 capitalize">{metodo.replace('_', ' ')}:</span>
-                  <span className="text-xl font-bold text-green-600">${Number((vals as any).total).toLocaleString()}</span>
+                  <span className="text-xl font-bold text-green-600">{formatCOP(Number((vals as any).total))}</span>
                 </div>
               ))}
             </div>
@@ -1010,9 +1009,9 @@ export default function ReportesPage() {
                     <td className="px-3 py-2">{t.tipo_vehiculo}</td>
                     <td className="px-3 py-2">{t.cliente}</td>
                     <td className="px-3 py-2">{t.documento}</td>
-                    <td className="px-3 py-2 text-right">{formatCurrency(t.valor_rtm)}</td>
-                    <td className="px-3 py-2 text-right">{formatCurrency(t.comision_soat)}</td>
-                    <td className="px-3 py-2 text-right font-semibold">{formatCurrency(t.total_cobrado)}</td>
+                    <td className="px-3 py-2 text-right">{formatCOP(t.valor_rtm)}</td>
+                    <td className="px-3 py-2 text-right">{formatCOP(t.comision_soat)}</td>
+                    <td className="px-3 py-2 text-right font-semibold">{formatCOP(t.total_cobrado)}</td>
                     <td className="px-3 py-2">{t.metodo_pago}</td>
                     <td className="px-3 py-2">{t.estado}</td>
                     <td className="px-3 py-2">{t.registrado_por}</td>

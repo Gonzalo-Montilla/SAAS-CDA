@@ -1,5 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { cargarLogoCDAConDimensiones } from './logoBase64';
+import { formatCOP } from './formatNumber';
 
 interface DatosVentaSOATPDF {
   placa: string;
@@ -112,7 +113,7 @@ export async function generarPDFVentaSOAT(datos: DatosVentaSOATPDF): Promise<str
   
   doc.setFontSize(12);
   doc.setFont('helvetica', 'bold');
-  const valorComercialFormateado = `$${datos.valorSoatComercial.toLocaleString('es-CO')}`;
+  const valorComercialFormateado = formatCOP(datos.valorSoatComercial);
   doc.text(valorComercialFormateado, pageWidth - leftMargin - 5, y + 8, { align: 'right' });
   
   doc.setFontSize(7);
@@ -149,7 +150,7 @@ export async function generarPDFVentaSOAT(datos: DatosVentaSOATPDF): Promise<str
   doc.text('COMISIÓN CDA:', leftMargin + 5, y + 10);
   
   doc.setFontSize(24);
-  const comisionFormateada = `$${datos.comisionCobrada.toLocaleString('es-CO')}`;
+  const comisionFormateada = formatCOP(datos.comisionCobrada);
   doc.text(comisionFormateada, pageWidth - leftMargin - 5, y + 16, { align: 'right' });
   
   doc.setFontSize(8);
