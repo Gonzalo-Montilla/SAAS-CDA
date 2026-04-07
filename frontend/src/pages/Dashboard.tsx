@@ -242,7 +242,7 @@ export default function Dashboard() {
                 </div>
                 <h3 className="text-xl font-bold text-slate-900 mb-2">Sedes y usuarios</h3>
                 <p className="text-slate-600 text-sm">
-                  Crear sedes, sede principal y usuarios del CDA
+                  Gestión de sedes y usuarios del CDA
                 </p>
               </button>
 

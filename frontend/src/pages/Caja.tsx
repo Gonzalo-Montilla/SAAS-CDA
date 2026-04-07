@@ -6,10 +6,12 @@ import ErrorBoundary from '../components/ErrorBoundary';
 import { cajasApi } from '../api/cajas';
 import { vehiculosApi } from '../api/vehiculos';
 import { configApi } from '../api/config';
+import { factusApi } from '../api/factus';
 import { useAuth } from '../contexts/AuthContext';
 import { useBrand } from '../contexts/BrandContext';
 import { formatCurrency } from '../utils/formatNumber';
 import { formatDateTimeShort, formatTime24, formatDateWithWeekday } from '../utils/formatDate';
+import { extractApiErrorMessage } from '../utils/apiError';
 import type { CajaApertura, Vehiculo } from '../types';
 import { 
   AlertTriangle, 
@@ -841,13 +843,24 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
     retry: 1,
   });
 
+  const { data: factusSettings, isLoading: loadingFactusSettings } = useQuery({
+    queryKey: ['factus-settings'],
+    queryFn: factusApi.getSettings,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  const modoFactus = factusSettings?.modo === 'factus';
+
   // Calcular suma del desglose mixto
   const sumaMixto = Object.values(desgloseMixto).reduce((acc, val) => acc + val, 0);
   // Tolerancia de 1 peso para errores de redondeo
   const desgloseMixtoValido = metodoPago === 'mixto' ? Math.abs(sumaMixto - totalAjustado) < 1 : true;
   
-  // Validar que los 3 registros externos + factura DIAN estén completos
-  const todosRegistrados = registros.registrado_runt && registros.registrado_sicov && registros.registrado_indra && !!numeroFactura;
+  // Validar registros externos; en modo Factus no se exige número DIAN manual (se emite al confirmar)
+  const facturaOk =
+    modoFactus || (!loadingFactusSettings && !!numeroFactura.trim());
+  const todosRegistrados =
+    registros.registrado_runt && registros.registrado_sicov && registros.registrado_indra && facturaOk;
   
   // Validar que si es preventiva, tenga valor
   const preventivaTieneValor = esPreventiva ? parseFloat(valorPreventiva) > 0 : true;
@@ -878,7 +891,7 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
         comisionSOAT: comisionFinal,
         totalCobrado: totalAjustado,
         metodoPago: metodoPago,
-        numeroFacturaDIAN: numeroFactura,
+        numeroFacturaDIAN: vehiculoCobrado.numero_factura_dian || numeroFactura,
         fecha: new Date(),
         nombreCajero: user?.nombre_completo || 'Cajero',
         logoUrl: brand.logoSrc,
@@ -903,6 +916,10 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
           emailStatusNote = emailResult.has_email
             ? '\nAviso: no fue posible enviar el recibo por correo.'
             : '\nAviso: cliente sin correo registrado, no se envió email.';
+        } else if (emailResult.factura_incluida) {
+          emailStatusNote = emailResult.factura_adjunto_pdf
+            ? '\nCorreo enviado con recibo y factura electrónica (PDF adjunto y enlace).'
+            : '\nCorreo enviado con recibo y enlace a la factura electrónica (DIAN).';
         }
       } catch {
         emailStatusNote = '\nAviso: falló el envío del recibo por correo.';
@@ -938,7 +955,7 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
       vehiculo_id: vehiculo.id,
       metodo_pago: metodoPago,
       tiene_soat: clientePagaSOAT,
-      numero_factura_dian: numeroFactura || undefined,
+      numero_factura_dian: modoFactus ? undefined : numeroFactura || undefined,
       valor_preventiva: esPreventiva ? parseFloat(valorPreventiva) : undefined,
       desglose_mixto: desgloseParaEnviar,
       ...registros,
@@ -1026,9 +1043,9 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
 
           {cobrarMutation.isError && (
             <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6">
-              <p className="text-red-800 font-semibold text-center flex items-center justify-center gap-2">
-                <XCircle className="w-5 h-5" />
-                {(cobrarMutation.error as Error & { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'No fue posible registrar el cobro.'}
+              <p className="text-red-800 font-semibold text-left flex items-start gap-2 break-words whitespace-pre-wrap">
+                <XCircle className="w-5 h-5 shrink-0 mt-0.5" />
+                {extractApiErrorMessage(cobrarMutation.error, 'No fue posible registrar el cobro.')}
               </p>
             </div>
           )}
@@ -1487,36 +1504,53 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
                 <div>
                   <h4 className="font-bold text-amber-900 flex items-center gap-2">
                     <Receipt className="w-5 h-5" />
-                    Número de Factura DIAN <span className="text-red-600">*</span>
+                    {modoFactus ? (
+                      <>Factura electrónica (Factus)</>
+                    ) : (
+                      <>
+                        Número de Factura DIAN <span className="text-red-600">*</span>
+                      </>
+                    )}
                   </h4>
-                  <p className="text-xs text-amber-700">Registro obligatorio para facturación electrónica</p>
+                  <p className="text-xs text-amber-700">
+                    {modoFactus
+                      ? 'Al confirmar el cobro se emitirá la factura en Factus y el número quedará en el recibo.'
+                      : 'Registro obligatorio para facturación (número manual)'}
+                  </p>
                 </div>
               </div>
-              <div className="flex gap-3">
-                <input
-                  type="text"
-                  value={numeroFactura}
-                  onChange={(e) => setNumeroFactura(e.target.value.toUpperCase())}
-                  className="flex-1 input-pos uppercase"
-                  placeholder="ABC-123"
-                  required
-                />
-                <label className="flex items-center px-4 py-2 bg-white border-2 border-amber-600 rounded-lg cursor-pointer hover:bg-amber-50 transition-colors">
+              {modoFactus ? (
+                <div className="rounded-lg bg-white border border-amber-200 px-4 py-3 text-sm text-amber-900">
+                  No debes ingresar número aquí: se generará al confirmar con las credenciales configuradas en
+                  Ajustes.
+                </div>
+              ) : (
+                <div className="flex gap-3">
                   <input
-                    type="checkbox"
-                    checked={!!numeroFactura}
-                    onChange={() => {
-                      // El checkbox es solo visual, el required del input maneja la validación
-                    }}
-                    className="w-5 h-5 text-amber-600 rounded"
-                    disabled
+                    type="text"
+                    value={numeroFactura}
+                    onChange={(e) => setNumeroFactura(e.target.value.toUpperCase())}
+                    className="flex-1 input-pos uppercase"
+                    placeholder="ABC-123"
+                    required
                   />
-                  <span className="ml-2 font-semibold text-amber-900 flex items-center gap-1">
-                    <CheckSquare className="w-4 h-4" />
-                    Registrado
-                  </span>
-                </label>
-              </div>
+                  <label className="flex items-center px-4 py-2 bg-white border-2 border-amber-600 rounded-lg cursor-pointer hover:bg-amber-50 transition-colors">
+                    <input
+                      type="checkbox"
+                      checked={!!numeroFactura}
+                      onChange={() => {
+                        // El checkbox es solo visual, el required del input maneja la validación
+                      }}
+                      className="w-5 h-5 text-amber-600 rounded"
+                      disabled
+                    />
+                    <span className="ml-2 font-semibold text-amber-900 flex items-center gap-1">
+                      <CheckSquare className="w-4 h-4" />
+                      Registrado
+                    </span>
+                  </label>
+                </div>
+              )}
             </div>
 
             {/* Alerta si faltan registros */}
@@ -1524,7 +1558,9 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
               <div className="mt-4 p-3 bg-yellow-50 border-2 border-yellow-200 rounded-lg">
                 <p className="text-sm font-semibold text-yellow-800 flex items-center gap-2">
                   <AlertTriangle className="w-5 h-5" />
-                  Debes marcar los 4 registros para confirmar el cobro
+                  {modoFactus
+                    ? 'Debes marcar los registros en RUNT, SICOV e INDRA para confirmar el cobro'
+                    : 'Debes marcar los 4 registros (incluido número DIAN) para confirmar el cobro'}
                 </p>
               </div>
             )}

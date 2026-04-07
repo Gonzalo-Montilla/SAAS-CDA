@@ -32,6 +32,9 @@ interface EnvioReciboResponse {
   sent: boolean;
   has_email: boolean;
   message: string;
+  /** Incluye enlace y/o adjunto de factura electrónica (Factus/DIAN) si existía registro. */
+  factura_incluida?: boolean;
+  factura_adjunto_pdf?: boolean;
 }
 
 export const vehiculosApi = {

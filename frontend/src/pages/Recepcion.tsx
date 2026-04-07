@@ -31,7 +31,7 @@ export default function Recepcion() {
   // Estado del formulario
   const [formData, setFormData] = useState<VehiculoRegistro>({
     placa: '',
-    tipo_vehiculo: 'liviano_particular',
+    tipo_vehiculo: 'moto',
     marca: '',
     modelo: '',
     ano_modelo: anoActual, // Año actual por defecto
@@ -242,7 +242,7 @@ export default function Recepcion() {
     navigate(location.pathname, { replace: true, state: null });
   }, [location.pathname, location.state, navigate, showToast]);
 
-  // Calcular tarifa cuando cambia el año del modelo o el tipo de vehículo
+  // Vista previa de tarifa solo para este formulario (no el vehículo del modal de Caja).
   useEffect(() => {
     let cancelled = false;
 
@@ -295,7 +295,7 @@ export default function Recepcion() {
     // Limpiar formulario PERO mantener el año para que la tarifa siga visible
     setFormData({
       placa: '',
-      tipo_vehiculo: 'liviano_particular',
+      tipo_vehiculo: 'moto',
       marca: '',
       modelo: '',
       ano_modelo: anoActual, // Mantener año actual para que la tarifa persista
@@ -356,11 +356,21 @@ export default function Recepcion() {
     e.preventDefault();
     
     const clienteEmailNormalizado = (formData.cliente_email || '').trim().toLowerCase();
+    const telDigits = (formData.cliente_telefono || '').replace(/\D/g, '');
+    if (telDigits.length < 7) {
+      alert('Ingrese un celular válido (mínimo 7 dígitos).');
+      return;
+    }
+    if (!clienteEmailNormalizado || !clienteEmailNormalizado.includes('@')) {
+      alert('Ingrese un correo electrónico válido.');
+      return;
+    }
 
     // Preparar datos incluyendo fotos en observaciones
     const dataConFotos = {
       ...formData,
-      cliente_email: clienteEmailNormalizado || undefined,
+      cliente_telefono: telDigits,
+      cliente_email: clienteEmailNormalizado,
       observaciones: JSON.stringify({
         texto: formData.observaciones || '',
         fotos: fotosVehiculo
@@ -651,29 +661,31 @@ export default function Recepcion() {
                 />
               </div>
 
-              {/* Teléfono */}
+              {/* Celular (obligatorio — factura electrónica / notificaciones) */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Teléfono
+                  Celular <span className="text-red-600">*</span>
                 </label>
                 <input
                   type="tel"
                   value={formData.cliente_telefono}
                   onChange={(e) => handleInputChange('cliente_telefono', e.target.value)}
+                  required
                   className="input-pos"
                   placeholder="3001234567"
                 />
               </div>
 
-              {/* Correo electrónico (opcional) */}
+              {/* Correo electrónico (obligatorio) */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Correo electrónico
+                  Correo electrónico <span className="text-red-600">*</span>
                 </label>
                 <input
                   type="email"
                   value={formData.cliente_email || ''}
                   onChange={(e) => handleInputChange('cliente_email', e.target.value.toLowerCase())}
+                  required
                   className="input-pos"
                   placeholder="cliente@correo.com"
                 />

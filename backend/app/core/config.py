@@ -2,7 +2,7 @@
 Configuración central de la aplicación
 """
 import json
-from typing import List
+from typing import List, Optional
 from pydantic_settings import BaseSettings
 from pydantic import Field, validator
 
@@ -55,6 +55,27 @@ class Settings(BaseSettings):
     SICOV_URL: str = "https://sicovindra.com:9093/"
     INDRA_URL: str = "https://indra.paynet.com.co:14443/Login.aspx?ReturnUrl=%2fInformacionSeguridad.aspx"
     
+    # Facturación electrónica (Factus) — URLs oficiales en https://developers.factus.com.co/
+    FACTUS_SANDBOX_BASE_URL: str = Field(default="https://api-sandbox.factus.com.co", env="FACTUS_SANDBOX_BASE_URL")
+    FACTUS_PRODUCTION_BASE_URL: str = Field(default="https://api.factus.com.co", env="FACTUS_PRODUCTION_BASE_URL")
+    FACTUS_ENCRYPTION_KEY: Optional[str] = Field(
+        default=None,
+        env="FACTUS_ENCRYPTION_KEY",
+        description="Opcional: cifrar secretos Factus; si vacío se deriva de SECRET_KEY.",
+    )
+    # Municipio DIAN (tabla Factus) para cliente/establecimiento cuando la sede aún no tiene código propio
+    FACTUS_DEFAULT_MUNICIPALITY_ID: int = Field(default=980, env="FACTUS_DEFAULT_MUNICIPALITY_ID")
+    # IVA tarifa general (Resolución DIAN: régimen común, p. ej. 19 %). En payloads Factus, `items.price`
+    # va con impuestos incluidos; la base la calcula Factus.
+    FACTUS_IVA_PORCENTAJE_GENERAL: float = Field(
+        default=19.0,
+        ge=0,
+        le=100,
+        env="FACTUS_IVA_PORCENTAJE_GENERAL",
+    )
+    # Decimales en pesos COP para bases y totales al desagregar IVA (habitual 2).
+    FACTUS_MONEDA_DECIMALES: int = Field(default=2, ge=0, le=6, env="FACTUS_MONEDA_DECIMALES")
+
     # Localización Colombia
     TIMEZONE: str = "America/Bogota"
     LOCALE: str = "es_CO"

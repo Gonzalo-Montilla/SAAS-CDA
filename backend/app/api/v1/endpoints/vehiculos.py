@@ -1,7 +1,10 @@
 """
 Endpoints de Vehículos
 """
+from io import BytesIO
+
 from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func
 from datetime import datetime, date, timezone
@@ -19,6 +22,9 @@ from app.core.deps import (
 from app.models.usuario import Usuario
 from app.models.tenant import Tenant
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo, MetodoPago
+from app.models.factus import TenantFactusSettings, FacturaElectronica
+from app.integrations.factus_client import FactusAPIError, format_factus_error_detail
+from app.integrations.factus_emit import emitir_y_persistir_factura_cobro, validar_datos_cliente_para_factus
 from app.models.tarifa import Tarifa, ComisionSOAT
 from app.models.caja import Caja, MovimientoCaja, TipoMovimiento, EstadoCaja
 from app.utils.email import (
@@ -30,6 +36,33 @@ from app.utils.email import (
 )
 from app.utils.quality import create_quality_survey_invite
 from app.utils.rtm_reminders import schedule_rtm_renewal_reminder_for_vehicle
+from app.utils.comprobantes import generar_recibo_pago_vehiculo_pdf
+
+
+def _try_download_factura_pdf_desde_url_publica(url: str, max_bytes: int = 8 * 1024 * 1024) -> bytes | None:
+    """Intenta obtener PDF desde la URL pública de Factus/DIAN. Si la URL sirve HTML, devuelve None."""
+    u = (url or "").strip()
+    if not u.lower().startswith("https://"):
+        return None
+    try:
+        import httpx
+
+        with httpx.Client(timeout=45.0, follow_redirects=True) as client:
+            r = client.get(
+                u,
+                headers={"Accept": "application/pdf,application/octet-stream,*/*"},
+            )
+            if r.status_code != 200:
+                return None
+            data = r.content
+            if not data or len(data) > max_bytes:
+                return None
+            ct = (r.headers.get("content-type") or "").lower()
+            if "pdf" in ct or data[:4] == b"%PDF":
+                return data
+    except Exception:
+        return None
+    return None
 from app.schemas.vehiculo import (
     VehiculoRegistro,
     VehiculoEdicion,
@@ -137,27 +170,41 @@ def calcular_tarifa_por_antiguedad(ano_modelo: int, tipo_vehiculo: str, tenant_i
     """Calcular tarifa según antigüedad y tipo de vehículo"""
     ano_actual = datetime.now().year
     antiguedad = ano_actual - ano_modelo
-    
-    # Buscar tarifa vigente según tipo y antigüedad
+
     hoy = date.today()
-    tarifa = db.query(Tarifa).filter(
-        and_(
-            Tarifa.activa == True,
-            Tarifa.tenant_id == tenant_id,
-            Tarifa.tipo_vehiculo == tipo_vehiculo,
-            Tarifa.vigencia_inicio <= hoy,
-            Tarifa.vigencia_fin >= hoy,
-            Tarifa.antiguedad_min <= antiguedad,
-            (Tarifa.antiguedad_max >= antiguedad) | (Tarifa.antiguedad_max == None)
+
+    def _buscar(ant: int) -> Tarifa | None:
+        return (
+            db.query(Tarifa)
+            .filter(
+                and_(
+                    Tarifa.activa == True,
+                    Tarifa.tenant_id == tenant_id,
+                    Tarifa.tipo_vehiculo == tipo_vehiculo,
+                    Tarifa.vigencia_inicio <= hoy,
+                    Tarifa.vigencia_fin >= hoy,
+                    Tarifa.antiguedad_min <= ant,
+                    (Tarifa.antiguedad_max >= ant) | (Tarifa.antiguedad_max == None),
+                )
+            )
+            .order_by(Tarifa.antiguedad_min.desc(), Tarifa.created_at.desc())
+            .first()
         )
-    ).order_by(Tarifa.antiguedad_min.desc(), Tarifa.created_at.desc()).first()
-    
+
+    tarifa = _buscar(antiguedad)
+    # Rangos suelen empezar en "1 año"; año modelo = año calendario → antigüedad 0 y no cae en ningún tramo.
+    if tarifa is None and antiguedad == 0:
+        tarifa = _buscar(1)
+
     if not tarifa:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No se encontró tarifa para vehículo tipo '{tipo_vehiculo}' de {antiguedad} años"
+            detail=(
+                f"No se encontró tarifa vigente para tipo '{tipo_vehiculo}' "
+                f"(antigüedad {antiguedad} años). Revise tarifas en administración."
+            ),
         )
-    
+
     return tarifa
 
 
@@ -242,7 +289,7 @@ def registrar_vehiculo(
         total_cobrado = valor_rtm + comision_soat
     
     # Crear vehículo en proceso
-    cliente_email_normalizado = (vehiculo_data.cliente_email or "").strip().lower() or None
+    cliente_email_normalizado = str(vehiculo_data.cliente_email).strip().lower()
     nuevo_vehiculo = VehiculoProceso(
         tenant_id=current_user.tenant_id,
         sucursal_id=active_sucursal_id,
@@ -400,7 +447,7 @@ def editar_vehiculo(
     vehiculo.cliente_nombre = vehiculo_data.cliente_nombre
     vehiculo.cliente_documento = vehiculo_data.cliente_documento
     vehiculo.cliente_telefono = vehiculo_data.cliente_telefono
-    vehiculo.cliente_email = (vehiculo_data.cliente_email or "").strip().lower() or None
+    vehiculo.cliente_email = str(vehiculo_data.cliente_email).strip().lower()
     vehiculo.tiene_soat = vehiculo_data.tiene_soat
     vehiculo.observaciones = vehiculo_data.observaciones
     
@@ -529,21 +576,49 @@ async def enviar_recibo_pago_email(
         if tenant and tenant.nombre_comercial
         else (tenant.nombre if tenant else "CDASOFT")
     )
+
+    fe = (
+        db.query(FacturaElectronica)
+        .filter(FacturaElectronica.vehiculo_proceso_id == vehiculo.id)
+        .order_by(FacturaElectronica.created_at.desc())
+        .first()
+    )
+    factura_url = (fe.public_url or "").strip() if fe else None
+    factura_numero = (fe.numero_documento or vehiculo.numero_factura_dian or "").strip() or None
+    factura_pdf: bytes | None = None
+    if factura_url:
+        factura_pdf = _try_download_factura_pdf_desde_url_publica(factura_url)
+
+    factura_pdf_adjunto = factura_pdf is not None
     email_html = generar_email_recibo_pago_cliente(
         nombre_cda=nombre_cda,
         nombre_cliente=vehiculo.cliente_nombre,
         placa_vehiculo=vehiculo.placa,
+        factura_url=factura_url if factura_url else None,
+        factura_numero=factura_numero,
+        factura_pdf_adjunto=factura_pdf_adjunto,
     )
     filename = receipt_file.filename or f"recibo_pago_{vehiculo.placa}.pdf"
+    adjuntos: list[tuple[str, bytes, str]] = [(filename, content, "application/pdf")]
+    if factura_pdf is not None:
+        fn_fac = f"factura_electronica_{(factura_numero or vehiculo.placa).replace(' ', '_')}.pdf"
+        adjuntos.append((fn_fac[:120], factura_pdf, "application/pdf"))
+
+    asunto = f"Recibo de pago - {nombre_cda} - {vehiculo.placa}"
+    if factura_url or factura_pdf_adjunto:
+        asunto = f"Recibo y factura electrónica - {nombre_cda} - {vehiculo.placa}"
+
     sent = enviar_email_con_adjuntos(
         destinatario=cliente_email,
-        asunto=f"Recibo de pago - {nombre_cda} - {vehiculo.placa}",
+        asunto=asunto,
         cuerpo_html=email_html,
-        adjuntos=[(filename, content, "application/pdf")],
+        adjuntos=adjuntos,
     )
     return {
         "sent": bool(sent),
         "has_email": True,
+        "factura_incluida": bool(factura_url or factura_pdf_adjunto),
+        "factura_adjunto_pdf": factura_pdf_adjunto,
         "message": "Recibo enviado al cliente." if sent else "No fue posible enviar el recibo por correo.",
     }
 
@@ -652,8 +727,85 @@ def cobrar_vehiculo(
             vehiculo.comision_soat = comision_soat
             vehiculo.total_cobrado = vehiculo.valor_rtm + comision_soat
         
+        tenant_row = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+        if tenant_row is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Tenant no encontrado",
+            )
+
+        fs = (
+            db.query(TenantFactusSettings)
+            .filter(TenantFactusSettings.tenant_id == current_user.tenant_id)
+            .first()
+        )
+        modo_factus = fs is not None and fs.modo == "factus"
+        cred_factus_ok = (
+            fs is not None
+            and bool(fs.client_id and fs.client_id.strip())
+            and bool(fs.client_secret_encrypted)
+            and bool(fs.api_username and fs.api_username.strip())
+            and bool(fs.api_password_encrypted)
+            and fs.default_numbering_range_id is not None
+        )
+
+        if modo_factus:
+            if not cred_factus_ok:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "Modo Factus activo pero faltan credenciales o resolución de numeración. "
+                        "Configure Client ID, secret, usuario y contraseña API, y numbering_range_id en Ajustes."
+                    ),
+                )
+            try:
+                validar_datos_cliente_para_factus(vehiculo)
+            except ValueError as ve:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(ve),
+                ) from ve
+            tarifa_emit: Tarifa | None = None
+            if vehiculo.tipo_vehiculo != "preventiva":
+                try:
+                    t_row = calcular_tarifa_por_antiguedad(
+                        vehiculo.ano_modelo,
+                        vehiculo.tipo_vehiculo,
+                        current_user.tenant_id,
+                        db,
+                    )
+                    suma_t = Decimal(t_row.valor_rtm) + Decimal(t_row.valor_terceros)
+                    if abs(suma_t - Decimal(vehiculo.valor_rtm)) <= Decimal("1"):
+                        tarifa_emit = t_row
+                except HTTPException:
+                    tarifa_emit = None
+            try:
+                num_fe, _cufe, _url = emitir_y_persistir_factura_cobro(
+                    db,
+                    vehiculo=vehiculo,
+                    tenant=tenant_row,
+                    fs=fs,
+                    active_sucursal_id=active_sucursal_id,
+                    metodo_pago=metodo_pago,
+                    tarifa=tarifa_emit,
+                )
+                vehiculo.numero_factura_dian = num_fe
+            except FactusAPIError as e:
+                detail_txt = format_factus_error_detail(e)
+                code = e.status_code if e.status_code and 100 <= e.status_code < 600 else status.HTTP_502_BAD_GATEWAY
+                raise HTTPException(status_code=code, detail=f"Factus: {detail_txt}") from e
+            except ValueError as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+        else:
+            manual = (cobro_data.numero_factura_dian or "").strip()
+            if not manual:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Debe ingresar el número de factura DIAN",
+                )
+            vehiculo.numero_factura_dian = manual
+
         # Actualizar vehículo - usar setattr para bypass el enum type checking
-        vehiculo.numero_factura_dian = cobro_data.numero_factura_dian
         vehiculo.registrado_runt = cobro_data.registrado_runt
         vehiculo.registrado_sicov = cobro_data.registrado_sicov
         vehiculo.registrado_indra = cobro_data.registrado_indra
@@ -1240,6 +1392,75 @@ def calcular_tarifa(
     )
 
 
+@router.get("/{vehiculo_id}/recibo-pdf")
+def descargar_recibo_pago_pdf(
+    vehiculo_id: str,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
+):
+    """
+    PDF del recibo de pago estándar (mismo criterio que en caja / reportes).
+    Solo trámites ya cobrados (estado pagado).
+    """
+    try:
+        vid = UUID(vehiculo_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID de vehículo inválido")
+    vehiculo = _filtro_vehiculo_sede(
+        db.query(VehiculoProceso),
+        current_user.tenant_id,
+        active_sucursal_id,
+    ).filter(VehiculoProceso.id == vid).first()
+
+    if not vehiculo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehículo no encontrado")
+
+    if vehiculo.estado != EstadoVehiculo.PAGADO:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo se genera recibo PDF para trámites ya cobrados.",
+        )
+
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    nombre_cda = (
+        tenant.nombre_comercial
+        if tenant and tenant.nombre_comercial
+        else (tenant.nombre if tenant else "CDASOFT")
+    )
+    cajero = db.query(Usuario).filter(Usuario.id == vehiculo.cobrado_por).first() if vehiculo.cobrado_por else None
+    nombre_cajero = cajero.nombre_completo if cajero else "—"
+    fpago = vehiculo.fecha_pago or datetime.now(timezone.utc)
+
+    mp = vehiculo.metodo_pago
+    if hasattr(mp, "value"):
+        mp = mp.value
+    metodo_str = str(mp or "efectivo")
+
+    pdf_bytes = generar_recibo_pago_vehiculo_pdf(
+        nombre_cda=nombre_cda,
+        placa=vehiculo.placa,
+        tipo_vehiculo=vehiculo.tipo_vehiculo,
+        cliente_nombre=vehiculo.cliente_nombre,
+        cliente_documento=vehiculo.cliente_documento,
+        valor_rtm=vehiculo.valor_rtm,
+        comision_soat=vehiculo.comision_soat or Decimal(0),
+        total_cobrado=vehiculo.total_cobrado,
+        metodo_pago=metodo_str,
+        fecha_pago=fpago,
+        nombre_cajero=nombre_cajero,
+        numero_factura_dian=vehiculo.numero_factura_dian,
+        cliente_email=vehiculo.cliente_email,
+        cliente_telefono=vehiculo.cliente_telefono,
+    )
+    filename = f"recibo_pago_{vehiculo.placa}.pdf"
+    return StreamingResponse(
+        BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
 @router.get("/{vehiculo_id}", response_model=VehiculoResponse)
 def obtener_vehiculo(
     vehiculo_id: str,
@@ -1261,8 +1482,14 @@ def obtener_vehiculo(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Vehículo no encontrado"
         )
-    
-    return vehiculo
+
+    out = VehiculoResponse.model_validate(vehiculo)
+    cajero_nombre = None
+    if vehiculo.cobrado_por:
+        cajero = db.query(Usuario).filter(Usuario.id == vehiculo.cobrado_por).first()
+        if cajero:
+            cajero_nombre = cajero.nombre_completo
+    return out.model_copy(update={"cajero_nombre": cajero_nombre})
 
 
 @router.get("/", response_model=List[VehiculoResponse])

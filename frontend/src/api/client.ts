@@ -1,4 +1,4 @@
-import axios from 'axios';
+import axios, { type InternalAxiosRequestConfig } from 'axios';
 import { getStoredTenantLoginPath } from '../utils/authRedirect';
 
 /** En desarrollo, por defecto mismo origen + proxy en vite.config (evita timeouts por CORS/red con localhost). */
@@ -19,65 +19,118 @@ export const apiClient = axios.create({
 /** Base URL del API (misma que usa apiClient); útil para fetch() que no pasa por axios. */
 export { API_URL as apiBaseUrl };
 
+/** Una sola renovación en vuelo: evita varios POST /refresh en paralelo (401 en cascada en el backoffice). */
+let refreshInFlight: Promise<string | null> | null = null;
+
+function clearSessionAndRedirect(scope: string) {
+  localStorage.removeItem('access_token');
+  localStorage.removeItem('refresh_token');
+  localStorage.removeItem('auth_scope');
+  window.location.href = scope === 'saas' ? '/saas/login' : getStoredTenantLoginPath();
+}
+
+function shouldSkipRefreshRetry(config: InternalAxiosRequestConfig | undefined): boolean {
+  const u = config?.url ?? '';
+  if (!u) return false;
+  // No reintentar login ni el propio refresh (evita bucles y reintentos absurdos).
+  if (u.includes('/auth/login') || u.includes('/saas/auth/login')) return true;
+  if (u.includes('/auth/refresh') || u.includes('/saas/auth/refresh')) return true;
+  return false;
+}
+
+function setAuthHeader(config: InternalAxiosRequestConfig, token: string) {
+  if (typeof config.headers?.set === 'function') {
+    config.headers.set('Authorization', `Bearer ${token}`);
+  } else {
+    config.headers = config.headers ?? {};
+    (config.headers as Record<string, string>).Authorization = `Bearer ${token}`;
+  }
+}
+
+async function refreshAccessToken(): Promise<string | null> {
+  const refreshToken = localStorage.getItem('refresh_token');
+  const currentScope = localStorage.getItem('auth_scope') || 'tenant';
+  const refreshEndpoint =
+    currentScope === 'saas' ? `${API_URL}/saas/auth/refresh` : `${API_URL}/auth/refresh`;
+
+  if (!refreshToken) {
+    return null;
+  }
+
+  const response = await axios.post(
+    refreshEndpoint,
+    { refresh_token: refreshToken },
+    { timeout: REQUEST_TIMEOUT_MS },
+  );
+
+  const { access_token, refresh_token } = response.data as {
+    access_token: string;
+    refresh_token?: string;
+  };
+  localStorage.setItem('access_token', access_token);
+  if (refresh_token) {
+    localStorage.setItem('refresh_token', refresh_token);
+  }
+  return access_token;
+}
+
+function getOrCreateRefreshPromise(): Promise<string | null> {
+  if (!refreshInFlight) {
+    refreshInFlight = refreshAccessToken()
+      .catch((err) => {
+        throw err;
+      })
+      .finally(() => {
+        refreshInFlight = null;
+      });
+  }
+  return refreshInFlight;
+}
+
 // Interceptor para agregar el token JWT a todas las peticiones
 apiClient.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('access_token');
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+      setAuthHeader(config, token);
     }
     return config;
   },
   (error) => {
     return Promise.reject(error);
-  }
+  },
 );
 
 // Interceptor para manejar errores de autenticación
 apiClient.interceptors.response.use(
   (response) => response,
   async (error) => {
-    const originalRequest = error.config;
+    const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
     const currentScope = localStorage.getItem('auth_scope') || 'tenant';
 
-    // Si el token expiró (401) y no hemos reintentado ya
-    if (error.response?.status === 401 && !originalRequest._retry) {
+    if (!originalRequest) {
+      return Promise.reject(error);
+    }
+
+    if (error.response?.status === 401 && !originalRequest._retry && !shouldSkipRefreshRetry(originalRequest)) {
       originalRequest._retry = true;
 
       try {
-        const refreshToken = localStorage.getItem('refresh_token');
-        const refreshEndpoint =
-          currentScope === 'saas' ? `${API_URL}/saas/auth/refresh` : `${API_URL}/auth/refresh`;
-
-        if (refreshToken) {
-          const response = await axios.post(
-            refreshEndpoint,
-            { refresh_token: refreshToken },
-            { timeout: REQUEST_TIMEOUT_MS }
-          );
-
-          const { access_token, refresh_token } = response.data;
-          localStorage.setItem('access_token', access_token);
-          if (refresh_token) {
-            localStorage.setItem('refresh_token', refresh_token);
-          }
-
-          // Reintentar la petición original con el nuevo token
-          originalRequest.headers.Authorization = `Bearer ${access_token}`;
-          return apiClient(originalRequest);
+        const newAccess = await getOrCreateRefreshPromise();
+        if (!newAccess) {
+          clearSessionAndRedirect(currentScope);
+          return Promise.reject(error);
         }
-      } catch (refreshError) {
-        // Si falla el refresh, cerrar sesión
-        localStorage.removeItem('access_token');
-        localStorage.removeItem('refresh_token');
-        localStorage.removeItem('auth_scope');
-        window.location.href = currentScope === 'saas' ? '/saas/login' : getStoredTenantLoginPath();
-        return Promise.reject(refreshError);
+        setAuthHeader(originalRequest, newAccess);
+        return apiClient(originalRequest);
+      } catch {
+        clearSessionAndRedirect(currentScope);
+        return Promise.reject(error);
       }
     }
 
     return Promise.reject(error);
-  }
+  },
 );
 
 export default apiClient;

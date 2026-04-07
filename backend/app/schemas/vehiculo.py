@@ -1,11 +1,31 @@
 """
 Schemas de Vehículos en Proceso
 """
+import re
+
 from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator
 from decimal import Decimal
 from datetime import datetime
 from typing import Optional
 from uuid import UUID
+
+
+def _validar_celular_recepcion(v) -> str:
+    if v is None or (isinstance(v, str) and not str(v).strip()):
+        raise ValueError("El celular es obligatorio")
+    digits = re.sub(r"\D", "", str(v))
+    if len(digits) < 7:
+        raise ValueError("El celular debe tener al menos 7 dígitos")
+    return digits
+
+
+def _validar_email_recepcion(v) -> str:
+    if v is None or (isinstance(v, str) and not str(v).strip()):
+        raise ValueError("El correo electrónico es obligatorio")
+    s = str(v).strip().lower()
+    if "@" not in s or "." not in s.split("@")[-1]:
+        raise ValueError("Ingrese un correo electrónico válido")
+    return s
 
 
 class VehiculoRegistro(BaseModel):
@@ -17,19 +37,20 @@ class VehiculoRegistro(BaseModel):
     ano_modelo: int = Field(ge=1950, le=2030)
     cliente_nombre: str = Field(min_length=3)
     cliente_documento: str = Field(min_length=5)
-    cliente_telefono: Optional[str] = None
-    cliente_email: Optional[EmailStr] = None
+    cliente_telefono: str = Field(min_length=7, max_length=30)
+    cliente_email: EmailStr
     tiene_soat: bool = False
     observaciones: Optional[str] = None
 
+    @field_validator("cliente_telefono", mode="before")
+    @classmethod
+    def normalize_phone(cls, v):
+        return _validar_celular_recepcion(v)
+
     @field_validator("cliente_email", mode="before")
     @classmethod
-    def empty_email_to_none(cls, value):
-        if value is None:
-            return None
-        if isinstance(value, str) and not value.strip():
-            return None
-        return value
+    def normalize_email(cls, v):
+        return _validar_email_recepcion(v)
 
 
 class VehiculoEdicion(BaseModel):
@@ -41,19 +62,20 @@ class VehiculoEdicion(BaseModel):
     ano_modelo: int = Field(ge=1950, le=2030)
     cliente_nombre: str = Field(min_length=3)
     cliente_documento: str = Field(min_length=5)
-    cliente_telefono: Optional[str] = None
-    cliente_email: Optional[EmailStr] = None
+    cliente_telefono: str = Field(min_length=7, max_length=30)
+    cliente_email: EmailStr
     tiene_soat: bool = False
     observaciones: Optional[str] = None
 
+    @field_validator("cliente_telefono", mode="before")
+    @classmethod
+    def normalize_phone_edit(cls, v):
+        return _validar_celular_recepcion(v)
+
     @field_validator("cliente_email", mode="before")
     @classmethod
-    def empty_email_to_none(cls, value):
-        if value is None:
-            return None
-        if isinstance(value, str) and not value.strip():
-            return None
-        return value
+    def normalize_email_edit(cls, v):
+        return _validar_email_recepcion(v)
 
 
 class VehiculoCobro(BaseModel):
@@ -97,7 +119,8 @@ class VehiculoResponse(BaseModel):
     
     # Campos calculados
     antiguedad: Optional[int] = None
-    
+    cajero_nombre: Optional[str] = None
+
     model_config = ConfigDict(from_attributes=True)
 
 

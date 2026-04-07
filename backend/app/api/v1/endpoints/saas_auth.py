@@ -32,7 +32,20 @@ from app.models.support_ticket import SaaSSupportTicket
 from app.models.tenant import Tenant
 from app.models.usuario import Usuario
 from app.schemas.auth import Token, RefreshTokenRequest
+from app.schemas.factus import (
+    FactusNumberingRangeItem,
+    FactusSettingsOut,
+    FactusSettingsUpdate,
+    FactusTestConnectionResult,
+)
 from app.schemas.saas_auth import SaaSUserCreate, SaaSUserResponse
+from app.services.factus_tenant_settings import (
+    apply_settings_update,
+    get_or_create_settings_row,
+    list_numbering_ranges_for_tenant,
+    row_to_out,
+    run_test_connection,
+)
 from app.utils.email import enviar_email_con_adjuntos, generar_email_recibo_pago_saas
 from app.utils.saas_billing_receipts import build_saas_payment_receipt_pdf
 
@@ -815,6 +828,102 @@ def get_saas_tenant_profile(
             for s in sedes_rows
         ],
     )
+
+
+@router.get("/tenants/{tenant_id}/factus-settings", response_model=FactusSettingsOut)
+def get_saas_tenant_factus_settings(
+    tenant_id: str,
+    db: Session = Depends(get_db),
+    _: SaaSUser = Depends(require_saas_role(["owner", "comercial", "soporte"])),
+):
+    """Configuración Factus del tenant (solo backoffice SaaS)."""
+    try:
+        tenant_uuid = UUID(tenant_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ID de tenant inválido",
+        )
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant no encontrado",
+        )
+    row = get_or_create_settings_row(db, tenant_uuid)
+    return row_to_out(row)
+
+
+@router.put("/tenants/{tenant_id}/factus-settings", response_model=FactusSettingsOut)
+def put_saas_tenant_factus_settings(
+    tenant_id: str,
+    body: FactusSettingsUpdate,
+    db: Session = Depends(get_db),
+    _: SaaSUser = Depends(require_saas_role(["owner", "comercial", "soporte"])),
+):
+    try:
+        tenant_uuid = UUID(tenant_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ID de tenant inválido",
+        )
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant no encontrado",
+        )
+    row = get_or_create_settings_row(db, tenant_uuid)
+    apply_settings_update(db, row, body)
+    return row_to_out(row)
+
+
+@router.post("/tenants/{tenant_id}/factus-test-connection", response_model=FactusTestConnectionResult)
+def post_saas_tenant_factus_test_connection(
+    tenant_id: str,
+    db: Session = Depends(get_db),
+    _: SaaSUser = Depends(require_saas_role(["owner", "comercial", "soporte"])),
+):
+    try:
+        tenant_uuid = UUID(tenant_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ID de tenant inválido",
+        )
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant no encontrado",
+        )
+    row = get_or_create_settings_row(db, tenant_uuid)
+    return run_test_connection(row)
+
+
+@router.get("/tenants/{tenant_id}/factus-numbering-ranges", response_model=list[FactusNumberingRangeItem])
+def get_saas_tenant_factus_numbering_ranges(
+    tenant_id: str,
+    db: Session = Depends(get_db),
+    _: SaaSUser = Depends(require_saas_role(["owner", "comercial", "soporte"])),
+):
+    """Lista rangos de numeración en Factus (ids válidos para default_numbering_range_id)."""
+    try:
+        tenant_uuid = UUID(tenant_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ID de tenant inválido",
+        )
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant no encontrado",
+        )
+    row = get_or_create_settings_row(db, tenant_uuid)
+    return list_numbering_ranges_for_tenant(row)
 
 
 @router.get("/billing/plans", response_model=list[SaaSBillingPlanItem])

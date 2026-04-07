@@ -411,6 +411,8 @@ export interface Vehiculo {
   estado: 'registrado' | 'pagado' | 'en_pista' | 'aprobado' | 'rechazado' | 'completado';
   observaciones?: string;
   fecha_registro: string;
+  /** Nombre del usuario que cobró (solo en detalle GET). */
+  cajero_nombre?: string | null;
 }
 
 export interface VehiculoRegistro {
@@ -421,8 +423,8 @@ export interface VehiculoRegistro {
   ano_modelo: number;
   cliente_nombre: string;
   cliente_documento: string;
-  cliente_telefono?: string;
-  cliente_email?: string;
+  cliente_telefono: string;
+  cliente_email: string;
   tiene_soat: boolean;
   observaciones?: string;
 }

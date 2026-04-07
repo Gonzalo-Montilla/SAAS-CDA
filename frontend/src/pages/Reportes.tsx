@@ -1,11 +1,13 @@
-import { lazy, Suspense, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { BarChart3, TrendingUp, TrendingDown, Wallet, Building2, FileText, Download, DollarSign, ArrowUpCircle, ArrowDownCircle, CalendarDays, TimerReset, AlertTriangle, GaugeCircle } from 'lucide-react';
+import { BarChart3, TrendingUp, TrendingDown, Wallet, Building2, FileText, Download, DollarSign, ArrowUpCircle, ArrowDownCircle, CalendarDays, TimerReset, AlertTriangle, GaugeCircle, Receipt, Landmark, X } from 'lucide-react';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import apiClient from '../api/client';
 import { reportesApi } from '../api/reportes';
+import { vehiculosApi } from '../api/vehiculos';
 import { useAuth } from '../contexts/AuthContext';
+import { useBrand } from '../contexts/BrandContext';
 import type { Usuario } from '../types';
 import { formatCOP } from '../utils/formatNumber';
 
@@ -60,6 +62,9 @@ interface Movimiento {
   usuario: string;
   numero_comprobante?: string;
   sede?: string | null;
+  vehiculo_id?: string | null;
+  numero_factura_dian?: string | null;
+  factura_public_url?: string | null;
 }
 
 interface Tramite {
@@ -83,6 +88,7 @@ type ReporteSedeScope = 'activa' | 'todas' | 'sucursal';
 
 export default function ReportesPage() {
   const { user } = useAuth();
+  const brand = useBrand();
   const tenantUser = user && 'tenant_id' in user ? (user as Usuario) : null;
   const puedeElegirSedeReporte =
     !!tenantUser && (tenantUser.rol === 'administrador' || tenantUser.rol === 'contador');
@@ -99,6 +105,7 @@ export default function ReportesPage() {
   const [filtroTipo, setFiltroTipo] = useState<string>('todos');
   const [filtroMetodo, setFiltroMetodo] = useState<string>('todos');
   const [filtroConcepto, setFiltroConcepto] = useState<string>('');
+  const [modalRecibo, setModalRecibo] = useState<{ blobUrl: string } | null>(null);
   const rangoInvalido = modoVista === 'rango' && fechaInicio > fechaFin;
   const periodoActual = modoVista === 'rango' ? `${fechaInicio} a ${fechaFin}` : fechaSeleccionada;
   const reportesEnabled = !rangoInvalido;
@@ -233,6 +240,75 @@ export default function ReportesPage() {
     setFiltroMetodo('todos');
     setFiltroConcepto('');
   };
+
+  const cerrarModalRecibo = () => {
+    setModalRecibo((prev) => {
+      if (prev) {
+        URL.revokeObjectURL(prev.blobUrl);
+      }
+      return null;
+    });
+  };
+
+  const abrirReciboCliente = async (vehiculoId: string) => {
+    try {
+      const v = await vehiculosApi.obtenerPorId(vehiculoId);
+      const comisionFinal = v.tiene_soat ? v.comision_soat : 0;
+      const { generarPDFReciboPagoParaEnvio } = await import('../utils/generarPDFReciboPago');
+      const { blob } = await generarPDFReciboPagoParaEnvio({
+        placa: v.placa,
+        tipoVehiculo: v.tipo_vehiculo,
+        marca: v.marca,
+        modelo: v.modelo,
+        anoModelo: v.ano_modelo,
+        clienteNombre: v.cliente_nombre,
+        clienteDocumento: v.cliente_documento,
+        valorRTM: v.valor_rtm,
+        comisionSOAT: comisionFinal,
+        totalCobrado: v.total_cobrado,
+        metodoPago: v.metodo_pago || 'efectivo',
+        numeroFacturaDIAN: v.numero_factura_dian || '',
+        fecha: v.fecha_pago ? new Date(v.fecha_pago) : new Date(),
+        nombreCajero: v.cajero_nombre?.trim() || user?.nombre_completo || 'Cajero',
+        logoUrl: brand.logoSrc,
+      });
+      const url = URL.createObjectURL(blob);
+      setModalRecibo({ blobUrl: url });
+    } catch {
+      alert('No fue posible generar el recibo. El trámite debe estar cobrado.');
+    }
+  };
+
+  const abrirFacturaOficial = (url: string | null | undefined) => {
+    const u = (url || '').trim();
+    if (!u) {
+      alert('No hay factura electrónica registrada para este cobro (modo manual o aún sin URL).');
+      return;
+    }
+    // Factus/DIAN suelen bloquear iframes (X-Frame-Options); en pestaña nueva sí carga.
+    const w = window.open(u, '_blank', 'noopener,noreferrer');
+    if (!w) {
+      alert('Permita ventanas emergentes para este sitio o abra el enlace manualmente.');
+    }
+  };
+
+  useEffect(() => {
+    if (!modalRecibo) {
+      return;
+    }
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setModalRecibo((prev) => {
+          if (prev) {
+            URL.revokeObjectURL(prev.blobUrl);
+          }
+          return null;
+        });
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [modalRecibo]);
 
   // Función para exportar a CSV
   const exportarCSV = (datos: any[], nombreArchivo: string) => {
@@ -878,17 +954,20 @@ export default function ReportesPage() {
                   <th className="px-3 py-2">Método</th>
                   <th className="px-3 py-2 text-right">Monto</th>
                   <th className="px-3 py-2">Usuario</th>
+                  <th className="px-3 py-2 text-center w-[120px]">Docs</th>
                 </tr>
               </thead>
               <tbody>
                 {movimientosFiltrados.length === 0 && (
                   <tr className="border-t">
-                    <td colSpan={10} className="px-3 py-6 text-center text-slate-500">
+                    <td colSpan={11} className="px-3 py-6 text-center text-slate-500">
                       No hay movimientos para los filtros seleccionados.
                     </td>
                   </tr>
                 )}
-                {movimientosFiltrados.map((m: Movimiento) => (
+                {movimientosFiltrados.map((m: Movimiento) => {
+                  const mostrarDocs = m.modulo === 'Caja' && m.vehiculo_id && m.categoria === 'rtm';
+                  return (
                   <tr key={m.id} className="border-t">
                     <td className="px-3 py-2">{m.hora}</td>
                     <td className="px-3 py-2">{m.modulo}</td>
@@ -900,8 +979,34 @@ export default function ReportesPage() {
                     <td className="px-3 py-2">{m.metodo_pago}</td>
                     <td className={`px-3 py-2 text-right font-semibold ${m.es_ingreso ? 'text-green-700' : 'text-red-700'}`}>{formatCOP(m.monto)}</td>
                     <td className="px-3 py-2">{m.usuario}</td>
+                    <td className="px-3 py-2 text-center">
+                      {mostrarDocs ? (
+                        <div className="flex flex-wrap justify-center gap-1">
+                          <button
+                            type="button"
+                            title="Recibo de pago (PDF interno)"
+                            onClick={() => m.vehiculo_id && abrirReciboCliente(m.vehiculo_id)}
+                            className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-primary-50 text-primary-700"
+                          >
+                            <Receipt className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            title="Factura electrónica DIAN (Factus)"
+                            onClick={() => abrirFacturaOficial(m.factura_public_url)}
+                            className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-amber-50 text-amber-800 disabled:opacity-40"
+                            disabled={!m.factura_public_url}
+                          >
+                            <Landmark className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <span className="text-slate-300">—</span>
+                      )}
+                    </td>
                   </tr>
-                ))}
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -1022,6 +1127,33 @@ export default function ReportesPage() {
           </div>
         </div>
       </div>
+
+      {modalRecibo && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="bg-white rounded-xl shadow-2xl max-w-5xl w-full max-h-[92vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
+              <h4 className="font-bold text-slate-900 flex items-center gap-2 text-sm sm:text-base">
+                <Receipt className="w-5 h-5 text-primary-600 shrink-0" /> Recibo de pago (sistema)
+              </h4>
+              <button
+                type="button"
+                onClick={cerrarModalRecibo}
+                className="p-2 rounded-lg hover:bg-slate-200 text-slate-600"
+                aria-label="Cerrar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 bg-slate-100 flex flex-col">
+              <iframe title="Recibo PDF" src={modalRecibo.blobUrl} className="w-full flex-1 min-h-[70vh] border-0" />
+            </div>
+          </div>
+        </div>
+      )}
     </Layout>
   );
 }

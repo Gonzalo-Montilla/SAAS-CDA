@@ -689,6 +689,48 @@ def ensure_sucursales_schema(db):
     )
 
 
+def ensure_factus_schema(db):
+    """Facturación electrónica Factus: tablas por tenant y trazas de documentos."""
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS tenant_factus_settings (
+                tenant_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+                modo VARCHAR(20) NOT NULL DEFAULT 'manual',
+                use_sandbox BOOLEAN NOT NULL DEFAULT TRUE,
+                client_id VARCHAR(200),
+                client_secret_encrypted TEXT,
+                api_username VARCHAR(255),
+                api_password_encrypted TEXT,
+                default_numbering_range_id INTEGER,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS facturas_electronicas (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                vehiculo_proceso_id UUID REFERENCES vehiculos_proceso(id) ON DELETE SET NULL,
+                reference_code VARCHAR(120) NOT NULL,
+                factus_bill_id INTEGER,
+                numero_documento VARCHAR(80),
+                cufe VARCHAR(200),
+                public_url VARCHAR(800),
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_facturas_electronicas_tenant ON facturas_electronicas(tenant_id)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_facturas_electronicas_ref ON facturas_electronicas(tenant_id, reference_code)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_facturas_electronicas_veh ON facturas_electronicas(vehiculo_proceso_id)"))
+
+
 def get_db():
     """
     Dependency para obtener sesión de base de datos
@@ -716,6 +758,7 @@ def init_db():
     from app.models.rtm_reminder import RTMRenewalReminder
     from app.models.sucursal import Sucursal  # noqa: F401 — register model
     from app.models.tesoreria import MovimientoTesoreria, DesgloseEfectivoTesoreria, ConfiguracionTesoreria  # noqa: F401
+    from app.models.factus import TenantFactusSettings, FacturaElectronica  # noqa: F401 — register model
     from app.core.security import get_password_hash
     from datetime import date
     
@@ -740,6 +783,7 @@ def init_db():
         ensure_appointments_schema(db)
         ensure_rtm_reminders_schema(db)
         ensure_sucursales_schema(db)
+        ensure_factus_schema(db)
         db.commit()
 
         # Verificar y crear owner global SaaS

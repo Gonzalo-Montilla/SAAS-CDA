@@ -16,6 +16,7 @@ import {
   CreditCard,
   KeyRound,
   UserPlus,
+  Landmark,
 } from 'lucide-react';
 import { BackofficeSectionHeading } from '../components/BackofficeSectionHeading';
 import { useAuth } from '../contexts/AuthContext';
@@ -38,6 +39,7 @@ import type {
   SaaSUserSecurityItem,
 } from '../types';
 import logoCdaSoft from '../assets/LOGO_CDA_SOFT-SIN FONDO.png';
+import SaasTenantFactusPanel from '../components/SaasTenantFactusPanel';
 
 interface SaaSPermissionsResponse {
   role: 'owner' | 'finanzas' | 'comercial' | 'soporte';
@@ -1592,6 +1594,20 @@ export default function SaaSBackoffice() {
                     </div>
                   );
                 })()}
+
+                <div className="section-card p-4">
+                  <div className="rounded-xl border border-slate-200/90 bg-white shadow-sm overflow-hidden ring-1 ring-slate-900/5">
+                    <BackofficeSectionHeading
+                      embedded
+                      icon={Landmark}
+                      title="Facturación electrónica (Factus)"
+                      description="Modo manual vs integración DIAN; credenciales y prueba de conexión"
+                    />
+                    <div className="p-4 border-t border-slate-100">
+                      <SaasTenantFactusPanel tenantId={tenantProfileQuery.data.id} />
+                    </div>
+                  </div>
+                </div>
 
                 <div className="section-card p-4">
                   <div className="rounded-xl border border-slate-200/90 bg-white shadow-sm overflow-hidden ring-1 ring-slate-900/5">

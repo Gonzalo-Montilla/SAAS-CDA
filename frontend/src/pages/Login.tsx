@@ -6,49 +6,7 @@ import { useBrand } from '../contexts/BrandContext';
 import { apiClient } from '../api/client';
 import type { AuthScope, TenantSelfRegisterRequest } from '../types';
 import { PasswordInput } from '../components/PasswordInput';
-
-function extractApiErrorMessage(err: any, fallback: string): string {
-  if (err?.code === 'ECONNABORTED' || (typeof err?.message === 'string' && err.message.includes('timeout'))) {
-    if (import.meta.env.DEV) {
-      return 'Tiempo de espera agotado al hablar con el API. Comprueba: 1) Backend en http://127.0.0.1:8000 (abre /docs o /health). 2) Tras cambiar .env reinicia npm run dev. 3) Si la base de datos está en otro servidor, que DATABASE_URL sea alcanzable.';
-    }
-    return 'La petición expiró: el servidor no respondió a tiempo. Revisa que el backend esté arriba y que la URL del API (VITE_API_URL en el build) apunte al dominio correcto, sin mezclar HTTPS del sitio con HTTP del API bloqueado por el navegador.';
-  }
-  const detail = err?.response?.data?.detail;
-
-  if (typeof detail === 'string' && detail.trim()) {
-    return detail;
-  }
-
-  if (Array.isArray(detail)) {
-    const messages = detail
-      .map((item) => {
-        if (typeof item === 'string') {
-          return item;
-        }
-        if (item && typeof item.msg === 'string') {
-          const loc = Array.isArray(item.loc)
-            ? item.loc
-                .filter((part: unknown) => typeof part === 'string')
-                .join('.')
-            : '';
-          return loc ? `${loc}: ${item.msg}` : item.msg;
-        }
-        return '';
-      })
-      .filter(Boolean);
-
-    if (messages.length > 0) {
-      return messages.join(' | ');
-    }
-  }
-
-  if (typeof err?.message === 'string' && err.message.trim()) {
-    return err.message;
-  }
-
-  return fallback;
-}
+import { extractApiErrorMessage } from '../utils/apiError';
 
 function normalizeNitInput(value: string): string {
   return value.toUpperCase().replace(/[^0-9A-Z-]/g, '');

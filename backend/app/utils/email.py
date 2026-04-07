@@ -1,6 +1,7 @@
 """
 Utilidad para envío de emails
 """
+import html
 import smtplib
 from email import encoders
 from email.mime.base import MIMEBase
@@ -314,15 +315,42 @@ def generar_email_recibo_pago_cliente(
     nombre_cda: str,
     nombre_cliente: str,
     placa_vehiculo: str,
+    *,
+    factura_url: str | None = None,
+    factura_numero: str | None = None,
+    factura_pdf_adjunto: bool = False,
 ) -> str:
-    """Email para enviar recibo de pago al cliente luego del cobro en caja."""
+    """Email para enviar recibo de pago al cliente luego del cobro en caja. Opcionalmente factura DIAN/Factus."""
+    recibo_txt = "Adjunto encontrarás el recibo de tu pago"
+    if factura_pdf_adjunto:
+        recibo_txt = "Adjunto encontrarás el recibo de tu pago y la factura electrónica de venta (DIAN)"
+    elif factura_url:
+        recibo_txt = "Adjunto encontrarás el recibo de tu pago; también incluimos el enlace a tu factura electrónica"
+
+    fac_block = ""
+    if factura_url or factura_numero:
+        num = (factura_numero or "").strip()
+        fac_block = "<p>"
+        if num:
+            fac_block += f"<strong>Factura electrónica (DIAN):</strong> {html.escape(num)}<br />"
+        if factura_url:
+            u_esc = html.escape(factura_url, quote=True)
+            fac_block += f'<a href="{u_esc}">Ver o descargar factura electrónica</a>'
+            fac_block += (
+                '<br /><span class="muted" style="word-break:break-all;font-size:12px;">'
+                + html.escape(factura_url)
+                + "</span>"
+            )
+        fac_block += "</p>"
+
     body_html = f"""
     <p>Estimado/a <strong>{nombre_cliente}</strong>,</p>
     <div class="highlight">
-        Adjunto encontrarás el recibo de tu pago del vehículo de placa <strong>{placa_vehiculo}</strong>.
+        {recibo_txt} del vehículo de placa <strong>{placa_vehiculo}</strong>.
         Queremos agradecerte por haber depositado tu confianza en <strong>{nombre_cda}</strong>;
         para nosotros es un gusto atender a clientes como tú.
     </div>
+    {fac_block}
     <p>
         Esperamos que tu experiencia haya sido satisfactoria y te invitamos a regresar cuando lo necesites.
         Estaremos encantados de seguir siendo tu centro de diagnóstico de confianza.

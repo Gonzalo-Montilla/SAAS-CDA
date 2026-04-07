@@ -19,9 +19,14 @@ interface SucursalRow {
   es_principal: boolean;
 }
 
+function tabFromSearch(tabParam: string | null): TabKey {
+  if (tabParam === 'usuarios') return 'usuarios';
+  return 'sedes';
+}
+
 export default function OrganizacionPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const tab: TabKey = searchParams.get('tab') === 'usuarios' ? 'usuarios' : 'sedes';
+  const tab: TabKey = tabFromSearch(searchParams.get('tab'));
   const { user, refreshTenantUser } = useAuth();
   const tenantUser = user && 'tenant_id' in user ? (user as Usuario) : null;
   const queryClient = useQueryClient();
@@ -30,7 +35,7 @@ export default function OrganizacionPage() {
     if (next === 'sedes') {
       setSearchParams({}, { replace: true });
     } else {
-      setSearchParams({ tab: 'usuarios' }, { replace: true });
+      setSearchParams({ tab: next }, { replace: true });
     }
   };
 
@@ -129,8 +134,10 @@ export default function OrganizacionPage() {
     return `Plan: hasta ${limitePlan} sede${limitePlan === 1 ? '' : 's'} · Configuradas: ${countSedes}`;
   }, [limitePlan, countSedes]);
 
+  const layoutTitle = tab === 'sedes' ? 'Sedes' : 'Usuarios';
+
   return (
-    <Layout title="Sedes y usuarios">
+    <Layout title={layoutTitle}>
       <div className="space-y-6">
         {feedback && (
           <div
@@ -148,11 +155,9 @@ export default function OrganizacionPage() {
           <div>
             <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
               <Building2 className="w-8 h-8 text-primary-600" />
-              Sedes y usuarios
+              Organización
             </h2>
-            <p className="text-slate-600 mt-1">
-              Administra las sedes de tu CDA y los usuarios que operan en ellas.
-            </p>
+            <p className="text-slate-600 mt-1">Sedes y usuarios de tu CDA.</p>
             {hintPlan && <p className="text-sm text-primary-700 font-medium mt-2">{hintPlan}</p>}
           </div>
         </div>

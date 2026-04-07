@@ -17,6 +17,7 @@ from app.models.caja import MovimientoCaja, Caja
 from app.models.tesoreria import MovimientoTesoreria
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo
 from app.models.sucursal import Sucursal
+from app.models.factus import FacturaElectronica
 
 router = APIRouter()
 
@@ -510,7 +511,22 @@ def obtener_movimientos_detallados(
         .order_by(MovimientoCaja.created_at.asc())
         .all()
     )
-    
+
+    vids = list({mov.vehiculo_id for mov in movimientos_caja if mov.vehiculo_id})
+    vmap: dict = {}
+    fe_by_vid: dict = {}
+    if vids:
+        for v in db.query(VehiculoProceso).filter(VehiculoProceso.id.in_(vids)).all():
+            vmap[v.id] = v
+        for fe in (
+            db.query(FacturaElectronica)
+            .filter(FacturaElectronica.vehiculo_proceso_id.in_(vids))
+            .order_by(FacturaElectronica.created_at.desc())
+            .all()
+        ):
+            if fe.vehiculo_proceso_id not in fe_by_vid:
+                fe_by_vid[fe.vehiculo_proceso_id] = fe
+
     lista_caja = []
     for mov in movimientos_caja:
         # Obtener nombre de usuario
@@ -526,6 +542,15 @@ def obtener_movimientos_detallados(
         if mov.caja and mov.caja.sucursal_id:
             s = db.query(Sucursal).filter(Sucursal.id == mov.caja.sucursal_id).first()
             sede_nombre = s.nombre if s else None
+        vid = mov.vehiculo_id
+        doc_vehiculo_id = str(vid) if vid else None
+        doc_numero_factura = None
+        doc_factura_url = None
+        if vid:
+            vp = vmap.get(vid)
+            doc_numero_factura = vp.numero_factura_dian if vp else None
+            fe = fe_by_vid.get(vid)
+            doc_factura_url = fe.public_url if fe else None
         lista_caja.append({
             "id": str(mov.id),
             "hora": mov.created_at.strftime("%H:%M:%S"),
@@ -540,7 +565,10 @@ def obtener_movimientos_detallados(
             "es_ingreso": mov.monto > 0,
             "metodo_pago": mov.metodo_pago or "N/A",
             "usuario": usuario_nombre,
-            "ingresa_efectivo": mov.ingresa_efectivo
+            "ingresa_efectivo": mov.ingresa_efectivo,
+            "vehiculo_id": doc_vehiculo_id,
+            "numero_factura_dian": doc_numero_factura,
+            "factura_public_url": doc_factura_url,
         })
     
     # ==================== MOVIMIENTOS DE TESORERÍA ====================
@@ -589,7 +617,10 @@ def obtener_movimientos_detallados(
             "es_ingreso": mov.monto > 0,
             "metodo_pago": mov.metodo_pago.value,
             "usuario": usuario_nombre,
-            "numero_comprobante": mov.numero_comprobante or "N/A"
+            "numero_comprobante": mov.numero_comprobante or "N/A",
+            "vehiculo_id": None,
+            "numero_factura_dian": None,
+            "factura_public_url": None,
         })
     
     # Combinar y ordenar por hora

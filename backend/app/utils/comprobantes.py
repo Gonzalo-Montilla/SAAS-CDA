@@ -299,8 +299,12 @@ def generar_recibo_pago_vehiculo_pdf(
     metodo_pago: str,
     fecha_pago: datetime,
     nombre_cajero: str,
+    *,
+    numero_factura_dian: Optional[str] = None,
+    cliente_email: Optional[str] = None,
+    cliente_telefono: Optional[str] = None,
 ) -> bytes:
-    """Genera PDF simple de recibo de pago para envío por correo."""
+    """Genera PDF de recibo de pago (formato estándar CDASOFT)."""
     buffer = BytesIO()
     doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5 * inch, bottomMargin=0.5 * inch)
     styles = getSampleStyleSheet()
@@ -348,7 +352,8 @@ def generar_recibo_pago_vehiculo_pdf(
         ["Fecha de pago", fecha_pago.strftime("%d/%m/%Y %H:%M:%S"), "Placa", placa],
         ["Cliente", cliente_nombre, "Documento", cliente_documento],
         ["Tipo vehículo", tipo_vehiculo.replace("_", " ").title(), "Atendido por", nombre_cajero],
-        ["Método de pago", metodo_label, "", ""],
+        ["Método de pago", metodo_label, "Factura DIAN", (numero_factura_dian or "—")],
+        ["Correo", (cliente_email or "—"), "Celular", (cliente_telefono or "—")],
     ]
     info_table = Table(data, colWidths=[1.3 * inch, 2.2 * inch, 1.2 * inch, 2.1 * inch])
     info_table.setStyle(
