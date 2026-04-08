@@ -4,7 +4,7 @@ Endpoints de Cajas
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func
+from sqlalchemy import and_, cast, Date, func, or_
 from datetime import datetime, timezone, date, time, timedelta
 from decimal import Decimal
 from typing import List
@@ -12,7 +12,8 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from app.core.deps import get_db, get_current_user, get_cajero_or_admin, get_admin, get_active_sucursal_id
-from app.models.usuario import Usuario
+from app.core.sucursal_scope import get_principal_sucursal_id
+from app.models.usuario import Usuario, RolEnum
 from app.models.caja import Caja, MovimientoCaja, TurnoEnum, EstadoCaja, TipoMovimiento, DesgloseEfectivoCierre
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo
 from app.schemas.caja import (
@@ -578,12 +579,17 @@ def obtener_historial_cajas(
     Con `fecha_cierre_desde` y `fecha_cierre_hasta`: solo cajas cerradas cuyo cierre cae en ese rango
     (día calendario America/Bogota), ordenadas por fecha de cierre descendente.
     """
+    principal_id = get_principal_sucursal_id(db, current_user.tenant_id)
+    # Sede activa; cajas antiguas pueden tener sucursal_id NULL (equivalente a sede principal).
     query = db.query(Caja).filter(
         Caja.tenant_id == current_user.tenant_id,
-        Caja.sucursal_id == active_sucursal_id,
+        or_(
+            Caja.sucursal_id == active_sucursal_id,
+            and_(Caja.sucursal_id.is_(None), active_sucursal_id == principal_id),
+        ),
     )
 
-    if current_user.rol != "administrador":
+    if current_user.rol != RolEnum.ADMINISTRADOR:
         query = query.filter(Caja.usuario_id == current_user.id)
 
     usa_rango_cierre = fecha_cierre_desde is not None or fecha_cierre_hasta is not None
@@ -603,18 +609,33 @@ def obtener_historial_cajas(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"El rango máximo permitido es de {HISTORIAL_RANGO_MAX_DIAS} días",
             )
-        tz = ZoneInfo("America/Bogota")
-        start_local = datetime.combine(fecha_cierre_desde, time.min, tzinfo=tz)
-        end_exclusive_local = datetime.combine(fecha_cierre_hasta + timedelta(days=1), time.min, tzinfo=tz)
-        start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
-        end_utc = end_exclusive_local.astimezone(timezone.utc).replace(tzinfo=None)
 
         query = query.filter(
             Caja.estado == EstadoCaja.CERRADA,
             Caja.fecha_cierre.isnot(None),
-            Caja.fecha_cierre >= start_utc,
-            Caja.fecha_cierre < end_utc,
         )
+
+        bind = db.get_bind()
+        if bind.dialect.name == "postgresql":
+            # fecha_cierre guardada como instante UTC (timestamp sin tz): día de cierre en Colombia en BD.
+            utc_tstz = func.timezone("UTC", Caja.fecha_cierre)
+            bogota_naive = func.timezone("America/Bogota", utc_tstz)
+            dia_cierre = cast(bogota_naive, Date)
+            query = query.filter(
+                dia_cierre >= fecha_cierre_desde,
+                dia_cierre <= fecha_cierre_hasta,
+            )
+        else:
+            tz = ZoneInfo("America/Bogota")
+            start_local = datetime.combine(fecha_cierre_desde, time.min, tzinfo=tz)
+            end_exclusive_local = datetime.combine(fecha_cierre_hasta + timedelta(days=1), time.min, tzinfo=tz)
+            start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
+            end_utc = end_exclusive_local.astimezone(timezone.utc).replace(tzinfo=None)
+            query = query.filter(
+                Caja.fecha_cierre >= start_utc,
+                Caja.fecha_cierre < end_utc,
+            )
+
         cajas = query.order_by(Caja.fecha_cierre.desc()).limit(limit).all()
     else:
         cajas = query.order_by(Caja.fecha_apertura.desc()).limit(limit).all()
