@@ -60,9 +60,27 @@ export const cajasApi = {
     }
   },
 
-  // Obtener historial de cajas
-  obtenerHistorial: async (): Promise<Caja[]> => {
-    const response = await apiClient.get<Caja[]>('/cajas/historial');
+  // Obtener historial de cajas (últimas N por defecto, sin filtro de fecha)
+  obtenerHistorial: async (limit = 10): Promise<Caja[]> => {
+    const response = await apiClient.get<Caja[]>('/cajas/historial', {
+      params: { limit },
+    });
+    return response.data;
+  },
+
+  /** Por día de cierre (calendario Colombia en servidor). Solo cajas cerradas en ese rango. */
+  obtenerHistorialPorFechaCierre: async (
+    fechaCierreDesde: string,
+    fechaCierreHasta: string,
+    limit = 200,
+  ): Promise<Caja[]> => {
+    const response = await apiClient.get<Caja[]>('/cajas/historial', {
+      params: {
+        fecha_cierre_desde: fechaCierreDesde,
+        fecha_cierre_hasta: fechaCierreHasta,
+        limit,
+      },
+    });
     return response.data;
   },
 

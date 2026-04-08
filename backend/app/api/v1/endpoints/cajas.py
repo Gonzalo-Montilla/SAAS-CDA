@@ -1,14 +1,15 @@
 """
 Endpoints de Cajas
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
 from fastapi.responses import Response
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date, time, timedelta
 from decimal import Decimal
 from typing import List
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from app.core.deps import get_db, get_current_user, get_cajero_or_admin, get_admin, get_active_sucursal_id
 from app.models.usuario import Usuario
@@ -549,27 +550,75 @@ def obtener_ultima_caja_cerrada(
     }
 
 
+HISTORIAL_DEFAULT_LIMIT = 10
+HISTORIAL_RANGO_MAX_DIAS = 366
+HISTORIAL_RANGO_MAX_LIMIT = 500
+
+
 @router.get("/historial", response_model=List[CajaResponse])
 def obtener_historial_cajas(
-    limit: int = 10,
+    limit: int = Query(HISTORIAL_DEFAULT_LIMIT, ge=1, le=HISTORIAL_RANGO_MAX_LIMIT),
+    fecha_cierre_desde: date | None = Query(
+        None,
+        description="Inicio del rango por día de cierre (inclusive), calendario Colombia",
+    ),
+    fecha_cierre_hasta: date | None = Query(
+        None,
+        description="Fin del rango por día de cierre (inclusive), calendario Colombia",
+    ),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
     active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
-    Obtener historial de cajas (admin ve todas, cajero solo las suyas)
+    Historial de cajas (admin ve todas, cajero solo las suyas).
+
+    Sin fechas: igual que antes — últimas `limit` cajas por fecha de apertura (por defecto 10).
+
+    Con `fecha_cierre_desde` y `fecha_cierre_hasta`: solo cajas cerradas cuyo cierre cae en ese rango
+    (día calendario America/Bogota), ordenadas por fecha de cierre descendente.
     """
     query = db.query(Caja).filter(
         Caja.tenant_id == current_user.tenant_id,
         Caja.sucursal_id == active_sucursal_id,
     )
 
-    # Si no es admin, solo ver sus propias cajas
     if current_user.rol != "administrador":
         query = query.filter(Caja.usuario_id == current_user.id)
-    
-    cajas = query.order_by(Caja.fecha_apertura.desc()).limit(limit).all()
-    
+
+    usa_rango_cierre = fecha_cierre_desde is not None or fecha_cierre_hasta is not None
+    if usa_rango_cierre:
+        if fecha_cierre_desde is None or fecha_cierre_hasta is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Para buscar por cierre indica fecha_cierre_desde y fecha_cierre_hasta",
+            )
+        if fecha_cierre_desde > fecha_cierre_hasta:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La fecha inicial no puede ser posterior a la final",
+            )
+        if (fecha_cierre_hasta - fecha_cierre_desde).days > HISTORIAL_RANGO_MAX_DIAS:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"El rango máximo permitido es de {HISTORIAL_RANGO_MAX_DIAS} días",
+            )
+        tz = ZoneInfo("America/Bogota")
+        start_local = datetime.combine(fecha_cierre_desde, time.min, tzinfo=tz)
+        end_exclusive_local = datetime.combine(fecha_cierre_hasta + timedelta(days=1), time.min, tzinfo=tz)
+        start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
+        end_utc = end_exclusive_local.astimezone(timezone.utc).replace(tzinfo=None)
+
+        query = query.filter(
+            Caja.estado == EstadoCaja.CERRADA,
+            Caja.fecha_cierre.isnot(None),
+            Caja.fecha_cierre >= start_utc,
+            Caja.fecha_cierre < end_utc,
+        )
+        cajas = query.order_by(Caja.fecha_cierre.desc()).limit(limit).all()
+    else:
+        cajas = query.order_by(Caja.fecha_apertura.desc()).limit(limit).all()
+
     return cajas
 
 

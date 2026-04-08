@@ -2735,44 +2735,190 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
 
 // Componente de Historial de Cajas
 function HistorialCajas() {
-  const { data: cajas, isLoading } = useQuery({
-    queryKey: ['historial-cajas'],
-    queryFn: () => cajasApi.obtenerHistorial(),
-    refetchInterval: 30000, // Refrescar cada 30 segundos
+  const queryClient = useQueryClient();
+  const [draftDesde, setDraftDesde] = useState('');
+  const [draftHasta, setDraftHasta] = useState('');
+  const [rangoAplicado, setRangoAplicado] = useState<{ desde: string; hasta: string } | null>(null);
+  const [errorFiltro, setErrorFiltro] = useState<string | null>(null);
+
+  const { data: cajas, isPending, isFetching } = useQuery({
+    queryKey: rangoAplicado
+      ? ['historial-cajas', 'por-cierre', rangoAplicado.desde, rangoAplicado.hasta]
+      : ['historial-cajas', 'recientes'],
+    queryFn: () =>
+      rangoAplicado
+        ? cajasApi.obtenerHistorialPorFechaCierre(rangoAplicado.desde, rangoAplicado.hasta, 200)
+        : cajasApi.obtenerHistorial(10),
+    refetchInterval: rangoAplicado ? false : 30000,
+    keepPreviousData: true,
   });
 
-  if (isLoading) {
+  const aplicarBusqueda = () => {
+    setErrorFiltro(null);
+    const d = draftDesde.trim();
+    const h = draftHasta.trim();
+    if (!d || !h) {
+      setErrorFiltro('Selecciona fecha desde y hasta (día de cierre).');
+      return;
+    }
+    if (d > h) {
+      setErrorFiltro('La fecha inicial no puede ser posterior a la final.');
+      return;
+    }
+    setRangoAplicado({ desde: d, hasta: h });
+  };
+
+  const volverRecientes = () => {
+    setErrorFiltro(null);
+    setRangoAplicado(null);
+    queryClient.invalidateQueries({ queryKey: ['historial-cajas', 'recientes'] });
+  };
+
+  const cajasArray = cajas || [];
+  const cargaInicial = isPending && cajasArray.length === 0;
+
+  if (cargaInicial) {
     return <LoadingSpinner message="Cargando historial de caja..." />;
   }
 
-  const cajasArray = cajas || [];
+  const etiquetaResumen = rangoAplicado
+    ? `Cierres entre ${new Date(rangoAplicado.desde + 'T12:00:00').toLocaleDateString('es-CO', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      })} y ${new Date(rangoAplicado.hasta + 'T12:00:00').toLocaleDateString('es-CO', {
+        day: '2-digit',
+        month: 'short',
+        year: 'numeric',
+      })} · hasta 200 registros`
+    : `Últimas ${cajasArray.length} cajas (por apertura)`;
 
   if (cajasArray.length === 0) {
     return (
-      <div className="card-pos text-center py-12">
-        <div className="flex justify-center mb-4">
-          <Folder className="w-20 h-20 text-gray-400" />
+      <div>
+        <div className="card-pos mb-4 p-4 border border-gray-200 rounded-xl bg-gray-50/80">
+          <p className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-2">
+            <Search className="w-4 h-4" />
+            Buscar por fecha de cierre
+          </p>
+          <p className="text-xs text-gray-600 mb-3">
+            El listado habitual sigue siendo las últimas 10 cajas. Usa el rango para ver cierres anteriores (día
+            calendario Colombia).
+          </p>
+          <div className="flex flex-wrap items-end gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Cierre desde</label>
+              <input
+                type="date"
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                value={draftDesde}
+                onChange={(e) => setDraftDesde(e.target.value)}
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Cierre hasta</label>
+              <input
+                type="date"
+                className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+                value={draftHasta}
+                onChange={(e) => setDraftHasta(e.target.value)}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={aplicarBusqueda}
+              className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold rounded-lg"
+            >
+              Buscar
+            </button>
+          </div>
+          {errorFiltro && <p className="text-sm text-red-600 mt-2">{errorFiltro}</p>}
         </div>
-        <h3 className="text-2xl font-bold text-gray-900 mb-2">
-          Sin historial
-        </h3>
-        <p className="text-gray-600">
-          Aún no hay cajas cerradas en el sistema
-        </p>
+        <div className="card-pos text-center py-12">
+          <div className="flex justify-center mb-4">
+            <Folder className="w-20 h-20 text-gray-400" />
+          </div>
+          <h3 className="text-2xl font-bold text-gray-900 mb-2">Sin resultados</h3>
+          <p className="text-gray-600">
+            {rangoAplicado
+              ? 'No hay cajas cerradas en ese rango de fechas.'
+              : 'Aún no hay cajas en el historial reciente.'}
+          </p>
+          {rangoAplicado && (
+            <button
+              type="button"
+              onClick={volverRecientes}
+              className="mt-4 text-sm font-semibold text-primary-600 hover:underline"
+            >
+              Volver a últimas 10
+            </button>
+          )}
+        </div>
       </div>
     );
   }
 
   return (
     <div>
-      <div className="flex justify-between items-center mb-6">
+      <div className="card-pos mb-4 p-4 border border-gray-200 rounded-xl bg-gray-50/80">
+        <p className="text-sm font-semibold text-gray-800 mb-2 flex items-center gap-2">
+          <Search className="w-4 h-4" />
+          Buscar por fecha de cierre
+        </p>
+        <p className="text-xs text-gray-600 mb-3">
+          Por defecto ves las últimas 10 cajas. El buscador lista cierres cuya <strong>fecha de cierre</strong> cae en
+          el rango (hasta 200 registros).
+        </p>
+        <div className="flex flex-wrap items-end gap-3">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Cierre desde</label>
+            <input
+              type="date"
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              value={draftDesde}
+              onChange={(e) => setDraftDesde(e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Cierre hasta</label>
+            <input
+              type="date"
+              className="border border-gray-300 rounded-lg px-3 py-2 text-sm"
+              value={draftHasta}
+              onChange={(e) => setDraftHasta(e.target.value)}
+            />
+          </div>
+          <button
+            type="button"
+            onClick={aplicarBusqueda}
+            className="px-4 py-2 bg-primary-600 hover:bg-primary-700 text-white text-sm font-semibold rounded-lg"
+          >
+            Buscar
+          </button>
+          {rangoAplicado && (
+            <button
+              type="button"
+              onClick={volverRecientes}
+              className="px-4 py-2 border border-gray-300 bg-white hover:bg-gray-50 text-gray-800 text-sm font-semibold rounded-lg"
+            >
+              Ver últimas 10
+            </button>
+          )}
+        </div>
+        {errorFiltro && <p className="text-sm text-red-600 mt-2">{errorFiltro}</p>}
+        {isFetching && !cargaInicial && (
+          <p className="text-xs text-gray-500 mt-2">Actualizando resultados…</p>
+        )}
+      </div>
+
+      <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-2 mb-6">
         <h3 className="text-2xl font-bold text-gray-900 flex items-center gap-2">
           <Folder className="w-7 h-7" />
           Historial de Cajas Cerradas
         </h3>
         <p className="text-sm text-gray-600 flex items-center gap-1">
-          <BarChart3 className="w-4 h-4" />
-          Mostrando las últimas {cajasArray.length} cajas
+          <BarChart3 className="w-4 h-4 shrink-0" />
+          <span>{etiquetaResumen}</span>
         </p>
       </div>
 
