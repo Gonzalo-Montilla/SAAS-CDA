@@ -532,14 +532,16 @@ def register_tenant_self_service(
     db.add(tenant)
     db.flush()
 
+    # Sede principal sin copiar dirección/municipio DIAN: en factura se resuelve desde la matriz (tenant),
+    # evitando duplicar datos y conflictos con «Guardar datos matriz». Solo ciudad opcional como etiqueta.
     sede_principal = Sucursal(
         tenant_id=tenant.id,
         nombre="Sede principal",
         codigo=None,
         activa=True,
         es_principal=True,
-        factus_municipality_id=mid_onboarding,
-        direccion=dir_onboarding,
+        factus_municipality_id=None,
+        direccion=None,
         ciudad=ciudad_onboarding,
     )
     db.add(sede_principal)

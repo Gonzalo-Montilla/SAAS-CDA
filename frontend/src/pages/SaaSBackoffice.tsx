@@ -90,6 +90,7 @@ export default function SaaSBackoffice() {
   const [sedeUbicacionEdit, setSedeUbicacionEdit] = useState<{
     id: string;
     nombre: string;
+    esPrincipal: boolean;
     direccion: string;
     ciudad: string;
     factus_municipality_id: string;
@@ -1585,7 +1586,7 @@ export default function SaaSBackoffice() {
                           embedded
                           icon={MapPin}
                           title="Matriz — respaldo DIAN / Factus"
-                          description="Configurado por el CDA en Organización. Si una sede deja vacíos dirección o código de municipio, al emitir se usan estos datos."
+                          description="Configurado por el CDA en Organización (Guardar datos matriz). Es el origen por defecto en factura para la sede principal y el respaldo del resto si no tienen dato propio."
                         />
                         <div className="px-4 pb-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm border-t border-slate-100 bg-slate-50/50">
                           <div>
@@ -1615,7 +1616,7 @@ export default function SaaSBackoffice() {
                           description={
                             n === 0
                               ? 'Sin sedes activas registradas'
-                              : `${n} sede${n === 1 ? '' : 's'} operativa${n === 1 ? '' : 's'} · ${totalesPlan} contratada${totalesPlan === 1 ? '' : 's'} en plan`
+                              : `${n} sede${n === 1 ? '' : 's'} operativa${n === 1 ? '' : 's'} · ${totalesPlan} contratada${totalesPlan === 1 ? '' : 's'} en plan. «Hereda matriz» = al facturar se usan dirección y/o municipio del bloque matriz. La sede principal suele ir así; las demás solo rellenan si el establecimiento DIAN es otro.`
                           }
                           right={
                             n > 0 ? (
@@ -1695,14 +1696,15 @@ export default function SaaSBackoffice() {
                                         className="inline-flex items-center gap-1 text-xs font-semibold text-primary-600 hover:underline"
                                         onClick={() => {
                                           setSedeUbicacionError('');
-                                          setSedeUbicacionEdit({
-                                            id: s.id,
-                                            nombre: s.nombre,
-                                            direccion: s.direccion?.trim() ? s.direccion : '',
-                                            ciudad: s.ciudad?.trim() ? s.ciudad : '',
-                                            factus_municipality_id:
-                                              s.factus_municipality_id != null ? String(s.factus_municipality_id) : '',
-                                          });
+                                        setSedeUbicacionEdit({
+                                          id: s.id,
+                                          nombre: s.nombre,
+                                          esPrincipal: s.es_principal,
+                                          direccion: s.direccion?.trim() ? s.direccion : '',
+                                          ciudad: s.ciudad?.trim() ? s.ciudad : '',
+                                          factus_municipality_id:
+                                            s.factus_municipality_id != null ? String(s.factus_municipality_id) : '',
+                                        });
                                         }}
                                       >
                                         <Pencil className="w-3.5 h-3.5" aria-hidden />
@@ -1732,6 +1734,13 @@ export default function SaaSBackoffice() {
                               dirección o municipio para que esta sede <strong>herede la matriz</strong> al emitir. El
                               código interno de sede no se cambia aquí.
                             </p>
+                            {sedeUbicacionEdit.esPrincipal ? (
+                              <p className="text-xs text-slate-600 bg-amber-50/90 border border-amber-100 rounded-lg px-3 py-2">
+                                <strong>Sede principal:</strong> lo coherente con la app del CDA es dejar vacíos
+                                dirección y municipio para no duplicar «datos de la matriz». Solo rellena si este
+                                punto es otro establecimiento DIAN.
+                              </p>
+                            ) : null}
                             {sedeUbicacionError ? (
                               <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">
                                 {sedeUbicacionError}

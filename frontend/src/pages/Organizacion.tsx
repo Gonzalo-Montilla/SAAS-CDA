@@ -333,9 +333,11 @@ export default function OrganizacionPage() {
               <div>
                 <h3 className="text-sm font-bold text-slate-900">Factura electrónica — datos de la matriz</h3>
                 <p className="text-xs text-slate-600 mt-1">
-                  Dirección y, si aplica, el código de municipio que exige la DIAN vía Factus. Son el respaldo del CDA:
-                  al cobrar se usa primero lo configurado en la <strong>sede activa</strong>; si la sede no tiene datos,
-                  se usan estos.
+                  Dirección y, si aplica, el código de municipio que exige la DIAN vía Factus. Es el{' '}
+                  <strong>respaldo del CDA</strong> y el valor por defecto de la <strong>sede principal</strong> en
+                  factura: si la sede principal deja vacíos dirección y municipio propios, se usan estos datos. Las{' '}
+                  <strong>sedes adicionales</strong> solo rellenan dirección y municipio cuando facturan en otro
+                  establecimiento; si los dejan vacíos, también heredan la matriz.
                 </p>
               </div>
               <div className="grid gap-3 sm:grid-cols-2">
@@ -463,7 +465,9 @@ export default function OrganizacionPage() {
 
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-slate-600 text-sm">
-                Cada sede es un contexto operativo: recepción, caja y reportes pueden filtrarse por sede.
+                Cada sede es un contexto operativo: recepción, caja y reportes pueden filtrarse por sede. En la tabla,
+                <span className="italic text-slate-500"> Hereda matriz</span> en dirección o municipio indica que al
+                facturar se usan los datos de matriz de arriba.
               </p>
               <button
                 type="button"
@@ -528,13 +532,26 @@ export default function OrganizacionPage() {
                           {s.ciudad?.trim() ? s.ciudad : '—'}
                         </td>
                         <td className="px-4 py-3 text-slate-600 tabular-nums">
-                          {s.factus_municipality_id != null ? s.factus_municipality_id : '—'}
+                          {s.factus_municipality_id != null ? (
+                            s.factus_municipality_id
+                          ) : (
+                            <span
+                              className="italic text-slate-500 text-xs font-sans"
+                              title="Al facturar se usa el código de municipio de la matriz"
+                            >
+                              Hereda matriz
+                            </span>
+                          )}
                         </td>
                         <td
                           className="px-4 py-3 text-slate-600 max-w-[10rem] truncate"
-                          title={s.direccion || undefined}
+                          title={s.direccion?.trim() ? s.direccion : 'Al facturar se usa la dirección de la matriz'}
                         >
-                          {s.direccion?.trim() ? s.direccion : '—'}
+                          {s.direccion?.trim() ? (
+                            s.direccion
+                          ) : (
+                            <span className="italic text-slate-500 text-xs">Hereda matriz</span>
+                          )}
                         </td>
                         <td className="px-4 py-3">
                           {s.activa ? (
@@ -646,14 +663,29 @@ export default function OrganizacionPage() {
               />
               <span className="text-sm text-slate-700">Marcar como sede principal</span>
             </label>
-            <p className="text-xs text-slate-500">Opcional — solo si esta sede factura distinto a la matriz</p>
+            {form.es_principal ? (
+              <p className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+                <strong>Sede principal:</strong> lo habitual es <strong>dejar vacíos</strong> dirección y código de
+                municipio para que la factura use siempre los datos de matriz (arriba). Solo complétalos si este punto
+                es otro establecimiento ante la DIAN.
+              </p>
+            ) : (
+              <p className="text-xs text-slate-500">
+                Dirección y municipio DIAN: complétalos solo si esta sede factura distinto a la matriz; vacío = hereda
+                matriz.
+              </p>
+            )}
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1">Dirección en factura</label>
               <textarea
                 className="input w-full min-h-[64px] text-sm"
                 value={form.direccion}
                 onChange={(e) => setForm((f) => ({ ...f, direccion: e.target.value }))}
-                placeholder="Si queda vacío, se usa la dirección de la matriz"
+                placeholder={
+                  form.es_principal
+                    ? 'Vacío recomendado: se usa la dirección de matriz'
+                    : 'Vacío: se usa la dirección de la matriz'
+                }
                 maxLength={500}
               />
             </div>
@@ -667,7 +699,7 @@ export default function OrganizacionPage() {
                 onChange={(e) =>
                   setForm((f) => ({ ...f, factus_municipality_id: e.target.value.replace(/\D/g, '') }))
                 }
-                placeholder="Vacío: usar el de la matriz"
+                placeholder={form.es_principal ? 'Vacío recomendado: se usa el de la matriz' : 'Vacío: el de la matriz'}
               />
             </div>
             <div className="flex gap-2 justify-end pt-2">
@@ -732,14 +764,25 @@ export default function OrganizacionPage() {
               />
               <span className="text-sm text-slate-700">Sede principal</span>
             </label>
-            <p className="text-xs text-slate-500">Opcional — distinto a la matriz solo si aplica</p>
+            {form.es_principal ? (
+              <p className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
+                <strong>Sede principal:</strong> borra dirección y municipio si quieres alinear todo con «datos de la
+                matriz» y evitar duplicados. Déjalos solo si facturas con otro establecimiento DIAN.
+              </p>
+            ) : (
+              <p className="text-xs text-slate-500">Vacío en dirección o municipio = hereda la matriz al facturar.</p>
+            )}
             <div>
               <label className="block text-sm font-semibold text-slate-700 mb-1">Dirección en factura</label>
               <textarea
                 className="input w-full min-h-[64px] text-sm"
                 value={form.direccion}
                 onChange={(e) => setForm((f) => ({ ...f, direccion: e.target.value }))}
-                placeholder="Vacío hereda dirección de la matriz"
+                placeholder={
+                  form.es_principal
+                    ? 'Vacío = dirección de matriz (recomendado si es el mismo establecimiento)'
+                    : 'Vacío hereda dirección de la matriz'
+                }
                 maxLength={500}
               />
             </div>
@@ -753,7 +796,11 @@ export default function OrganizacionPage() {
                 onChange={(e) =>
                   setForm((f) => ({ ...f, factus_municipality_id: e.target.value.replace(/\D/g, '') }))
                 }
-                placeholder="Vacío: mismo que la matriz"
+                placeholder={
+                  form.es_principal
+                    ? 'Vacío = municipio de matriz (recomendado si coincide)'
+                    : 'Vacío: mismo que la matriz'
+                }
               />
             </div>
             <div className="flex gap-2 justify-end pt-2">
