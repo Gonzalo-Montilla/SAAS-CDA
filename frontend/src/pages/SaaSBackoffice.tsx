@@ -12,15 +12,18 @@ import {
   Wallet,
   LifeBuoy,
   Star,
+  Pencil,
   Link2,
   CreditCard,
   KeyRound,
   UserPlus,
   Landmark,
+  MapPin,
 } from 'lucide-react';
 import { BackofficeSectionHeading } from '../components/BackofficeSectionHeading';
 import { useAuth } from '../contexts/AuthContext';
 import { apiClient } from '../api/client';
+import { patchSaasSucursalUbicacion } from '../api/saasTenant';
 import { useState } from 'react';
 import { formatCurrency } from '../utils/formatNumber';
 import type {
@@ -84,6 +87,14 @@ export default function SaaSBackoffice() {
   const [supportActionSuccess, setSupportActionSuccess] = useState('');
   const [supportReplyTicketId, setSupportReplyTicketId] = useState<string | null>(null);
   const [supportReplyMessage, setSupportReplyMessage] = useState('');
+  const [sedeUbicacionEdit, setSedeUbicacionEdit] = useState<{
+    id: string;
+    nombre: string;
+    direccion: string;
+    ciudad: string;
+    factus_municipality_id: string;
+  } | null>(null);
+  const [sedeUbicacionError, setSedeUbicacionError] = useState('');
 
   const formatAmountForInput = (amount: number): string => {
     if (!Number.isFinite(amount)) {
@@ -229,6 +240,33 @@ export default function SaaSBackoffice() {
       return response.data;
     },
     enabled: !!selectedTenantId,
+  });
+
+  const patchSedeUbicacionMutation = useMutation({
+    mutationFn: async (args: {
+      tenantId: string;
+      sucursalId: string;
+      direccion: string | null;
+      ciudad: string | null;
+      factus_municipality_id: number | null;
+    }) =>
+      patchSaasSucursalUbicacion(args.tenantId, args.sucursalId, {
+        direccion: args.direccion,
+        ciudad: args.ciudad,
+        factus_municipality_id: args.factus_municipality_id,
+      }),
+    onSuccess: () => {
+      setSedeUbicacionEdit(null);
+      setSedeUbicacionError('');
+      queryClient.invalidateQueries({ queryKey: ['saas-tenant-profile', selectedTenantId] });
+    },
+    onError: (err: unknown) => {
+      const detail =
+        typeof err === 'object' && err !== null && 'response' in err
+          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : undefined;
+      setSedeUbicacionError(typeof detail === 'string' ? detail : 'No se pudo guardar.');
+    },
   });
 
   const billingOverviewQuery = useQuery({
@@ -1530,67 +1568,264 @@ export default function SaaSBackoffice() {
                 </div>
 
                 {(() => {
-                  const sedes = tenantProfileQuery.data.sucursales_activas || [];
+                  const profile = tenantProfileQuery.data;
+                  if (!profile) return null;
+                  const matriz = profile.facturacion_matriz ?? {
+                    direccion_facturacion: null,
+                    factus_municipality_id: null,
+                  };
+                  const sedes = profile.sucursales_activas || [];
                   const n = sedes.length;
-                  const totalesPlan = tenantProfileQuery.data.sedes_totales;
+                  const totalesPlan = profile.sedes_totales;
+
                   return (
-                    <div className="section-card p-4">
+                    <div className="section-card p-4 space-y-4">
                       <div className="rounded-xl border border-slate-200/90 bg-white shadow-sm overflow-hidden ring-1 ring-slate-900/5">
-                      <BackofficeSectionHeading
-                        embedded
-                        icon={Building2}
-                        title="Red de sedes"
-                        description={
-                          n === 0
-                            ? 'Sin sedes activas registradas'
-                            : `${n} sede${n === 1 ? '' : 's'} operativa${n === 1 ? '' : 's'} · ${totalesPlan} contratada${totalesPlan === 1 ? '' : 's'} en plan`
-                        }
-                        right={
-                          n > 0 ? (
-                            <span className="rounded-md bg-white/80 px-2 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200/80">
-                              {n}/{totalesPlan} activas
-                            </span>
-                          ) : undefined
-                        }
-                      />
-                      {n === 0 ? (
-                        <div className="px-4 py-8 text-center">
-                          <p className="text-sm text-slate-500">El tenant aún no tiene sedes activas en el sistema.</p>
+                        <BackofficeSectionHeading
+                          embedded
+                          icon={MapPin}
+                          title="Matriz — respaldo DIAN / Factus"
+                          description="Configurado por el CDA en Organización. Si una sede deja vacíos dirección o código de municipio, al emitir se usan estos datos."
+                        />
+                        <div className="px-4 pb-4 grid grid-cols-1 md:grid-cols-2 gap-4 text-sm border-t border-slate-100 bg-slate-50/50">
+                          <div>
+                            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">
+                              Dirección (matriz)
+                            </p>
+                            <p className="text-slate-900 whitespace-pre-wrap break-words">
+                              {matriz.direccion_facturacion?.trim() ? matriz.direccion_facturacion : '—'}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">
+                              Código municipio (DIAN)
+                            </p>
+                            <p className="font-mono text-slate-900 tabular-nums">
+                              {matriz.factus_municipality_id != null ? matriz.factus_municipality_id : '—'}
+                            </p>
+                          </div>
                         </div>
-                      ) : (
-                        <div className="overflow-x-auto">
-                          <table className="table-enterprise min-w-full">
-                            <thead>
-                              <tr>
-                                <th>Sede</th>
-                                <th>Código</th>
-                                <th>Estado</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {sedes.map((s) => (
-                                <tr key={s.id}>
-                                  <td className="font-semibold text-slate-900">{s.nombre}</td>
-                                  <td className="font-mono text-xs text-slate-600">{s.codigo || '—'}</td>
-                                  <td>
-                                    {s.es_principal ? (
-                                      <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 pl-2 pr-2.5 py-1 text-xs font-semibold text-amber-900 ring-1 ring-amber-200/90">
-                                        <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-600" aria-hidden />
-                                        Principal
-                                      </span>
-                                    ) : (
-                                      <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 ring-1 ring-emerald-200/70">
-                                        Activa
-                                      </span>
-                                    )}
-                                  </td>
+                      </div>
+
+                      <div className="rounded-xl border border-slate-200/90 bg-white shadow-sm overflow-hidden ring-1 ring-slate-900/5">
+                        <BackofficeSectionHeading
+                          embedded
+                          icon={Building2}
+                          title="Red de sedes"
+                          description={
+                            n === 0
+                              ? 'Sin sedes activas registradas'
+                              : `${n} sede${n === 1 ? '' : 's'} operativa${n === 1 ? '' : 's'} · ${totalesPlan} contratada${totalesPlan === 1 ? '' : 's'} en plan`
+                          }
+                          right={
+                            n > 0 ? (
+                              <span className="rounded-md bg-white/80 px-2 py-1 text-xs font-medium text-slate-700 ring-1 ring-slate-200/80">
+                                {n}/{totalesPlan} activas
+                              </span>
+                            ) : undefined
+                          }
+                        />
+                        {n === 0 ? (
+                          <div className="px-4 py-8 text-center">
+                            <p className="text-sm text-slate-500">El tenant aún no tiene sedes activas en el sistema.</p>
+                          </div>
+                        ) : (
+                          <div className="overflow-x-auto">
+                            <table className="table-enterprise min-w-full">
+                              <thead>
+                                <tr>
+                                  <th>Sede</th>
+                                  <th>Cód. sede</th>
+                                  <th>Ciudad</th>
+                                  <th>Dirección (factura)</th>
+                                  <th>Cód. municipio</th>
+                                  <th>Estado</th>
+                                  <th className="text-right">Desde CDASOFT</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
+                              </thead>
+                              <tbody>
+                                {sedes.map((s) => (
+                                  <tr key={s.id}>
+                                    <td className="font-semibold text-slate-900">{s.nombre}</td>
+                                    <td className="font-mono text-xs text-slate-600">{s.codigo || '—'}</td>
+                                    <td className="text-sm text-slate-700 max-w-[8rem] truncate" title={s.ciudad || undefined}>
+                                      {s.ciudad?.trim() ? s.ciudad : '—'}
+                                    </td>
+                                    <td className="text-sm text-slate-700 max-w-[12rem]">
+                                      {s.direccion?.trim() ? (
+                                        <span className="line-clamp-2" title={s.direccion}>
+                                          {s.direccion}
+                                        </span>
+                                      ) : (
+                                        <span
+                                          className="italic text-slate-500 text-xs whitespace-nowrap"
+                                          title="Al emitir factura se usa la dirección de matriz"
+                                        >
+                                          Hereda matriz
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="font-mono text-xs text-slate-600 tabular-nums">
+                                      {s.factus_municipality_id != null ? (
+                                        s.factus_municipality_id
+                                      ) : (
+                                        <span
+                                          className="italic text-slate-500 text-xs font-sans whitespace-nowrap"
+                                          title="Al emitir factura se usa el código de municipio de matriz"
+                                        >
+                                          Hereda matriz
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td>
+                                      {s.es_principal ? (
+                                        <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 pl-2 pr-2.5 py-1 text-xs font-semibold text-amber-900 ring-1 ring-amber-200/90">
+                                          <Star className="w-3.5 h-3.5 fill-amber-400 text-amber-600" aria-hidden />
+                                          Principal
+                                        </span>
+                                      ) : (
+                                        <span className="inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 ring-1 ring-emerald-200/70">
+                                          Activa
+                                        </span>
+                                      )}
+                                    </td>
+                                    <td className="text-right">
+                                      <button
+                                        type="button"
+                                        className="inline-flex items-center gap-1 text-xs font-semibold text-primary-600 hover:underline"
+                                        onClick={() => {
+                                          setSedeUbicacionError('');
+                                          setSedeUbicacionEdit({
+                                            id: s.id,
+                                            nombre: s.nombre,
+                                            direccion: s.direccion?.trim() ? s.direccion : '',
+                                            ciudad: s.ciudad?.trim() ? s.ciudad : '',
+                                            factus_municipality_id:
+                                              s.factus_municipality_id != null ? String(s.factus_municipality_id) : '',
+                                          });
+                                        }}
+                                      >
+                                        <Pencil className="w-3.5 h-3.5" aria-hidden />
+                                        Editar
+                                      </button>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+
+                      {sedeUbicacionEdit && selectedTenantId && (
+                        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40">
+                          <div
+                            className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4 ring-1 ring-slate-200 max-h-[90vh] overflow-y-auto"
+                            role="dialog"
+                            aria-labelledby="sede-ubicacion-dialog-title"
+                          >
+                            <h3 id="sede-ubicacion-dialog-title" className="text-lg font-bold text-slate-900">
+                              Facturación de la sede (DIAN)
+                            </h3>
+                            <p className="text-sm text-slate-600">
+                              <span className="font-semibold text-slate-800">{sedeUbicacionEdit.nombre}</span>. Deja vacíos
+                              dirección o municipio para que esta sede <strong>herede la matriz</strong> al emitir. El
+                              código interno de sede no se cambia aquí.
+                            </p>
+                            {sedeUbicacionError ? (
+                              <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">
+                                {sedeUbicacionError}
+                              </p>
+                            ) : null}
+                            <div>
+                              <label className="block text-sm font-semibold text-slate-700 mb-1">
+                                Dirección en factura
+                              </label>
+                              <textarea
+                                className="input-corporate w-full min-h-[72px] text-sm resize-y"
+                                value={sedeUbicacionEdit.direccion}
+                                onChange={(e) =>
+                                  setSedeUbicacionEdit((prev) =>
+                                    prev ? { ...prev, direccion: e.target.value } : prev,
+                                  )
+                                }
+                                placeholder="Vacío = hereda matriz"
+                                maxLength={500}
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-semibold text-slate-700 mb-1">
+                                Código municipio (Factus / DIAN)
+                              </label>
+                              <input
+                                type="text"
+                                inputMode="numeric"
+                                className="input-corporate w-full font-mono text-sm"
+                                value={sedeUbicacionEdit.factus_municipality_id}
+                                onChange={(e) =>
+                                  setSedeUbicacionEdit((prev) =>
+                                    prev ? { ...prev, factus_municipality_id: e.target.value.replace(/\D/g, '') } : prev,
+                                  )
+                                }
+                                placeholder="Vacío = hereda matriz"
+                              />
+                            </div>
+                            <div>
+                              <label className="block text-sm font-semibold text-slate-700 mb-1">
+                                Ciudad (opcional)
+                              </label>
+                              <input
+                                className="input-corporate w-full"
+                                value={sedeUbicacionEdit.ciudad}
+                                onChange={(e) =>
+                                  setSedeUbicacionEdit((prev) =>
+                                    prev ? { ...prev, ciudad: e.target.value } : prev,
+                                  )
+                                }
+                                placeholder="Etiqueta interna; no reemplaza municipio DIAN"
+                                maxLength={200}
+                              />
+                            </div>
+                            <div className="flex gap-2 justify-end pt-2">
+                              <button
+                                type="button"
+                                className="btn-corporate-muted px-4"
+                                onClick={() => {
+                                  setSedeUbicacionEdit(null);
+                                  setSedeUbicacionError('');
+                                }}
+                              >
+                                Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                className="btn-primary-solid px-4 disabled:opacity-50"
+                                disabled={patchSedeUbicacionMutation.isLoading}
+                                onClick={() => {
+                                  if (!sedeUbicacionEdit || !selectedTenantId) return;
+                                  const midStr = sedeUbicacionEdit.factus_municipality_id.trim();
+                                  if (midStr) {
+                                    const n = parseInt(midStr, 10);
+                                    if (Number.isNaN(n) || n < 1) {
+                                      setSedeUbicacionError('El código de municipio debe ser un entero mayor a 0.');
+                                      return;
+                                    }
+                                  }
+                                  patchSedeUbicacionMutation.mutate({
+                                    tenantId: selectedTenantId,
+                                    sucursalId: sedeUbicacionEdit.id,
+                                    direccion: sedeUbicacionEdit.direccion.trim() || null,
+                                    ciudad: sedeUbicacionEdit.ciudad.trim() || null,
+                                    factus_municipality_id: midStr ? parseInt(midStr, 10) : null,
+                                  });
+                                }}
+                              >
+                                Guardar
+                              </button>
+                            </div>
+                          </div>
                         </div>
                       )}
-                      </div>
                     </div>
                   );
                 })()}

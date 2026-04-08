@@ -11,7 +11,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_current_user, get_admin, get_db
+from app.core.deps import get_admin, get_current_user, get_db
 from app.core.config import settings
 from app.models.usuario import Usuario
 from app.models.tenant import Tenant
@@ -205,3 +205,55 @@ def actualizar_tenant_branding(
     return {
         "message": "Branding del tenant actualizado exitosamente"
     }
+
+
+class TenantFacturacionUbicacionOut(BaseModel):
+    factus_municipality_id: int | None = None
+    direccion_facturacion: str | None = None
+
+
+class TenantFacturacionUbicacionUpdate(BaseModel):
+    factus_municipality_id: int | None = Field(default=None, ge=1)
+    direccion_facturacion: str | None = Field(default=None, max_length=500)
+
+
+@router.get("/facturacion-ubicacion", response_model=TenantFacturacionUbicacionOut)
+def obtener_facturacion_ubicacion_tenant(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado")
+    return TenantFacturacionUbicacionOut(
+        factus_municipality_id=tenant.factus_municipality_id,
+        direccion_facturacion=tenant.direccion_facturacion,
+    )
+
+
+@router.patch("/facturacion-ubicacion", response_model=TenantFacturacionUbicacionOut)
+def actualizar_facturacion_ubicacion_tenant(
+    payload: TenantFacturacionUbicacionUpdate,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_admin),
+):
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado")
+
+    data = payload.model_dump(exclude_unset=True)
+    if "factus_municipality_id" in data:
+        tenant.factus_municipality_id = data["factus_municipality_id"]
+    if "direccion_facturacion" in data:
+        d = data["direccion_facturacion"]
+        if d is None:
+            tenant.direccion_facturacion = None
+        else:
+            tenant.direccion_facturacion = d.strip() or None
+
+    db.commit()
+    db.refresh(tenant)
+    return TenantFacturacionUbicacionOut(
+        factus_municipality_id=tenant.factus_municipality_id,
+        direccion_facturacion=tenant.direccion_facturacion,
+    )

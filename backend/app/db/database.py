@@ -689,6 +689,15 @@ def ensure_sucursales_schema(db):
     )
 
 
+def ensure_facturacion_ubicacion_schema(db):
+    """Municipio y dirección para Factus: matriz (tenant) y override opcional por sede."""
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS factus_municipality_id INTEGER"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS direccion_facturacion VARCHAR(500)"))
+    db.execute(text("ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS factus_municipality_id INTEGER"))
+    db.execute(text("ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS direccion VARCHAR(500)"))
+    db.execute(text("ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS ciudad VARCHAR(200)"))
+
+
 def ensure_factus_schema(db):
     """Facturación electrónica Factus: tablas por tenant y trazas de documentos."""
     db.execute(
@@ -770,12 +779,9 @@ def init_db():
     try:
         ensure_tenant_baseline_schema(db)
 
-        default_tenant = db.query(Tenant).filter(
-            Tenant.slug == settings.SAAS_DEFAULT_TENANT_SLUG
-        ).first()
-        if not default_tenant:
-            raise RuntimeError("No se pudo inicializar tenant default")
-
+        # Esquemas que hacen ALTER en tenants/sucursales deben ejecutarse antes del primer
+        # db.query(Tenant): el modelo ORM incluye todas las columnas mapeadas y fallaría
+        # con UndefinedColumn si la BD aún no las tiene (y el except más abajo ocultaría el error).
         ensure_tenant_domain_schema(db)
         ensure_onboarding_security_schema(db)
         ensure_support_schema(db)
@@ -783,8 +789,15 @@ def init_db():
         ensure_appointments_schema(db)
         ensure_rtm_reminders_schema(db)
         ensure_sucursales_schema(db)
+        ensure_facturacion_ubicacion_schema(db)
         ensure_factus_schema(db)
         db.commit()
+
+        default_tenant = db.query(Tenant).filter(
+            Tenant.slug == settings.SAAS_DEFAULT_TENANT_SLUG
+        ).first()
+        if not default_tenant:
+            raise RuntimeError("No se pudo inicializar tenant default")
 
         # Verificar y crear owner global SaaS
         saas_owner = db.query(SaaSUser).filter(SaaSUser.email == settings.SAAS_OWNER_EMAIL).first()

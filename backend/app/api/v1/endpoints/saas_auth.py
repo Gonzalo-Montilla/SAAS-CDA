@@ -29,6 +29,7 @@ from app.core.security import (
 from app.models.audit_log import AuditLog
 from app.models.saas_user import SaaSUser
 from app.models.support_ticket import SaaSSupportTicket
+from app.models.sucursal import Sucursal
 from app.models.tenant import Tenant
 from app.models.usuario import Usuario
 from app.schemas.auth import Token, RefreshTokenRequest
@@ -150,13 +151,34 @@ class SaaSSucursalResumen(BaseModel):
     id: str
     nombre: str
     codigo: str | None = None
+    ciudad: str | None = None
+    direccion: str | None = None
+    factus_municipality_id: int | None = None
     activa: bool
     es_principal: bool
+
+
+class SaaSTenantFacturacionMatriz(BaseModel):
+    """Respaldo DIAN/Factus a nivel matriz. Las sedes sin dato propio lo heredan al facturar."""
+
+    direccion_facturacion: str | None = None
+    factus_municipality_id: int | None = None
+
+
+class SaaSSucursalUbicacionPatch(BaseModel):
+    """Ubicación por sede desde backoffice SaaS (vacío en sede = hereda matriz al emitir)."""
+
+    ciudad: str | None = Field(default=None, max_length=200)
+    direccion: str | None = Field(default=None, max_length=500)
+    factus_municipality_id: int | None = Field(default=None, ge=1)
 
 
 class SaaSTenantProfile(SaaSTenantSummary):
     total_usuarios: int
     usuarios_recientes: list[SaaSTenantUserSummary]
+    facturacion_matriz: SaaSTenantFacturacionMatriz = Field(
+        description="Datos de facturación por defecto del CDA (matriz).",
+    )
     sucursales_activas: list[SaaSSucursalResumen] = Field(
         default_factory=list,
         description="Sedes activas del tenant (operativas).",
@@ -746,10 +768,6 @@ def get_saas_tenant_profile(
     db: Session = Depends(get_db),
     _: SaaSUser = Depends(require_saas_role(["owner", "comercial", "soporte"])),
 ):
-    from app.models.tenant import Tenant
-    from app.models.usuario import Usuario
-    from app.models.sucursal import Sucursal
-
     sync_expired_demo_tenants(db)
     try:
         tenant_uuid = UUID(tenant_id)
@@ -805,6 +823,10 @@ def get_saas_tenant_profile(
         last_payment_at=tenant.last_payment_at,
         activo=tenant.activo,
         login_url=f"{base_url}/{tenant.slug}",
+        facturacion_matriz=SaaSTenantFacturacionMatriz(
+            direccion_facturacion=tenant.direccion_facturacion,
+            factus_municipality_id=tenant.factus_municipality_id,
+        ),
         total_usuarios=total_users,
         usuarios_recientes=[
             SaaSTenantUserSummary(
@@ -822,11 +844,76 @@ def get_saas_tenant_profile(
                 id=str(s.id),
                 nombre=s.nombre,
                 codigo=s.codigo,
+                ciudad=s.ciudad,
+                direccion=s.direccion,
+                factus_municipality_id=s.factus_municipality_id,
                 activa=bool(s.activa),
                 es_principal=bool(s.es_principal),
             )
             for s in sedes_rows
         ],
+    )
+
+
+@router.patch(
+    "/tenants/{tenant_id}/sucursales/{sucursal_id}",
+    response_model=SaaSSucursalResumen,
+)
+def patch_saas_sucursal_ubicacion(
+    tenant_id: str,
+    sucursal_id: str,
+    body: SaaSSucursalUbicacionPatch,
+    db: Session = Depends(get_db),
+    _: SaaSUser = Depends(require_saas_role(["owner", "comercial", "soporte"])),
+):
+    """Ubicación de facturación por sede (CDASOFT backoffice). Vacío hereda matriz al emitir."""
+    try:
+        tenant_uuid = UUID(tenant_id)
+        suc_uuid = UUID(sucursal_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ID inválido",
+        )
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant no encontrado",
+        )
+    row = (
+        db.query(Sucursal)
+        .filter(Sucursal.id == suc_uuid, Sucursal.tenant_id == tenant_uuid)
+        .first()
+    )
+    if not row:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Sede no encontrada",
+        )
+
+    data = body.model_dump(exclude_unset=True)
+    if "ciudad" in data:
+        c = data["ciudad"]
+        row.ciudad = (c.strip() if c else None) or None
+    if "direccion" in data:
+        d = data["direccion"]
+        row.direccion = (d.strip() if d else None) or None
+    if "factus_municipality_id" in data:
+        row.factus_municipality_id = data["factus_municipality_id"]
+
+    db.commit()
+    db.refresh(row)
+
+    return SaaSSucursalResumen(
+        id=str(row.id),
+        nombre=row.nombre,
+        codigo=row.codigo,
+        ciudad=row.ciudad,
+        direccion=row.direccion,
+        factus_municipality_id=row.factus_municipality_id,
+        activa=bool(row.activa),
+        es_principal=bool(row.es_principal),
     )
 
 

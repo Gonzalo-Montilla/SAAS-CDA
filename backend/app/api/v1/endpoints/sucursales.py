@@ -53,12 +53,17 @@ def crear_sucursal(
             Sucursal.es_principal.is_(True),
         ).update({Sucursal.es_principal: False})
 
+    dir_sede = (body.direccion.strip() if body.direccion else None) or None
+    ciudad_sede = (body.ciudad.strip() if body.ciudad else None) or None
     row = Sucursal(
         tenant_id=current_user.tenant_id,
         nombre=body.nombre.strip(),
         codigo=(body.codigo.strip() if body.codigo else None) or None,
         activa=body.activa,
         es_principal=es_principal,
+        factus_municipality_id=body.factus_municipality_id,
+        direccion=dir_sede,
+        ciudad=ciudad_sede,
     )
     db.add(row)
     db.commit()
@@ -104,6 +109,20 @@ def actualizar_sucursal(
                 detail="Marque otra sede como principal antes de quitar la principal",
             )
         row.es_principal = False
+    if "factus_municipality_id" in data:
+        row.factus_municipality_id = data["factus_municipality_id"]
+    if "direccion" in data:
+        d = data["direccion"]
+        if d is None:
+            row.direccion = None
+        else:
+            row.direccion = d.strip() or None
+    if "ciudad" in data:
+        c = data["ciudad"]
+        if c is None:
+            row.ciudad = None
+        else:
+            row.ciudad = c.strip() or None
 
     db.commit()
     db.refresh(row)

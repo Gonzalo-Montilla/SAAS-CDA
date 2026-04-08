@@ -1,12 +1,42 @@
 """
 Utilidades para Auditoría
 """
-from typing import Optional, Dict, Any
-from sqlalchemy.orm import Session
+from __future__ import annotations
+
+from datetime import date, datetime
+from decimal import Decimal
+from enum import Enum
+from typing import Any, Optional, Dict
+from uuid import UUID
+
 from fastapi import Request
+from sqlalchemy.orm import Session
 
 from app.models.audit_log import AuditLog, AuditAction
 from app.models.usuario import Usuario
+
+
+def _sanitize_for_json(value: Any) -> Any:
+    """Convierte valores a tipos serializables en JSON (UUID, Enum, fechas, anidados)."""
+    if value is None:
+        return None
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, Enum):
+        return value.value if hasattr(value, "value") else str(value)
+    if isinstance(value, datetime):
+        return value.isoformat()
+    if isinstance(value, date):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, dict):
+        return {k: _sanitize_for_json(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_sanitize_for_json(v) for v in value]
+    if isinstance(value, (str, int, float, bool)):
+        return value
+    return str(value)
 
 
 def create_audit_log(
@@ -48,7 +78,9 @@ def create_audit_log(
             ip_address = request.client.host if request.client else None
         
         user_agent = request.headers.get("User-Agent")
-    
+
+    safe_metadata = _sanitize_for_json(metadata) if metadata is not None else None
+
     # Crear registro
     audit_log = AuditLog(
         action=action.value if hasattr(action, 'value') else action,
@@ -59,7 +91,7 @@ def create_audit_log(
         usuario_rol=usuario.rol.value if usuario and hasattr(usuario.rol, 'value') else (usuario.rol if usuario else None),
         ip_address=ip_address,
         user_agent=user_agent,
-        extra_data=metadata,
+        extra_data=safe_metadata,
         success=success,
         error_message=error_message
     )

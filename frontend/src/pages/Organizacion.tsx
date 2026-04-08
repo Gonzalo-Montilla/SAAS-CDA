@@ -1,23 +1,16 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Building2, Users, Plus, Pencil, Star, CheckCircle2, XCircle } from 'lucide-react';
 import Layout from '../components/Layout';
 import apiClient from '../api/client';
+import { configApi } from '../api/config';
+import { factusApi } from '../api/factus';
 import { useAuth } from '../contexts/AuthContext';
-import type { Usuario } from '../types';
+import type { SucursalAdminRow, Usuario } from '../types';
 import UsuariosPage from './Usuarios';
 
 type TabKey = 'sedes' | 'usuarios';
-
-interface SucursalRow {
-  id: string;
-  tenant_id: string;
-  nombre: string;
-  codigo: string | null;
-  activa: boolean;
-  es_principal: boolean;
-}
 
 function tabFromSearch(tabParam: string | null): TabKey {
   if (tabParam === 'usuarios') return 'usuarios';
@@ -42,13 +35,108 @@ export default function OrganizacionPage() {
   const limitePlan = tenantUser?.tenant_sedes_totales ?? null;
   const sedesActuales = tenantUser?.sucursales?.length ?? 0;
 
-  const { data: sedesLista, isLoading } = useQuery<SucursalRow[]>({
+  const { data: sedesLista, isLoading } = useQuery<SucursalAdminRow[]>({
     queryKey: ['sucursales-admin'],
     queryFn: async () => {
-      const r = await apiClient.get<SucursalRow[]>('/sucursales');
+      const r = await apiClient.get<SucursalAdminRow[]>('/sucursales');
       return r.data;
     },
     enabled: tab === 'sedes',
+  });
+
+  const { data: ubicacionMatriz } = useQuery({
+    queryKey: ['config-facturacion-ubicacion'],
+    queryFn: () => configApi.obtenerFacturacionUbicacion(),
+    enabled: tab === 'sedes',
+  });
+
+  const [matrizDraft, setMatrizDraft] = useState({ direccion: '', municipio: '' });
+
+  useEffect(() => {
+    if (!ubicacionMatriz) return;
+    setMatrizDraft({
+      direccion: ubicacionMatriz.direccion_facturacion ?? '',
+      municipio:
+        ubicacionMatriz.factus_municipality_id != null
+          ? String(ubicacionMatriz.factus_municipality_id)
+          : '',
+    });
+  }, [ubicacionMatriz]);
+
+  const saveMatrizMutation = useMutation({
+    mutationFn: async () => {
+      const m = matrizDraft.municipio.trim();
+      let mid: number | null = null;
+      if (m) {
+        const n = parseInt(m, 10);
+        if (Number.isNaN(n) || n < 1) {
+          throw new Error('El código de municipio debe ser un número entero mayor a 0.');
+        }
+        mid = n;
+      }
+      await configApi.actualizarFacturacionUbicacion({
+        direccion_facturacion: matrizDraft.direccion.trim() || null,
+        factus_municipality_id: m ? mid : null,
+      });
+    },
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['config-facturacion-ubicacion'] });
+      setFeedback({
+        type: 'success',
+        message: 'Datos de facturación de la matriz guardados. Se usarán como respaldo si una sede no tiene municipio propio.',
+      });
+    },
+    onError: (e: unknown) => {
+      const msg = e instanceof Error ? e.message : 'No se pudo guardar.';
+      setFeedback({ type: 'error', message: msg });
+    },
+  });
+
+  const { data: factusSettings, isLoading: loadingFactusModo } = useQuery({
+    queryKey: ['factus-settings'],
+    queryFn: () => factusApi.getSettings(),
+    enabled: tab === 'sedes',
+  });
+
+  const patchFactusModoMutation = useMutation({
+    mutationFn: (payload: { modo: 'manual' | 'factus' }) => factusApi.patchModo(payload),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['factus-settings'] });
+      setFeedback({
+        type: 'success',
+        message: 'Modo de facturación actualizado. En caja se aplicará al cargar o al abrir de nuevo la pantalla.',
+      });
+    },
+    onError: (e: unknown) => {
+      const detail =
+        typeof e === 'object' && e !== null && 'response' in e
+          ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : undefined;
+      setFeedback({
+        type: 'error',
+        message: typeof detail === 'string' ? detail : 'No se pudo cambiar el modo de facturación.',
+      });
+    },
+  });
+
+  const testFactusMutation = useMutation({
+    mutationFn: () => factusApi.testConnection(),
+    onSuccess: (data) => {
+      setFeedback({
+        type: 'success',
+        message: data.message || 'Conexión con Factus correcta.',
+      });
+    },
+    onError: (e: unknown) => {
+      const detail =
+        typeof e === 'object' && e !== null && 'response' in e
+          ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : undefined;
+      setFeedback({
+        type: 'error',
+        message: typeof detail === 'string' ? detail : 'No se pudo probar la conexión con Factus.',
+      });
+    },
   });
 
   const countSedes = sedesLista?.length ?? sedesActuales;
@@ -56,34 +144,67 @@ export default function OrganizacionPage() {
 
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [modalCrear, setModalCrear] = useState(false);
-  const [editando, setEditando] = useState<SucursalRow | null>(null);
+  const [editando, setEditando] = useState<SucursalAdminRow | null>(null);
   const [form, setForm] = useState({
     nombre: '',
     codigo: '',
     activa: true,
     es_principal: false,
+    ciudad: '',
+    direccion: '',
+    factus_municipality_id: '',
   });
 
   const crearMutation = useMutation({
     mutationFn: async () => {
-      await apiClient.post('/sucursales', {
+      const midStr = form.factus_municipality_id.trim();
+      if (midStr) {
+        const n = parseInt(midStr, 10);
+        if (Number.isNaN(n) || n < 1) {
+          throw new Error('Código de municipio inválido.');
+        }
+      }
+      const payload: Record<string, unknown> = {
         nombre: form.nombre.trim(),
         codigo: form.codigo.trim() || null,
         activa: form.activa,
         es_principal: form.es_principal,
-      });
+      };
+      if (midStr) payload.factus_municipality_id = parseInt(midStr, 10);
+      const dir = form.direccion.trim();
+      if (dir) payload.direccion = dir;
+      const ciu = form.ciudad.trim();
+      if (ciu) payload.ciudad = ciu;
+      await apiClient.post('/sucursales', payload);
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['sucursales-admin'] });
       await refreshTenantUser();
       setModalCrear(false);
-      setForm({ nombre: '', codigo: '', activa: true, es_principal: false });
+      setForm({
+        nombre: '',
+        codigo: '',
+        activa: true,
+        es_principal: false,
+        ciudad: '',
+        direccion: '',
+        factus_municipality_id: '',
+      });
       setFeedback({ type: 'success', message: 'Sede creada correctamente.' });
     },
-    onError: (e: any) => {
+    onError: (e: unknown) => {
+      const msg =
+        e && typeof e === 'object' && 'message' in e && typeof (e as Error).message === 'string'
+          ? (e as Error).message
+          : '';
       setFeedback({
         type: 'error',
-        message: e?.response?.data?.detail || 'No se pudo crear la sede.',
+        message:
+          msg ||
+          (typeof e === 'object' && e !== null && 'response' in e
+            ? String((e as { response?: { data?: { detail?: string } } }).response?.data?.detail)
+            : '') ||
+          'No se pudo crear la sede.',
       });
     },
   });
@@ -91,11 +212,21 @@ export default function OrganizacionPage() {
   const actualizarMutation = useMutation({
     mutationFn: async () => {
       if (!editando) return;
+      const midStr = form.factus_municipality_id.trim();
+      if (midStr) {
+        const n = parseInt(midStr, 10);
+        if (Number.isNaN(n) || n < 1) {
+          throw new Error('Código de municipio inválido.');
+        }
+      }
       await apiClient.patch(`/sucursales/${editando.id}`, {
         nombre: form.nombre.trim(),
         codigo: form.codigo.trim() || null,
         activa: form.activa,
         es_principal: form.es_principal,
+        factus_municipality_id: midStr ? parseInt(midStr, 10) : null,
+        direccion: form.direccion.trim() || null,
+        ciudad: form.ciudad.trim() || null,
       });
     },
     onSuccess: async () => {
@@ -104,10 +235,19 @@ export default function OrganizacionPage() {
       setEditando(null);
       setFeedback({ type: 'success', message: 'Sede actualizada.' });
     },
-    onError: (e: any) => {
+    onError: (e: unknown) => {
+      const msg =
+        e && typeof e === 'object' && 'message' in e && typeof (e as Error).message === 'string'
+          ? (e as Error).message
+          : '';
       setFeedback({
         type: 'error',
-        message: e?.response?.data?.detail || 'No se pudo guardar.',
+        message:
+          msg ||
+          (typeof e === 'object' && e !== null && 'response' in e
+            ? String((e as { response?: { data?: { detail?: string } } }).response?.data?.detail)
+            : '') ||
+          'No se pudo guardar.',
       });
     },
   });
@@ -189,6 +329,138 @@ export default function OrganizacionPage() {
 
         {tab === 'sedes' && (
           <div className="card-pos space-y-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Factura electrónica — datos de la matriz</h3>
+                <p className="text-xs text-slate-600 mt-1">
+                  Dirección y, si aplica, el código de municipio que exige la DIAN vía Factus. Son el respaldo del CDA:
+                  al cobrar se usa primero lo configurado en la <strong>sede activa</strong>; si la sede no tiene datos,
+                  se usan estos.
+                </p>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Dirección del establecimiento</label>
+                  <textarea
+                    className="input w-full min-h-[72px] resize-y text-sm"
+                    value={matrizDraft.direccion}
+                    onChange={(e) => setMatrizDraft((d) => ({ ...d, direccion: e.target.value }))}
+                    placeholder="Ej. Calle 10 # 20-30"
+                    maxLength={500}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Código de municipio (DIAN)</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    className="input w-full text-sm"
+                    value={matrizDraft.municipio}
+                    onChange={(e) => setMatrizDraft((d) => ({ ...d, municipio: e.target.value.replace(/\D/g, '') }))}
+                    placeholder="Solo números"
+                    aria-describedby="matriz-municipio-hint"
+                  />
+                  <p id="matriz-municipio-hint" className="text-xs text-slate-500 mt-1">
+                    Lo entrega el catálogo de Factus o tu contador; no es el nombre de la ciudad. Déjalo vacío hasta
+                    tenerlo.
+                  </p>
+                </div>
+              </div>
+              <div className="flex justify-end">
+                <button
+                  type="button"
+                  className="btn-primary-solid px-4 text-sm disabled:opacity-50"
+                  disabled={saveMatrizMutation.isLoading}
+                  onClick={() => {
+                    setFeedback(null);
+                    saveMatrizMutation.mutate();
+                  }}
+                >
+                  {saveMatrizMutation.isLoading ? 'Guardando…' : 'Guardar datos matriz'}
+                </button>
+              </div>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 bg-white p-4 space-y-3 shadow-sm">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900">Factus — facturación automática en caja</h3>
+                <p className="text-xs text-slate-600 mt-1 leading-relaxed">
+                  El cobro debe generar la factura electrónica solo: el sistema <strong>reintenta automáticamente</strong>{' '}
+                  fallos temporales de red con Factus. Si el mensaje habla de factura «pendiente» ante la DIAN, el bloqueo
+                  lo impone la <strong>cuenta Factus</strong> configurada para este CDA (a veces queda una prueba anterior
+                  en cola en el mismo sandbox). No indica un error de datos de ciudad en CDASOFT. Reenvíe el mensaje
+                  completo a <strong>CDASOFT</strong> para revisar la cuenta; el cajero no debe pasar a papel salvo
+                  indicación expresa.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  className="btn-primary-solid px-4 py-2 text-sm disabled:opacity-50"
+                  disabled={testFactusMutation.isLoading || factusSettings?.modo !== 'factus'}
+                  onClick={() => {
+                    setFeedback(null);
+                    testFactusMutation.mutate();
+                  }}
+                  title={factusSettings?.modo !== 'factus' ? 'Solo aplica con modo Factus activo (backoffice)' : undefined}
+                >
+                  {testFactusMutation.isLoading ? 'Probando…' : 'Probar conexión con Factus'}
+                </button>
+                {!loadingFactusModo && (
+                  <span className="text-xs text-slate-500">
+                    Modo:{' '}
+                    <strong>{factusSettings?.modo === 'factus' ? 'Factus' : 'Manual'}</strong>
+                    {factusSettings?.modo !== 'factus' && ' — active Factus desde backoffice CDASOFT para emitir aquí.'}
+                  </span>
+                )}
+              </div>
+              <details className="rounded-lg border border-slate-100 bg-slate-50/80 px-3 py-2 text-xs text-slate-600">
+                <summary className="cursor-pointer font-semibold text-slate-700 select-none">
+                  Opción avanzada (solo si CDASOFT lo indica)
+                </summary>
+                <p className="mt-2 mb-2">
+                  Conmutar a facturación manual temporal hace que en caja se pida el número DIAN a mano. No es el flujo
+                  normal.
+                </p>
+                {loadingFactusModo ? (
+                  <p className="text-slate-500">Cargando…</p>
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className={`px-2 py-1.5 rounded-md text-xs font-semibold border ${
+                        factusSettings?.modo === 'manual'
+                          ? 'bg-slate-800 text-white border-slate-800'
+                          : 'bg-white border-slate-300'
+                      }`}
+                      disabled={patchFactusModoMutation.isLoading || factusSettings?.modo === 'manual'}
+                      onClick={() => {
+                        setFeedback(null);
+                        patchFactusModoMutation.mutate({ modo: 'manual' });
+                      }}
+                    >
+                      Manual
+                    </button>
+                    <button
+                      type="button"
+                      className={`px-2 py-1.5 rounded-md text-xs font-semibold border ${
+                        factusSettings?.modo === 'factus'
+                          ? 'bg-slate-800 text-white border-slate-800'
+                          : 'bg-white border-slate-300'
+                      }`}
+                      disabled={patchFactusModoMutation.isLoading || factusSettings?.modo === 'factus'}
+                      onClick={() => {
+                        setFeedback(null);
+                        patchFactusModoMutation.mutate({ modo: 'factus' });
+                      }}
+                    >
+                      Factus
+                    </button>
+                  </div>
+                )}
+              </details>
+            </div>
+
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-slate-600 text-sm">
                 Cada sede es un contexto operativo: recepción, caja y reportes pueden filtrarse por sede.
@@ -203,6 +475,9 @@ export default function OrganizacionPage() {
                     codigo: '',
                     activa: true,
                     es_principal: sedesLista?.length === 0,
+                    ciudad: '',
+                    direccion: '',
+                    factus_municipality_id: '',
                   });
                   setModalCrear(true);
                 }}
@@ -229,6 +504,9 @@ export default function OrganizacionPage() {
                     <tr>
                       <th className="text-left px-4 py-3">Nombre</th>
                       <th className="text-left px-4 py-3">Código</th>
+                      <th className="text-left px-4 py-3 min-w-[6rem]">Ciudad</th>
+                      <th className="text-left px-4 py-3 whitespace-nowrap">Cód. municipio</th>
+                      <th className="text-left px-4 py-3 min-w-[8rem]">Dirección</th>
                       <th className="text-left px-4 py-3">Estado</th>
                       <th className="text-left px-4 py-3">Principal</th>
                       <th className="text-right px-4 py-3">Acciones</th>
@@ -237,7 +515,7 @@ export default function OrganizacionPage() {
                   <tbody>
                     {(sedesLista || []).length === 0 && (
                       <tr>
-                        <td colSpan={5} className="px-4 py-8 text-center text-slate-500">
+                        <td colSpan={8} className="px-4 py-8 text-center text-slate-500">
                           No hay sedes registradas.
                         </td>
                       </tr>
@@ -246,6 +524,18 @@ export default function OrganizacionPage() {
                       <tr key={s.id} className="border-t border-slate-100">
                         <td className="px-4 py-3 font-medium text-slate-900">{s.nombre}</td>
                         <td className="px-4 py-3 text-slate-600">{s.codigo || '—'}</td>
+                        <td className="px-4 py-3 text-slate-600 max-w-[8rem] truncate" title={s.ciudad || undefined}>
+                          {s.ciudad?.trim() ? s.ciudad : '—'}
+                        </td>
+                        <td className="px-4 py-3 text-slate-600 tabular-nums">
+                          {s.factus_municipality_id != null ? s.factus_municipality_id : '—'}
+                        </td>
+                        <td
+                          className="px-4 py-3 text-slate-600 max-w-[10rem] truncate"
+                          title={s.direccion || undefined}
+                        >
+                          {s.direccion?.trim() ? s.direccion : '—'}
+                        </td>
                         <td className="px-4 py-3">
                           {s.activa ? (
                             <span className="inline-flex items-center gap-1 text-emerald-700">
@@ -285,6 +575,10 @@ export default function OrganizacionPage() {
                                 codigo: s.codigo || '',
                                 activa: s.activa,
                                 es_principal: s.es_principal,
+                                ciudad: s.ciudad || '',
+                                direccion: s.direccion || '',
+                                factus_municipality_id:
+                                  s.factus_municipality_id != null ? String(s.factus_municipality_id) : '',
                               });
                             }}
                           >
@@ -326,6 +620,16 @@ export default function OrganizacionPage() {
                 placeholder="Ej. NTE"
               />
             </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">Ciudad (opcional)</label>
+              <input
+                className="input w-full"
+                value={form.ciudad}
+                onChange={(e) => setForm((f) => ({ ...f, ciudad: e.target.value }))}
+                placeholder="Ej. Bogotá"
+                maxLength={200}
+              />
+            </div>
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
@@ -342,6 +646,30 @@ export default function OrganizacionPage() {
               />
               <span className="text-sm text-slate-700">Marcar como sede principal</span>
             </label>
+            <p className="text-xs text-slate-500">Opcional — solo si esta sede factura distinto a la matriz</p>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">Dirección en factura</label>
+              <textarea
+                className="input w-full min-h-[64px] text-sm"
+                value={form.direccion}
+                onChange={(e) => setForm((f) => ({ ...f, direccion: e.target.value }))}
+                placeholder="Si queda vacío, se usa la dirección de la matriz"
+                maxLength={500}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">Código municipio (DIAN)</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                className="input w-full text-sm"
+                value={form.factus_municipality_id}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, factus_municipality_id: e.target.value.replace(/\D/g, '') }))
+                }
+                placeholder="Vacío: usar el de la matriz"
+              />
+            </div>
             <div className="flex gap-2 justify-end pt-2">
               <button type="button" className="btn-corporate-muted px-4" onClick={() => setModalCrear(false)}>
                 Cancelar
@@ -379,6 +707,15 @@ export default function OrganizacionPage() {
                 onChange={(e) => setForm((f) => ({ ...f, codigo: e.target.value }))}
               />
             </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">Ciudad (opcional)</label>
+              <input
+                className="input w-full"
+                value={form.ciudad}
+                onChange={(e) => setForm((f) => ({ ...f, ciudad: e.target.value }))}
+                maxLength={200}
+              />
+            </div>
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
@@ -395,6 +732,30 @@ export default function OrganizacionPage() {
               />
               <span className="text-sm text-slate-700">Sede principal</span>
             </label>
+            <p className="text-xs text-slate-500">Opcional — distinto a la matriz solo si aplica</p>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">Dirección en factura</label>
+              <textarea
+                className="input w-full min-h-[64px] text-sm"
+                value={form.direccion}
+                onChange={(e) => setForm((f) => ({ ...f, direccion: e.target.value }))}
+                placeholder="Vacío hereda dirección de la matriz"
+                maxLength={500}
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-semibold text-slate-700 mb-1">Código municipio (DIAN)</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                className="input w-full text-sm"
+                value={form.factus_municipality_id}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, factus_municipality_id: e.target.value.replace(/\D/g, '') }))
+                }
+                placeholder="Vacío: mismo que la matriz"
+              />
+            </div>
             <div className="flex gap-2 justify-end pt-2">
               <button type="button" className="btn-corporate-muted px-4" onClick={() => setEditando(null)}>
                 Cancelar

@@ -45,6 +45,8 @@ export default function Login() {
   const [registerRepresentanteNombre, setRegisterRepresentanteNombre] = useState('');
   const [registerCelular, setRegisterCelular] = useState('');
   const [registerSedesTotales, setRegisterSedesTotales] = useState(1);
+  const [registerDireccionFacturacion, setRegisterDireccionFacturacion] = useState('');
+  const [registerCiudadSede, setRegisterCiudadSede] = useState('');
   const [registerAdminPassword, setRegisterAdminPassword] = useState('');
   const [registerEmailCode, setRegisterEmailCode] = useState('');
   const [emailCodeTarget, setEmailCodeTarget] = useState('');
@@ -193,6 +195,12 @@ export default function Login() {
       if (payload.captcha_token) {
         formData.append('captcha_token', payload.captcha_token);
       }
+      if (payload.direccion_facturacion?.trim()) {
+        formData.append('direccion_facturacion', payload.direccion_facturacion.trim());
+      }
+      if (payload.ciudad?.trim()) {
+        formData.append('ciudad', payload.ciudad.trim());
+      }
 
       const response = await apiClient.post('/onboarding/register-tenant', formData);
       return response.data;
@@ -264,6 +272,15 @@ export default function Login() {
       return;
     }
 
+    if (registerDireccionFacturacion.length > 500) {
+      setRegisterValidationError('La dirección de facturación admite máximo 500 caracteres.');
+      return;
+    }
+    if (registerCiudadSede.length > 200) {
+      setRegisterValidationError('La ciudad admite máximo 200 caracteres.');
+      return;
+    }
+
     if (registerEmailCode.trim().length !== 6) {
       setRegisterValidationError('Debes ingresar el código de verificación de 6 dígitos.');
       return;
@@ -287,6 +304,8 @@ export default function Login() {
       sedes_totales: registerSedesTotales,
       admin_password: registerAdminPassword,
       codigo_verificacion_email: registerEmailCode.trim(),
+      direccion_facturacion: registerDireccionFacturacion.trim() || undefined,
+      ciudad: registerCiudadSede.trim() || undefined,
       logo_url: logoInputMode === 'url' ? (registerLogoUrl || undefined) : undefined,
       logo_file: logoInputMode === 'file' ? (registerLogoFile || undefined) : undefined,
       captcha_token: registerCaptchaToken || undefined,
@@ -656,16 +675,61 @@ export default function Login() {
                 placeholder="Celular"
                 required
               />
-              <input
-                type="number"
-                min={1}
-                max={100}
-                value={registerSedesTotales}
-                onChange={(e) => setRegisterSedesTotales(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
-                className="input-corporate"
-                placeholder="Total sedes (principal + sucursales)"
-                required
-              />
+              <div>
+                <label htmlFor="register-sedes-totales" className="block text-xs font-semibold text-slate-700 mb-1">
+                  ¿Cuántas sedes vas a usar?
+                </label>
+                <input
+                  id="register-sedes-totales"
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={registerSedesTotales}
+                  onChange={(e) => setRegisterSedesTotales(Math.max(1, Math.min(100, Number(e.target.value) || 1)))}
+                  className="input-corporate w-full"
+                  required
+                  aria-describedby="register-sedes-totales-hint"
+                />
+                <p id="register-sedes-totales-hint" className="text-xs text-slate-500 mt-1">
+                  Cuenta la sede principal más cada sucursal. Si solo tienes un punto de atención, deja <strong>1</strong>.
+                  Este número ayuda a dimensionar tu plan; lo puedes ajustar después con CDASOFT si cambia.
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50/90 p-3 space-y-2">
+                <p className="text-sm font-semibold text-slate-800">Dirección del centro (opcional)</p>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Si ya tienes la dirección comercial de tu CDA, escríbela aquí; la usaremos más adelante para factura
+                  electrónica. Si aún no la tienes o no estás seguro, déjala vacía: el administrador puede completarla en{' '}
+                  <strong>Organización</strong> cuando el contador o soporte lo indiquen.
+                </p>
+                <label htmlFor="register-direccion-matriz" className="sr-only">
+                  Dirección del centro
+                </label>
+                <textarea
+                  id="register-direccion-matriz"
+                  value={registerDireccionFacturacion}
+                  onChange={(e) => setRegisterDireccionFacturacion(e.target.value)}
+                  className="input-corporate min-h-[72px] resize-y w-full"
+                  placeholder="Ej. Carrera 15 # 40-20, barrio, ciudad"
+                  maxLength={500}
+                />
+                <label htmlFor="register-ciudad-sede" className="block text-xs font-semibold text-slate-700 mt-2">
+                  Ciudad (opcional)
+                </label>
+                <input
+                  id="register-ciudad-sede"
+                  type="text"
+                  value={registerCiudadSede}
+                  onChange={(e) => setRegisterCiudadSede(e.target.value)}
+                  className="input-corporate w-full"
+                  placeholder="Ej. Medellín"
+                  maxLength={200}
+                />
+                <p className="text-xs text-slate-500">
+                  El código de municipio para la DIAN no se pide aquí: es un dato técnico que el administrador configura
+                  en Organización cuando activen facturación electrónica.
+                </p>
+              </div>
               <div className="flex gap-2">
                 <input
                   type="text"

@@ -35,6 +35,55 @@ router = APIRouter()
 ALLOWED_LOGO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 
+def _parse_optional_factus_municipality_id(raw: str | None) -> int | None:
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    try:
+        v = int(s)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="factus_municipality_id debe ser un número entero válido",
+        )
+    if v < 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="factus_municipality_id debe ser mayor a 0",
+        )
+    return v
+
+
+def _parse_optional_direccion_facturacion(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if len(s) > 500:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="direccion_facturacion admite máximo 500 caracteres",
+        )
+    return s
+
+
+def _parse_optional_ciudad_sede(raw: str | None) -> str | None:
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if len(s) > 200:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ciudad admite máximo 200 caracteres",
+        )
+    return s
+
+
 def utcnow_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
@@ -342,6 +391,9 @@ def register_tenant_self_service(
     sedes_totales: int = Form(1),
     admin_password: str = Form(...),
     codigo_verificacion_email: str | None = Form(default=None),
+    direccion_facturacion: str | None = Form(default=None),
+    ciudad: str | None = Form(default=None),
+    factus_municipality_id: str | None = Form(default=None),
     logo_url: str | None = Form(default=None),
     captcha_token: str | None = Form(default=None),
     logo_file: UploadFile | None = File(default=None),
@@ -361,6 +413,10 @@ def register_tenant_self_service(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="sedes_totales no puede ser mayor a 100")
     if len(admin_password) < 6:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="La contraseña debe tener al menos 6 caracteres")
+
+    mid_onboarding = _parse_optional_factus_municipality_id(factus_municipality_id)
+    dir_onboarding = _parse_optional_direccion_facturacion(direccion_facturacion)
+    ciudad_onboarding = _parse_optional_ciudad_sede(ciudad)
     if not logo_url and logo_file is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -470,6 +526,8 @@ def register_tenant_self_service(
         demo_ends_at=utcnow_naive() + timedelta(days=15),
         billing_cycle_days=15,
         next_billing_at=utcnow_naive() + timedelta(days=15),
+        factus_municipality_id=mid_onboarding,
+        direccion_facturacion=dir_onboarding,
     )
     db.add(tenant)
     db.flush()
@@ -480,6 +538,9 @@ def register_tenant_self_service(
         codigo=None,
         activa=True,
         es_principal=True,
+        factus_municipality_id=mid_onboarding,
+        direccion=dir_onboarding,
+        ciudad=ciudad_onboarding,
     )
     db.add(sede_principal)
     db.flush()

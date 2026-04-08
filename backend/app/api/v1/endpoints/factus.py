@@ -2,7 +2,8 @@
 
 Configuración y pruebas de integración Factus (facturación electrónica DIAN).
 
-Lectura del modo (manual vs Factus) para usuarios del tenant. La edición la hace solo el backoffice SaaS.
+Lectura del modo para usuarios del tenant. La edición completa (credenciales) sigue en backoffice SaaS;
+el administrador del CDA puede cambiar solo el modo (manual vs Factus) vía PATCH /settings/modo.
 
 """
 
@@ -14,9 +15,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 
 from sqlalchemy.orm import Session
 
-
-
-from app.core.deps import get_current_user, get_db
+from app.core.deps import get_admin, get_current_user, get_db
 
 from app.integrations.factus_client import FactusAPIError, factus_base_url, get_bill_show, obtain_token
 
@@ -24,9 +23,13 @@ from app.models.usuario import Usuario
 
 from app.core.factus_crypto import decrypt_secret
 
-from app.schemas.factus import FactusSettingsOut
+from app.schemas.factus import FactusModoPatch, FactusSettingsOut, FactusTestConnectionResult
 
-from app.services.factus_tenant_settings import get_or_create_settings_row, row_to_out
+from app.services.factus_tenant_settings import (
+    get_or_create_settings_row,
+    row_to_out,
+    run_test_connection,
+)
 
 
 
@@ -53,7 +56,37 @@ def get_factus_settings(
     return row_to_out(row)
 
 
+@router.patch("/settings/modo", response_model=FactusSettingsOut)
+def patch_factus_modo(
+    body: FactusModoPatch,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_admin),
+):
+    """
+    Conmutar solo entre facturación manual y Factus (administrador del CDA).
 
+    Útil si Factus rechaza cobros (p. ej. factura pendiente DIAN) y no hay soporte SaaS:
+    pasar a manual permite que caja ingrese el número DIAN a mano hasta regularizar Factus.
+    Volver a «factus» cuando el servicio esté estable.
+    """
+    row = get_or_create_settings_row(db, current_user.tenant_id)
+    row.modo = body.modo
+    db.commit()
+    db.refresh(row)
+    return row_to_out(row)
+
+
+@router.post("/test-connection", response_model=FactusTestConnectionResult)
+def post_factus_test_connection(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_admin),
+):
+    """
+    Prueba OAuth contra Factus con las credenciales guardadas para este CDA (mismo criterio que backoffice SaaS).
+    Requiere modo «factus» y credenciales completas.
+    """
+    row = get_or_create_settings_row(db, current_user.tenant_id)
+    return run_test_connection(row)
 
 
 @router.get("/bills/{number}")

@@ -1,7 +1,7 @@
 """
 Modelo de Tenant (organización CDA) para baseline SaaS multitenant.
 """
-from sqlalchemy import Column, String, Boolean, DateTime, Integer
+from sqlalchemy import Boolean, Column, DateTime, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
@@ -35,6 +35,10 @@ class Tenant(Base):
     billing_cycle_days = Column(Integer, nullable=False, default=30)
     next_billing_at = Column(DateTime, nullable=True)
     last_payment_at = Column(DateTime, nullable=True)
+
+    # Facturación electrónica (Factus / DIAN): matriz / por defecto del CDA
+    factus_municipality_id = Column(Integer, nullable=True)
+    direccion_facturacion = Column(String(500), nullable=True)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))

@@ -144,7 +144,31 @@ def validar_datos_cliente_para_factus(vehiculo: VehiculoProceso) -> None:
         )
 
 
-def _customer_payload(vehiculo: VehiculoProceso) -> dict[str, Any]:
+def _resolve_municipality_id(sede: Optional[Sucursal], tenant: Tenant) -> int:
+    if sede is not None and sede.factus_municipality_id is not None:
+        return int(sede.factus_municipality_id)
+    if tenant.factus_municipality_id is not None:
+        return int(tenant.factus_municipality_id)
+    return int(settings.FACTUS_DEFAULT_MUNICIPALITY_ID)
+
+
+def _resolve_establishment_address(sede: Optional[Sucursal], tenant: Tenant) -> str:
+    if sede is not None:
+        d = (sede.direccion or "").strip()
+        if d:
+            return d[:200]
+    d2 = (tenant.direccion_facturacion or "").strip()
+    if d2:
+        return d2[:200]
+    return "N/A"
+
+
+def _customer_payload(
+    vehiculo: VehiculoProceso,
+    *,
+    municipality_id: int,
+    address_line: str,
+) -> dict[str, Any]:
     """Cliente persona natural (cédula); documento solo dígitos."""
     digits = _solo_digitos(vehiculo.cliente_documento or "")
     if not digits:
@@ -154,7 +178,7 @@ def _customer_payload(vehiculo: VehiculoProceso) -> dict[str, Any]:
     if not _email_valido_factus(email):
         email = "cliente@local.invalid"
     phone = _solo_digitos(vehiculo.cliente_telefono or "") or "6000000000"
-    mid = settings.FACTUS_DEFAULT_MUNICIPALITY_ID
+    addr = (address_line or "").strip()[:200] or "Colombia"
     return {
         "identification_document_id": 3,
         "identification": digits[:20],
@@ -162,39 +186,34 @@ def _customer_payload(vehiculo: VehiculoProceso) -> dict[str, Any]:
         "company": "",
         "trade_name": "",
         "names": names,
-        "address": "Colombia",
+        "address": addr,
         "email": email[:200],
         "phone": phone[:20],
         "legal_organization_id": 2,
         "tribute_id": 21,
-        "municipality_id": mid,
+        "municipality_id": municipality_id,
     }
 
 
 def _establishment_payload(
-    db: Session,
     tenant: Tenant,
-    sucursal_id: Optional[UUID],
+    sede: Optional[Sucursal],
+    *,
+    municipality_id: int,
+    address: str,
 ) -> dict[str, Any]:
     nombre = tenant.nombre_comercial or tenant.nombre or "CDA"
-    direccion = "N/A"
+    direccion = address
     tel = _solo_digitos(tenant.celular or "") or "6000000000"
     mail = (tenant.correo_electronico or "facturacion@cda.local").strip()
-    if sucursal_id:
-        sede = (
-            db.query(Sucursal)
-            .filter(Sucursal.id == sucursal_id, Sucursal.tenant_id == tenant.id)
-            .first()
-        )
-        if sede:
-            nombre = f"{nombre} — {sede.nombre}"
-    mid = settings.FACTUS_DEFAULT_MUNICIPALITY_ID
+    if sede is not None:
+        nombre = f"{nombre} — {sede.nombre}"
     return {
         "name": nombre[:200],
         "address": direccion,
         "phone_number": tel,
         "email": mail[:200],
-        "municipality_id": mid,
+        "municipality_id": municipality_id,
     }
 
 
@@ -309,6 +328,14 @@ def build_validate_body(
     # Factura por RTM + terceros (vehiculo.valor_rtm ≈ tarifa.valor_total). Comisión SOAT fuera de Factus.
     items = _items_factura_cobro(vehiculo, tarifa)
 
+    sede = (
+        db.query(Sucursal)
+        .filter(Sucursal.id == active_sucursal_id, Sucursal.tenant_id == tenant.id)
+        .first()
+    )
+    mid = _resolve_municipality_id(sede, tenant)
+    addr_est = _resolve_establishment_address(sede, tenant)
+
     ref = f"cdsoft-{vehiculo.id.hex[:8]}-{uuid.uuid4().hex[:12]}"
     obs = f"Placa {vehiculo.placa} — RTM + terceros (total servicio)"
 
@@ -319,8 +346,10 @@ def build_validate_body(
         "observation": obs[:250],
         "payment_method_code": _map_metodo_pago_factus(metodo_pago),
         "send_email": _email_valido_factus(vehiculo.cliente_email),
-        "establishment": _establishment_payload(db, tenant, active_sucursal_id),
-        "customer": _customer_payload(vehiculo),
+        "establishment": _establishment_payload(
+            tenant, sede, municipality_id=mid, address=addr_est
+        ),
+        "customer": _customer_payload(vehiculo, municipality_id=mid, address_line=addr_est),
         "items": items,
     }
     return body

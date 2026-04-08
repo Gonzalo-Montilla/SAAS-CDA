@@ -23,7 +23,7 @@ from app.models.usuario import Usuario
 from app.models.tenant import Tenant
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo, MetodoPago
 from app.models.factus import TenantFactusSettings, FacturaElectronica
-from app.integrations.factus_client import FactusAPIError, format_factus_error_detail
+from app.integrations.factus_client import FactusAPIError, format_factus_error_for_user
 from app.integrations.factus_emit import emitir_y_persistir_factura_cobro, validar_datos_cliente_para_factus
 from app.models.tarifa import Tarifa, ComisionSOAT
 from app.models.caja import Caja, MovimientoCaja, TipoMovimiento, EstadoCaja
@@ -791,7 +791,7 @@ def cobrar_vehiculo(
                 )
                 vehiculo.numero_factura_dian = num_fe
             except FactusAPIError as e:
-                detail_txt = format_factus_error_detail(e)
+                detail_txt = format_factus_error_for_user(e)
                 code = e.status_code if e.status_code and 100 <= e.status_code < 600 else status.HTTP_502_BAD_GATEWAY
                 raise HTTPException(status_code=code, detail=f"Factus: {detail_txt}") from e
             except ValueError as e:

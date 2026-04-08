@@ -18,6 +18,12 @@ class FactusSettingsOut(BaseModel):
     base_url_effective: str
 
 
+class FactusModoPatch(BaseModel):
+    """Solo conmutar manual ↔ factus (admin del tenant, sin backoffice SaaS)."""
+
+    modo: Literal["manual", "factus"]
+
+
 class FactusSettingsUpdate(BaseModel):
     modo: Literal["manual", "factus"] = "manual"
     use_sandbox: bool = True

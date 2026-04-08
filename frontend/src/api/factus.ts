@@ -12,6 +12,11 @@ export interface FactusSettings {
   base_url_effective: string;
 }
 
+/** PATCH /factus/settings/modo — solo admin del tenant. */
+export interface FactusModoPatch {
+  modo: 'manual' | 'factus';
+}
+
 /** Cuerpo de PUT /factus/settings — secretos vacíos no sobrescriben lo guardado. */
 export interface FactusSettingsUpdatePayload {
   modo: 'manual' | 'factus';
@@ -45,9 +50,21 @@ export interface FactusNumberingRangeItem {
 }
 
 export const factusApi = {
-  /** Solo lectura (modo manual vs Factus). La edición la hace el backoffice SaaS. */
+  /** Modo manual vs Factus (lectura). Credenciales las configura el backoffice SaaS. */
   getSettings: async (): Promise<FactusSettings> => {
     const response = await apiClient.get<FactusSettings>('/factus/settings');
+    return response.data;
+  },
+
+  /** Conmutar manual ↔ Factus en emergencia (solo administrador del CDA). */
+  patchModo: async (payload: FactusModoPatch): Promise<FactusSettings> => {
+    const response = await apiClient.patch<FactusSettings>('/factus/settings/modo', payload);
+    return response.data;
+  },
+
+  /** Prueba de token OAuth Factus (solo admin; requiere modo factus y credenciales). */
+  testConnection: async (): Promise<FactusTestConnectionResult> => {
+    const response = await apiClient.post<FactusTestConnectionResult>('/factus/test-connection');
     return response.data;
   },
 };

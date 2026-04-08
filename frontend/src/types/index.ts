@@ -14,6 +14,24 @@ export interface SucursalBasica {
   es_principal: boolean;
 }
 
+/** Respuesta API /sucursales (admin) — incluye datos opcionales para Factus. */
+export interface SucursalAdminRow {
+  id: string;
+  tenant_id: string;
+  nombre: string;
+  codigo: string | null;
+  activa: boolean;
+  es_principal: boolean;
+  factus_municipality_id?: number | null;
+  direccion?: string | null;
+  ciudad?: string | null;
+}
+
+export interface TenantFacturacionUbicacion {
+  factus_municipality_id: number | null;
+  direccion_facturacion: string | null;
+}
+
 export interface Usuario {
   id: string;
   tenant_id: string;
@@ -81,13 +99,25 @@ export interface SaaSSucursalResumen {
   id: string;
   nombre: string;
   codigo?: string | null;
+  ciudad?: string | null;
+  /** Dirección en factura propia de la sede; vacío en API = hereda matriz al emitir. */
+  direccion?: string | null;
+  factus_municipality_id?: number | null;
   activa: boolean;
   es_principal: boolean;
+}
+
+/** Respaldo DIAN/Factus configurado en Organización (matriz). */
+export interface SaaSTenantFacturacionMatriz {
+  direccion_facturacion: string | null;
+  factus_municipality_id: number | null;
 }
 
 export interface SaaSTenantProfile extends SaaSTenantSummary {
   total_usuarios: number;
   usuarios_recientes: SaaSTenantUserSummary[];
+  /** Presente desde API SaaS con perfil extendido; fallback en UI si falta (despliegue mixto). */
+  facturacion_matriz?: SaaSTenantFacturacionMatriz;
   sucursales_activas: SaaSSucursalResumen[];
 }
 
@@ -381,6 +411,12 @@ export interface TenantSelfRegisterRequest {
   sedes_totales: number;
   admin_password: string;
   codigo_verificacion_email?: string;
+  /** Dirección de la matriz para factura electrónica (opcional; se replica en la sede principal). */
+  direccion_facturacion?: string;
+  /** Ciudad mostrada en datos de sede (opcional; se guarda en la sede principal). */
+  ciudad?: string;
+  /** Reservado; en el registro web no se envía — el admin lo define en Organización. */
+  factus_municipality_id?: string;
   logo_url?: string;
   logo_file?: File;
   captcha_token?: string;

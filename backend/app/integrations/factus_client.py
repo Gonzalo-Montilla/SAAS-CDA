@@ -5,6 +5,7 @@ Documentación: https://developers.factus.com.co/
 from __future__ import annotations
 
 import json
+import time
 from typing import Any, Optional
 from urllib.parse import quote, urlencode
 
@@ -93,6 +94,24 @@ def format_factus_error_detail(e: FactusAPIError) -> str:
     if e.args and str(e.args[0]):
         return str(e.args[0])[:4500]
     return "Error al comunicarse con Factus"
+
+
+def format_factus_error_for_user(e: FactusAPIError) -> str:
+    """
+    Mensaje para Caja: detalle Factus + contexto (cuenta Factus vs CDASOFT, sin pedir al cajero Factus).
+    """
+    detail = format_factus_error_detail(e)
+    low = detail.lower()
+    if e.status_code == 409 or ("pendiente" in low and "dian" in low):
+        hint = (
+            " [CDASOFT] Este bloqueo lo aplica Factus sobre la cuenta electrónica configurada para este CDA "
+            "(no indica un error de «ciudad» en el software). Suele deberse a un documento previo en cola "
+            "ante la DIAN en esa misma cuenta (p. ej. pruebas en sandbox). Reenvíe este mensaje a CDASOFT "
+            "para revisar la cuenta Factus; el cajero no debe pasar a facturación manual salvo indicación."
+        )
+        if len(detail) + len(hint) <= 5000:
+            return detail + hint
+    return detail
 
 
 def factus_base_url(*, use_sandbox: bool) -> str:
@@ -190,33 +209,53 @@ def get_numbering_ranges(
     return rows
 
 
+_TRANSIENT_VALIDATE_STATUS = frozenset({502, 503, 504})
+
+
 def validate_invoice(
     *,
     base_url: str,
     access_token: str,
     body: dict[str, Any],
     timeout: float = 90.0,
+    max_attempts: int = 3,
 ) -> dict[str, Any]:
-    """POST /v1/bills/validate"""
+    """
+    POST /v1/bills/validate — reintenta automáticamente fallos temporales (502/503/504 y timeouts de red).
+    No reintenta 4xx de negocio (p. ej. 409 cola DIAN): ahí debe actuar Factus/cuenta.
+    """
     url = f"{base_url.rstrip('/')}/v1/bills/validate"
-    with httpx.Client(timeout=timeout) as client:
-        r = client.post(
-            url,
-            json=body,
-            headers={
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {access_token}",
-            },
-        )
-    data = _safe_json(r)
-    if r.status_code >= 400:
-        raise FactusAPIError(
-            "Factus rechazó la factura de prueba",
-            status_code=r.status_code,
-            body=data,
-        )
-    return data if isinstance(data, dict) else {"raw": data}
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {access_token}",
+    }
+    for attempt in range(max(1, max_attempts)):
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                r = client.post(url, json=body, headers=headers)
+            data = _safe_json(r)
+            if r.status_code < 400:
+                return data if isinstance(data, dict) else {"raw": data}
+            if r.status_code in _TRANSIENT_VALIDATE_STATUS and attempt < max_attempts - 1:
+                time.sleep(min(2.0 * (attempt + 1), 8.0))
+                continue
+            raise FactusAPIError(
+                "Factus rechazó la validación de la factura",
+                status_code=r.status_code,
+                body=data,
+            )
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout) as exc:
+            if attempt < max_attempts - 1:
+                time.sleep(min(2.0 * (attempt + 1), 8.0))
+                continue
+            raise FactusAPIError(
+                f"Red o tiempo de espera con Factus al validar factura ({exc!s})",
+                status_code=504,
+                body=None,
+            ) from exc
+
+    raise RuntimeError("validate_invoice: no result")  # pragma: no cover
 
 
 def get_bill_show(

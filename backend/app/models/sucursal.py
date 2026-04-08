@@ -1,7 +1,7 @@
 """
 Sucursal (sede operativa) dentro de un tenant CDA.
 """
-from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey
+from sqlalchemy import Column, String, Boolean, DateTime, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
@@ -20,6 +20,10 @@ class Sucursal(Base):
     codigo = Column(String(40), nullable=True, index=True)
     activa = Column(Boolean, default=True, nullable=False)
     es_principal = Column(Boolean, default=False, nullable=False)
+    # Opcional: si la sede factura en otra ciudad que la matriz
+    factus_municipality_id = Column(Integer, nullable=True)
+    direccion = Column(String(500), nullable=True)
+    ciudad = Column(String(200), nullable=True)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(
