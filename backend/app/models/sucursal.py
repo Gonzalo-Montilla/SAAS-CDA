@@ -22,6 +22,8 @@ class Sucursal(Base):
     es_principal = Column(Boolean, default=False, nullable=False)
     # Opcional: si la sede factura en otra ciudad que la matriz
     factus_municipality_id = Column(Integer, nullable=True)
+    # Rango de numeración Factus (documento 01) para esta sede; si NULL se usa tenant_factus_settings.default_numbering_range_id
+    factus_numbering_range_id = Column(Integer, nullable=True)
     direccion = Column(String(500), nullable=True)
     ciudad = Column(String(200), nullable=True)
 

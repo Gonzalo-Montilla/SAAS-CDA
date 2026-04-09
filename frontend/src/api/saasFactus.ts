@@ -1,5 +1,6 @@
 import { apiClient } from './client';
 import type {
+  FactusMunicipalityItem,
   FactusNumberingRangeItem,
   FactusSettings,
   FactusSettingsUpdatePayload,
@@ -35,6 +36,14 @@ export const saasFactusApi = {
   listNumberingRanges: async (tenantId: string): Promise<FactusNumberingRangeItem[]> => {
     const response = await apiClient.get<FactusNumberingRangeItem[]>(
       `/saas/auth/tenants/${tenantId}/factus-numbering-ranges`,
+    );
+    return response.data;
+  },
+
+  searchMunicipalities: async (tenantId: string, name: string): Promise<FactusMunicipalityItem[]> => {
+    const response = await apiClient.get<FactusMunicipalityItem[]>(
+      `/saas/auth/tenants/${tenantId}/factus-municipalities`,
+      { params: { name } },
     );
     return response.data;
   },

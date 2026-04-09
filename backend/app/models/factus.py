@@ -21,10 +21,17 @@ class TenantFactusSettings(Base):
     modo = Column(String(20), nullable=False, default="manual")  # manual | factus
     use_sandbox = Column(Boolean, nullable=False, default=True)
 
+    # Credenciales ambiente de pruebas (sandbox / api-sandbox.factus.com.co)
     client_id = Column(String(200), nullable=True)
     client_secret_encrypted = Column(Text, nullable=True)
     api_username = Column(String(255), nullable=True)
     api_password_encrypted = Column(Text, nullable=True)
+
+    # Credenciales producción (api.factus.com.co) — misma forma que sandbox; se usan si use_sandbox es False
+    production_client_id = Column(String(200), nullable=True)
+    production_client_secret_encrypted = Column(Text, nullable=True)
+    production_api_username = Column(String(255), nullable=True)
+    production_api_password_encrypted = Column(Text, nullable=True)
 
     default_numbering_range_id = Column(Integer, nullable=True)
 

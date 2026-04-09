@@ -62,6 +62,7 @@ def crear_sucursal(
         activa=body.activa,
         es_principal=es_principal,
         factus_municipality_id=body.factus_municipality_id,
+        factus_numbering_range_id=body.factus_numbering_range_id,
         direccion=dir_sede,
         ciudad=ciudad_sede,
     )
@@ -111,6 +112,14 @@ def actualizar_sucursal(
         row.es_principal = False
     if "factus_municipality_id" in data:
         row.factus_municipality_id = data["factus_municipality_id"]
+    if "factus_numbering_range_id" in data:
+        rid = data["factus_numbering_range_id"]
+        if rid is not None and int(rid) < 1:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="factus_numbering_range_id debe ser un entero ≥ 1 o null.",
+            )
+        row.factus_numbering_range_id = rid
     if "direccion" in data:
         d = data["direccion"]
         if d is None:

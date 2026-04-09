@@ -23,6 +23,8 @@ export interface SucursalAdminRow {
   activa: boolean;
   es_principal: boolean;
   factus_municipality_id?: number | null;
+  /** Rango Factus para esta sede; null = usar predeterminado del tenant (backoffice). */
+  factus_numbering_range_id?: number | null;
   direccion?: string | null;
   ciudad?: string | null;
 }
@@ -263,6 +265,8 @@ export interface QualityInviteItem {
   cliente_nombre: string;
   cliente_email?: string | null;
   cliente_celular?: string | null;
+  sucursal_id?: string | null;
+  sucursal_nombre?: string | null;
   placa: string;
   tipo_vehiculo: string;
   status: 'pending' | 'sent' | 'responded' | 'expired' | 'failed' | 'no_email';
@@ -270,16 +274,25 @@ export interface QualityInviteItem {
   sent_at?: string | null;
   responded_at?: string | null;
   expires_at: string;
-  atencion_general?: number | null;
+  experiencia_global?: number | null;
   comentario?: string | null;
   created_at: string;
 }
 
+export interface QualityInviteListResponse {
+  items: QualityInviteItem[];
+  total: number;
+}
+
 export interface QualityInviteDetail extends QualityInviteItem {
-  atencion_recepcion?: number | null;
-  atencion_caja?: number | null;
-  sala_espera?: number | null;
-  agrado_visita?: number | null;
+  facilidad_agendar_cita?: number | null;
+  tiempo_espera_revision?: number | null;
+  amabilidad_recepcion_caja?: number | null;
+  limpieza_instalaciones?: number | null;
+  amenidades_cda?: number | null;
+  claridad_resultados_revision?: number | null;
+  confianza_diagnostico_tecnico?: number | null;
+  recomendar_cda?: number | null;
   cajero_nombre?: string | null;
   recepcionista_nombre?: string | null;
 }
@@ -434,6 +447,8 @@ export interface Vehiculo {
   cliente_documento: string;
   cliente_telefono?: string;
   cliente_email?: string;
+  /** Dirección del cliente en factura Factus (opcional). */
+  cliente_direccion?: string | null;
   valor_rtm: number;
   tiene_soat: boolean;
   comision_soat: number;
@@ -461,6 +476,7 @@ export interface VehiculoRegistro {
   cliente_documento: string;
   cliente_telefono: string;
   cliente_email: string;
+  cliente_direccion?: string | null;
   tiene_soat: boolean;
   observaciones?: string;
 }

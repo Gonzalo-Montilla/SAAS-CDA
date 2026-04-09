@@ -39,6 +39,7 @@ class VehiculoRegistro(BaseModel):
     cliente_documento: str = Field(min_length=5)
     cliente_telefono: str = Field(min_length=7, max_length=30)
     cliente_email: EmailStr
+    cliente_direccion: Optional[str] = Field(default=None, max_length=300)
     tiene_soat: bool = False
     observaciones: Optional[str] = None
 
@@ -52,6 +53,13 @@ class VehiculoRegistro(BaseModel):
     def normalize_email(cls, v):
         return _validar_email_recepcion(v)
 
+    @field_validator("cliente_direccion", mode="before")
+    @classmethod
+    def strip_direccion(cls, v):
+        if v is None or (isinstance(v, str) and not str(v).strip()):
+            return None
+        return str(v).strip()[:300]
+
 
 class VehiculoEdicion(BaseModel):
     """Edición de vehículo registrado (antes de cobrar)"""
@@ -64,6 +72,7 @@ class VehiculoEdicion(BaseModel):
     cliente_documento: str = Field(min_length=5)
     cliente_telefono: str = Field(min_length=7, max_length=30)
     cliente_email: EmailStr
+    cliente_direccion: Optional[str] = Field(default=None, max_length=300)
     tiene_soat: bool = False
     observaciones: Optional[str] = None
 
@@ -76,6 +85,13 @@ class VehiculoEdicion(BaseModel):
     @classmethod
     def normalize_email_edit(cls, v):
         return _validar_email_recepcion(v)
+
+    @field_validator("cliente_direccion", mode="before")
+    @classmethod
+    def strip_direccion_edit(cls, v):
+        if v is None or (isinstance(v, str) and not str(v).strip()):
+            return None
+        return str(v).strip()[:300]
 
 
 class VehiculoCobro(BaseModel):
@@ -103,6 +119,7 @@ class VehiculoResponse(BaseModel):
     cliente_documento: str
     cliente_telefono: Optional[str]
     cliente_email: Optional[str]
+    cliente_direccion: Optional[str] = None
     valor_rtm: Decimal
     tiene_soat: bool
     comision_soat: Decimal

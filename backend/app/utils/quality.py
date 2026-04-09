@@ -7,7 +7,7 @@ import secrets
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.models.quality import QualitySurveyInvite
+from app.models.quality import QualitySurveyInvite, QualitySurveyResponse
 from app.models.tenant import Tenant
 from app.utils.email import enviar_email, generar_email_encuesta_calidad_cliente
 
@@ -25,6 +25,8 @@ def create_quality_survey_invite(
     *,
     tenant_id,
     vehiculo_id,
+    sucursal_id=None,
+    sucursal_nombre: str | None = None,
     cliente_nombre: str,
     cliente_email: str | None,
     cliente_celular: str | None,
@@ -39,9 +41,12 @@ def create_quality_survey_invite(
     normalized_email = (cliente_email or "").strip().lower() or None
     token = secrets.token_urlsafe(32)
 
+    nombre_sede = (sucursal_nombre or "").strip() or None
     invite = QualitySurveyInvite(
         tenant_id=tenant_id,
         vehiculo_id=vehiculo_id,
+        sucursal_id=sucursal_id,
+        sucursal_nombre=nombre_sede,
         cliente_nombre=(cliente_nombre or "").strip() or "Cliente",
         cliente_email=normalized_email,
         cliente_celular=(cliente_celular or "").strip() or None,
@@ -91,6 +96,20 @@ def process_due_quality_invites(
     tenant_map = {tenant.id: tenant for tenant in tenants}
 
     for invite in invites:
+        db.refresh(invite)
+        if invite.status != "pending":
+            continue
+        existing_resp = (
+            db.query(QualitySurveyResponse)
+            .filter(QualitySurveyResponse.invite_id == invite.id)
+            .first()
+        )
+        if existing_resp:
+            invite.status = "responded"
+            invite.responded_at = existing_resp.created_at
+            invite.updated_at = now
+            continue
+
         tenant = tenant_map.get(invite.tenant_id)
         nombre_cda = (
             tenant.nombre_comercial

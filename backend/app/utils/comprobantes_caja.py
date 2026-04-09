@@ -14,9 +14,9 @@ from typing import Optional
 import os
 from pathlib import Path
 from urllib.parse import urlparse
-from urllib.request import urlopen
 
 from app.core.config import settings
+from app.utils.tenant_logo_remote import fetch_remote_tenant_logo
 
 
 def _safe_text(value: object) -> str:
@@ -79,16 +79,15 @@ def _download_remote_logo(tenant_logo_url: Optional[str]) -> Optional[BytesIO]:
     if not tenant_logo_url:
         return None
     raw = str(tenant_logo_url).strip()
+    if raw.startswith("//"):
+        raw = "https:" + raw
     if not (raw.startswith("http://") or raw.startswith("https://")):
         return None
-    try:
-        with urlopen(raw, timeout=4) as response:
-            content = response.read()
-            if not content:
-                return None
-            return BytesIO(content)
-    except Exception:
+    fetched = fetch_remote_tenant_logo(raw)
+    if not fetched:
         return None
+    content, _media = fetched
+    return BytesIO(content)
 
 
 def generar_comprobante_cierre_caja(

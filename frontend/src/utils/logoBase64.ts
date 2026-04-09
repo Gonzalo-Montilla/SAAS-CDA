@@ -134,11 +134,17 @@ async function loadLogoAsDataUrl(logoUrl?: string): Promise<LogoCDAData | null> 
     // Prioridad 1: endpoint backend confiable del tenant autenticado.
     try {
       const blob = await configApi.obtenerTenantLogoBlob();
-      if (blob && blob.type.startsWith('image/')) {
-        const rawDataUrl = await blobToDataUrl(blob);
-        const pngLogo = await imageToPngDataUrl(rawDataUrl);
-        if (pngLogo) {
-          return pngLogo;
+      if (blob && blob.size > 0) {
+        const t = (blob.type || '').toLowerCase();
+        // El backend a veces envía application/octet-stream aunque el cuerpo sea PNG/JPEG.
+        const mayBeImage =
+          t.startsWith('image/') || t === '' || t === 'application/octet-stream';
+        if (mayBeImage) {
+          const rawDataUrl = await blobToDataUrl(blob);
+          const pngLogo = await imageToPngDataUrl(rawDataUrl);
+          if (pngLogo) {
+            return pngLogo;
+          }
         }
       }
     } catch {

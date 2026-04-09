@@ -11,7 +11,7 @@ from __future__ import annotations
 
 
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 
 from sqlalchemy.orm import Session
 
@@ -23,10 +23,20 @@ from app.models.usuario import Usuario
 
 from app.core.factus_crypto import decrypt_secret
 
-from app.schemas.factus import FactusModoPatch, FactusSettingsOut, FactusTestConnectionResult
+from app.schemas.factus import (
+    FactusModoPatch,
+    FactusMunicipalityItem,
+    FactusNumberingRangeItem,
+    FactusSettingsOut,
+    FactusTestConnectionResult,
+)
 
 from app.services.factus_tenant_settings import (
+    active_auth_encrypted,
+    creds_complete_for_active_env,
     get_or_create_settings_row,
+    list_municipalities_for_tenant,
+    list_numbering_ranges_for_tenant,
     row_to_out,
     run_test_connection,
 )
@@ -76,6 +86,33 @@ def patch_factus_modo(
     return row_to_out(row)
 
 
+@router.get("/municipalities", response_model=list[FactusMunicipalityItem])
+def get_factus_municipalities(
+    name: str = Query(..., min_length=2, max_length=200),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_admin),
+):
+    """
+    Proxy a GET /v1/municipalities con token del ambiente Factus activo del CDA.
+    Guarde el `id` de la fila elegida (no el código DIAN `code`).
+    """
+    row = get_or_create_settings_row(db, current_user.tenant_id)
+    return list_municipalities_for_tenant(row, name=name)
+
+
+@router.get("/numbering-ranges", response_model=list[FactusNumberingRangeItem])
+def get_factus_numbering_ranges(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_admin),
+):
+    """
+    Rangos de numeración en Factus para el ambiente activo (mismas credenciales que backoffice).
+    El `id` es el que se guarda por sede o como predeterminado del tenant.
+    """
+    row = get_or_create_settings_row(db, current_user.tenant_id)
+    return list_numbering_ranges_for_tenant(row)
+
+
 @router.post("/test-connection", response_model=FactusTestConnectionResult)
 def post_factus_test_connection(
     db: Session = Depends(get_db),
@@ -113,43 +150,21 @@ def consultar_factura_factus(
 
     row = get_or_create_settings_row(db, current_user.tenant_id)
 
-    if not row.client_id or not row.client_secret_encrypted:
-
+    if not creds_complete_for_active_env(row):
+        env = "pruebas (sandbox)" if row.use_sandbox else "producción"
         raise HTTPException(
-
             status_code=status.HTTP_400_BAD_REQUEST,
-
-            detail="Configure Client ID y Client Secret de Factus.",
-
+            detail=f"Configure credenciales Factus completas para el ambiente activo ({env}).",
         )
 
-    if not row.api_username or not row.api_password_encrypted:
-
+    cid, sec_enc, user, pwd_enc = active_auth_encrypted(row)
+    secret = decrypt_secret(sec_enc) if sec_enc else None
+    password = decrypt_secret(pwd_enc) if pwd_enc else None
+    if not secret or not password or not cid or not user:
         raise HTTPException(
-
-            status_code=status.HTTP_400_BAD_REQUEST,
-
-            detail="Configure usuario y contraseña API de Factus.",
-
-        )
-
-
-
-    secret = decrypt_secret(row.client_secret_encrypted)
-
-    password = decrypt_secret(row.api_password_encrypted)
-
-    if not secret or not password:
-
-        raise HTTPException(
-
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-
             detail="No se pudieron descifrar las credenciales. Vuelve a guardarlas.",
-
         )
-
-
 
     base = factus_base_url(use_sandbox=row.use_sandbox)
 
@@ -159,11 +174,11 @@ def consultar_factura_factus(
 
             base_url=base,
 
-            client_id=row.client_id.strip(),
+            client_id=cid,
 
             client_secret=secret,
 
-            username=row.api_username.strip(),
+            username=user,
 
             password=password,
 

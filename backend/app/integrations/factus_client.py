@@ -209,6 +209,49 @@ def get_numbering_ranges(
     return rows
 
 
+def get_municipalities(
+    *,
+    base_url: str,
+    access_token: str,
+    name: Optional[str] = None,
+    timeout: float = 60.0,
+) -> list[dict[str, Any]]:
+    """
+    GET /v1/municipalities — catálogo DIAN/Factus (mismo ambiente que el token).
+
+    Documentación: https://developers.factus.com.co/municipios/obtener-municipios/
+    Query opcional `name` filtra por nombre. El campo `id` es el municipality_id en facturas;
+    `code` es el código DIAN (distinto del id).
+    """
+    url = f"{base_url.rstrip('/')}/v1/municipalities"
+    params: dict[str, str] = {}
+    if name and name.strip():
+        params["name"] = name.strip()[:200]
+    with httpx.Client(timeout=timeout) as client:
+        r = client.get(
+            url,
+            params=params or None,
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {access_token}",
+            },
+        )
+    data = _safe_json(r)
+    if r.status_code >= 400:
+        raise FactusAPIError(
+            "No se pudieron consultar municipios en Factus",
+            status_code=r.status_code,
+            body=data,
+        )
+    rows: list[dict[str, Any]] = []
+    if isinstance(data, dict):
+        inner = data.get("data")
+        if isinstance(inner, list):
+            rows = [x for x in inner if isinstance(x, dict)]
+    return rows
+
+
 _TRANSIENT_VALIDATE_STATUS = frozenset({502, 503, 504})
 
 

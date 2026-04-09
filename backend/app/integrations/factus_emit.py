@@ -15,6 +15,7 @@ from app.core.config import settings
 from app.core.factus_crypto import decrypt_secret
 from app.integrations.factus_client import FactusAPIError, factus_base_url, obtain_token, validate_invoice
 from app.models.factus import FacturaElectronica, TenantFactusSettings
+from app.services.factus_tenant_settings import active_auth_encrypted
 from app.models.sucursal import Sucursal
 from app.models.tarifa import Tarifa
 from app.models.tenant import Tenant
@@ -167,9 +168,8 @@ def _customer_payload(
     vehiculo: VehiculoProceso,
     *,
     municipality_id: int,
-    address_line: str,
 ) -> dict[str, Any]:
-    """Cliente persona natural (cédula); documento solo dígitos."""
+    """Cliente persona natural (cédula); documento solo dígitos. Dirección opcional (Factus/DIAN puede ir en blanco)."""
     digits = _solo_digitos(vehiculo.cliente_documento or "")
     if not digits:
         raise ValueError("El cliente no tiene documento válido para emitir factura electrónica")
@@ -178,7 +178,7 @@ def _customer_payload(
     if not _email_valido_factus(email):
         email = "cliente@local.invalid"
     phone = _solo_digitos(vehiculo.cliente_telefono or "") or "6000000000"
-    addr = (address_line or "").strip()[:200] or "Colombia"
+    addr = (vehiculo.cliente_direccion or "").strip()[:200]
     return {
         "identification_document_id": 3,
         "identification": digits[:20],
@@ -315,6 +315,26 @@ def _bill_from_validate_response(resp: dict[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def resolve_numbering_range_id_for_cobro(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    active_sucursal_id: UUID,
+    tenant_default_range_id: int | None,
+) -> int | None:
+    """
+    Rango Factus a usar en caja: el de la sede activa si está definido; si no, default del tenant (backoffice).
+    """
+    sede = (
+        db.query(Sucursal)
+        .filter(Sucursal.id == active_sucursal_id, Sucursal.tenant_id == tenant_id)
+        .first()
+    )
+    if sede is not None and sede.factus_numbering_range_id is not None:
+        return sede.factus_numbering_range_id
+    return tenant_default_range_id
+
+
 def build_validate_body(
     *,
     vehiculo: VehiculoProceso,
@@ -349,7 +369,7 @@ def build_validate_body(
         "establishment": _establishment_payload(
             tenant, sede, municipality_id=mid, address=addr_est
         ),
-        "customer": _customer_payload(vehiculo, municipality_id=mid, address_line=addr_est),
+        "customer": _customer_payload(vehiculo, municipality_id=mid),
         "items": items,
     }
     return body
@@ -369,20 +389,33 @@ def emitir_y_persistir_factura_cobro(
     Obtiene token, valida factura en Factus, persiste FacturaElectronica.
     Retorna (numero_factura_dian, cufe, public_url).
     """
-    if not fs.default_numbering_range_id:
-        raise FactusAPIError("Configure default_numbering_range_id en ajustes Factus.", status_code=400)
+    numbering_id = resolve_numbering_range_id_for_cobro(
+        db,
+        tenant_id=vehiculo.tenant_id,
+        active_sucursal_id=active_sucursal_id,
+        tenant_default_range_id=fs.default_numbering_range_id,
+    )
+    if not numbering_id:
+        raise FactusAPIError(
+            "Configure el id de rango Factus para esta sede (Organización → sedes) o un rango predeterminado del tenant en el backoffice SaaS.",
+            status_code=400,
+        )
 
-    secret = decrypt_secret(fs.client_secret_encrypted)
-    pwd = decrypt_secret(fs.api_password_encrypted)
-    if not fs.client_id or not secret or not fs.api_username or not pwd:
-        raise FactusAPIError("Credenciales Factus incompletas.", status_code=400)
+    cid, sec_enc, user, pwd_enc = active_auth_encrypted(fs)
+    secret = decrypt_secret(sec_enc) if sec_enc else None
+    pwd = decrypt_secret(pwd_enc) if pwd_enc else None
+    if not cid or not secret or not user or not pwd:
+        raise FactusAPIError(
+            "Credenciales Factus incompletas para el ambiente configurado (pruebas o producción).",
+            status_code=400,
+        )
 
     base = factus_base_url(use_sandbox=fs.use_sandbox)
     tok = obtain_token(
         base_url=base,
-        client_id=fs.client_id.strip(),
+        client_id=cid,
         client_secret=secret,
-        username=fs.api_username.strip(),
+        username=user,
         password=pwd,
     )
     access = tok.get("access_token")
@@ -394,7 +427,7 @@ def emitir_y_persistir_factura_cobro(
         tenant=tenant,
         db=db,
         active_sucursal_id=active_sucursal_id,
-        numbering_range_id=fs.default_numbering_range_id,
+        numbering_range_id=numbering_id,
         metodo_pago=metodo_pago,
         tarifa=tarifa,
     )

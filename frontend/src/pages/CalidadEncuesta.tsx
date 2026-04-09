@@ -3,31 +3,17 @@ import { useParams } from 'react-router-dom';
 import { useMutation, useQuery } from '@tanstack/react-query';
 import { Star } from 'lucide-react';
 import { qualityApi, type QualitySurveySubmitPayload } from '../api/quality';
-
-type RatingKey =
-  | 'atencion_recepcion'
-  | 'atencion_caja'
-  | 'sala_espera'
-  | 'agrado_visita'
-  | 'atencion_general';
-
-const QUESTIONS: Array<{ key: RatingKey; label: string }> = [
-  { key: 'atencion_recepcion', label: '¿Cómo te pareció la atención en recepción?' },
-  { key: 'atencion_caja', label: '¿Cómo te pareció la atención en caja?' },
-  { key: 'sala_espera', label: '¿Cómo fue la atención en sala de espera?' },
-  { key: 'agrado_visita', label: '¿Fue de tu agrado la visita?' },
-  { key: 'atencion_general', label: '¿Cómo calificas la atención en general?' },
-];
+import {
+  QUALITY_SURVEY_COMMENT_LABEL,
+  QUALITY_SURVEY_COMMENT_PLACEHOLDER,
+  QUALITY_SURVEY_QUESTIONS,
+  emptyQualitySurveyRatings,
+  type QualitySurveyRatingKey,
+} from '../survey/qualitySurveyConfig';
 
 export default function CalidadEncuesta() {
   const { token = '' } = useParams();
-  const [ratings, setRatings] = useState<Record<RatingKey, number>>({
-    atencion_recepcion: 0,
-    atencion_caja: 0,
-    sala_espera: 0,
-    agrado_visita: 0,
-    atencion_general: 0,
-  });
+  const [ratings, setRatings] = useState<Record<QualitySurveyRatingKey, number>>(emptyQualitySurveyRatings);
   const [comentario, setComentario] = useState('');
 
   const infoQuery = useQuery({
@@ -41,7 +27,7 @@ export default function CalidadEncuesta() {
   });
 
   const allRated = useMemo(
-    () => QUESTIONS.every((q) => ratings[q.key] >= 1 && ratings[q.key] <= 5),
+    () => QUALITY_SURVEY_QUESTIONS.every((q) => ratings[q.key] >= 1 && ratings[q.key] <= 5),
     [ratings],
   );
 
@@ -90,7 +76,7 @@ export default function CalidadEncuesta() {
               </p>
             ) : (
               <div className="space-y-5">
-                {QUESTIONS.map((q) => (
+                {QUALITY_SURVEY_QUESTIONS.map((q) => (
                   <div key={q.key}>
                     <p className="text-sm font-medium text-slate-800 mb-2">{q.label}</p>
                     <div className="flex gap-2">
@@ -113,12 +99,12 @@ export default function CalidadEncuesta() {
                 ))}
 
                 <div>
-                  <p className="text-sm font-medium text-slate-800 mb-2">Comentario (opcional)</p>
+                  <p className="text-sm font-medium text-slate-800 mb-2">{QUALITY_SURVEY_COMMENT_LABEL}</p>
                   <textarea
                     value={comentario}
                     onChange={(e) => setComentario(e.target.value)}
                     className="input-corporate min-h-[120px]"
-                    placeholder="Cuéntanos cómo podemos mejorar tu experiencia..."
+                    placeholder={QUALITY_SURVEY_COMMENT_PLACEHOLDER}
                     maxLength={2000}
                   />
                 </div>
@@ -147,4 +133,3 @@ export default function CalidadEncuesta() {
     </div>
   );
 }
-

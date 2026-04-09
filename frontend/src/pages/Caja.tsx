@@ -2741,7 +2741,7 @@ function HistorialCajas() {
   const [rangoAplicado, setRangoAplicado] = useState<{ desde: string; hasta: string } | null>(null);
   const [errorFiltro, setErrorFiltro] = useState<string | null>(null);
 
-  const { data: cajas, isPending, isFetching } = useQuery({
+  const { data: cajas, isLoading: cajasHistorialLoading, isFetching } = useQuery({
     queryKey: rangoAplicado
       ? ['historial-cajas', 'por-cierre', rangoAplicado.desde, rangoAplicado.hasta]
       : ['historial-cajas', 'recientes'],
@@ -2775,7 +2775,7 @@ function HistorialCajas() {
   };
 
   const cajasArray = cajas || [];
-  const cargaInicial = isPending && cajasArray.length === 0;
+  const cargaInicial = cajasHistorialLoading && cajasArray.length === 0;
 
   if (cargaInicial) {
     return <LoadingSpinner message="Cargando historial de caja..." />;

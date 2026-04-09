@@ -1,8 +1,19 @@
 import apiClient from './client';
 
+export interface FactusEnvCredentials {
+  client_id_configured: boolean;
+  client_id_hint: string | null;
+  client_secret_configured: boolean;
+  api_username: string | null;
+  api_password_configured: boolean;
+  base_url: string;
+}
+
 export interface FactusSettings {
   modo: 'manual' | 'factus';
   use_sandbox: boolean;
+  sandbox: FactusEnvCredentials;
+  production: FactusEnvCredentials;
   client_id_configured: boolean;
   client_id_hint: string | null;
   client_secret_configured: boolean;
@@ -17,7 +28,7 @@ export interface FactusModoPatch {
   modo: 'manual' | 'factus';
 }
 
-/** Cuerpo de PUT /factus/settings — secretos vacíos no sobrescriben lo guardado. */
+/** Cuerpo de PUT factus-settings SaaS — secretos vacíos no sobrescriben lo guardado. */
 export interface FactusSettingsUpdatePayload {
   modo: 'manual' | 'factus';
   use_sandbox: boolean;
@@ -25,6 +36,10 @@ export interface FactusSettingsUpdatePayload {
   client_secret?: string | null;
   api_username?: string | null;
   api_password?: string | null;
+  production_client_id?: string | null;
+  production_client_secret?: string | null;
+  production_api_username?: string | null;
+  production_api_password?: string | null;
   default_numbering_range_id?: number | null;
 }
 
@@ -49,6 +64,14 @@ export interface FactusNumberingRangeItem {
   end_date?: string | null;
 }
 
+/** GET /factus/municipalities — el `id` es el que guarda Factus en factus_municipality_id (no el `code` DIAN). */
+export interface FactusMunicipalityItem {
+  id: number;
+  code?: string | null;
+  name?: string | null;
+  department?: string | null;
+}
+
 export const factusApi = {
   /** Modo manual vs Factus (lectura). Credenciales las configura el backoffice SaaS. */
   getSettings: async (): Promise<FactusSettings> => {
@@ -65,6 +88,20 @@ export const factusApi = {
   /** Prueba de token OAuth Factus (solo admin; requiere modo factus y credenciales). */
   testConnection: async (): Promise<FactusTestConnectionResult> => {
     const response = await apiClient.post<FactusTestConnectionResult>('/factus/test-connection');
+    return response.data;
+  },
+
+  /** Rangos numeración Factus (solo admin; ambiente y credenciales activos en backoffice). */
+  listNumberingRanges: async (): Promise<FactusNumberingRangeItem[]> => {
+    const response = await apiClient.get<FactusNumberingRangeItem[]>('/factus/numbering-ranges');
+    return response.data;
+  },
+
+  /** Búsqueda municipios Factus (admin CDA; mín. 2 caracteres). */
+  searchMunicipalities: async (name: string): Promise<FactusMunicipalityItem[]> => {
+    const response = await apiClient.get<FactusMunicipalityItem[]>('/factus/municipalities', {
+      params: { name },
+    });
     return response.data;
   },
 };

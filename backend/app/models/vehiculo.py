@@ -52,6 +52,7 @@ class VehiculoProceso(Base):
     cliente_documento = Column(String(50), nullable=False)
     cliente_telefono = Column(String(20))
     cliente_email = Column(String(255))
+    cliente_direccion = Column(String(300), nullable=True)
     
     # Servicio RTM
     valor_rtm = Column(Numeric(10, 2), nullable=False)

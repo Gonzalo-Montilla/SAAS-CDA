@@ -21,6 +21,7 @@ import {
   MapPin,
 } from 'lucide-react';
 import { BackofficeSectionHeading } from '../components/BackofficeSectionHeading';
+import FactusMunicipalitySearchField from '../components/FactusMunicipalitySearchField';
 import { useAuth } from '../contexts/AuthContext';
 import { apiClient } from '../api/client';
 import { patchSaasSucursalUbicacion } from '../api/saasTenant';
@@ -1599,7 +1600,7 @@ export default function SaaSBackoffice() {
                           </div>
                           <div>
                             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1">
-                              Código municipio (DIAN)
+                              Id municipio Factus
                             </p>
                             <p className="font-mono text-slate-900 tabular-nums">
                               {matriz.factus_municipality_id != null ? matriz.factus_municipality_id : '—'}
@@ -1639,7 +1640,7 @@ export default function SaaSBackoffice() {
                                   <th>Cód. sede</th>
                                   <th>Ciudad</th>
                                   <th>Dirección (factura)</th>
-                                  <th>Cód. municipio</th>
+                                  <th>Id mpio. Factus</th>
                                   <th>Estado</th>
                                   <th className="text-right">Desde CDASOFT</th>
                                 </tr>
@@ -1672,7 +1673,7 @@ export default function SaaSBackoffice() {
                                       ) : (
                                         <span
                                           className="italic text-slate-500 text-xs font-sans whitespace-nowrap"
-                                          title="Al emitir factura se usa el código de municipio de matriz"
+                                          title="Al emitir se usa el id Factus de municipio de matriz"
                                         >
                                           Hereda matriz
                                         </span>
@@ -1722,7 +1723,7 @@ export default function SaaSBackoffice() {
                       {sedeUbicacionEdit && selectedTenantId && (
                         <div className="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-black/40">
                           <div
-                            className="bg-white rounded-2xl shadow-xl max-w-md w-full p-6 space-y-4 ring-1 ring-slate-200 max-h-[90vh] overflow-y-auto"
+                            className="bg-white rounded-2xl shadow-xl max-w-lg w-full p-6 space-y-4 ring-1 ring-slate-200 max-h-[90vh] overflow-y-auto"
                             role="dialog"
                             aria-labelledby="sede-ubicacion-dialog-title"
                           >
@@ -1762,23 +1763,16 @@ export default function SaaSBackoffice() {
                                 maxLength={500}
                               />
                             </div>
-                            <div>
-                              <label className="block text-sm font-semibold text-slate-700 mb-1">
-                                Código municipio (Factus / DIAN)
-                              </label>
-                              <input
-                                type="text"
-                                inputMode="numeric"
-                                className="input-corporate w-full font-mono text-sm"
-                                value={sedeUbicacionEdit.factus_municipality_id}
-                                onChange={(e) =>
-                                  setSedeUbicacionEdit((prev) =>
-                                    prev ? { ...prev, factus_municipality_id: e.target.value.replace(/\D/g, '') } : prev,
-                                  )
-                                }
-                                placeholder="Vacío = hereda matriz"
-                              />
-                            </div>
+                            <FactusMunicipalitySearchField
+                              value={sedeUbicacionEdit.factus_municipality_id}
+                              onChange={(idDigits) =>
+                                setSedeUbicacionEdit((prev) =>
+                                  prev ? { ...prev, factus_municipality_id: idDigits } : prev,
+                                )
+                              }
+                              saasTenantId={selectedTenantId}
+                              idInputClassName="input-corporate w-full font-mono text-sm"
+                            />
                             <div>
                               <label className="block text-sm font-semibold text-slate-700 mb-1">
                                 Ciudad (opcional)
@@ -1816,7 +1810,7 @@ export default function SaaSBackoffice() {
                                   if (midStr) {
                                     const n = parseInt(midStr, 10);
                                     if (Number.isNaN(n) || n < 1) {
-                                      setSedeUbicacionError('El código de municipio debe ser un entero mayor a 0.');
+                                      setSedeUbicacionError('El id de municipio Factus debe ser un número mayor a 0.');
                                       return;
                                     }
                                   }
@@ -1845,7 +1839,7 @@ export default function SaaSBackoffice() {
                       embedded
                       icon={Landmark}
                       title="Facturación electrónica (Factus)"
-                      description="Modo manual vs integración DIAN; credenciales y prueba de conexión"
+                      description="Credenciales, ambiente y rango fallback; el CDA define municipio y rango por sede"
                     />
                     <div className="p-4 border-t border-slate-100">
                       <SaasTenantFactusPanel tenantId={tenantProfileQuery.data.id} />

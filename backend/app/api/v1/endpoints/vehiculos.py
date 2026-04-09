@@ -23,10 +23,16 @@ from app.models.usuario import Usuario
 from app.models.tenant import Tenant
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo, MetodoPago
 from app.models.factus import TenantFactusSettings, FacturaElectronica
+from app.services.factus_tenant_settings import creds_complete_for_active_env
 from app.integrations.factus_client import FactusAPIError, format_factus_error_for_user
-from app.integrations.factus_emit import emitir_y_persistir_factura_cobro, validar_datos_cliente_para_factus
+from app.integrations.factus_emit import (
+    emitir_y_persistir_factura_cobro,
+    resolve_numbering_range_id_for_cobro,
+    validar_datos_cliente_para_factus,
+)
 from app.models.tarifa import Tarifa, ComisionSOAT
 from app.models.caja import Caja, MovimientoCaja, TipoMovimiento, EstadoCaja
+from app.models.sucursal import Sucursal
 from app.utils.email import (
     enviar_email,
     enviar_email_con_adjuntos,
@@ -302,6 +308,7 @@ def registrar_vehiculo(
         cliente_documento=vehiculo_data.cliente_documento,
         cliente_telefono=vehiculo_data.cliente_telefono,
         cliente_email=cliente_email_normalizado,
+        cliente_direccion=vehiculo_data.cliente_direccion,
         valor_rtm=valor_rtm,
         tiene_soat=vehiculo_data.tiene_soat,
         comision_soat=comision_soat,
@@ -448,6 +455,7 @@ def editar_vehiculo(
     vehiculo.cliente_documento = vehiculo_data.cliente_documento
     vehiculo.cliente_telefono = vehiculo_data.cliente_telefono
     vehiculo.cliente_email = str(vehiculo_data.cliente_email).strip().lower()
+    vehiculo.cliente_direccion = vehiculo_data.cliente_direccion
     vehiculo.tiene_soat = vehiculo_data.tiene_soat
     vehiculo.observaciones = vehiculo_data.observaciones
     
@@ -740,22 +748,23 @@ def cobrar_vehiculo(
             .first()
         )
         modo_factus = fs is not None and fs.modo == "factus"
-        cred_factus_ok = (
-            fs is not None
-            and bool(fs.client_id and fs.client_id.strip())
-            and bool(fs.client_secret_encrypted)
-            and bool(fs.api_username and fs.api_username.strip())
-            and bool(fs.api_password_encrypted)
-            and fs.default_numbering_range_id is not None
-        )
+        range_id_cobro: int | None = None
+        if fs is not None:
+            range_id_cobro = resolve_numbering_range_id_for_cobro(
+                db,
+                tenant_id=current_user.tenant_id,
+                active_sucursal_id=active_sucursal_id,
+                tenant_default_range_id=fs.default_numbering_range_id,
+            )
+        cred_factus_ok = fs is not None and creds_complete_for_active_env(fs) and range_id_cobro is not None
 
         if modo_factus:
             if not cred_factus_ok:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=(
-                        "Modo Factus activo pero faltan credenciales o resolución de numeración. "
-                        "Configure Client ID, secret, usuario y contraseña API, y numbering_range_id en Ajustes."
+                        "Modo Factus activo pero faltan credenciales del ambiente activo (pruebas o producción) "
+                        "o id de rango de numeración para esta sede (Organización → sedes) o rango predeterminado del tenant en backoffice SaaS."
                     ),
                 )
             try:
@@ -918,10 +927,18 @@ def cobrar_vehiculo(
                 if recepcionista:
                     recepcionista_nombre = recepcionista.nombre_completo
 
+            sucursal_nombre_encuesta = None
+            if vehiculo.sucursal_id:
+                sede_row = db.query(Sucursal).filter(Sucursal.id == vehiculo.sucursal_id).first()
+                if sede_row:
+                    sucursal_nombre_encuesta = sede_row.nombre
+
             create_quality_survey_invite(
                 db,
                 tenant_id=current_user.tenant_id,
                 vehiculo_id=vehiculo.id,
+                sucursal_id=vehiculo.sucursal_id,
+                sucursal_nombre=sucursal_nombre_encuesta,
                 cliente_nombre=vehiculo.cliente_nombre,
                 cliente_email=vehiculo.cliente_email,
                 cliente_celular=vehiculo.cliente_telefono,

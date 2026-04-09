@@ -4,7 +4,7 @@ Endpoints de autenticación global SaaS (backoffice).
 from datetime import datetime, timedelta, timezone
 import csv
 import io
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -34,6 +34,7 @@ from app.models.tenant import Tenant
 from app.models.usuario import Usuario
 from app.schemas.auth import Token, RefreshTokenRequest
 from app.schemas.factus import (
+    FactusMunicipalityItem,
     FactusNumberingRangeItem,
     FactusSettingsOut,
     FactusSettingsUpdate,
@@ -43,6 +44,7 @@ from app.schemas.saas_auth import SaaSUserCreate, SaaSUserResponse
 from app.services.factus_tenant_settings import (
     apply_settings_update,
     get_or_create_settings_row,
+    list_municipalities_for_tenant,
     list_numbering_ranges_for_tenant,
     row_to_out,
     run_test_connection,
@@ -1011,6 +1013,31 @@ def get_saas_tenant_factus_numbering_ranges(
         )
     row = get_or_create_settings_row(db, tenant_uuid)
     return list_numbering_ranges_for_tenant(row)
+
+
+@router.get("/tenants/{tenant_id}/factus-municipalities", response_model=list[FactusMunicipalityItem])
+def get_saas_tenant_factus_municipalities(
+    tenant_id: str,
+    name: str = Query(..., min_length=2, max_length=200, description="Texto del nombre del municipio (mín. 2 caracteres)"),
+    db: Session = Depends(get_db),
+    _: SaaSUser = Depends(require_saas_role(["owner", "comercial", "soporte"])),
+):
+    """Catálogo Factus /v1/municipalities en el ambiente activo del tenant (usar `id` en sedes/municipio)."""
+    try:
+        tenant_uuid = UUID(tenant_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ID de tenant inválido",
+        )
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant no encontrado",
+        )
+    row = get_or_create_settings_row(db, tenant_uuid)
+    return list_municipalities_for_tenant(row, name=name)
 
 
 @router.get("/billing/plans", response_model=list[SaaSBillingPlanItem])

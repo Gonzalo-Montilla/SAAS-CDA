@@ -39,6 +39,7 @@ export default function Recepcion() {
     cliente_documento: '',
     cliente_telefono: '',
     cliente_email: '',
+    cliente_direccion: '',
     tiene_soat: false,
     observaciones: '',
   });
@@ -303,6 +304,7 @@ export default function Recepcion() {
       cliente_documento: '',
       cliente_telefono: '',
       cliente_email: '',
+      cliente_direccion: '',
       tiene_soat: false,
       observaciones: '',
     });
@@ -337,6 +339,7 @@ export default function Recepcion() {
       cliente_documento: vehiculo.cliente_documento,
       cliente_telefono: vehiculo.cliente_telefono || '',
       cliente_email: vehiculo.cliente_email || '',
+      cliente_direccion: vehiculo.cliente_direccion || '',
       tiene_soat: vehiculo.tiene_soat,
       observaciones: textoObservaciones,
     });
@@ -366,11 +369,13 @@ export default function Recepcion() {
       return;
     }
 
+    const dirCliente = (formData.cliente_direccion || '').trim();
     // Preparar datos incluyendo fotos en observaciones
     const dataConFotos = {
       ...formData,
       cliente_telefono: telDigits,
       cliente_email: clienteEmailNormalizado,
+      cliente_direccion: dirCliente ? dirCliente.slice(0, 300) : undefined,
       observaciones: JSON.stringify({
         texto: formData.observaciones || '',
         fotos: fotosVehiculo
@@ -688,6 +693,20 @@ export default function Recepcion() {
                   required
                   className="input-pos"
                   placeholder="cliente@correo.com"
+                />
+              </div>
+
+              <div className="md:col-span-2">
+                <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Dirección del cliente (opcional, factura electrónica)
+                </label>
+                <input
+                  type="text"
+                  value={formData.cliente_direccion || ''}
+                  onChange={(e) => handleInputChange('cliente_direccion', e.target.value.toUpperCase())}
+                  className="input-pos uppercase"
+                  maxLength={300}
+                  placeholder="Si queda vacío, Factus puede emitir sin dirección del adquiriente"
                 />
               </div>
             </div>

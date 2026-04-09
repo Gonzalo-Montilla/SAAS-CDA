@@ -1,19 +1,22 @@
 """
 Endpoints de calidad (encuestas de satisfacción por tenant).
 """
+import uuid
 from datetime import datetime, timezone, timedelta
 from statistics import mean
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
+from sqlalchemy import false, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.deps import get_current_user, get_db
 from app.models.quality import QualitySurveyInvite, QualitySurveyResponse
 from app.models.rtm_reminder import RTMRenewalReminder
+from app.models.sucursal import Sucursal
 from app.models.tenant import Tenant
-from app.models.usuario import Usuario
+from app.models.usuario import RolEnum, Usuario
 from app.utils.quality import process_due_quality_invites, utcnow_naive
 from app.utils.rtm_reminders import process_due_rtm_renewal_reminders
 from app.utils.email import enviar_email, generar_email_recordatorio_proxima_rtm
@@ -23,6 +26,49 @@ router = APIRouter()
 
 def _now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _calidad_puede_elegir_sede(user: Usuario) -> bool:
+    return user.rol in (RolEnum.ADMINISTRADOR, RolEnum.CONTADOR)
+
+
+def _parse_calidad_sucursal_id_param(raw: str | None) -> uuid.UUID | None:
+    if raw is None or not str(raw).strip():
+        return None
+    try:
+        return uuid.UUID(str(raw).strip())
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="sucursal_id inválido") from None
+
+
+def _apply_calidad_sede_filter(query, db: Session, user: Usuario, sucursal_uuid: uuid.UUID | None):
+    """Admin/contador: todo el tenant o una sede elegida. Resto: solo su sede (sin ver otras ni legado sin sede)."""
+    if _calidad_puede_elegir_sede(user):
+        if sucursal_uuid is not None:
+            sede = (
+                db.query(Sucursal)
+                .filter(Sucursal.id == sucursal_uuid, Sucursal.tenant_id == user.tenant_id)
+                .first()
+            )
+            if not sede:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Sede no encontrada")
+            return query.filter(QualitySurveyInvite.sucursal_id == sucursal_uuid)
+        return query
+    if user.sucursal_id is None:
+        # Sin sede asignada: no listar nada (evita ver tenant completo ni legado ambiguo).
+        return query.filter(false())
+    return query.filter(QualitySurveyInvite.sucursal_id == user.sucursal_id)
+
+
+def _calidad_invite_visible_for_user(invite: QualitySurveyInvite, user: Usuario) -> bool:
+    if _calidad_puede_elegir_sede(user):
+        return True
+    if invite.sucursal_id is None:
+        # Legado sin sede: solo quien puede ver todo el tenant.
+        return False
+    if user.sucursal_id is None:
+        return False
+    return invite.sucursal_id == user.sucursal_id
 
 
 class QualitySummaryResponse(BaseModel):
@@ -38,6 +84,8 @@ class QualityInviteItem(BaseModel):
     cliente_nombre: str
     cliente_email: str | None = None
     cliente_celular: str | None = None
+    sucursal_id: str | None = None
+    sucursal_nombre: str | None = None
     placa: str
     tipo_vehiculo: str
     status: str
@@ -45,16 +93,25 @@ class QualityInviteItem(BaseModel):
     sent_at: datetime | None = None
     responded_at: datetime | None = None
     expires_at: datetime
-    atencion_general: int | None = None
+    experiencia_global: int | None = None
     comentario: str | None = None
     created_at: datetime
 
 
+class QualityInviteListResponse(BaseModel):
+    items: list[QualityInviteItem]
+    total: int
+
+
 class QualityInviteDetailResponse(QualityInviteItem):
-    atencion_recepcion: int | None = None
-    atencion_caja: int | None = None
-    sala_espera: int | None = None
-    agrado_visita: int | None = None
+    facilidad_agendar_cita: int | None = None
+    tiempo_espera_revision: int | None = None
+    amabilidad_recepcion_caja: int | None = None
+    limpieza_instalaciones: int | None = None
+    amenidades_cda: int | None = None
+    claridad_resultados_revision: int | None = None
+    confianza_diagnostico_tecnico: int | None = None
+    recomendar_cda: int | None = None
     cajero_nombre: str | None = None
     recepcionista_nombre: str | None = None
 
@@ -74,11 +131,15 @@ class QualityPublicSurveyInfo(BaseModel):
 
 
 class QualityPublicSurveySubmitRequest(BaseModel):
-    atencion_recepcion: int = Field(ge=1, le=5)
-    atencion_caja: int = Field(ge=1, le=5)
-    sala_espera: int = Field(ge=1, le=5)
-    agrado_visita: int = Field(ge=1, le=5)
-    atencion_general: int = Field(ge=1, le=5)
+    facilidad_agendar_cita: int = Field(ge=1, le=5)
+    tiempo_espera_revision: int = Field(ge=1, le=5)
+    amabilidad_recepcion_caja: int = Field(ge=1, le=5)
+    limpieza_instalaciones: int = Field(ge=1, le=5)
+    amenidades_cda: int = Field(ge=1, le=5)
+    claridad_resultados_revision: int = Field(ge=1, le=5)
+    confianza_diagnostico_tecnico: int = Field(ge=1, le=5)
+    recomendar_cda: int = Field(ge=1, le=5)
+    experiencia_global: int = Field(ge=1, le=5)
     comentario: str | None = Field(default=None, max_length=2000)
 
 
@@ -136,12 +197,44 @@ class RTMReminderTouchManagementRequest(BaseModel):
     auto_status: str | None = Field(default=None, max_length=30)
 
 
+_IN_PERSON_SUBMIT_STATUSES = frozenset({"pending", "no_email", "sent", "failed"})
+
+
+def _persist_quality_survey_response(
+    db: Session,
+    invite: QualitySurveyInvite,
+    payload: QualityPublicSurveySubmitRequest,
+    now: datetime,
+) -> None:
+    response = QualitySurveyResponse(
+        invite_id=invite.id,
+        tenant_id=invite.tenant_id,
+        facilidad_agendar_cita=payload.facilidad_agendar_cita,
+        tiempo_espera_revision=payload.tiempo_espera_revision,
+        amabilidad_recepcion_caja=payload.amabilidad_recepcion_caja,
+        limpieza_instalaciones=payload.limpieza_instalaciones,
+        amenidades_cda=payload.amenidades_cda,
+        claridad_resultados_revision=payload.claridad_resultados_revision,
+        confianza_diagnostico_tecnico=payload.confianza_diagnostico_tecnico,
+        recomendar_cda=payload.recomendar_cda,
+        experiencia_global=payload.experiencia_global,
+        comentario=(payload.comentario or "").strip() or None,
+        created_at=now,
+    )
+    db.add(response)
+    invite.status = "responded"
+    invite.responded_at = now
+    invite.updated_at = now
+
+
 def _invite_to_item(invite: QualitySurveyInvite, response: QualitySurveyResponse | None) -> QualityInviteItem:
     return QualityInviteItem(
         id=str(invite.id),
         cliente_nombre=invite.cliente_nombre,
         cliente_email=invite.cliente_email,
         cliente_celular=invite.cliente_celular,
+        sucursal_id=str(invite.sucursal_id) if invite.sucursal_id else None,
+        sucursal_nombre=invite.sucursal_nombre,
         placa=invite.placa,
         tipo_vehiculo=invite.tipo_vehiculo,
         status=invite.status,
@@ -149,7 +242,7 @@ def _invite_to_item(invite: QualitySurveyInvite, response: QualitySurveyResponse
         sent_at=invite.sent_at,
         responded_at=invite.responded_at,
         expires_at=invite.expires_at,
-        atencion_general=response.atencion_general if response else None,
+        experiencia_global=response.experiencia_global if response else None,
         comentario=response.comentario if response else None,
         created_at=invite.created_at,
     )
@@ -239,17 +332,21 @@ def process_pending_quality_invites(
 
 @router.get("/summary", response_model=QualitySummaryResponse)
 def get_quality_summary(
+    sucursal_id: str | None = Query(default=None, description="Filtrar por sede (administrador/contador)"),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
     process_due_quality_invites(db, tenant_id=current_user.tenant_id, limit=100)
 
-    invites = (
+    sid = _parse_calidad_sucursal_id_param(sucursal_id) if _calidad_puede_elegir_sede(current_user) else None
+
+    q_inv = (
         db.query(QualitySurveyInvite)
         .filter(QualitySurveyInvite.tenant_id == current_user.tenant_id)
         .order_by(QualitySurveyInvite.created_at.desc())
-        .all()
     )
+    q_inv = _apply_calidad_sede_filter(q_inv, db, current_user, sid)
+    invites = q_inv.all()
     invite_ids = [invite.id for invite in invites]
     responses = (
         db.query(QualitySurveyResponse)
@@ -260,7 +357,7 @@ def get_quality_summary(
     )
     response_count = len(responses)
     pending_count = sum(1 for invite in invites if invite.status in {"pending", "sent"})
-    average = round(mean([resp.atencion_general for resp in responses]), 2) if responses else 0.0
+    average = round(mean([resp.experiencia_global for resp in responses]), 2) if responses else 0.0
     response_rate = round((response_count / len(invites)) * 100, 2) if invites else 0.0
 
     return QualitySummaryResponse(
@@ -272,18 +369,45 @@ def get_quality_summary(
     )
 
 
-@router.get("/invites", response_model=list[QualityInviteItem])
+@router.get("/invites", response_model=QualityInviteListResponse)
 def list_quality_invites(
     status_filter: str | None = None,
+    sucursal_id: str | None = Query(default=None, description="Filtrar por sede (administrador/contador)"),
+    search: str | None = Query(
+        default=None,
+        description="Buscar en cliente, placa, correo, celular o sede",
+        max_length=120,
+    ),
+    skip: int = Query(default=0, ge=0, le=500_000),
+    limit: int = Query(default=25, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
     process_due_quality_invites(db, tenant_id=current_user.tenant_id, limit=100)
 
+    sid = _parse_calidad_sucursal_id_param(sucursal_id) if _calidad_puede_elegir_sede(current_user) else None
+
     query = db.query(QualitySurveyInvite).filter(QualitySurveyInvite.tenant_id == current_user.tenant_id)
+    query = _apply_calidad_sede_filter(query, db, current_user, sid)
     if status_filter:
         query = query.filter(QualitySurveyInvite.status == status_filter.strip().lower())
-    invites = query.order_by(QualitySurveyInvite.created_at.desc()).limit(300).all()
+    q_term = (search or "").strip()
+    if q_term:
+        like = f"%{q_term}%"
+        query = query.filter(
+            or_(
+                QualitySurveyInvite.cliente_nombre.ilike(like),
+                QualitySurveyInvite.placa.ilike(like),
+                QualitySurveyInvite.cliente_email.ilike(like),
+                QualitySurveyInvite.cliente_celular.ilike(like),
+                QualitySurveyInvite.sucursal_nombre.ilike(like),
+            )
+        )
+
+    total = query.count()
+    invites = (
+        query.order_by(QualitySurveyInvite.created_at.desc()).offset(skip).limit(limit).all()
+    )
     invite_ids = [invite.id for invite in invites]
     responses = (
         db.query(QualitySurveyResponse)
@@ -293,7 +417,8 @@ def list_quality_invites(
         else []
     )
     response_map = {str(resp.invite_id): resp for resp in responses}
-    return [_invite_to_item(invite, response_map.get(str(invite.id))) for invite in invites]
+    items = [_invite_to_item(invite, response_map.get(str(invite.id))) for invite in invites]
+    return QualityInviteListResponse(items=items, total=total)
 
 
 @router.get("/invites/{invite_id}", response_model=QualityInviteDetailResponse)
@@ -310,14 +435,21 @@ def get_quality_invite_detail(
     if not invite:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitación no encontrada")
 
+    if not _calidad_invite_visible_for_user(invite, current_user):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitación no encontrada")
+
     response = db.query(QualitySurveyResponse).filter(QualitySurveyResponse.invite_id == invite.id).first()
     base = _invite_to_item(invite, response)
     return QualityInviteDetailResponse(
         **base.model_dump(),
-        atencion_recepcion=response.atencion_recepcion if response else None,
-        atencion_caja=response.atencion_caja if response else None,
-        sala_espera=response.sala_espera if response else None,
-        agrado_visita=response.agrado_visita if response else None,
+        facilidad_agendar_cita=response.facilidad_agendar_cita if response else None,
+        tiempo_espera_revision=response.tiempo_espera_revision if response else None,
+        amabilidad_recepcion_caja=response.amabilidad_recepcion_caja if response else None,
+        limpieza_instalaciones=response.limpieza_instalaciones if response else None,
+        amenidades_cda=response.amenidades_cda if response else None,
+        claridad_resultados_revision=response.claridad_resultados_revision if response else None,
+        confianza_diagnostico_tecnico=response.confianza_diagnostico_tecnico if response else None,
+        recomendar_cda=response.recomendar_cda if response else None,
         cajero_nombre=invite.cajero_nombre,
         recepcionista_nombre=invite.recepcionista_nombre,
     )
@@ -371,23 +503,58 @@ def submit_public_quality_survey(
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Esta encuesta ya fue respondida")
 
-    response = QualitySurveyResponse(
-        invite_id=invite.id,
-        tenant_id=invite.tenant_id,
-        atencion_recepcion=payload.atencion_recepcion,
-        atencion_caja=payload.atencion_caja,
-        sala_espera=payload.sala_espera,
-        agrado_visita=payload.agrado_visita,
-        atencion_general=payload.atencion_general,
-        comentario=(payload.comentario or "").strip() or None,
-        created_at=now,
-    )
-    db.add(response)
-    invite.status = "responded"
-    invite.responded_at = now
-    invite.updated_at = now
+    _persist_quality_survey_response(db, invite, payload, now)
     db.commit()
     return {"success": True, "message": "Gracias por compartir tu experiencia."}
+
+
+@router.post("/invites/{invite_id}/submit-in-person")
+def submit_in_person_quality_survey(
+    invite_id: str,
+    payload: QualityPublicSurveySubmitRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """Registra la encuesta en el CDA; anula el envío automático por correo si aún no se había enviado."""
+    try:
+        invite_uuid = uuid.UUID(invite_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Identificador inválido") from exc
+
+    invite = (
+        db.query(QualitySurveyInvite)
+        .filter(QualitySurveyInvite.id == invite_uuid, QualitySurveyInvite.tenant_id == current_user.tenant_id)
+        .first()
+    )
+    if not invite:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitación no encontrada")
+
+    if not _calidad_invite_visible_for_user(invite, current_user):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitación no encontrada")
+
+    now = _now_naive()
+    if now > invite.expires_at:
+        invite.status = "expired"
+        invite.updated_at = now
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El plazo de esta encuesta ha vencido")
+
+    if invite.status == "responded":
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Esta encuesta ya fue respondida")
+
+    if invite.status not in _IN_PERSON_SUBMIT_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se puede registrar la encuesta en este estado",
+        )
+
+    existing = db.query(QualitySurveyResponse).filter(QualitySurveyResponse.invite_id == invite.id).first()
+    if existing:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Esta encuesta ya fue respondida")
+
+    _persist_quality_survey_response(db, invite, payload, now)
+    db.commit()
+    return {"success": True, "message": "Encuesta registrada. No se enviará correo si aún estaba pendiente."}
 
 
 @router.get("/rtm-reminders/summary", response_model=RTMReminderSummary)

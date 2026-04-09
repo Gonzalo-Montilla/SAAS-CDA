@@ -1,7 +1,7 @@
 import apiClient from './client';
 import type {
   QualityInviteDetail,
-  QualityInviteItem,
+  QualityInviteListResponse,
   QualityPublicSurveyInfo,
   RTMReminderItem,
   RTMReminderSummary,
@@ -9,11 +9,15 @@ import type {
 } from '../types';
 
 export interface QualitySurveySubmitPayload {
-  atencion_recepcion: number;
-  atencion_caja: number;
-  sala_espera: number;
-  agrado_visita: number;
-  atencion_general: number;
+  facilidad_agendar_cita: number;
+  tiempo_espera_revision: number;
+  amabilidad_recepcion_caja: number;
+  limpieza_instalaciones: number;
+  amenidades_cda: number;
+  claridad_resultados_revision: number;
+  confianza_diagnostico_tecnico: number;
+  recomendar_cda: number;
+  experiencia_global: number;
   comentario?: string;
 }
 
@@ -25,20 +29,45 @@ export interface RTMReminderUpdatePayload {
 }
 
 export const qualityApi = {
-  getSummary: async (): Promise<QualitySummary> => {
-    const response = await apiClient.get<QualitySummary>('/quality/summary');
+  getSummary: async (params?: { sucursal_id?: string }): Promise<QualitySummary> => {
+    const response = await apiClient.get<QualitySummary>('/quality/summary', {
+      params: params?.sucursal_id ? { sucursal_id: params.sucursal_id } : undefined,
+    });
     return response.data;
   },
 
-  listInvites: async (statusFilter?: string): Promise<QualityInviteItem[]> => {
-    const response = await apiClient.get<QualityInviteItem[]>('/quality/invites', {
-      params: statusFilter ? { status_filter: statusFilter } : undefined,
+  listInvites: async (opts?: {
+    statusFilter?: string;
+    sucursal_id?: string;
+    search?: string;
+    skip?: number;
+    limit?: number;
+  }): Promise<QualityInviteListResponse> => {
+    const params: Record<string, string | number> = {};
+    if (opts?.statusFilter) params.status_filter = opts.statusFilter;
+    if (opts?.sucursal_id) params.sucursal_id = opts.sucursal_id;
+    if (opts?.search) params.search = opts.search;
+    if (opts?.skip != null) params.skip = opts.skip;
+    if (opts?.limit != null) params.limit = opts.limit;
+    const response = await apiClient.get<QualityInviteListResponse>('/quality/invites', {
+      params: Object.keys(params).length ? params : undefined,
     });
     return response.data;
   },
 
   getInviteDetail: async (inviteId: string): Promise<QualityInviteDetail> => {
     const response = await apiClient.get<QualityInviteDetail>(`/quality/invites/${inviteId}`);
+    return response.data;
+  },
+
+  submitInPersonSurvey: async (
+    inviteId: string,
+    payload: QualitySurveySubmitPayload
+  ): Promise<{ success: boolean; message: string }> => {
+    const response = await apiClient.post<{ success: boolean; message: string }>(
+      `/quality/invites/${inviteId}/submit-in-person`,
+      payload
+    );
     return response.data;
   },
 

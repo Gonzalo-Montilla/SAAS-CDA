@@ -4,7 +4,6 @@ Endpoints de Configuración
 from io import BytesIO
 from pathlib import Path
 from urllib.parse import urlparse
-from urllib.request import urlopen
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import Response
@@ -15,6 +14,7 @@ from app.core.deps import get_admin, get_current_user, get_db
 from app.core.config import settings
 from app.models.usuario import Usuario
 from app.models.tenant import Tenant
+from app.utils.tenant_logo_remote import fetch_remote_tenant_logo
 
 router = APIRouter()
 
@@ -26,6 +26,8 @@ def _resolve_tenant_logo_bytes(logo_url: str | None) -> tuple[bytes, str] | None
     raw = str(logo_url).strip()
     if not raw:
         return None
+    if raw.startswith("//"):
+        raw = "https:" + raw
 
     uploads_root = Path(settings.TENANT_LOGO_UPLOAD_DIR).resolve().parent
     normalized = raw.replace("\\", "/")
@@ -76,17 +78,9 @@ def _resolve_tenant_logo_bytes(logo_url: str | None) -> tuple[bytes, str] | None
                 }.get(ext, "application/octet-stream")
                 return content, media_type
 
-    # Último intento: descargar URL remota.
+    # Último intento: descargar URL remota (User-Agent + tipo imagen por firma/extensión).
     if normalized.startswith("http://") or normalized.startswith("https://"):
-        try:
-            with urlopen(normalized, timeout=4) as remote:
-                content = remote.read()
-                if not content:
-                    return None
-                content_type = remote.headers.get("Content-Type", "application/octet-stream")
-                return content, content_type
-        except Exception:
-            return None
+        return fetch_remote_tenant_logo(normalized)
 
     return None
 

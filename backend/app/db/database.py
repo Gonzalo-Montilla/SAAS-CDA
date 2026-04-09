@@ -246,6 +246,7 @@ def ensure_tenant_domain_schema(db):
     db.execute(text("ALTER TABLE desglose_efectivo_cierre ADD COLUMN IF NOT EXISTS tenant_id UUID"))
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS tenant_id UUID"))
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS cliente_email VARCHAR(255)"))
+    db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS cliente_direccion VARCHAR(300)"))
     db.execute(text("ALTER TABLE tarifas ADD COLUMN IF NOT EXISTS tenant_id UUID"))
     db.execute(text("ALTER TABLE comisiones_soat ADD COLUMN IF NOT EXISTS tenant_id UUID"))
     db.execute(text("ALTER TABLE movimientos_tesoreria ADD COLUMN IF NOT EXISTS tenant_id UUID"))
@@ -696,6 +697,7 @@ def ensure_facturacion_ubicacion_schema(db):
     db.execute(text("ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS factus_municipality_id INTEGER"))
     db.execute(text("ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS direccion VARCHAR(500)"))
     db.execute(text("ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS ciudad VARCHAR(200)"))
+    db.execute(text("ALTER TABLE sucursales ADD COLUMN IF NOT EXISTS factus_numbering_range_id INTEGER"))
 
 
 def ensure_factus_schema(db):
@@ -738,6 +740,192 @@ def ensure_factus_schema(db):
     db.execute(text("CREATE INDEX IF NOT EXISTS ix_facturas_electronicas_tenant ON facturas_electronicas(tenant_id)"))
     db.execute(text("CREATE INDEX IF NOT EXISTS ix_facturas_electronicas_ref ON facturas_electronicas(tenant_id, reference_code)"))
     db.execute(text("CREATE INDEX IF NOT EXISTS ix_facturas_electronicas_veh ON facturas_electronicas(vehiculo_proceso_id)"))
+    db.execute(text("ALTER TABLE tenant_factus_settings ADD COLUMN IF NOT EXISTS production_client_id VARCHAR(200)"))
+    db.execute(text("ALTER TABLE tenant_factus_settings ADD COLUMN IF NOT EXISTS production_client_secret_encrypted TEXT"))
+    db.execute(text("ALTER TABLE tenant_factus_settings ADD COLUMN IF NOT EXISTS production_api_username VARCHAR(255)"))
+    db.execute(text("ALTER TABLE tenant_factus_settings ADD COLUMN IF NOT EXISTS production_api_password_encrypted TEXT"))
+
+
+def ensure_quality_survey_responses_schema(db):
+    """
+    Migra quality_survey_responses del esquema de 5 preguntas al de 9 dimensiones.
+    Idempotente: seguro en arranque repetido y en BD nuevas (create_all ya alineado).
+    """
+    tbl = "quality_survey_responses"
+    exists = db.execute(
+        text(
+            """
+            SELECT 1 FROM information_schema.tables
+            WHERE table_schema = 'public' AND table_name = :t
+            """
+        ),
+        {"t": tbl},
+    ).scalar()
+    if not exists:
+        return
+
+    db.execute(
+        text(
+            f"""
+            ALTER TABLE {tbl}
+            ADD COLUMN IF NOT EXISTS facilidad_agendar_cita INTEGER,
+            ADD COLUMN IF NOT EXISTS tiempo_espera_revision INTEGER,
+            ADD COLUMN IF NOT EXISTS amabilidad_recepcion_caja INTEGER,
+            ADD COLUMN IF NOT EXISTS limpieza_instalaciones INTEGER,
+            ADD COLUMN IF NOT EXISTS amenidades_cda INTEGER,
+            ADD COLUMN IF NOT EXISTS claridad_resultados_revision INTEGER,
+            ADD COLUMN IF NOT EXISTS confianza_diagnostico_tecnico INTEGER,
+            ADD COLUMN IF NOT EXISTS recomendar_cda INTEGER,
+            ADD COLUMN IF NOT EXISTS experiencia_global INTEGER
+            """
+        )
+    )
+
+    legacy = db.execute(
+        text(
+            """
+            SELECT 1 FROM information_schema.columns
+            WHERE table_schema = 'public' AND table_name = :t AND column_name = 'atencion_recepcion'
+            """
+        ),
+        {"t": tbl},
+    ).scalar()
+
+    if legacy:
+        db.execute(
+            text(
+                f"""
+                UPDATE {tbl} AS r
+                SET
+                  facilidad_agendar_cita = v.m,
+                  tiempo_espera_revision = v.m,
+                  amabilidad_recepcion_caja = v.m2,
+                  limpieza_instalaciones = v.m,
+                  amenidades_cda = v.m,
+                  claridad_resultados_revision = v.m,
+                  confianza_diagnostico_tecnico = v.m,
+                  recomendar_cda = v.m,
+                  experiencia_global = v.gen
+                FROM (
+                  SELECT
+                    id,
+                    atencion_general AS gen,
+                    LEAST(
+                      5,
+                      GREATEST(
+                        1,
+                        ROUND(
+                          (
+                            COALESCE(atencion_recepcion, 3)
+                            + COALESCE(atencion_caja, 3)
+                            + COALESCE(sala_espera, 3)
+                            + COALESCE(agrado_visita, 3)
+                            + COALESCE(atencion_general, 3)
+                          )::numeric
+                          / 5
+                        )
+                      )::integer
+                    ) AS m,
+                    LEAST(
+                      5,
+                      GREATEST(
+                        1,
+                        ROUND(
+                          (COALESCE(atencion_recepcion, 3) + COALESCE(atencion_caja, 3))::numeric / 2
+                        )::integer
+                      )
+                    ) AS m2
+                  FROM {tbl}
+                ) AS v
+                WHERE r.id = v.id AND r.facilidad_agendar_cita IS NULL
+                """
+            )
+        )
+
+    db.execute(
+        text(
+            f"""
+            UPDATE {tbl}
+            SET
+              facilidad_agendar_cita = COALESCE(facilidad_agendar_cita, 3),
+              tiempo_espera_revision = COALESCE(tiempo_espera_revision, 3),
+              amabilidad_recepcion_caja = COALESCE(amabilidad_recepcion_caja, 3),
+              limpieza_instalaciones = COALESCE(limpieza_instalaciones, 3),
+              amenidades_cda = COALESCE(amenidades_cda, 3),
+              claridad_resultados_revision = COALESCE(claridad_resultados_revision, 3),
+              confianza_diagnostico_tecnico = COALESCE(confianza_diagnostico_tecnico, 3),
+              recomendar_cda = COALESCE(recomendar_cda, 3),
+              experiencia_global = COALESCE(experiencia_global, 3)
+            """
+        )
+    )
+
+    for col in (
+        "facilidad_agendar_cita",
+        "tiempo_espera_revision",
+        "amabilidad_recepcion_caja",
+        "limpieza_instalaciones",
+        "amenidades_cda",
+        "claridad_resultados_revision",
+        "confianza_diagnostico_tecnico",
+        "recomendar_cda",
+        "experiencia_global",
+    ):
+        db.execute(text(f"ALTER TABLE {tbl} ALTER COLUMN {col} SET NOT NULL"))
+
+    for col in (
+        "atencion_recepcion",
+        "atencion_caja",
+        "sala_espera",
+        "agrado_visita",
+        "atencion_general",
+    ):
+        db.execute(text(f"ALTER TABLE {tbl} DROP COLUMN IF EXISTS {col}"))
+
+
+def ensure_quality_survey_invites_sucursal_schema(db):
+    """Añade sede a invitaciones de encuesta y hace backfill desde vehículo/sucursal."""
+    inv = "quality_survey_invites"
+    exists = db.execute(
+        text(
+            "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=:t"
+        ),
+        {"t": inv},
+    ).scalar()
+    if not exists:
+        return
+    db.execute(
+        text(f"ALTER TABLE {inv} ADD COLUMN IF NOT EXISTS sucursal_id UUID REFERENCES sucursales(id)")
+    )
+    db.execute(text(f"ALTER TABLE {inv} ADD COLUMN IF NOT EXISTS sucursal_nombre VARCHAR(200)"))
+    db.execute(
+        text(
+            f"CREATE INDEX IF NOT EXISTS ix_quality_survey_invites_sucursal_id ON {inv}(sucursal_id)"
+        )
+    )
+    db.execute(
+        text(
+            f"""
+            UPDATE {inv} AS i
+            SET sucursal_id = v.sucursal_id
+            FROM vehiculos_proceso v
+            WHERE i.vehiculo_id = v.id
+              AND i.sucursal_id IS NULL
+              AND v.sucursal_id IS NOT NULL
+            """
+        )
+    )
+    db.execute(
+        text(
+            f"""
+            UPDATE {inv} AS i
+            SET sucursal_nombre = s.nombre
+            FROM sucursales s
+            WHERE i.sucursal_id = s.id
+              AND (i.sucursal_nombre IS NULL OR TRIM(i.sucursal_nombre) = '')
+            """
+        )
+    )
 
 
 def get_db():
@@ -791,6 +979,8 @@ def init_db():
         ensure_sucursales_schema(db)
         ensure_facturacion_ubicacion_schema(db)
         ensure_factus_schema(db)
+        ensure_quality_survey_responses_schema(db)
+        ensure_quality_survey_invites_sucursal_schema(db)
         db.commit()
 
         default_tenant = db.query(Tenant).filter(
