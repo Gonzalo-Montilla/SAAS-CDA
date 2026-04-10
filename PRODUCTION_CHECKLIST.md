@@ -11,6 +11,7 @@ Documento operativo para validar el despliegue antes de exponer el sistema a cli
 | Tareas programadas (cron) | [`RUNBOOK_AUTOMATION.md`](RUNBOOK_AUTOMATION.md) |
 | Plantilla env backend | [`backend/.env.example`](backend/.env.example) |
 | Plantilla env frontend | [`frontend/.env.example`](frontend/.env.example) |
+| Despliegue en VPS (Nginx, systemd) | [`DEPLOY_VPS.md`](DEPLOY_VPS.md) |
 
 ---
 

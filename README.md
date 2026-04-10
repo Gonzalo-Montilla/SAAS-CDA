@@ -240,7 +240,7 @@ El sistema viene preconfigura do con las tarifas 2025 para motos según antigüe
 
 ### VPS (Hostinger u otro)
 
-Ver `DEPLOY.md` para instrucciones detalladas de despliegue en VPS.
+Ver **[`DEPLOY_VPS.md`](DEPLOY_VPS.md)** para despliegue paso a paso en VPS (Nginx, systemd, PostgreSQL) sin interferir con otros proyectos.
 
 ## 📝 Desarrollo
 
