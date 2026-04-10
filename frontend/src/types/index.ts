@@ -367,6 +367,8 @@ export interface AppointmentItem {
   source: string;
   notes?: string | null;
   created_at: string;
+  reminder_status?: string;
+  reminder_sent_at?: string | null;
 }
 
 export interface SaaSSupportTicketItem {

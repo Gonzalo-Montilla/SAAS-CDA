@@ -190,6 +190,11 @@
     @apply py-3.5 px-4 text-sm text-slate-700 align-middle;
   }
 
+  .table-enterprise th.table-enterprise-col-monto,
+  .table-enterprise td.table-enterprise-col-monto {
+    @apply text-right tabular-nums whitespace-nowrap;
+  }
+
   .table-enterprise th.table-enterprise-col-actions,
   .table-enterprise td.table-enterprise-col-actions {
     @apply text-right whitespace-nowrap;
@@ -339,15 +344,15 @@
     box-shadow: var(--ui-shadow-panel);
   }
   
-  /* Tarjetas de vehículos */
+  /* Tarjetas de vehículos (Caja, Recepción): hover corporativo sin scale */
   .vehicle-card {
-    @apply bg-white rounded-xl p-5 border cursor-pointer transition-all duration-300 transform hover:-translate-y-1 hover:scale-[1.01];
+    @apply bg-white rounded-xl p-5 border transition-shadow duration-200;
     border-color: var(--ui-border);
     box-shadow: var(--ui-shadow-soft);
   }
 
   .vehicle-card:hover {
-    border-color: rgba(47, 103, 246, 0.45);
+    border-color: rgba(37, 99, 235, 0.35);
     box-shadow: var(--ui-shadow-panel);
   }
   

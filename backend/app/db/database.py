@@ -690,6 +690,74 @@ def ensure_sucursales_schema(db):
     )
 
 
+def ensure_tesoreria_anulacion_y_enum(db):
+    """
+    Anulación de movimientos (soft delete) y valores enum de categoría ajuste_correccion en PostgreSQL.
+    """
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    db.execute(
+        text(
+            """
+            ALTER TABLE movimientos_tesoreria ADD COLUMN IF NOT EXISTS anulado BOOLEAN NOT NULL DEFAULT FALSE
+            """
+        )
+    )
+    db.execute(text("ALTER TABLE movimientos_tesoreria ADD COLUMN IF NOT EXISTS motivo_anulacion TEXT"))
+    db.execute(
+        text(
+            "ALTER TABLE movimientos_tesoreria ADD COLUMN IF NOT EXISTS anulado_por UUID REFERENCES usuarios(id)"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE movimientos_tesoreria ADD COLUMN IF NOT EXISTS fecha_anulacion TIMESTAMP"
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS idx_movimientos_tesoreria_anulado
+            ON movimientos_tesoreria(anulado)
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            DO $body$
+            DECLARE
+              r record;
+            BEGIN
+              FOR r IN
+                SELECT DISTINCT t.typname AS tn FROM pg_type t
+                JOIN pg_enum e ON t.oid = e.enumtypid
+                WHERE e.enumlabel = 'otro_ingreso'
+              LOOP
+                BEGIN
+                  EXECUTE format('ALTER TYPE %I ADD VALUE %L', r.tn, 'ajuste_correccion');
+                EXCEPTION
+                  WHEN duplicate_object THEN NULL;
+                END;
+              END LOOP;
+              FOR r IN
+                SELECT DISTINCT t.typname AS tn FROM pg_type t
+                JOIN pg_enum e ON t.oid = e.enumtypid
+                WHERE e.enumlabel = 'otros_gastos'
+              LOOP
+                BEGIN
+                  EXECUTE format('ALTER TYPE %I ADD VALUE %L', r.tn, 'ajuste_correccion');
+                EXCEPTION
+                  WHEN duplicate_object THEN NULL;
+                END;
+              END LOOP;
+            END $body$;
+            """
+        )
+    )
+
+
 def ensure_facturacion_ubicacion_schema(db):
     """Municipio y dirección para Factus: matriz (tenant) y override opcional por sede."""
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS factus_municipality_id INTEGER"))
@@ -977,6 +1045,7 @@ def init_db():
         ensure_appointments_schema(db)
         ensure_rtm_reminders_schema(db)
         ensure_sucursales_schema(db)
+        ensure_tesoreria_anulacion_y_enum(db)
         ensure_facturacion_ubicacion_schema(db)
         ensure_factus_schema(db)
         ensure_quality_survey_responses_schema(db)

@@ -24,6 +24,7 @@ class CategoriaIngresoTesoreria(str, enum.Enum):
     APORTE_SOCIO = "aporte_socio"
     INGRESO_EXTERNO = "ingreso_externo"  # Otros negocios
     OTRO_INGRESO = "otro_ingreso"
+    AJUSTE_CORRECCION = "ajuste_correccion"  # Cuadrar monto mal registrado (diferencia a favor)
 
 
 class CategoriaEgresoTesoreria(str, enum.Enum):
@@ -36,6 +37,7 @@ class CategoriaEgresoTesoreria(str, enum.Enum):
     MANTENIMIENTO = "mantenimiento"
     IMPUESTOS = "impuestos"
     OTROS_GASTOS = "otros_gastos"
+    AJUSTE_CORRECCION = "ajuste_correccion"  # Cuadrar monto mal registrado (diferencia en contra)
 
 
 class MetodoPagoTesoreria(str, enum.Enum):
@@ -75,6 +77,12 @@ class MovimientoTesoreria(Base):
     fecha_movimiento = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     created_by = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False)
+
+    # Anulación (no borrar fila: saldo y desglose ignoran movimientos anulados)
+    anulado = Column(Boolean, nullable=False, default=False)
+    motivo_anulacion = Column(Text, nullable=True)
+    anulado_por = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=True)
+    fecha_anulacion = Column(DateTime, nullable=True)
     
     # Relaciones
     caja_origen = relationship("Caja", foreign_keys=[origen_caja_id])

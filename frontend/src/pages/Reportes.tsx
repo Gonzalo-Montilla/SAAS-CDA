@@ -1,13 +1,15 @@
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { BarChart3, TrendingUp, TrendingDown, Wallet, Building2, FileText, Download, DollarSign, ArrowUpCircle, ArrowDownCircle, CalendarDays, TimerReset, AlertTriangle, GaugeCircle, Receipt, Landmark, X } from 'lucide-react';
+import { BarChart3, TrendingUp, TrendingDown, Wallet, Building2, FileText, Download, DollarSign, ArrowUpCircle, ArrowDownCircle, CalendarDays, TimerReset, AlertTriangle, GaugeCircle, Receipt, Landmark, X, Lock, Printer } from 'lucide-react';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import apiClient from '../api/client';
-import { reportesApi } from '../api/reportes';
+import { reportesApi, type AgendamientoMetricasResponse, type CierreCajaReporteItem } from '../api/reportes';
+import { cajasApi } from '../api/cajas';
 import { vehiculosApi } from '../api/vehiculos';
 import { useAuth } from '../contexts/AuthContext';
 import { useBrand } from '../contexts/BrandContext';
+import { useToast } from '../contexts/ToastContext';
 import type { Usuario } from '../types';
 import { formatCOP } from '../utils/formatNumber';
 
@@ -86,14 +88,32 @@ interface Tramite {
 
 type ReporteSedeScope = 'activa' | 'todas' | 'sucursal';
 
+type ReportesSeccion = 'resumen' | 'finanzas' | 'operacion' | 'citas' | 'cierres' | 'detalle';
+
+const REPORTES_SECCIONES: { id: ReportesSeccion; label: string; hint: string }[] = [
+  { id: 'resumen', label: 'Resumen', hint: 'KPIs del día, comparativo por sede y tendencia de ingresos' },
+  { id: 'finanzas', label: 'Finanzas', hint: 'Caja, tesorería y recaudo por concepto y medio de pago' },
+  { id: 'operacion', label: 'Operación', hint: 'SLA, colas de atención y casos en riesgo' },
+  { id: 'citas', label: 'Citas', hint: 'Métricas de agendamiento del tenant' },
+  { id: 'cierres', label: 'Cierres caja', hint: 'Historial de cierres por cajero y sede (auditoría)' },
+  { id: 'detalle', label: 'Detalle', hint: 'Movimientos y trámites con exportación CSV' },
+];
+
 export default function ReportesPage() {
   const { user } = useAuth();
   const brand = useBrand();
+  const { showToast } = useToast();
   const tenantUser = user && 'tenant_id' in user ? (user as Usuario) : null;
   const puedeElegirSedeReporte =
     !!tenantUser && (tenantUser.rol === 'administrador' || tenantUser.rol === 'contador');
 
   const todayLocal = formatLocalDate(new Date());
+  /** Permite analizar citas ya programadas en el futuro; el tope evita fechas absurdas. */
+  const maxFechaReportes = useMemo(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() + 18);
+    return formatLocalDate(d);
+  }, []);
   const [modoVista, setModoVista] = useState<'dia' | 'rango'>('dia');
   const [fechaSeleccionada, setFechaSeleccionada] = useState<string>(todayLocal);
   const [fechaInicio, setFechaInicio] = useState<string>(todayLocal);
@@ -106,6 +126,8 @@ export default function ReportesPage() {
   const [filtroMetodo, setFiltroMetodo] = useState<string>('todos');
   const [filtroConcepto, setFiltroConcepto] = useState<string>('');
   const [modalRecibo, setModalRecibo] = useState<{ blobUrl: string } | null>(null);
+  const [reportesSeccion, setReportesSeccion] = useState<ReportesSeccion>('resumen');
+  const [cierrePdfLoadingId, setCierrePdfLoadingId] = useState<string | null>(null);
   const rangoInvalido = modoVista === 'rango' && fechaInicio > fechaFin;
   const periodoActual = modoVista === 'rango' ? `${fechaInicio} a ${fechaFin}` : fechaSeleccionada;
   const reportesEnabled = !rangoInvalido;
@@ -119,6 +141,27 @@ export default function ReportesPage() {
     }
     return '';
   }, [puedeElegirSedeReporte, reporteSedeScope, reporteSedeId]);
+
+  const cierresCajaQueryString = useMemo(() => {
+    const desde = modoVista === 'rango' ? fechaInicio : fechaSeleccionada;
+    const hasta = modoVista === 'rango' ? fechaFin : fechaSeleccionada;
+    let qs = `fecha_cierre_desde=${encodeURIComponent(desde)}&fecha_cierre_hasta=${encodeURIComponent(hasta)}&limit=200`;
+    if (puedeElegirSedeReporte) {
+      if (reporteSedeScope === 'todas') qs += '&consolidar_todas=true';
+      else if (reporteSedeScope === 'sucursal' && reporteSedeId) {
+        qs += `&sucursal_id=${encodeURIComponent(reporteSedeId)}`;
+      }
+    }
+    return qs;
+  }, [
+    modoVista,
+    fechaInicio,
+    fechaFin,
+    fechaSeleccionada,
+    puedeElegirSedeReporte,
+    reporteSedeScope,
+    reporteSedeId,
+  ]);
 
   const queryParams = useMemo(() => {
     const base =
@@ -220,6 +263,34 @@ export default function ReportesPage() {
       }),
     enabled: reportesEnabled,
     refetchInterval: 60000,
+  });
+
+  const agendamientoQueryParams = useMemo(() => {
+    return modoVista === 'rango'
+      ? `fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`
+      : `fecha=${fechaSeleccionada}`;
+  }, [modoVista, fechaInicio, fechaFin, fechaSeleccionada]);
+
+  const {
+    data: agendamientoMetricas,
+    isFetching: isFetchingAgendamiento,
+    isError: isErrorAgendamiento,
+  } = useQuery<AgendamientoMetricasResponse>({
+    queryKey: ['reportes-agendamiento-metricas', agendamientoQueryParams],
+    queryFn: () => reportesApi.getAgendamientoMetricas(agendamientoQueryParams),
+    enabled: reportesEnabled,
+    refetchInterval: 60000,
+  });
+
+  const {
+    data: cierresCajaRows = [],
+    isFetching: isFetchingCierresCaja,
+    isError: isErrorCierresCaja,
+  } = useQuery<CierreCajaReporteItem[]>({
+    queryKey: ['reportes-cierres-caja', cierresCajaQueryString, reportesSeccion],
+    queryFn: () => reportesApi.getCierresCaja(cierresCajaQueryString),
+    enabled: reportesEnabled && reportesSeccion === 'cierres',
+    refetchInterval: reportesSeccion === 'cierres' ? 60000 : false,
   });
 
   // Filtrar movimientos localmente
@@ -350,6 +421,29 @@ export default function ReportesPage() {
     document.body.removeChild(link);
   };
 
+  const descargarComprobanteCierreReporte = async (cajaId: string) => {
+    setCierrePdfLoadingId(cajaId);
+    try {
+      const blob = await cajasApi.descargarComprobanteCierre(cajaId);
+      if (!blob || blob.size === 0) {
+        showToast('error', 'PDF vacío', 'El comprobante no se generó correctamente.');
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `comprobante_cierre_${cajaId.slice(0, 8)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch {
+      showToast('error', 'Descarga fallida', 'No fue posible obtener el comprobante de cierre.');
+    } finally {
+      setCierrePdfLoadingId(null);
+    }
+  };
+
   if (dashboardEnabled && isLoading) {
     return (
       <Layout title="Reportes">
@@ -440,7 +534,7 @@ export default function ReportesPage() {
                   type="date"
                   value={fechaSeleccionada}
                   onChange={(e) => setFechaSeleccionada(e.target.value)}
-                  max={todayLocal}
+                  max={maxFechaReportes}
                   className="px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                 />
               </div>
@@ -454,7 +548,7 @@ export default function ReportesPage() {
                     type="date"
                     value={fechaInicio}
                     onChange={(e) => setFechaInicio(e.target.value)}
-                    max={todayLocal}
+                    max={maxFechaReportes}
                     className="px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
                 </div>
@@ -466,7 +560,7 @@ export default function ReportesPage() {
                     type="date"
                     value={fechaFin}
                     onChange={(e) => setFechaFin(e.target.value)}
-                    max={todayLocal}
+                    max={maxFechaReportes}
                     min={fechaInicio}
                     className="px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
                   />
@@ -605,6 +699,39 @@ export default function ReportesPage() {
           </div>
         )}
 
+        <div className="sticky top-0 z-10 rounded-xl border border-slate-200/90 bg-white/95 shadow-sm backdrop-blur-sm supports-[backdrop-filter]:bg-white/90">
+          <div
+            className="flex overflow-x-auto gap-0 border-b border-slate-100 px-1 pt-1 sm:px-2"
+            role="tablist"
+            aria-label="Secciones del panel de reportes"
+          >
+            {REPORTES_SECCIONES.map((s) => {
+              const active = reportesSeccion === s.id;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setReportesSeccion(s.id)}
+                  className={`min-w-[5.5rem] shrink-0 rounded-t-lg px-3 py-2.5 text-sm font-semibold transition-colors sm:min-w-0 sm:px-4 ${
+                    active
+                      ? 'border-b-2 border-primary-600 bg-primary-50/70 text-primary-900'
+                      : 'border-b-2 border-transparent text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                  }`}
+                >
+                  {s.label}
+                </button>
+              );
+            })}
+          </div>
+          <p className="border-t border-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500 sm:px-4">
+            {REPORTES_SECCIONES.find((x) => x.id === reportesSeccion)?.hint}
+          </p>
+        </div>
+
+        {reportesSeccion === 'resumen' && (
+        <>
         {/* Tarjetas de Resumen Principal - Solo en modo día */}
         {modoVista === 'dia' && (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
@@ -717,6 +844,62 @@ export default function ReportesPage() {
         </div>
         )}
 
+        {modoVista === 'rango' && !rangoInvalido && (
+          <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white px-5 py-4 shadow-sm">
+            <p className="text-sm text-slate-700 leading-relaxed">
+              <span className="font-semibold text-slate-900">Vista Resumen en modo Rango.</span> Las tarjetas de KPI, el
+              comparativo por sede y la tendencia de 7 días están disponibles en{' '}
+              <span className="font-semibold">modo Día</span>. Para el periodo{' '}
+              <span className="font-mono text-slate-800">{periodoActual}</span> abre{' '}
+              <button
+                type="button"
+                className="font-semibold text-primary-700 underline decoration-primary-300 underline-offset-2 hover:no-underline"
+                onClick={() => setReportesSeccion('finanzas')}
+              >
+                Finanzas
+              </button>
+              ,{' '}
+              <button
+                type="button"
+                className="font-semibold text-primary-700 underline decoration-primary-300 underline-offset-2 hover:no-underline"
+                onClick={() => setReportesSeccion('operacion')}
+              >
+                Operación
+              </button>
+              ,{' '}
+              <button
+                type="button"
+                className="font-semibold text-primary-700 underline decoration-primary-300 underline-offset-2 hover:no-underline"
+                onClick={() => setReportesSeccion('citas')}
+              >
+                Citas
+              </button>{' '}
+              o{' '}
+              <button
+                type="button"
+                className="font-semibold text-primary-700 underline decoration-primary-300 underline-offset-2 hover:no-underline"
+                onClick={() => setReportesSeccion('detalle')}
+              >
+                Detalle
+              </button>
+              .
+            </p>
+          </div>
+        )}
+        </>
+        )}
+
+        {reportesSeccion === 'finanzas' && (
+        <>
+        {modoVista === 'rango' && !rangoInvalido && (
+          <div className="rounded-lg border border-amber-200/80 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
+            En <strong>modo Rango</strong>, los bloques de Caja y Tesorería siguen mostrando saldos del{' '}
+            <strong>dashboard diario</strong> (no se recalculan por el rango). Para el periodo{' '}
+            <span className="font-mono">{periodoActual}</span> usa los desgloses por concepto y por medio de pago, o
+            cambia a <strong>modo Día</strong> para alinear todo a una sola fecha.
+          </div>
+        )}
+
         {/* Desglose por Módulo - Solo en modo día */}
         {modoVista === 'dia' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -778,7 +961,52 @@ export default function ReportesPage() {
         </div>
         )}
 
-        {/* Tabla: Movimientos */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          <div className="card-pos">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                <DollarSign className="w-6 h-6 text-primary-600" />
+                Desglose por Conceptos
+              </h3>
+            </div>
+            <div className="space-y-2">
+              {Object.keys(conceptosData?.ingresos_por_concepto || {}).length === 0 &&
+                Object.keys(conceptosData?.egresos_por_concepto || {}).length === 0 && (
+                  <p className="text-sm text-slate-500">No hay movimientos por concepto en este periodo.</p>
+                )}
+              {Object.entries(conceptosData?.ingresos_por_concepto || {}).map(([k, v]: any) => (
+                <div key={k} className="flex justify-between text-green-700"><span>{k}</span><span className="font-semibold">{formatCOP(Number(v))}</span></div>
+              ))}
+              {Object.entries(conceptosData?.egresos_por_concepto || {}).map(([k, v]: any) => (
+                <div key={k} className="flex justify-between text-red-700"><span>{k}</span><span className="font-semibold">{formatCOP(Number(v))}</span></div>
+              ))}
+            </div>
+          </div>
+          <div className="card-pos">
+            <div className="flex items-center justify-between mb-4">
+              <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                <CalendarDays className="w-6 h-6 text-primary-600" />
+                Métodos de Pago
+              </h3>
+              <p className="text-sm text-slate-600">Total recaudado por método</p>
+            </div>
+            <div className="space-y-2">
+              {Object.keys(mediosPagoData?.medios_pago || {}).length === 0 && (
+                <p className="text-sm text-slate-500">No hay recaudo por método de pago en este periodo.</p>
+              )}
+              {Object.entries(mediosPagoData?.medios_pago || {}).map(([metodo, vals]: any) => (
+                <div key={metodo} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition">
+                  <span className="font-semibold text-slate-700 capitalize">{metodo.replace('_', ' ')}:</span>
+                  <span className="text-xl font-bold text-green-600">{formatCOP(Number((vals as any).total))}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+        </>
+        )}
+
+        {reportesSeccion === 'operacion' && (
         <div className="card-pos">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
@@ -855,7 +1083,326 @@ export default function ReportesPage() {
             </p>
           </div>
         </div>
+        )}
 
+        {reportesSeccion === 'citas' && (
+        <div className="card-pos border-2 border-sky-100 bg-gradient-to-br from-sky-50/40 to-white">
+          <div className="flex flex-wrap items-start justify-between gap-4 mb-4">
+            <div>
+              <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
+                <CalendarDays className="w-6 h-6 text-sky-600" />
+                Métricas de agendamiento
+              </h3>
+              <p className="text-sm text-slate-600 mt-1 max-w-3xl">
+                KPIs según la <span className="font-semibold">fecha y hora programada de la cita</span> dentro del
+                periodo <span className="font-semibold text-sky-800">«{agendamientoMetricas?.periodo ?? periodoActual}»</span>{' '}
+                (mismo filtro que arriba: Día o Rango). Alcance: <span className="font-semibold">todo el tenant</span>{' '}
+                (sin sede por cita en el modelo actual).
+              </p>
+              <p className="text-xs text-slate-500 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
+                <span className="inline-flex items-center gap-1">
+                  <TimerReset className="w-3.5 h-3.5" />
+                  Auto-actualización cada 60 s
+                </span>
+                <span>
+                  Último cálculo:{' '}
+                  {agendamientoMetricas?.fecha_generacion
+                    ? new Date(agendamientoMetricas.fecha_generacion).toLocaleString('es-CO')
+                    : '—'}
+                </span>
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                const m = agendamientoMetricas;
+                if (!m) return;
+                exportarCSV(
+                  [
+                    {
+                      periodo: m.periodo,
+                      total_citas: m.total_citas,
+                      tasa_check_in_pct: m.tasa_check_in_pct,
+                      scheduled: m.por_estado.scheduled,
+                      confirmed: m.por_estado.confirmed,
+                      checked_in: m.por_estado.checked_in,
+                      cancelled: m.por_estado.cancelled,
+                      no_show: m.por_estado.no_show,
+                      origen_link_publico: m.por_origen.public_link,
+                      origen_manual: m.por_origen.manual,
+                      citas_con_email: m.citas_con_email,
+                      citas_sin_email: m.citas_sin_email,
+                      recordatorios_enviados: m.recordatorios_enviados,
+                      recordatorios_pendientes: m.recordatorios_pendientes,
+                      recordatorios_fallidos: m.recordatorios_fallidos,
+                    },
+                  ],
+                  `agendamiento_kpi_${m.periodo.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '')}`,
+                );
+                if (m.serie_diaria.length > 0) {
+                  exportarCSV(m.serie_diaria, `agendamiento_serie_${m.periodo.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '')}`);
+                }
+              }}
+              disabled={rangoInvalido || !agendamientoMetricas}
+              className="flex items-center gap-2 btn-corporate-muted disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+            >
+              <Download className="w-4 h-4" />
+              Exportar KPI + serie
+            </button>
+          </div>
+
+          {isFetchingAgendamiento && !agendamientoMetricas && (
+            <p className="text-sm text-slate-500 mb-3">Cargando métricas de citas…</p>
+          )}
+
+          {isErrorAgendamiento && (
+            <p className="text-sm text-red-700 bg-red-50 border border-red-100 rounded-lg px-3 py-2 mb-3">
+              No se pudieron cargar las métricas de agendamiento. Intenta recargar la página.
+            </p>
+          )}
+
+          {agendamientoMetricas && (
+            <>
+              <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-4">
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <p className="text-xs text-slate-500">Total citas</p>
+                  <p className="text-2xl font-bold text-slate-900">{agendamientoMetricas.total_citas}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <p className="text-xs text-slate-500">Tasa check-in</p>
+                  <p className="text-2xl font-bold text-emerald-700">{agendamientoMetricas.tasa_check_in_pct}%</p>
+                  <p className="text-[10px] text-slate-400 mt-0.5">Sobre citas no canceladas</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <p className="text-xs text-slate-500">Pipeline (agend. + conf.)</p>
+                  <p className="text-2xl font-bold text-blue-700">
+                    {agendamientoMetricas.por_estado.scheduled + agendamientoMetricas.por_estado.confirmed}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <p className="text-xs text-slate-500">En recepción</p>
+                  <p className="text-2xl font-bold text-teal-700">{agendamientoMetricas.por_estado.checked_in}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <p className="text-xs text-slate-500">Canceladas</p>
+                  <p className="text-2xl font-bold text-amber-700">{agendamientoMetricas.por_estado.cancelled}</p>
+                </div>
+                <div className="rounded-lg border border-slate-200 bg-white p-3">
+                  <p className="text-xs text-slate-500">No asistió</p>
+                  <p className="text-2xl font-bold text-slate-600">{agendamientoMetricas.por_estado.no_show}</p>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <p className="text-sm font-semibold text-slate-800 mb-2">Origen de la cita</p>
+                  <div className="flex flex-wrap gap-4 text-sm">
+                    <span>
+                      <span className="text-slate-500">Link público:</span>{' '}
+                      <b className="text-slate-900">{agendamientoMetricas.por_origen.public_link}</b>
+                    </span>
+                    <span>
+                      <span className="text-slate-500">Manual (equipo):</span>{' '}
+                      <b className="text-slate-900">{agendamientoMetricas.por_origen.manual}</b>
+                    </span>
+                    {agendamientoMetricas.por_origen.otros > 0 && (
+                      <span>
+                        <span className="text-slate-500">Otros:</span>{' '}
+                        <b className="text-slate-900">{agendamientoMetricas.por_origen.otros}</b>
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="rounded-xl border border-slate-200 bg-white p-4">
+                  <p className="text-sm font-semibold text-slate-800 mb-2">Correo y recordatorios</p>
+                  <div className="grid grid-cols-2 gap-2 text-sm">
+                    <div>
+                      <span className="text-slate-500">Con correo</span>
+                      <p className="font-bold text-slate-900">{agendamientoMetricas.citas_con_email}</p>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Sin correo</span>
+                      <p className="font-bold text-slate-900">{agendamientoMetricas.citas_sin_email}</p>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Record. enviados</span>
+                      <p className="font-bold text-emerald-700">{agendamientoMetricas.recordatorios_enviados}</p>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Pendientes</span>
+                      <p className="font-bold text-amber-700">{agendamientoMetricas.recordatorios_pendientes}</p>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Fallidos</span>
+                      <p className="font-bold text-red-600">{agendamientoMetricas.recordatorios_fallidos}</p>
+                    </div>
+                    <div>
+                      <span className="text-slate-500">Omitidos</span>
+                      <p className="font-bold text-slate-600">{agendamientoMetricas.recordatorios_omitidos}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {agendamientoMetricas.serie_diaria.length > 0 && (
+                <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4">
+                  <p className="text-sm font-semibold text-slate-800 mb-3">Serie por día (en el periodo)</p>
+                  <div className="overflow-x-auto">
+                    <table className="min-w-full text-sm">
+                      <thead>
+                        <tr className="text-left text-slate-600 border-b">
+                          <th className="px-3 py-2">Fecha</th>
+                          <th className="px-3 py-2 text-right">Total</th>
+                          <th className="px-3 py-2 text-right">Check-in</th>
+                          <th className="px-3 py-2 text-right">Canceladas</th>
+                          <th className="px-3 py-2 text-right">No asistió</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {agendamientoMetricas.serie_diaria.map((row) => (
+                          <tr key={row.fecha} className="border-t border-slate-100">
+                            <td className="px-3 py-2 font-mono text-xs">{row.fecha}</td>
+                            <td className="px-3 py-2 text-right font-semibold">{row.total}</td>
+                            <td className="px-3 py-2 text-right text-emerald-700">{row.checked_in}</td>
+                            <td className="px-3 py-2 text-right text-amber-700">{row.canceladas}</td>
+                            <td className="px-3 py-2 text-right text-slate-600">{row.no_show}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+        </div>
+        )}
+
+        {reportesSeccion === 'cierres' && (
+        <div className="card-pos border border-slate-200/90">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 className="flex items-center gap-2 text-xl font-bold text-slate-900">
+                <Lock className="h-6 w-6 text-primary-600" />
+                Cierres de caja por cajero
+              </h3>
+              <p className="mt-1 max-w-3xl text-sm text-slate-600">
+                Listado según <strong>día de cierre</strong> en Colombia, alineado al periodo de arriba (
+                {modoVista === 'dia' ? `día ${fechaSeleccionada}` : `rango ${fechaInicio} → ${fechaFin}`}).
+                Respeta el alcance de sede del encabezado (activa, una sede o todas).
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={rangoInvalido || cierresCajaRows.length === 0}
+              onClick={() => {
+                const filas = cierresCajaRows.map((r) => ({
+                  cajero: r.cajero_nombre,
+                  sede: r.sucursal_nombre ?? '',
+                  turno: r.turno,
+                  fecha_apertura: r.fecha_apertura,
+                  fecha_cierre: r.fecha_cierre ?? '',
+                  monto_inicial: r.monto_inicial,
+                  saldo_sistema: r.monto_final_sistema ?? '',
+                  efectivo_contado: r.monto_final_fisico ?? '',
+                  diferencia: r.diferencia ?? '',
+                  observaciones: (r.observaciones_cierre ?? '').replace(/\n/g, ' '),
+                }));
+                exportarCSV(filas, 'cierres_caja');
+              }}
+              className="btn-primary-solid inline-flex shrink-0 items-center gap-2 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Download className="h-5 w-5" />
+              Exportar CSV
+            </button>
+          </div>
+
+          {isErrorCierresCaja && (
+            <p className="mb-3 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-800">
+              No se pudo cargar el historial de cierres. Intenta de nuevo o revisa tu sesión.
+            </p>
+          )}
+          {isFetchingCierresCaja && (
+            <p className="mb-3 text-sm text-slate-500">Cargando cierres de caja…</p>
+          )}
+
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="px-3 py-3">Cajero</th>
+                  <th className="px-3 py-3">Sede</th>
+                  <th className="px-3 py-3">Turno</th>
+                  <th className="px-3 py-3">Cierre</th>
+                  <th className="px-3 py-3 text-right">Inicial</th>
+                  <th className="px-3 py-3 text-right">Sistema</th>
+                  <th className="px-3 py-3 text-right">Físico</th>
+                  <th className="px-3 py-3 text-right">Dif.</th>
+                  <th className="px-3 py-3">Obs.</th>
+                  <th className="px-3 py-3 text-center">PDF</th>
+                </tr>
+              </thead>
+              <tbody>
+                {cierresCajaRows.length === 0 && !isFetchingCierresCaja && (
+                  <tr>
+                    <td colSpan={10} className="px-3 py-8 text-center text-slate-500">
+                      No hay cierres registrados en este periodo y alcance de sede.
+                    </td>
+                  </tr>
+                )}
+                {cierresCajaRows.map((r) => {
+                  const dif = r.diferencia ?? 0;
+                  const difClass =
+                    Math.abs(dif) < 0.01 ? 'text-slate-700' : dif < 0 ? 'text-red-700' : 'text-amber-800';
+                  return (
+                    <tr key={r.id} className="border-t border-slate-100 hover:bg-slate-50/80">
+                      <td className="px-3 py-2.5 font-medium text-slate-900">{r.cajero_nombre}</td>
+                      <td className="px-3 py-2.5 text-slate-600">{r.sucursal_nombre ?? '—'}</td>
+                      <td className="px-3 py-2.5 capitalize text-slate-700">{r.turno}</td>
+                      <td className="px-3 py-2.5 text-slate-700">
+                        {r.fecha_cierre
+                          ? new Date(r.fecha_cierre).toLocaleString('es-CO', {
+                              dateStyle: 'short',
+                              timeStyle: 'short',
+                            })
+                          : '—'}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">{formatCOP(r.monto_inicial)}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-800">
+                        {r.monto_final_sistema != null ? formatCOP(r.monto_final_sistema) : '—'}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-slate-800">
+                        {r.monto_final_fisico != null ? formatCOP(r.monto_final_fisico) : '—'}
+                      </td>
+                      <td className={`px-3 py-2.5 text-right font-semibold tabular-nums ${difClass}`}>
+                        {r.diferencia != null ? formatCOP(r.diferencia) : '—'}
+                      </td>
+                      <td className="max-w-[200px] truncate px-3 py-2.5 text-xs text-slate-600" title={r.observaciones_cierre ?? ''}>
+                        {r.observaciones_cierre?.trim() ? r.observaciones_cierre.trim() : '—'}
+                      </td>
+                      <td className="px-3 py-2.5 text-center">
+                        <button
+                          type="button"
+                          title="Descargar comprobante de cierre"
+                          disabled={cierrePdfLoadingId === r.id}
+                          onClick={() => descargarComprobanteCierreReporte(r.id)}
+                          className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white p-2 text-primary-700 hover:bg-primary-50 disabled:opacity-50"
+                        >
+                          <Printer className="h-4 w-4" />
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-xs text-slate-500">Hasta 200 cierres más recientes en el rango. Mismo criterio de fechas que el resto del panel.</p>
+        </div>
+        )}
+
+        {reportesSeccion === 'detalle' && (
+        <>
         <div className="card-pos">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
@@ -1012,50 +1559,6 @@ export default function ReportesPage() {
           </div>
         </div>
 
-        {/* Desglose por Conceptos y Medios de Pago */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          <div className="card-pos">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                <DollarSign className="w-6 h-6 text-primary-600" />
-                Desglose por Conceptos
-              </h3>
-            </div>
-            <div className="space-y-2">
-              {Object.keys(conceptosData?.ingresos_por_concepto || {}).length === 0 &&
-                Object.keys(conceptosData?.egresos_por_concepto || {}).length === 0 && (
-                  <p className="text-sm text-slate-500">No hay movimientos por concepto en este periodo.</p>
-                )}
-              {Object.entries(conceptosData?.ingresos_por_concepto || {}).map(([k, v]: any) => (
-                <div key={k} className="flex justify-between text-green-700"><span>{k}</span><span className="font-semibold">{formatCOP(Number(v))}</span></div>
-              ))}
-              {Object.entries(conceptosData?.egresos_por_concepto || {}).map(([k, v]: any) => (
-                <div key={k} className="flex justify-between text-red-700"><span>{k}</span><span className="font-semibold">{formatCOP(Number(v))}</span></div>
-              ))}
-            </div>
-          </div>
-          <div className="card-pos">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
-                <CalendarDays className="w-6 h-6 text-primary-600" />
-                Métodos de Pago
-              </h3>
-              <p className="text-sm text-slate-600">Total recaudado por método</p>
-            </div>
-            <div className="space-y-2">
-              {Object.keys(mediosPagoData?.medios_pago || {}).length === 0 && (
-                <p className="text-sm text-slate-500">No hay recaudo por método de pago en este periodo.</p>
-              )}
-              {Object.entries(mediosPagoData?.medios_pago || {}).map(([metodo, vals]: any) => (
-                <div key={metodo} className="flex justify-between items-center p-3 bg-slate-50 rounded-lg hover:bg-slate-100 transition">
-                  <span className="font-semibold text-slate-700 capitalize">{metodo.replace('_', ' ')}:</span>
-                  <span className="text-xl font-bold text-green-600">{formatCOP(Number((vals as any).total))}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-
         {/* Tabla: Trámites */}
         <div className="card-pos">
           <div className="flex items-center justify-between mb-4">
@@ -1126,6 +1629,8 @@ export default function ReportesPage() {
             </table>
           </div>
         </div>
+        </>
+        )}
       </div>
 
       {modalRecibo && (

@@ -72,7 +72,6 @@ class MovimientoTesoreriaCreate(BaseModel):
             return None
         return v
 
-
 class MovimientoTesoreriaResponse(BaseModel):
     """Respuesta de movimiento de tesorería"""
     id: UUID
@@ -87,11 +86,24 @@ class MovimientoTesoreriaResponse(BaseModel):
     fecha_movimiento: datetime
     created_at: datetime
     created_by: UUID
+
+    anulado: bool = False
+    motivo_anulacion: Optional[str] = None
+    fecha_anulacion: Optional[datetime] = None
     
     # Información adicional
     categoria_display: Optional[str] = None  # Categoría formateada para mostrar
     
     model_config = ConfigDict(from_attributes=True)
+
+
+class MovimientoTesoreriaAnular(BaseModel):
+    """Anular movimiento (revierte efecto en saldo y desglose)."""
+    motivo: Optional[str] = Field(
+        default=None,
+        max_length=2000,
+        description="Opcional; si no se envía se usa un texto por defecto.",
+    )
 
 
 class ResumenTesoreria(BaseModel):

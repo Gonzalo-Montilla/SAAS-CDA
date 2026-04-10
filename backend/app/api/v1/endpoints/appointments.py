@@ -3,7 +3,7 @@ Endpoints de agendamiento (público + gestión interna por tenant).
 """
 from datetime import datetime, date, time, timedelta, timezone
 import hashlib
-from typing import Optional
+from typing import Literal, Optional
 from zoneinfo import ZoneInfo
 from urllib.parse import quote
 
@@ -104,6 +104,32 @@ class AppointmentResponse(BaseModel):
     source: str
     notes: Optional[str] = None
     created_at: datetime
+    reminder_status: str = "pending"
+    reminder_sent_at: Optional[datetime] = None
+
+
+class AppointmentStatusUpdateRequest(BaseModel):
+    """Transiciones permitidas desde la agenda interna."""
+
+    status: Literal["confirmed", "cancelled", "no_show"]
+
+
+def _appointment_to_response(row: Appointment) -> AppointmentResponse:
+    return AppointmentResponse(
+        id=str(row.id),
+        cliente_nombre=row.cliente_nombre,
+        cliente_email=row.cliente_email,
+        cliente_celular=row.cliente_celular,
+        placa=row.placa,
+        tipo_vehiculo=row.tipo_vehiculo,
+        scheduled_at=row.scheduled_at,
+        status=row.status,
+        source=row.source,
+        notes=row.notes,
+        created_at=row.created_at,
+        reminder_status=row.reminder_status or "pending",
+        reminder_sent_at=row.reminder_sent_at,
+    )
 
 
 def _now_naive() -> datetime:
@@ -174,6 +200,7 @@ def _humanize_service(tipo_vehiculo: str) -> str:
         "liviano_particular": "Revisión técnico-mecánica vehículo liviano particular",
         "liviano_publico": "Revisión técnico-mecánica vehículo liviano público",
         "pesado": "Revisión técnico-mecánica vehículo pesado",
+        "preventiva": "Servicio preventiva",
     }
     return mapping.get(normalized, normalized.replace("_", " ").title() or "Revisión técnico-mecánica")
 
@@ -468,19 +495,7 @@ def book_public_appointment(
         placa=appointment.placa,
         tipo_vehiculo=appointment.tipo_vehiculo,
     )
-    return AppointmentResponse(
-        id=str(appointment.id),
-        cliente_nombre=appointment.cliente_nombre,
-        cliente_email=appointment.cliente_email,
-        cliente_celular=appointment.cliente_celular,
-        placa=appointment.placa,
-        tipo_vehiculo=appointment.tipo_vehiculo,
-        scheduled_at=appointment.scheduled_at,
-        status=appointment.status,
-        source=appointment.source,
-        notes=appointment.notes,
-        created_at=appointment.created_at,
-    )
+    return _appointment_to_response(appointment)
 
 
 @router.get("/", response_model=list[AppointmentResponse])
@@ -501,22 +516,7 @@ def list_appointments(
         query = query.filter(Appointment.status == status_filter.strip().lower())
 
     rows = query.order_by(Appointment.scheduled_at.asc()).limit(300).all()
-    return [
-        AppointmentResponse(
-            id=str(row.id),
-            cliente_nombre=row.cliente_nombre,
-            cliente_email=row.cliente_email,
-            cliente_celular=row.cliente_celular,
-            placa=row.placa,
-            tipo_vehiculo=row.tipo_vehiculo,
-            scheduled_at=row.scheduled_at,
-            status=row.status,
-            source=row.source,
-            notes=row.notes,
-            created_at=row.created_at,
-        )
-        for row in rows
-    ]
+    return [_appointment_to_response(row) for row in rows]
 
 
 @router.post("/internal", response_model=AppointmentResponse, status_code=status.HTTP_201_CREATED)
@@ -568,19 +568,53 @@ def create_internal_appointment(
         placa=appointment.placa,
         tipo_vehiculo=appointment.tipo_vehiculo,
     )
-    return AppointmentResponse(
-        id=str(appointment.id),
-        cliente_nombre=appointment.cliente_nombre,
-        cliente_email=appointment.cliente_email,
-        cliente_celular=appointment.cliente_celular,
-        placa=appointment.placa,
-        tipo_vehiculo=appointment.tipo_vehiculo,
-        scheduled_at=appointment.scheduled_at,
-        status=appointment.status,
-        source=appointment.source,
-        notes=appointment.notes,
-        created_at=appointment.created_at,
+    return _appointment_to_response(appointment)
+
+
+@router.patch("/{appointment_id}/status", response_model=AppointmentResponse)
+def update_appointment_status(
+    appointment_id: str,
+    payload: AppointmentStatusUpdateRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_agendamiento_or_admin),
+):
+    appointment = (
+        db.query(Appointment)
+        .filter(Appointment.id == appointment_id, Appointment.tenant_id == current_user.tenant_id)
+        .first()
     )
+    if not appointment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cita no encontrada")
+
+    target = payload.status
+    if target == "confirmed":
+        if appointment.status != "scheduled":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Solo se puede confirmar una cita en estado agendada",
+            )
+        appointment.status = "confirmed"
+    elif target == "cancelled":
+        if appointment.status not in ("scheduled", "confirmed"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Solo se puede cancelar una cita agendada o confirmada",
+            )
+        appointment.status = "cancelled"
+        appointment.reminder_status = "skipped"
+    elif target == "no_show":
+        if appointment.status not in ("scheduled", "confirmed"):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Solo se puede marcar «no asistió» en citas agendadas o confirmadas",
+            )
+        appointment.status = "no_show"
+        appointment.reminder_status = "skipped"
+
+    appointment.updated_at = _now_naive()
+    db.commit()
+    db.refresh(appointment)
+    return _appointment_to_response(appointment)
 
 
 @router.post("/process-reminders")

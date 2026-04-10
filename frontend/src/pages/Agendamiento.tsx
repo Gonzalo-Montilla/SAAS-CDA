@@ -1,6 +1,17 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, CheckCircle2, Copy, ExternalLink, MessageCircle, Plus } from 'lucide-react';
+import axios from 'axios';
+import {
+  Ban,
+  CalendarClock,
+  CheckCircle2,
+  Copy,
+  ExternalLink,
+  MessageCircle,
+  Plus,
+  UserCheck,
+  UserX,
+} from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { appointmentsApi, type AppointmentCreatePayload } from '../api/appointments';
@@ -17,6 +28,22 @@ const statusMap: Record<string, { label: string; className: string }> = {
 };
 
 const todayIso = new Date().toISOString().slice(0, 10);
+
+const sourceLabel = (source: string): string => {
+  const s = (source || '').toLowerCase();
+  if (s === 'public_link') return 'Link público';
+  if (s === 'manual') return 'Equipo (manual)';
+  return source || '—';
+};
+
+const reminderLabel = (row: AppointmentItem): string => {
+  if (!row.cliente_email?.trim()) return 'Sin correo (no hay recordatorio)';
+  const st = (row.reminder_status || 'pending').toLowerCase();
+  if (st === 'sent') return 'Recordatorio enviado';
+  if (st === 'failed') return 'Recordatorio falló';
+  if (st === 'skipped') return 'No aplica';
+  return 'Recordatorio pendiente';
+};
 
 export default function Agendamiento() {
   const navigate = useNavigate();
@@ -59,6 +86,27 @@ export default function Agendamiento() {
     },
     onError: (error: any) => {
       setFeedback({ type: 'error', message: error?.response?.data?.detail || error?.message || 'No fue posible crear la cita' });
+    },
+  });
+
+  const statusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: 'confirmed' | 'cancelled' | 'no_show' }) =>
+      appointmentsApi.updateStatus(id, status),
+    onSuccess: (_, vars) => {
+      const msg =
+        vars.status === 'confirmed'
+          ? 'Cita confirmada.'
+          : vars.status === 'cancelled'
+            ? 'Cita cancelada (el cupo queda libre).'
+            : 'Cita marcada como no asistió.';
+      setFeedback({ type: 'success', message: msg });
+      queryClient.invalidateQueries({ queryKey: ['appointments'] });
+    },
+    onError: (error: any) => {
+      setFeedback({
+        type: 'error',
+        message: error?.response?.data?.detail || error?.message || 'No fue posible actualizar la cita',
+      });
     },
   });
 
@@ -167,6 +215,15 @@ export default function Agendamiento() {
           <p className="module-hero-subtitle">
             Gestiona citas creadas por link público y por el equipo comercial/recepción.
           </p>
+          <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50/80 px-3 py-2 text-xs text-slate-700">
+            <p className="font-semibold text-slate-800 mb-1">Cómo funciona la agenda</p>
+            <ul className="list-disc list-inside space-y-0.5 text-slate-600">
+              <li>Franjas cada 30 minutos, de 08:00 a 17:00.</li>
+              <li>Hasta 4 citas activas por franja (agendada o confirmada); cancelar libera cupo.</li>
+              <li>Quién puede usar este módulo: recepción, comercial o administrador del CDA.</li>
+              <li>Si el cliente dejó correo, puede recibir confirmación y recordatorio automáticos.</li>
+            </ul>
+          </div>
           <div className="mt-4 rounded-xl border border-slate-200 bg-white/90 p-3">
             <p className="text-xs font-semibold text-slate-700 mb-2">Link público del tenant</p>
             <div className="flex flex-col md:flex-row gap-2">
@@ -236,6 +293,7 @@ export default function Agendamiento() {
               <option value="moto">Moto</option>
               <option value="liviano_publico">Liviano público</option>
               <option value="pesado">Pesado</option>
+              <option value="preventiva">Preventiva</option>
             </select>
             <input className="input-corporate" type="date" value={form.fecha} onChange={(e) => setForm((p) => ({ ...p, fecha: e.target.value }))} required />
             <input className="input-corporate" type="time" value={form.hora} onChange={(e) => setForm((p) => ({ ...p, hora: e.target.value }))} required />
@@ -260,6 +318,7 @@ export default function Agendamiento() {
               <select className="input-corporate" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
                 <option value="">Todos</option>
                 <option value="scheduled">Agendada</option>
+                <option value="confirmed">Confirmada</option>
                 <option value="checked_in">En recepción</option>
                 <option value="cancelled">Cancelada</option>
                 <option value="no_show">No asistió</option>
@@ -273,7 +332,7 @@ export default function Agendamiento() {
           </div>
 
           <div className="overflow-x-auto">
-            <table className="table-corporate w-full min-w-[900px]">
+            <table className="table-corporate w-full min-w-[1040px]">
               <thead>
                 <tr>
                   <th>Hora</th>
@@ -281,45 +340,130 @@ export default function Agendamiento() {
                   <th>Contacto</th>
                   <th>Placa</th>
                   <th>Tipo</th>
+                  <th>Origen</th>
+                  <th>Notas</th>
+                  <th>Recordatorio</th>
                   <th>Estado</th>
                   <th>Acciones</th>
                 </tr>
               </thead>
               <tbody>
-                {(query.data || []).map((row: AppointmentItem) => (
-                  <tr key={row.id}>
-                    <td>{new Date(row.scheduled_at).toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit' })}</td>
-                    <td>{row.cliente_nombre}</td>
-                    <td>
-                      <p>{row.cliente_celular || 'Sin celular'}</p>
-                      <p className="text-xs text-slate-500">{row.cliente_email || 'Sin correo'}</p>
-                    </td>
-                    <td>{row.placa}</td>
-                    <td className="capitalize">{row.tipo_vehiculo.replace('_', ' ')}</td>
-                    <td>
-                      <span className={statusMap[row.status]?.className || 'badge bg-slate-100 text-slate-700'}>
-                        {statusMap[row.status]?.label || row.status}
-                      </span>
-                    </td>
-                    <td>
-                      {(row.status === 'scheduled' || row.status === 'confirmed') ? (
-                        <button
-                          onClick={() => checkInMutation.mutate(row.id)}
-                          className="inline-flex items-center gap-1 text-emerald-700 hover:text-emerald-800 text-sm font-medium"
-                          disabled={checkInMutation.isLoading}
-                        >
-                          <CheckCircle2 className="w-4 h-4" />
-                          Check-in
-                        </button>
-                      ) : (
-                        <span className="text-xs text-slate-500">Sin acciones</span>
-                      )}
+                {query.isLoading && (
+                  <tr>
+                    <td colSpan={10} className="text-center text-sm text-slate-500 py-8">
+                      Cargando citas…
                     </td>
                   </tr>
-                ))}
-                {!query.isLoading && (query.data || []).length === 0 && (
+                )}
+                {query.isError && (
                   <tr>
-                    <td colSpan={7} className="text-center text-sm text-slate-500 py-8">
+                    <td colSpan={10} className="text-center text-sm text-red-700 bg-red-50/80 py-8 px-4">
+                      <p className="font-semibold">No se pudieron cargar las citas.</p>
+                      <p className="mt-1 text-red-600">
+                        {axios.isAxiosError(query.error) && query.error.response?.status === 401
+                          ? 'Sesión no válida o expirada. Cierra sesión y vuelve a ingresar al sistema.'
+                          : 'Revisa la conexión o recarga la página.'}
+                      </p>
+                    </td>
+                  </tr>
+                )}
+                {!query.isLoading &&
+                  !query.isError &&
+                  (query.data || []).map((row: AppointmentItem) => (
+                    <tr key={row.id}>
+                      <td>
+                        {new Date(row.scheduled_at).toLocaleTimeString('es-CO', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </td>
+                      <td>{row.cliente_nombre}</td>
+                      <td>
+                        <p>{row.cliente_celular || 'Sin celular'}</p>
+                        <p className="text-xs text-slate-500">{row.cliente_email || 'Sin correo'}</p>
+                      </td>
+                      <td>{row.placa}</td>
+                      <td className="capitalize">{row.tipo_vehiculo.replaceAll('_', ' ')}</td>
+                      <td className="text-xs text-slate-600 whitespace-nowrap">{sourceLabel(row.source)}</td>
+                      <td className="max-w-[140px] text-xs text-slate-600 truncate" title={row.notes || ''}>
+                        {row.notes?.trim() ? row.notes : '—'}
+                      </td>
+                      <td className="text-xs text-slate-600 max-w-[140px]">{reminderLabel(row)}</td>
+                      <td>
+                        <span className={statusMap[row.status]?.className || 'badge bg-slate-100 text-slate-700'}>
+                          {statusMap[row.status]?.label || row.status}
+                        </span>
+                      </td>
+                      <td>
+                        <div className="flex flex-col gap-1 items-start">
+                          {(row.status === 'scheduled' || row.status === 'confirmed') && (
+                            <>
+                              {row.status === 'scheduled' && (
+                                <button
+                                  type="button"
+                                  onClick={() => statusMutation.mutate({ id: row.id, status: 'confirmed' })}
+                                  className="inline-flex items-center gap-1 text-blue-700 hover:text-blue-900 text-xs font-medium disabled:opacity-50"
+                                  disabled={statusMutation.isLoading || checkInMutation.isLoading}
+                                >
+                                  <UserCheck className="w-3.5 h-3.5" />
+                                  Confirmar
+                                </button>
+                              )}
+                              <button
+                                type="button"
+                                onClick={() => checkInMutation.mutate(row.id)}
+                                className="inline-flex items-center gap-1 text-emerald-700 hover:text-emerald-800 text-xs font-medium disabled:opacity-50"
+                                disabled={checkInMutation.isLoading || statusMutation.isLoading}
+                              >
+                                <CheckCircle2 className="w-3.5 h-3.5" />
+                                Check-in
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (
+                                    window.confirm(
+                                      '¿Cancelar esta cita? El horario volverá a tener cupo disponible.'
+                                    )
+                                  ) {
+                                    statusMutation.mutate({ id: row.id, status: 'cancelled' });
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 text-amber-800 hover:text-amber-950 text-xs font-medium disabled:opacity-50"
+                                disabled={statusMutation.isLoading || checkInMutation.isLoading}
+                              >
+                                <Ban className="w-3.5 h-3.5" />
+                                Cancelar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (
+                                    window.confirm(
+                                      '¿Marcar que el cliente no asistió? La cita quedará como «No asistió».'
+                                    )
+                                  ) {
+                                    statusMutation.mutate({ id: row.id, status: 'no_show' });
+                                  }
+                                }}
+                                className="inline-flex items-center gap-1 text-slate-600 hover:text-slate-900 text-xs font-medium disabled:opacity-50"
+                                disabled={statusMutation.isLoading || checkInMutation.isLoading}
+                              >
+                                <UserX className="w-3.5 h-3.5" />
+                                No asistió
+                              </button>
+                            </>
+                          )}
+                          {!(row.status === 'scheduled' || row.status === 'confirmed') && (
+                            <span className="text-xs text-slate-500">—</span>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                {!query.isLoading && !query.isError && (query.data || []).length === 0 && (
+                  <tr>
+                    <td colSpan={10} className="text-center text-sm text-slate-500 py-8">
                       No hay citas para esta fecha.
                     </td>
                   </tr>

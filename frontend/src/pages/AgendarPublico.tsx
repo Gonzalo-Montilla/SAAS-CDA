@@ -121,8 +121,17 @@ export default function AgendarPublico() {
 
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-2">Horarios disponibles</label>
+              {availabilityQuery.isLoading && (
+                <p className="text-sm text-slate-500 py-2">Cargando horarios…</p>
+              )}
+              {availabilityQuery.isError && (
+                <p className="text-sm text-red-600 py-2">
+                  No se pudieron cargar los horarios. Revisa la conexión o intenta otra fecha.
+                </p>
+              )}
               <div className="grid grid-cols-3 md:grid-cols-5 gap-2">
-                {(availabilityQuery.data || []).map((slot) => (
+                {!availabilityQuery.isLoading &&
+                  (availabilityQuery.data || []).map((slot) => (
                   <button
                     key={slot.hora}
                     type="button"
@@ -141,6 +150,11 @@ export default function AgendarPublico() {
                   </button>
                 ))}
               </div>
+              {!availabilityQuery.isLoading &&
+                !availabilityQuery.isError &&
+                (availabilityQuery.data || []).length === 0 && (
+                  <p className="text-sm text-slate-500 mt-2">No hay franjas para mostrar.</p>
+                )}
             </div>
 
             <form
@@ -160,6 +174,7 @@ export default function AgendarPublico() {
                 <option value="moto">Moto</option>
                 <option value="liviano_publico">Liviano público</option>
                 <option value="pesado">Pesado</option>
+                <option value="preventiva">Preventiva</option>
               </select>
               <input className="input-corporate" value={hora} readOnly placeholder="Selecciona horario" />
               <textarea className="input-corporate md:col-span-2 min-h-[80px]" placeholder="Comentario (opcional)" value={form.notes} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} />

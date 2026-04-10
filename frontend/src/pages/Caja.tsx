@@ -9,6 +9,7 @@ import { configApi } from '../api/config';
 import { factusApi } from '../api/factus';
 import { useAuth } from '../contexts/AuthContext';
 import { useBrand } from '../contexts/BrandContext';
+import { useToast } from '../contexts/ToastContext';
 import { formatCurrency } from '../utils/formatNumber';
 import { formatDateTimeShort, formatTime24, formatDateWithWeekday } from '../utils/formatDate';
 import { extractApiErrorMessage } from '../utils/apiError';
@@ -168,139 +169,119 @@ export default function CajaPage() {
   // Si hay caja activa, mostrar módulo completo
   return (
     <Layout title="Módulo de Caja">
-      {/* Alerta: Caja abierta por mucho tiempo */}
       {cajaAbiertaMuchoTiempo && (
-        <div className="bg-red-50 border-2 border-red-400 rounded-xl p-4 mb-6">
-          <div className="flex items-center gap-3">
-            <div className="flex-shrink-0">
-              <Clock className="w-8 h-8 text-red-600" />
-            </div>
-            <div className="flex-1">
-              <h3 className="text-lg font-bold text-red-900 flex items-center gap-2">
-                <AlertTriangle className="w-5 h-5" />
-                Caja abierta por más de {Math.floor(horasDesdeApertura)} horas
-              </h3>
-              <p className="text-sm text-red-700">
-                Apertura: {formatDateTimeShort(cajaActiva!.fecha_apertura)} -
-                Considera cerrar la caja al finalizar el turno para evitar errores en los reportes.
-              </p>
-            </div>
-          </div>
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-xl border border-red-200 bg-red-50/90 px-4 py-3 text-sm text-red-900">
+          <Clock className="h-5 w-5 shrink-0 text-red-600" aria-hidden />
+          <p className="min-w-0 flex-1 leading-relaxed">
+            <span className="font-semibold">Caja abierta {Math.floor(horasDesdeApertura)}h+.</span>{' '}
+            Apertura {formatDateTimeShort(cajaActiva!.fecha_apertura)}. Cierra el turno al terminar para mantener
+            reportes alineados.
+          </p>
+          <button
+            type="button"
+            onClick={() => setVistaActual('cierre')}
+            className="shrink-0 rounded-lg border border-red-300 bg-white px-3 py-1.5 text-sm font-semibold text-red-900 shadow-sm transition hover:bg-red-50"
+          >
+            Ir a cierre
+          </button>
         </div>
       )}
 
-      {/* Header con info de caja */}
-      <div className="bg-gradient-to-r from-primary-600 to-primary-700 text-white rounded-2xl shadow-lg p-4 sm:p-6 mb-6">
-        <div className="flex flex-col xl:flex-row gap-4 xl:gap-6 xl:items-center xl:justify-between">
-          <div className="flex-1">
-            <h2 className="text-2xl font-bold mb-2 flex items-center gap-2">
-              <Wallet className="w-7 h-7" />
-              Caja Activa
+      <div className="section-card mb-4 border border-slate-200/90 p-4 shadow-sm sm:p-6">
+        <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0 flex-1">
+            <h2 className="flex items-center gap-2 text-xl font-bold text-slate-900 sm:text-2xl">
+              <Wallet className="h-6 w-6 shrink-0 text-primary-600" />
+              Caja activa
             </h2>
-            <div className="flex flex-wrap gap-4 sm:gap-6 text-sm">
-              <div>
-                <span className="opacity-80">Turno:</span>{' '}
-                <span className="font-semibold capitalize">{cajaActiva.turno}</span>
-              </div>
-              <div>
-                <span className="opacity-80">Apertura:</span>{' '}
-                <span className="font-semibold">{formatTime24(cajaActiva.fecha_apertura)}</span>
-              </div>
-              <div>
-                <span className="opacity-80">Monto Inicial:</span>{' '}
-                <span className="font-semibold">
-                  ${formatCurrency(cajaActiva.monto_inicial)}
-                </span>
-              </div>
+            <div className="mt-2 flex flex-wrap gap-x-5 gap-y-1 text-sm text-slate-600">
+              <span>
+                <span className="text-slate-500">Turno:</span>{' '}
+                <span className="font-semibold capitalize text-slate-900">{cajaActiva.turno}</span>
+              </span>
+              <span>
+                <span className="text-slate-500">Apertura:</span>{' '}
+                <span className="font-semibold text-slate-900">{formatTime24(cajaActiva.fecha_apertura)}</span>
+              </span>
+              <span>
+                <span className="text-slate-500">Monto inicial:</span>{' '}
+                <span className="font-semibold text-slate-900">${formatCurrency(cajaActiva.monto_inicial)}</span>
+              </span>
             </div>
           </div>
-          
-          {/* Contador de Efectivo en Tiempo Real */}
+
           {resumenTiempoReal && (
-            <div className="bg-white/20 rounded-lg px-4 sm:px-6 py-3 sm:py-4 backdrop-blur-sm">
-              <p className="text-xs opacity-90 mb-1 flex items-center gap-1">
-                <Banknote className="w-4 h-4" />
-                Efectivo en Caja
-              </p>
-              <p className="text-3xl font-bold">
+            <div className="rounded-xl border border-slate-200 bg-slate-50/90 px-5 py-4">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Efectivo esperado</p>
+              <p className="mt-1 text-2xl font-bold tabular-nums text-slate-900 sm:text-3xl">
                 ${formatCurrency(resumenTiempoReal.saldo_esperado)}
               </p>
-              <p className="text-xs opacity-75 mt-1">
-                {resumenTiempoReal.vehiculos_cobrados} vehículos cobrados
+              <p className="mt-1 text-xs text-slate-500">
+                {resumenTiempoReal.vehiculos_cobrados} vehículos cobrados en este turno
               </p>
             </div>
           )}
-          <div className="flex flex-wrap gap-3">
+
+          <div className="flex flex-wrap gap-2 xl:justify-end">
             <button
+              type="button"
               onClick={() => setMostrarModalVentaSOAT(true)}
-              className="px-6 py-3 bg-secondary-500 text-white rounded-lg font-bold hover:bg-secondary-600 transition-colors inline-flex items-center gap-2 shadow-lg"
+              className="btn-corporate-muted inline-flex items-center gap-2 px-4 py-2.5 text-sm font-semibold text-slate-800"
             >
-              <Shield className="w-5 h-5" />
+              <Shield className="h-4 w-4 text-secondary-600" />
               Venta SOAT
             </button>
             <button
+              type="button"
               onClick={() => setMostrarModalGasto(true)}
-              className="px-6 py-3 bg-red-600 text-white rounded-lg font-bold hover:bg-red-700 transition-colors inline-flex items-center gap-2"
+              className="rounded-lg border border-red-200 bg-white px-4 py-2.5 text-sm font-semibold text-red-800 shadow-sm transition hover:bg-red-50"
             >
-              <ArrowRight className="w-5 h-5" />
-              Registrar Gasto
-            </button>
-            <button
-              onClick={() => setVistaActual('cierre')}
-              className="px-6 py-3 bg-white text-primary-700 rounded-lg font-bold hover:bg-primary-50 transition-colors inline-flex items-center gap-2"
-            >
-              <Lock className="w-5 h-5" />
-              Cerrar Caja
+              <span className="inline-flex items-center gap-2">
+                <ArrowRight className="h-4 w-4" />
+                Registrar gasto
+              </span>
             </button>
           </div>
         </div>
       </div>
 
-      {/* Navegación de vistas */}
-      <div className="flex gap-4 mb-6">
-        <button
-          onClick={() => setVistaActual('cobros')}
-          className={`flex-1 py-4 rounded-lg font-semibold text-lg transition-all inline-flex items-center justify-center gap-2 ${ 
-            vistaActual === 'cobros'
-              ? 'bg-primary-600 text-white shadow-lg'
-              : 'bg-white text-gray-700 hover:bg-gray-100'
-          }`}
+      <div className="sticky top-0 z-10 mb-4 rounded-xl border border-slate-200/90 bg-white/95 shadow-sm backdrop-blur-sm supports-[backdrop-filter]:bg-white/90">
+        <div
+          className="flex gap-0 overflow-x-auto border-b border-slate-100 px-1 pt-1 sm:px-2"
+          role="tablist"
+          aria-label="Secciones de caja"
         >
-          <Banknote className="w-5 h-5" />
-          Pendientes
-          {vehiculosPendientes && vehiculosPendientes.length > 0 && (
-            <span className="ml-2 px-3 py-1 bg-red-500 text-white rounded-full text-sm">
-              {vehiculosPendientes.length}
-            </span>
-          )}
-        </button>
-        <button
-          onClick={() => setVistaActual('cobrados-hoy')}
-          className={`flex-1 py-4 rounded-lg font-semibold text-lg transition-all inline-flex items-center justify-center gap-2 ${ 
-            vistaActual === 'cobrados-hoy'
-              ? 'bg-primary-600 text-white shadow-lg'
-              : 'bg-white text-gray-700 hover:bg-gray-100'
-          }`}
-        >
-          <CheckCircle2 className="w-5 h-5" />
-          Cobros de Hoy
-          {vehiculosCobradosHoy && vehiculosCobradosHoy.length > 0 && (
-            <span className="ml-2 px-3 py-1 bg-green-500 text-white rounded-full text-sm">
-              {vehiculosCobradosHoy.length}
-            </span>
-          )}
-        </button>
-        <button
-          onClick={() => setVistaActual('historial')}
-          className={`flex-1 py-4 rounded-lg font-semibold text-lg transition-all inline-flex items-center justify-center gap-2 ${ 
-            vistaActual === 'historial'
-              ? 'bg-primary-600 text-white shadow-lg'
-              : 'bg-white text-gray-700 hover:bg-gray-100'
-          }`}
-        >
-          <Folder className="w-5 h-5" />
-          Historial
-        </button>
+          {(
+            [
+              { id: 'cobros' as const, label: 'Pendientes', icon: Banknote, badge: vehiculosPendientes?.length, badgeClass: 'bg-rose-100 text-rose-800' },
+              { id: 'cobrados-hoy' as const, label: 'Cobros hoy', icon: CheckCircle2, badge: vehiculosCobradosHoy?.length, badgeClass: 'bg-emerald-100 text-emerald-800' },
+              { id: 'historial' as const, label: 'Historial', icon: Folder, badge: undefined, badgeClass: '' },
+              { id: 'cierre' as const, label: 'Cierre', icon: Lock, badge: undefined, badgeClass: '' },
+            ] as const
+          ).map(({ id, label, icon: Icon, badge, badgeClass }) => {
+            const active = vistaActual === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                role="tab"
+                aria-selected={active}
+                onClick={() => setVistaActual(id)}
+                className={`flex min-w-[6.5rem] shrink-0 items-center justify-center gap-2 rounded-t-lg px-3 py-2.5 text-sm font-semibold transition-colors sm:min-w-0 sm:px-4 ${
+                  active
+                    ? 'border-b-2 border-primary-600 bg-primary-50/80 text-primary-900'
+                    : 'border-b-2 border-transparent text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                }`}
+              >
+                <Icon className="h-4 w-4 shrink-0" aria-hidden />
+                {label}
+                {badge != null && badge > 0 && (
+                  <span className={`rounded-full px-2 py-0.5 text-xs font-bold ${badgeClass}`}>{badge}</span>
+                )}
+              </button>
+            );
+          })}
+        </div>
       </div>
 
       {/* Contenido según vista */}
@@ -360,6 +341,7 @@ export default function CajaPage() {
 // Componente de Apertura de Caja
 function AperturaCaja() {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const [formData, setFormData] = useState<CajaApertura>({
     monto_inicial: 50000,
     turno: 'mañana',
@@ -384,7 +366,7 @@ function AperturaCaja() {
     
     // Validar que el monto inicial no sea negativo
     if (formData.monto_inicial < 0) {
-      alert('El monto inicial no puede ser negativo.');
+      showToast('warning', 'Monto inválido', 'El monto inicial no puede ser negativo.');
       return;
     }
     
@@ -580,6 +562,7 @@ function VehiculosPendientes({
   error: unknown
 }) {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const [vehiculoSeleccionado, setVehiculoSeleccionado] = useState<Vehiculo | null>(null);
   const [busqueda, setBusqueda] = useState('');
 
@@ -592,13 +575,22 @@ function VehiculosPendientes({
             console.info(`Sin correo para notificación de caja: ${vehiculo.placa}`);
             return;
           }
-          alert('El vehículo se abrió para cobro, pero no fue posible enviar la notificación al cliente.');
+          showToast(
+            'warning',
+            'Notificación no enviada',
+            'El cobro puede continuar, pero no se envió aviso por correo al cliente.',
+          );
         }
       })
       .catch(() => {
         // No bloquear apertura del flujo de cobro por fallo de notificación.
-        alert('El vehículo se abrió para cobro, pero falló la notificación por correo.');
+        showToast('warning', 'Correo no enviado', 'El cobro puede continuar; falló la notificación al cliente.');
       });
+  };
+
+  const abrirCobro = (vehiculo: Vehiculo) => {
+    notificarPasoCaja(vehiculo);
+    setVehiculoSeleccionado(vehiculo);
   };
 
   if (loading) {
@@ -731,50 +723,45 @@ function VehiculosPendientes({
         </div>
       ) : (
         <ErrorBoundary>
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
           {vehiculosFiltrados.map((vehiculo) => (
-            <button
-              key={vehiculo.id}
-              onClick={() => {
-                notificarPasoCaja(vehiculo);
-                setVehiculoSeleccionado(vehiculo);
-              }}
-              className="vehicle-card text-left hover:scale-105 transition-transform"
-            >
-              <div className="flex justify-between items-start mb-3">
-                <div>
-                  <p className="text-3xl font-bold text-gray-900">{vehiculo.placa}</p>
-                  <p className="text-sm text-gray-600 capitalize">{vehiculo.tipo_vehiculo}</p>
+            <div key={vehiculo.id} className="vehicle-card flex flex-col text-left">
+              <div className="mb-3 flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-2xl font-bold tracking-wide text-slate-900 sm:text-3xl">{vehiculo.placa}</p>
+                  <p className="text-sm capitalize text-slate-600">{vehiculo.tipo_vehiculo}</p>
                 </div>
-                <span className="px-3 py-1 bg-yellow-100 text-yellow-800 rounded-full text-xs font-semibold">
-                  PENDIENTE
+                <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-900">
+                  Pendiente
                 </span>
               </div>
 
-              <div className="space-y-1 text-sm mb-4">
-                <p className="text-gray-700">
-                  <span className="font-semibold">Cliente:</span> {vehiculo.cliente_nombre}
+              <div className="mb-4 space-y-1 text-sm text-slate-700">
+                <p>
+                  <span className="font-semibold text-slate-800">Cliente:</span> {vehiculo.cliente_nombre}
                 </p>
-                <p className="text-gray-700">
-                  <span className="font-semibold">Documento:</span> {vehiculo.cliente_documento}
+                <p>
+                  <span className="font-semibold text-slate-800">Documento:</span> {vehiculo.cliente_documento}
                 </p>
-                <p className="text-gray-700">
-                  <span className="font-semibold">Modelo:</span> {vehiculo.ano_modelo}
-                </p>
-              </div>
-
-              <div className="bg-secondary-50 border-2 border-secondary-200 rounded-lg p-3">
-                <p className="text-xs text-secondary-700 mb-1">Total a Cobrar</p>
-                <p className="text-2xl font-bold text-secondary-900">
-                  ${formatCurrency(vehiculo.total_cobrado)}
+                <p>
+                  <span className="font-semibold text-slate-800">Modelo:</span> {vehiculo.ano_modelo}
                 </p>
               </div>
 
-              <div className="mt-4 py-3 bg-primary-600 text-white rounded-lg font-bold text-center flex items-center justify-center gap-2">
-                <CreditCard className="w-5 h-5" />
-                COBRAR
+              <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/90 p-3">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Total a cobrar</p>
+                <p className="text-2xl font-bold tabular-nums text-slate-900">${formatCurrency(vehiculo.total_cobrado)}</p>
               </div>
-            </button>
+
+              <button
+                type="button"
+                onClick={() => abrirCobro(vehiculo)}
+                className="btn-primary-solid mt-auto inline-flex w-full items-center justify-center gap-2 py-3 text-base font-semibold"
+              >
+                <CreditCard className="h-5 w-5 shrink-0" />
+                Cobrar
+              </button>
+            </div>
           ))}
           </div>
         </ErrorBoundary>
@@ -796,6 +783,7 @@ function VehiculosPendientes({
 // Componente Modal de Cobro
 function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => void }) {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const { user } = useAuth();
   const brand = useBrand();
   const isMountedRef = useRef(true);
@@ -929,7 +917,11 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
         return;
       }
 
-      alert(`Cobro registrado exitosamente.\n\nRecibo generado: ${nombreArchivo}${emailStatusNote}`);
+      showToast(
+        'success',
+        'Cobro registrado',
+        `Recibo: ${nombreArchivo}${emailStatusNote.replace(/^\n+/, ' ').replace(/\n/g, ' ')}`,
+      );
       
       // Defer query invalidation to prevent React DOM errors
       setTimeout(() => {
@@ -985,31 +977,31 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
 
   const getMetodoStyles = (metodoPago: string, selectedMetodo: string) => {
     const isSelected = metodoPago === selectedMetodo;
-    
+
     const styles: Record<string, string> = {
-      efectivo: isSelected 
-        ? 'border-green-600 bg-green-50 text-green-900 scale-105' 
+      efectivo: isSelected
+        ? 'border-green-600 bg-green-50 text-green-900 shadow-sm ring-2 ring-green-600/25'
         : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400',
-      tarjeta_debito: isSelected 
-        ? 'border-blue-600 bg-blue-50 text-blue-900 scale-105' 
+      tarjeta_debito: isSelected
+        ? 'border-blue-600 bg-blue-50 text-blue-900 shadow-sm ring-2 ring-blue-600/25'
         : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400',
-      tarjeta_credito: isSelected 
-        ? 'border-indigo-600 bg-indigo-50 text-indigo-900 scale-105' 
+      tarjeta_credito: isSelected
+        ? 'border-indigo-600 bg-indigo-50 text-indigo-900 shadow-sm ring-2 ring-indigo-600/25'
         : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400',
-      transferencia: isSelected 
-        ? 'border-purple-600 bg-purple-50 text-purple-900 scale-105' 
+      transferencia: isSelected
+        ? 'border-purple-600 bg-purple-50 text-purple-900 shadow-sm ring-2 ring-purple-600/25'
         : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400',
-      mixto: isSelected 
-        ? 'border-teal-600 bg-teal-50 text-teal-900 scale-105' 
+      mixto: isSelected
+        ? 'border-teal-600 bg-teal-50 text-teal-900 shadow-sm ring-2 ring-teal-600/25'
         : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400',
-      credismart: isSelected 
-        ? 'border-orange-600 bg-orange-50 text-orange-900 scale-105' 
+      credismart: isSelected
+        ? 'border-orange-600 bg-orange-50 text-orange-900 shadow-sm ring-2 ring-orange-600/25'
         : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400',
-      sistecredito: isSelected 
-        ? 'border-yellow-600 bg-yellow-50 text-yellow-900 scale-105' 
+      sistecredito: isSelected
+        ? 'border-yellow-600 bg-yellow-50 text-yellow-900 shadow-sm ring-2 ring-yellow-600/25'
         : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400',
     };
-    
+
     return styles[metodoPago] || '';
   };
 
@@ -1034,8 +1026,10 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
               <p className="text-xl font-bold text-primary-600 mt-1">{vehiculo.placa}</p>
             </div>
             <button
+              type="button"
               onClick={onClose}
-              className="h-10 w-10 rounded-lg border border-slate-300 text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition flex items-center justify-center text-2xl"
+              className="modal-close-btn flex items-center justify-center text-2xl leading-none"
+              aria-label="Cerrar"
             >
               ×
             </button>
@@ -1574,29 +1568,33 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
             )}
           </div>
 
-          {/* Botones */}
-          <div className="modal-footer-sticky -mx-6 px-6 flex gap-4">
-            <button
-              onClick={onClose}
-              className="flex-1 btn-pos btn-secondary"
-              disabled={cobrarMutation.isLoading}
-            >
-              Cancelar
-            </button>
-            <button
-              onClick={handleCobrar}
-              disabled={cobrarMutation.isLoading || !puedeConfirmarCobro}
-              className="flex-1 btn-pos btn-success disabled:opacity-50 inline-flex items-center justify-center gap-2"
-            >
-              {cobrarMutation.isLoading ? (
-                <span>Procesando...</span>
-              ) : (
-                <span className="inline-flex items-center justify-center gap-2">
-                  <CheckCircle2 className="w-5 h-5" />
-                  Confirmar Cobro
-                </span>
-              )}
-            </button>
+          <div className="modal-footer-sticky -mx-6 mt-6 border-t border-slate-200 px-6 pt-4">
+            <p className="mb-3 text-center text-xs text-slate-500">Atajos: Esc cerrar · Ctrl+Enter confirmar</p>
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <button
+                type="button"
+                onClick={onClose}
+                className="btn-corporate-muted flex-1 py-3 font-semibold"
+                disabled={cobrarMutation.isLoading}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={handleCobrar}
+                disabled={cobrarMutation.isLoading || !puedeConfirmarCobro}
+                className="btn-success-solid flex-1 inline-flex items-center justify-center gap-2 py-3 font-semibold disabled:opacity-50"
+              >
+                {cobrarMutation.isLoading ? (
+                  <span>Procesando...</span>
+                ) : (
+                  <span className="inline-flex items-center justify-center gap-2">
+                    <CheckCircle2 className="h-5 w-5 shrink-0" />
+                    Confirmar cobro
+                  </span>
+                )}
+              </button>
+            </div>
           </div>
         </div>
       </div>
@@ -1950,6 +1948,7 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
 // Componente de Cierre de Caja
 function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => void }) {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const [montoFisico, setMontoFisico] = useState<number | null>(null);
   const [observaciones, setObservaciones] = useState('');
   const [mostrarDetalleMetodos, setMostrarDetalleMetodos] = useState(false);
@@ -2035,7 +2034,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
       try {
         const blob = await cajasApi.descargarComprobanteCierre(cajaCerrada.id);
         saveBlobAsFile(blob, `comprobante_cierre_caja_${formatLocalDate(new Date())}.pdf`);
-        alert('Caja cerrada exitosamente. El comprobante se descargó correctamente.');
+        showToast('success', 'Caja cerrada', 'El comprobante se descargó correctamente.');
       } catch (error: any) {
         try {
           // Fallback operativo: intentar con la última caja cerrada del usuario.
@@ -2043,14 +2042,18 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
           if (ultimaCerrada?.caja_id) {
             const blob = await cajasApi.descargarComprobanteCierre(ultimaCerrada.caja_id);
             saveBlobAsFile(blob, `comprobante_cierre_caja_${formatLocalDate(new Date())}.pdf`);
-            alert('Caja cerrada exitosamente. Comprobante descargado en segundo intento.');
+            showToast('success', 'Caja cerrada', 'Comprobante descargado en segundo intento.');
             return;
           }
         } catch (fallbackError) {
           console.error('Error en fallback de comprobante:', fallbackError);
         }
         console.error('Error al descargar comprobante:', error?.response?.status, error?.response?.data || error);
-        alert('La caja se cerró, pero no fue posible descargar el comprobante automáticamente.');
+        showToast(
+          'warning',
+          'Caja cerrada',
+          'No fue posible descargar el comprobante automáticamente. Revisa el historial o reportes.',
+        );
       }
       
       // Defer query invalidation and callback to prevent React DOM errors
@@ -2064,12 +2067,16 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
   const handleCerrar = () => {
     // Validar si hay vehículos pendientes
     if (vehiculosPendientes.length > 0) {
-      alert(
-        `No es posible cerrar la caja con vehículos pendientes de cobro.\n\n` +
-        `Pendientes: ${vehiculosPendientes.length}\n` +
-        `Placas: ${vehiculosPendientes.slice(0, 5).map((v: Vehiculo) => v.placa).join(', ')}` +
-        `${vehiculosPendientes.length > 5 ? '...' : ''}\n\n` +
-        `Finaliza estos cobros para continuar con el cierre.`
+      const placas = vehiculosPendientes
+        .slice(0, 5)
+        .map((v: Vehiculo) => v.placa)
+        .join(', ');
+      showToast(
+        'warning',
+        'Hay cobros pendientes',
+        `No puedes cerrar con ${vehiculosPendientes.length} vehículo(s) pendiente(s). Placas: ${placas}${
+          vehiculosPendientes.length > 5 ? '…' : ''
+        }. Finaliza los cobros primero.`,
       );
       return;
     }
@@ -2079,9 +2086,10 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
     if (diferenciaAbsoluta > 20000) {
       // Si no hay observaciones, exigirlas
       if (!observaciones || observaciones.trim().length < 10) {
-        alert(
-          `Se detectó una diferencia alta: $${formatCurrency(diferencia)}.\n\n` +
-          `Debes agregar observaciones (mínimo 10 caracteres) explicando la diferencia.`
+        showToast(
+          'warning',
+          'Observaciones requeridas',
+          `Diferencia alta ($${formatCurrency(diferencia)}). Agrega observaciones de al menos 10 caracteres.`,
         );
         return;
       }
@@ -2121,13 +2129,32 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
   const diferencia = (montoFisico ?? 0) - resumen.saldo_esperado;
   const haIngresadoArqueo = montoFisico !== null;
 
+  const pasosCierre = [
+    { n: 1, t: 'Resumen del turno' },
+    { n: 2, t: 'Conceptos' },
+    { n: 3, t: 'Arqueo' },
+    { n: 4, t: 'Confirmar' },
+  ];
+
   return (
     <div className="max-w-4xl mx-auto">
       <div className="card-pos">
-        <h3 className="text-3xl font-bold text-gray-900 mb-6 flex items-center gap-2">
-          <Lock className="w-8 h-8" />
-          Cerrar Caja
+        <h3 className="mb-4 flex items-center gap-2 text-2xl font-bold text-slate-900 sm:text-3xl">
+          <Lock className="h-7 w-7 shrink-0 text-primary-600 sm:h-8 sm:w-8" />
+          Cerrar caja
         </h3>
+
+        <div className="mb-6 flex flex-wrap items-center gap-x-2 gap-y-2 rounded-xl border border-slate-200 bg-slate-50/80 px-3 py-3 text-xs text-slate-600 sm:gap-x-3 sm:px-4">
+          {pasosCierre.map((step, i) => (
+            <div key={step.n} className="flex items-center gap-2">
+              <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary-100 text-xs font-bold text-primary-800">
+                {step.n}
+              </span>
+              <span className="font-medium text-slate-700">{step.t}</span>
+              {i < pasosCierre.length - 1 && <span className="hidden text-slate-300 sm:inline" aria-hidden>→</span>}
+            </div>
+          ))}
+        </div>
 
         {cerrarMutation.isError && (
           <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6">
@@ -2138,32 +2165,35 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
           </div>
         )}
 
-        {/* Resumen de Movimientos */}
-        <div className="bg-gradient-to-r from-primary-600 to-primary-700 text-white rounded-xl p-6 mb-6">
-          <h4 className="text-xl font-bold mb-4 flex items-center gap-2">
-            <BarChart3 className="w-6 h-6" />
-            Resumen del Turno
+        <div className="section-card mb-6 border border-slate-200 p-5 sm:p-6">
+          <h4 className="mb-4 flex items-center gap-2 text-lg font-bold text-slate-900">
+            <BarChart3 className="h-5 w-5 text-primary-600" />
+            Resumen del turno
           </h4>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <div>
-              <p className="text-sm opacity-90">Monto Inicial</p>
-              <p className="text-2xl font-bold">${formatCurrency(resumen.monto_inicial)}</p>
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
+            <div className="rounded-lg border border-slate-100 bg-slate-50/90 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Monto inicial</p>
+              <p className="mt-1 text-xl font-bold tabular-nums text-slate-900 sm:text-2xl">
+                ${formatCurrency(resumen.monto_inicial)}
+              </p>
             </div>
-            <div>
-              <p className="text-sm opacity-90">Total Ingresos</p>
-              <p className="text-2xl font-bold text-green-300">
+            <div className="rounded-lg border border-emerald-100 bg-emerald-50/80 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-emerald-800">Total ingresos</p>
+              <p className="mt-1 text-xl font-bold tabular-nums text-emerald-900 sm:text-2xl">
                 +${formatCurrency(resumen.total_ingresos)}
               </p>
             </div>
-            <div>
-              <p className="text-sm opacity-90">Total Egresos</p>
-              <p className="text-2xl font-bold text-red-300">
-                -${formatCurrency(resumen.total_egresos)}
+            <div className="rounded-lg border border-red-100 bg-red-50/80 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-red-800">Total egresos</p>
+              <p className="mt-1 text-xl font-bold tabular-nums text-red-900 sm:text-2xl">
+                −${formatCurrency(resumen.total_egresos)}
               </p>
             </div>
-            <div>
-              <p className="text-sm opacity-90">Saldo Esperado</p>
-              <p className="text-2xl font-bold">${formatCurrency(resumen.saldo_esperado)}</p>
+            <div className="rounded-lg border border-primary-100 bg-primary-50/60 p-3">
+              <p className="text-xs font-medium uppercase tracking-wide text-primary-800">Saldo esperado</p>
+              <p className="mt-1 text-xl font-bold tabular-nums text-primary-950 sm:text-2xl">
+                ${formatCurrency(resumen.saldo_esperado)}
+              </p>
             </div>
           </div>
         </div>
@@ -2736,6 +2766,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
 // Componente de Historial de Cajas
 function HistorialCajas() {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const [draftDesde, setDraftDesde] = useState('');
   const [draftHasta, setDraftHasta] = useState('');
   const [rangoAplicado, setRangoAplicado] = useState<{ desde: string; hasta: string } | null>(null);
@@ -3019,7 +3050,7 @@ function HistorialCajas() {
                             );
                           } catch (error) {
                             console.error('Error al descargar PDF:', error);
-                            alert('No fue posible cargar el comprobante.');
+                            showToast('error', 'Descarga fallida', 'No fue posible cargar el comprobante.');
                           }
                         }}
                         className="px-3 py-1 bg-gray-600 hover:bg-gray-700 text-white text-xs font-semibold rounded-lg inline-flex items-center justify-center gap-1 transition-colors"
@@ -3140,6 +3171,7 @@ function VehiculosCobradosHoy({ vehiculos, loading }: { vehiculos: Vehiculo[], l
 // Modal para cambiar método de pago
 function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => void }) {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const formRef = useRef<HTMLFormElement>(null);
   const motivoInputRef = useRef<HTMLTextAreaElement>(null);
   const [nuevoMetodo, setNuevoMetodo] = useState(vehiculo.metodo_pago || 'efectivo');
@@ -3148,8 +3180,12 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
   const cambiarMetodoMutation = useMutation({
     mutationFn: () => vehiculosApi.cambiarMetodoPago(vehiculo.id, nuevoMetodo, motivo),
     onSuccess: (data) => {
-      alert(`${data.message}\n\nMétodo anterior: ${data.metodo_anterior}\nMétodo nuevo: ${data.metodo_nuevo}`);
-      
+      showToast(
+        'success',
+        data.message || 'Método actualizado',
+        `Anterior: ${data.metodo_anterior} → Nuevo: ${data.metodo_nuevo}`,
+      );
+
       // Defer query invalidations
       setTimeout(() => {
         queryClient.invalidateQueries({ queryKey: ['vehiculos-cobrados-hoy'] });
@@ -3159,14 +3195,18 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
       onClose();
     },
     onError: (error: any) => {
-      alert(error.response?.data?.detail || 'No fue posible cambiar el método de pago.');
+      showToast(
+        'error',
+        'No se pudo cambiar el método',
+        error.response?.data?.detail || 'Intenta de nuevo o revisa la conexión.',
+      );
     },
   });
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (nuevoMetodo === vehiculo.metodo_pago) {
-      alert('El método de pago seleccionado es el mismo que el actual.');
+      showToast('warning', 'Sin cambios', 'El método seleccionado es el mismo que el actual.');
       return;
     }
     cambiarMetodoMutation.mutate();
@@ -3333,6 +3373,7 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
 function ModalVentaSOAT({ onClose, onSuccess }: { onClose: () => void, onSuccess: () => void }) {
   const { user } = useAuth();
   const brand = useBrand();
+  const { showToast } = useToast();
   const formRef = useRef<HTMLFormElement>(null);
   const placaInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
@@ -3365,7 +3406,7 @@ function ModalVentaSOAT({ onClose, onSuccess }: { onClose: () => void, onSuccess
         logoUrl: brand.logoSrc,
       });
       
-      alert(`Venta de SOAT registrada exitosamente.\n\nRecibo generado: ${nombrePDF}`);
+      showToast('success', 'Venta SOAT registrada', `Recibo generado: ${nombrePDF}`);
       onSuccess();
     },
   });
@@ -3376,7 +3417,7 @@ function ModalVentaSOAT({ onClose, onSuccess }: { onClose: () => void, onSuccess
     const valorComercial = parseFloat(formData.valor_soat_comercial);
     
     if (isNaN(valorComercial) || valorComercial <= 0) {
-      alert('El valor comercial del SOAT debe ser mayor a $0.');
+      showToast('warning', 'Valor inválido', 'El valor comercial del SOAT debe ser mayor a $0.');
       return;
     }
 

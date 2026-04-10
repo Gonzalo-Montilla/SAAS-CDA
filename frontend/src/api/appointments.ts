@@ -16,7 +16,8 @@ const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
 
 export const appointmentsApi = {
   listByDate: async (fecha: string, statusFilter?: string): Promise<AppointmentItem[]> => {
-    const response = await apiClient.get<AppointmentItem[]>('/appointments', {
+    // Barra final obligatoria: sin ella FastAPI responde 307 y el redirect puede perder el header Authorization → 401.
+    const response = await apiClient.get<AppointmentItem[]>('/appointments/', {
       params: { fecha, ...(statusFilter ? { status_filter: statusFilter } : {}) },
     });
     return response.data;
@@ -24,6 +25,16 @@ export const appointmentsApi = {
 
   createInternal: async (payload: AppointmentCreatePayload): Promise<AppointmentItem> => {
     const response = await apiClient.post<AppointmentItem>('/appointments/internal', payload);
+    return response.data;
+  },
+
+  updateStatus: async (
+    appointmentId: string,
+    status: 'confirmed' | 'cancelled' | 'no_show'
+  ): Promise<AppointmentItem> => {
+    const response = await apiClient.patch<AppointmentItem>(`/appointments/${appointmentId}/status`, {
+      status,
+    });
     return response.data;
   },
 

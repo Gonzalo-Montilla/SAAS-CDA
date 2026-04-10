@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { MovimientoTesoreria } from '../api/tesoreria';
 import { useAuth } from '../contexts/AuthContext';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -24,7 +25,8 @@ import {
   Banknote,
   Clock,
   Search,
-  Download
+  Download,
+  Trash2
 } from 'lucide-react';
 
 export default function TesoreriaPage() {
@@ -124,7 +126,8 @@ function Dashboard() {
 
   const { data: movimientos, isLoading: loadingMovimientos } = useQuery({
     queryKey: ['tesoreria-movimientos-recientes', consolidarTodas],
-    queryFn: () => tesoreriaApi.listarMovimientos({ limit: 5, ...scopeParams }),
+    queryFn: () =>
+      tesoreriaApi.listarMovimientos({ limit: 5, solo_activos: true, ...scopeParams }),
     enabled: !!saldo,
     refetchInterval: 60000,
     staleTime: 30000,
@@ -290,11 +293,30 @@ function Dashboard() {
             Efectivo en Caja
           </h3>
           <div className="mb-4 p-4 bg-secondary-100 border-2 border-secondary-400 rounded-lg">
-            <p className="text-sm text-secondary-700 mb-1">Total en Efectivo</p>
+            <p className="text-sm text-secondary-700 mb-1">Total en Efectivo (libros)</p>
             <p className="text-3xl font-bold text-secondary-900">
-              ${formatCurrency(desglose?.desglose.efectivo || 0)}
+              ${formatCurrency(desglose?.desglose.efectivo ?? desgloseEfectivo?.total_efectivo ?? 0)}
+            </p>
+            <p className="text-xs text-secondary-600 mt-2">
+              Coincide con el saldo por método «efectivo» en tesorería. El detalle por billetes y monedas solo
+              incluye movimientos que registraron desglose.
             </p>
           </div>
+
+          {desgloseEfectivo &&
+            typeof desgloseEfectivo.total_desglosado === 'number' &&
+            Math.abs((desgloseEfectivo.total_efectivo || 0) - desgloseEfectivo.total_desglosado) > 0.5 && (
+              <div className="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-950">
+                Parte del efectivo no tiene desglose por denominación (datos antiguos o migrados).{' '}
+                <span className="font-semibold">
+                  Suma del desglose mostrado: ${formatCurrency(desgloseEfectivo.total_desglosado)}
+                </span>
+                {' · '}
+                <span className="font-semibold">
+                  Total contable: ${formatCurrency(desgloseEfectivo.total_efectivo || 0)}
+                </span>
+              </div>
+            )}
 
           {desgloseEfectivo && (
             <div className="space-y-2">
@@ -450,6 +472,12 @@ function RegistrarMovimiento() {
   });
   const [desgloseEfectivo, setDesgloseEfectivo] = useState<DesgloseEfectivo | null>(null);
 
+  const [modalConfirmar, setModalConfirmar] = useState<{
+    payload: Record<string, unknown>;
+    resumen: { label: string; value: string }[];
+    monto: number;
+  } | null>(null);
+
   // Obtener categorías
   const { data: categorias, isLoading: loadingCategorias, isError: errorCategorias } = useQuery({
     queryKey: ['tesoreria-categorias'],
@@ -473,6 +501,7 @@ function RegistrarMovimiento() {
       queryClient.invalidateQueries({ queryKey: ['tesoreria-resumen'] });
       queryClient.invalidateQueries({ queryKey: ['tesoreria-movimientos-recientes'] });
       queryClient.invalidateQueries({ queryKey: ['tesoreria-desglose'] });
+      queryClient.invalidateQueries({ queryKey: ['tesoreria-movimientos'] });
       
       // Refetch inmediato de las queries importantes
       queryClient.refetchQueries({ queryKey: ['tesoreria-saldo'] });
@@ -518,6 +547,17 @@ function RegistrarMovimiento() {
       });
     },
   });
+
+  useEffect(() => {
+    if (!modalConfirmar) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !registrarMutation.isLoading) {
+        setModalConfirmar(null);
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [modalConfirmar, registrarMutation.isLoading]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -572,20 +612,13 @@ function RegistrarMovimiento() {
         return;
       }
     }
-    
-    // Confirmación para montos grandes
-    if (monto > 1000000) {
-      if (!window.confirm(`MONTO ALTO: $${formatCurrency(monto)}\n\n¿Estás seguro de registrar este ${tipoMovimiento}?`)) {
-        return;
-      }
-    }
 
     // Construir concepto completo con beneficiario si es egreso
     const conceptoCompleto = tipoMovimiento === 'egreso' && formData.beneficiario
       ? `${formData.beneficiario} - ${formData.concepto}`
       : formData.concepto;
     
-    const data: any = {
+    const data: Record<string, unknown> = {
       tipo: tipoMovimiento,
       [tipoMovimiento === 'ingreso' ? 'categoria_ingreso' : 'categoria_egreso']: formData.categoria,
       monto,
@@ -599,7 +632,47 @@ function RegistrarMovimiento() {
       data.desglose_efectivo = desgloseEfectivo;
     }
 
-    registrarMutation.mutate(data);
+    const categoriasLista =
+      tipoMovimiento === 'ingreso'
+        ? categorias?.ingresos ?? []
+        : categorias?.egresos ?? [];
+    const catLabel =
+      categoriasLista.find((c) => c.value === formData.categoria)?.label ??
+      formData.categoria;
+    const metodoLabel =
+      categorias?.metodos_pago?.find((m) => m.value === formData.metodo_pago)?.label ??
+      formData.metodo_pago;
+
+    const resumen: { label: string; value: string }[] = [
+      {
+        label: 'Operación',
+        value:
+          tipoMovimiento === 'ingreso'
+            ? 'Ingreso: el dinero entra a la caja fuerte (tesorería).'
+            : 'Egreso: el dinero sale de la caja fuerte (tesorería).',
+      },
+      { label: 'Categoría', value: catLabel || '—' },
+      {
+        label: 'Monto',
+        value: `$${formatCurrency(monto)}`,
+      },
+    ];
+    if (tipoMovimiento === 'egreso' && formData.beneficiario) {
+      resumen.push({ label: 'Beneficiario', value: formData.beneficiario });
+    }
+    resumen.push({ label: 'Concepto', value: conceptoCompleto });
+    resumen.push({ label: 'Método de pago', value: metodoLabel });
+    if (formData.numero_comprobante.trim()) {
+      resumen.push({ label: 'Número de comprobante', value: formData.numero_comprobante.trim() });
+    }
+    if (formData.metodo_pago === 'efectivo') {
+      resumen.push({
+        label: 'Efectivo',
+        value: 'Se registrará el desglose por billetes y monedas indicado abajo en el formulario.',
+      });
+    }
+
+    setModalConfirmar({ payload: data, resumen, monto });
   };
 
   const categoriasDisponibles = tipoMovimiento === 'ingreso' 
@@ -853,7 +926,11 @@ function RegistrarMovimiento() {
                 montoDeclarado={parseFloat(formData.monto)}
                 onChange={setDesgloseEfectivo}
                 esEgreso={tipoMovimiento === 'egreso'}
-                desgloseDisponible={tipoMovimiento === 'egreso' ? inventarioDisponible?.desglose : undefined}
+                desgloseDisponible={
+                  tipoMovimiento === 'egreso' && inventarioDisponible?.desglose
+                    ? (inventarioDisponible.desglose as unknown as DesgloseEfectivo)
+                    : undefined
+                }
               />
             </div>
           )}
@@ -877,19 +954,102 @@ function RegistrarMovimiento() {
             </button>
             <button
               type="submit"
-              disabled={registrarMutation.isLoading}
+              disabled={registrarMutation.isLoading || !!modalConfirmar}
               className="flex-1 btn-pos btn-primary disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {registrarMutation.isLoading ? 'Registrando...' : (
                 <>
                   <Plus className="w-5 h-5" />
-                  Registrar Movimiento
+                  Revisar y registrar
                 </>
               )}
             </button>
           </div>
         </form>
       </div>
+
+      {modalConfirmar && (
+        <div
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4"
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !registrarMutation.isLoading) {
+              setModalConfirmar(null);
+            }
+          }}
+        >
+          <div
+            className="modal-panel max-w-lg w-full shadow-xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="confirmar-tesoreria-titulo"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="p-6">
+              <h3
+                id="confirmar-tesoreria-titulo"
+                className="text-xl font-bold text-slate-900 flex items-center gap-2 mb-1"
+              >
+                <Vault className="w-6 h-6 text-primary-600 shrink-0" />
+                Confirmar movimiento en tesorería
+              </h3>
+              <p className="text-sm text-slate-600 mb-4">
+                Revisa los datos. Al aceptar, el movimiento quedará registrado en la sede activa.
+              </p>
+
+              {modalConfirmar.monto > 1_000_000 && (
+                <div className="mb-4 rounded-lg border-2 border-amber-400 bg-amber-50 px-3 py-2 text-sm text-amber-950 flex gap-2 items-start">
+                  <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5" />
+                  <span>
+                    <strong>Monto elevado:</strong> ${formatCurrency(modalConfirmar.monto)}. Verifica que sea
+                    correcto antes de confirmar.
+                  </span>
+                </div>
+              )}
+
+              <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 mb-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                  Resumen
+                </p>
+                <dl className="space-y-2 text-sm">
+                  {modalConfirmar.resumen.map((row) => (
+                    <div key={row.label} className="grid grid-cols-[minmax(0,7.5rem)_1fr] gap-x-3 gap-y-1">
+                      <dt className="text-slate-500 font-medium">{row.label}</dt>
+                      <dd className="text-slate-900 break-words">{row.value}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+
+              <div className="flex flex-col-reverse sm:flex-row gap-3 mt-6 pt-4 border-t border-slate-200">
+                <button
+                  type="button"
+                  className="flex-1 btn-pos btn-secondary"
+                  disabled={registrarMutation.isLoading}
+                  onClick={() => setModalConfirmar(null)}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  className="flex-1 btn-pos btn-primary flex items-center justify-center gap-2"
+                  disabled={registrarMutation.isLoading}
+                  onClick={() => {
+                    const payload = modalConfirmar.payload;
+                    setModalConfirmar(null);
+                    registrarMutation.mutate(payload);
+                  }}
+                >
+                  {registrarMutation.isLoading ? 'Registrando…' : 'Aceptar y registrar'}
+                </button>
+              </div>
+              <p className="text-center text-xs text-slate-400 mt-3">
+                Tecla <kbd className="px-1 rounded bg-slate-200">Esc</kbd> para cancelar
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -897,6 +1057,7 @@ function RegistrarMovimiento() {
 // ==================== HISTORIAL ====================
 function Historial() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [consolidarTodas, setConsolidarTodas] = useState(false);
   const showConsolidar = user?.rol === 'administrador';
   const scopeParams = showConsolidar && consolidarTodas ? { consolidar_todas: true } : {};
@@ -908,18 +1069,44 @@ function Historial() {
   });
   const [busqueda, setBusqueda] = useState('');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
-  
-  
+  const [movEliminar, setMovEliminar] = useState<MovimientoTesoreria | null>(null);
 
   const { data: movimientosRaw, isLoading } = useQuery({
     queryKey: ['tesoreria-movimientos', filtros, consolidarTodas],
-    queryFn: () => tesoreriaApi.listarMovimientos({
-      tipo: filtros.tipo || undefined,
-      fecha_desde: filtros.fecha_desde || undefined,
-      fecha_hasta: filtros.fecha_hasta || undefined,
-      limit: 100,
-      ...scopeParams,
-    }),
+    queryFn: () =>
+      tesoreriaApi.listarMovimientos({
+        tipo: filtros.tipo || undefined,
+        fecha_desde: filtros.fecha_desde || undefined,
+        fecha_hasta: filtros.fecha_hasta || undefined,
+        limit: 100,
+        solo_activos: false,
+        ...scopeParams,
+      }),
+  });
+
+  const anularMutation = useMutation({
+    mutationFn: (id: string) => tesoreriaApi.anularMovimiento(id, scopeParams),
+    onSuccess: () => {
+      setMovEliminar(null);
+      setFeedback({
+        type: 'success',
+        message:
+          'Movimiento anulado. El saldo y el conteo de efectivo vuelven como antes de ese registro. Puedes cargar el movimiento de nuevo si lo necesitas.',
+      });
+      queryClient.invalidateQueries({ queryKey: ['tesoreria-movimientos'] });
+      queryClient.invalidateQueries({ queryKey: ['tesoreria-saldo'] });
+      queryClient.invalidateQueries({ queryKey: ['tesoreria-resumen'] });
+      queryClient.invalidateQueries({ queryKey: ['tesoreria-desglose'] });
+      queryClient.invalidateQueries({ queryKey: ['tesoreria-desglose-efectivo'] });
+      queryClient.invalidateQueries({ queryKey: ['tesoreria-movimientos-recientes'] });
+      queryClient.invalidateQueries({ queryKey: ['tesoreria-inventario-disponible'] });
+    },
+    onError: (error: unknown) => {
+      const msg =
+        (error as { response?: { data?: { detail?: string } } })?.response?.data?.detail ||
+        'No fue posible anular el movimiento.';
+      setFeedback({ type: 'error', message: msg });
+    },
   });
 
   // Filtrar por búsqueda de texto (en frontend)
@@ -944,12 +1131,14 @@ function Historial() {
 
       // Preparar datos para Excel
       const datosExcel = movimientos.map(mov => ({
-        'Fecha': new Date(mov.fecha_movimiento).toLocaleDateString('es-CO'),
+        'Fecha y hora': new Date(mov.fecha_movimiento).toLocaleString('es-CO'),
+        'ID (soporte)': mov.id,
         'Tipo': mov.tipo === 'ingreso' ? 'Ingreso' : 'Egreso',
         'Categoría': mov.categoria_ingreso || mov.categoria_egreso || 'N/A',
         'Concepto': mov.concepto,
         'Método de Pago': mov.metodo_pago,
         'Monto': mov.monto,
+        'Estado': mov.anulado ? 'Anulado' : 'Vigente',
         'Número Comprobante': mov.numero_comprobante || '',
       }));
 
@@ -1078,62 +1267,107 @@ function Historial() {
           <LoadingSpinner message="Cargando historial de movimientos..." />
         ) : movimientos && movimientos.length > 0 ? (
           <div className="table-shell">
-            <table className="table-enterprise">
+            <table className="table-enterprise table-fixed w-full">
+              <colgroup>
+                <col className="w-[9.5rem]" />
+                <col className="w-[7.25rem]" />
+                <col />
+                <col className="w-[5.75rem]" />
+                <col className="w-[9rem]" />
+                <col className="w-[13.5rem]" />
+              </colgroup>
               <thead>
                 <tr>
-                  <th className="pl-3 text-left">Fecha</th>
-                  <th className="pl-3 text-left">Tipo</th>
-                  <th className="pl-3 text-left">Concepto</th>
-                  <th className="pl-3 text-right">Monto</th>
-                  <th className="pl-3 text-center">Acciones</th>
+                  <th>Fecha y hora</th>
+                  <th>Tipo</th>
+                  <th>Concepto</th>
+                  <th>Estado</th>
+                  <th className="table-enterprise-col-monto">Monto</th>
+                  <th className="table-enterprise-col-actions">Acciones</th>
                 </tr>
               </thead>
               <tbody>
                 {movimientos.map((mov) => (
-                  <tr key={mov.id}>
-                    <td className="pl-3 text-sm text-slate-600">
-                      {new Date(mov.fecha_movimiento).toLocaleDateString('es-CO')}
+                  <tr
+                    key={mov.id}
+                    className={mov.anulado ? 'opacity-60 bg-slate-50/80' : undefined}
+                  >
+                    <td className="text-sm text-slate-600 whitespace-nowrap align-top">
+                      <div>{new Date(mov.fecha_movimiento).toLocaleDateString('es-CO')}</div>
+                      <div className="text-xs text-slate-400 font-normal">
+                        {new Date(mov.fecha_movimiento).toLocaleTimeString('es-CO', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </div>
                     </td>
-                    <td className="pl-3">
-                      <span className={`px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 w-fit ${
+                    <td className="align-middle">
+                      <span className={`px-2 py-1 rounded text-xs font-semibold inline-flex items-center gap-1 ${
                         mov.tipo === 'ingreso'
                           ? 'bg-blue-100 text-blue-800'
                           : 'bg-red-100 text-red-800'
                       }`}>
                         {mov.tipo === 'ingreso' ? (
-                          <><ArrowDownCircle className="w-3 h-3" /> Ingreso</>
+                          <><ArrowDownCircle className="w-3 h-3 shrink-0" /> Ingreso</>
                         ) : (
-                          <><ArrowUpCircle className="w-3 h-3" /> Egreso</>
+                          <><ArrowUpCircle className="w-3 h-3 shrink-0" /> Egreso</>
                         )}
                       </span>
                     </td>
-                    <td className="pl-3 text-sm text-slate-900">{mov.concepto}</td>
-                    <td className={`pl-3 text-right text-lg font-bold ${
-                      mov.tipo === 'ingreso' ? 'text-green-600' : 'text-red-600'
-                    }`}>
+                    <td className="text-sm text-slate-900 break-words min-w-0">
+                      <span className={mov.anulado ? 'line-through text-slate-500' : ''}>
+                        {mov.concepto}
+                      </span>
+                    </td>
+                    <td className="text-sm align-middle">
+                      {mov.anulado ? (
+                        <span className="text-amber-800 font-semibold text-xs">Anulado</span>
+                      ) : (
+                        <span className="text-emerald-700 font-medium text-xs">Vigente</span>
+                      )}
+                    </td>
+                    <td
+                      className={`table-enterprise-col-monto text-lg font-bold align-middle ${
+                        mov.anulado ? 'text-slate-500' : mov.tipo === 'ingreso' ? 'text-green-600' : 'text-red-600'
+                      }`}
+                    >
                       {mov.tipo === 'ingreso' ? '+' : '-'}${formatCurrency(Math.abs(mov.monto))}
                     </td>
-                    <td className="pl-3 text-center">
-                      {mov.tipo === 'egreso' && (
-                        <button
-                          onClick={async () => {
-                            try {
-                              await tesoreriaApi.descargarComprobanteEgreso(mov.id);
-                            } catch (error) {
-                              console.error('Error:', error);
-                              setFeedback({
-                                type: 'error',
-                                message: 'No fue posible descargar el comprobante. Intenta nuevamente.',
-                              });
-                            }
-                          }}
-                          className="btn-chip border-red-300 bg-red-50 text-red-700 hover:bg-red-100 px-3 py-1 inline-flex items-center gap-1"
-                          title="Descargar comprobante de egreso"
-                        >
-                          <Download className="w-3 h-3" />
-                          Comprobante
-                        </button>
-                      )}
+                    <td className="table-enterprise-col-actions align-middle">
+                      <div className="flex flex-col sm:flex-row flex-wrap gap-1 justify-end items-end sm:items-center">
+                        {mov.tipo === 'egreso' && !mov.anulado && (
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await tesoreriaApi.descargarComprobanteEgreso(mov.id);
+                              } catch (error) {
+                                console.error('Error:', error);
+                                setFeedback({
+                                  type: 'error',
+                                  message: 'No fue posible descargar el comprobante. Intenta nuevamente.',
+                                });
+                              }
+                            }}
+                            className="btn-chip border-red-300 bg-red-50 text-red-700 hover:bg-red-100 px-3 py-1 inline-flex items-center gap-1"
+                            title="Descargar comprobante de egreso"
+                          >
+                            <Download className="w-3 h-3" />
+                            Comprobante
+                          </button>
+                        )}
+                        {!mov.anulado && (
+                          <button
+                            type="button"
+                            onClick={() => setMovEliminar(mov)}
+                            className="btn-chip border-slate-300 bg-white text-slate-800 hover:bg-red-50 hover:border-red-300 hover:text-red-800 px-3 py-1 inline-flex items-center gap-1"
+                            title="Anular movimiento y revertir saldo"
+                          >
+                            <Trash2 className="w-3 h-3" />
+                            Eliminar
+                          </button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -1144,6 +1378,65 @@ function Historial() {
           <p className="text-center text-slate-500 py-8">No hay movimientos para mostrar</p>
         )}
       </div>
+
+      {movEliminar && (
+        <div
+          className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-[100] p-4"
+          role="presentation"
+          onClick={(e) => {
+            if (e.target === e.currentTarget && !anularMutation.isLoading) setMovEliminar(null);
+          }}
+        >
+          <div
+            className="modal-panel max-w-md w-full shadow-xl"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="eliminar-tesoreria-titulo"
+            onClick={(ev) => ev.stopPropagation()}
+          >
+            <div className="p-6">
+              <h3
+                id="eliminar-tesoreria-titulo"
+                className="text-lg font-bold text-slate-900 flex items-center gap-2 mb-2"
+              >
+                <AlertTriangle className="w-6 h-6 text-amber-600 shrink-0" />
+                ¿Eliminar este movimiento?
+              </h3>
+              <p className="text-sm text-slate-600 mb-3">
+                Se <strong>anulará</strong> el registro (no se borra del historial). El{' '}
+                <strong>saldo de tesorería</strong> y el <strong>conteo de efectivo por billetes</strong>{' '}
+                volverán al estado de <strong>antes</strong> de este movimiento. Luego puedes registrarlo de
+                nuevo con los datos correctos.
+              </p>
+              <div className="rounded-lg bg-slate-50 border border-slate-200 p-3 text-sm mb-4">
+                <p className="font-semibold text-slate-800">
+                  {movEliminar.tipo === 'ingreso' ? 'Ingreso' : 'Egreso'} · $
+                  {formatCurrency(Math.abs(movEliminar.monto))}
+                </p>
+                <p className="text-slate-600 mt-1">{movEliminar.concepto}</p>
+              </div>
+              <div className="flex flex-col-reverse sm:flex-row gap-3">
+                <button
+                  type="button"
+                  className="flex-1 btn-pos btn-secondary"
+                  disabled={anularMutation.isLoading}
+                  onClick={() => setMovEliminar(null)}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="button"
+                  className="flex-1 btn-pos btn-primary bg-red-600 border-red-600 hover:bg-red-700"
+                  disabled={anularMutation.isLoading}
+                  onClick={() => anularMutation.mutate(movEliminar.id)}
+                >
+                  {anularMutation.isLoading ? 'Procesando…' : 'Sí, anular movimiento'}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

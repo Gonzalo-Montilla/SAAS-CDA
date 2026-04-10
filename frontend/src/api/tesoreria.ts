@@ -13,6 +13,9 @@ export interface MovimientoTesoreria {
   fecha_movimiento: string;
   created_at: string;
   created_by: string;
+  anulado?: boolean;
+  motivo_anulacion?: string | null;
+  fecha_anulacion?: string | null;
 }
 
 export interface ResumenTesoreria {
@@ -29,6 +32,16 @@ export interface ResumenTesoreria {
 export interface DesgloseSaldo {
   desglose: Record<string, number>;
   total: number;
+  fecha_calculo: string;
+}
+
+/** Respuesta de /tesoreria/desglose-efectivo */
+export interface DesgloseEfectivoTesoreriaResponse {
+  desglose: Record<string, number>;
+  /** Suma contable de todos los movimientos en efectivo (igual que desglose-saldo → efectivo). */
+  total_efectivo: number;
+  /** Suma según denominaciones registradas; puede ser menor si hay movimientos antiguos sin desglose. */
+  total_desglosado: number;
   fecha_calculo: string;
 }
 
@@ -66,8 +79,23 @@ export const tesoreriaApi = {
     metodo_pago?: string;
     limit?: number;
     consolidar_todas?: boolean;
+    /** true = solo vigentes (excluye anulados). false = incluye anulados. */
+    solo_activos?: boolean;
   }): Promise<MovimientoTesoreria[]> => {
     const response = await apiClient.get<MovimientoTesoreria[]>('/tesoreria/movimientos', { params });
+    return response.data;
+  },
+
+  anularMovimiento: async (
+    movimientoId: string,
+    params?: { consolidar_todas?: boolean },
+    body?: { motivo?: string }
+  ): Promise<MovimientoTesoreria> => {
+    const response = await apiClient.post<MovimientoTesoreria>(
+      `/tesoreria/movimientos/${movimientoId}/anular`,
+      body ?? {},
+      { params }
+    );
     return response.data;
   },
 
@@ -100,8 +128,13 @@ export const tesoreriaApi = {
     return response.data;
   },
 
-  obtenerDesgloseEfectivo: async (params?: { consolidar_todas?: boolean }): Promise<any> => {
-    const response = await apiClient.get('/tesoreria/desglose-efectivo', { params });
+  obtenerDesgloseEfectivo: async (
+    params?: { consolidar_todas?: boolean }
+  ): Promise<DesgloseEfectivoTesoreriaResponse> => {
+    const response = await apiClient.get<DesgloseEfectivoTesoreriaResponse>(
+      '/tesoreria/desglose-efectivo',
+      { params }
+    );
     return response.data;
   },
 

@@ -1,10 +1,10 @@
 """
 Endpoints de Tesorería (Caja Fuerte)
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func, desc
+from sqlalchemy import and_, func, desc, or_
 from datetime import datetime, timedelta, date, timezone
 from decimal import Decimal
 from typing import List, Optional
@@ -25,6 +25,7 @@ from app.models.tesoreria import (
 from app.schemas.tesoreria import (
     MovimientoTesoreriaCreate,
     MovimientoTesoreriaResponse,
+    MovimientoTesoreriaAnular,
     ResumenTesoreria,
     ConfiguracionTesoreriaResponse,
     ConfiguracionTesoreriaUpdate,
@@ -40,14 +41,46 @@ def _tesoreria_sucursal_scope(consolidar_todas: bool, active_sucursal_id: UUID) 
     return None if consolidar_todas else active_sucursal_id
 
 
-def _filter_movimientos_tesoreria(q, tenant_id, scope_sid: Optional[UUID]):
+def _filter_movimientos_tesoreria(
+    q,
+    tenant_id,
+    scope_sid: Optional[UUID],
+    *,
+    solo_activos: bool = True,
+):
     q = q.filter(MovimientoTesoreria.tenant_id == tenant_id)
     if scope_sid is not None:
         q = q.filter(MovimientoTesoreria.sucursal_id == scope_sid)
+    if solo_activos:
+        q = q.filter(
+            or_(MovimientoTesoreria.anulado == False, MovimientoTesoreria.anulado.is_(None))
+        )
     return q
 
 
 # ==================== FUNCIONES AUXILIARES ====================
+
+def _total_pesos_desde_denominaciones(desglose: dict) -> Decimal:
+    """Suma en pesos a partir del mapa de cantidades por denominación (coherente con DesgloseEfectivoCreate)."""
+    pairs = [
+        ("billetes_100000", 100000),
+        ("billetes_50000", 50000),
+        ("billetes_20000", 20000),
+        ("billetes_10000", 10000),
+        ("billetes_5000", 5000),
+        ("billetes_2000", 2000),
+        ("billetes_1000", 1000),
+        ("monedas_1000", 1000),
+        ("monedas_500", 500),
+        ("monedas_200", 200),
+        ("monedas_100", 100),
+        ("monedas_50", 50),
+    ]
+    total = Decimal(0)
+    for key, unit in pairs:
+        total += Decimal(int(desglose.get(key, 0) or 0)) * Decimal(unit)
+    return total
+
 
 def _calcular_desglose_disponible(db: Session, tenant_id, sucursal_id: Optional[UUID]) -> dict:
     """
@@ -55,8 +88,9 @@ def _calcular_desglose_disponible(db: Session, tenant_id, sucursal_id: Optional[
     Retorna un diccionario con las cantidades de cada denominación.
     """
     q = db.query(MovimientoTesoreria).filter(
-        MovimientoTesoreria.metodo_pago == "efectivo",
+        MovimientoTesoreria.metodo_pago == MetodoPagoTesoreria.EFECTIVO,
         MovimientoTesoreria.tenant_id == tenant_id,
+        or_(MovimientoTesoreria.anulado == False, MovimientoTesoreria.anulado.is_(None)),
     )
     if sucursal_id is not None:
         q = q.filter(MovimientoTesoreria.sucursal_id == sucursal_id)
@@ -169,7 +203,7 @@ def crear_movimiento(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Debe especificar una categoría de egreso válida"
         )
-    
+
     # Validar desglose de efectivo si el método de pago es efectivo
     if movimiento_data.metodo_pago == "efectivo":
         if not movimiento_data.desglose_efectivo:
@@ -283,6 +317,10 @@ def listar_movimientos(
     metodo_pago: Optional[str] = None,
     limit: int = Query(100, le=500),
     consolidar_todas: bool = Query(False, description="Incluir todas las sedes (vista consolidada)"),
+    solo_activos: bool = Query(
+        False,
+        description="Si es true, excluye movimientos anulados (útil en resúmenes recientes).",
+    ),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_admin),
     active_sucursal_id: UUID = Depends(get_active_sucursal_id),
@@ -295,11 +333,18 @@ def listar_movimientos(
         db.query(MovimientoTesoreria),
         current_user.tenant_id,
         scope_sid,
+        solo_activos=solo_activos,
     )
 
     # Aplicar filtros
     if tipo:
-        query = query.filter(MovimientoTesoreria.tipo == tipo)
+        try:
+            query = query.filter(MovimientoTesoreria.tipo == TipoMovimientoTesoreria(tipo))
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tipo de movimiento inválido (use ingreso o egreso)",
+            )
     
     if categoria:
         query = query.filter(
@@ -316,7 +361,15 @@ def listar_movimientos(
         query = query.filter(MovimientoTesoreria.fecha_movimiento <= fecha_hasta_dt)
     
     if metodo_pago:
-        query = query.filter(MovimientoTesoreria.metodo_pago == metodo_pago)
+        try:
+            query = query.filter(
+                MovimientoTesoreria.metodo_pago == MetodoPagoTesoreria(metodo_pago)
+            )
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Método de pago inválido",
+            )
     
     movimientos = query.order_by(desc(MovimientoTesoreria.fecha_movimiento)).limit(limit).all()
     
@@ -339,6 +392,7 @@ def obtener_movimiento(
         db.query(MovimientoTesoreria),
         current_user.tenant_id,
         scope_sid,
+        solo_activos=False,
     )
     movimiento = q.filter(MovimientoTesoreria.id == movimiento_id).first()
 
@@ -349,6 +403,43 @@ def obtener_movimiento(
         )
     
     return movimiento
+
+
+@router.post("/movimientos/{movimiento_id}/anular", response_model=MovimientoTesoreriaResponse)
+def anular_movimiento(
+    movimiento_id: str,
+    body: MovimientoTesoreriaAnular = Body(default_factory=MovimientoTesoreriaAnular),
+    consolidar_todas: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
+):
+    """
+    Anula un movimiento: deja de afectar saldo y desglose de efectivo (no borra el registro).
+    """
+    scope_sid = _tesoreria_sucursal_scope(consolidar_todas, active_sucursal_id)
+    q = _filter_movimientos_tesoreria(
+        db.query(MovimientoTesoreria),
+        current_user.tenant_id,
+        scope_sid,
+        solo_activos=False,
+    )
+    mov = q.filter(MovimientoTesoreria.id == movimiento_id).first()
+    if not mov:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Movimiento no encontrado")
+    if mov.anulado:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Este movimiento ya está anulado.",
+        )
+    motivo = (body.motivo or "").strip() or "Anulado desde el panel de tesorería"
+    mov.anulado = True
+    mov.motivo_anulacion = motivo
+    mov.anulado_por = current_user.id
+    mov.fecha_anulacion = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(mov)
+    return mov
 
 
 # ==================== SALDO Y RESUMEN ====================
@@ -442,10 +533,16 @@ def obtener_resumen(
     )
 
     if scope_sid is None:
-        config = (
+        configs = (
             db.query(ConfiguracionTesoreria)
             .filter(ConfiguracionTesoreria.tenant_id == current_user.tenant_id)
-            .first()
+            .all()
+        )
+        # Vista consolidada: umbral = suma de mínimos por sede (cada sede debería mantener su piso).
+        umbral_minimo = (
+            sum((c.saldo_minimo_alerta or Decimal(0)) for c in configs)
+            if configs
+            else Decimal(100000)
         )
     else:
         config = (
@@ -456,7 +553,7 @@ def obtener_resumen(
             )
             .first()
         )
-    umbral_minimo = config.saldo_minimo_alerta if config else Decimal(100000)
+        umbral_minimo = config.saldo_minimo_alerta if config else Decimal(100000)
     saldo_bajo_umbral = saldo_actual < umbral_minimo
     
     return ResumenTesoreria(
@@ -502,7 +599,8 @@ def obtener_desglose_saldo(
     
     for metodo, saldo in resultados:
         saldo_decimal = Decimal(str(saldo)) if saldo else Decimal(0)
-        desglose[metodo] = float(saldo_decimal)
+        key = metodo.value if isinstance(metodo, MetodoPagoTesoreria) else str(metodo)
+        desglose[key] = float(saldo_decimal)
         total += saldo_decimal
     
     return {
@@ -529,9 +627,12 @@ def obtener_desglose_efectivo(
             current_user.tenant_id,
             scope_sid,
         )
-        .filter(MovimientoTesoreria.metodo_pago == "efectivo")
+        .filter(MovimientoTesoreria.metodo_pago == MetodoPagoTesoreria.EFECTIVO)
         .all()
     )
+
+    # Total contable: todos los movimientos en efectivo (coincide con /desglose-saldo).
+    total_efectivo_contable = sum((Decimal(str(mov.monto)) for mov in movimientos_efectivo), Decimal(0))
     
     # Inicializar contadores
     desglose_total = {
@@ -549,16 +650,10 @@ def obtener_desglose_efectivo(
         'monedas_50': 0,
     }
     
-    total_efectivo = Decimal(0)
-    
     # Sumar/restar desgloses según tipo de movimiento
-    # IMPORTANTE: Solo contar movimientos que tienen desglose registrado
+    # IMPORTANTE: Solo movimientos con desglose afectan el inventario por denominación
     for mov in movimientos_efectivo:
-        # Solo procesar si tiene desglose
         if mov.desglose_efectivo:
-            # Sumar al total
-            total_efectivo += mov.monto
-            
             desg = mov.desglose_efectivo
             multiplicador = 1 if mov.monto > 0 else -1  # Ingresos suman, egresos restan
             
@@ -574,10 +669,13 @@ def obtener_desglose_efectivo(
             desglose_total['monedas_200'] += int(desg.monedas_200 or 0) * multiplicador
             desglose_total['monedas_100'] += int(desg.monedas_100 or 0) * multiplicador
             desglose_total['monedas_50'] += int(desg.monedas_50 or 0) * multiplicador
+
+    total_desglosado = _total_pesos_desde_denominaciones(desglose_total)
     
     return {
         "desglose": desglose_total,
-        "total_efectivo": float(total_efectivo),
+        "total_efectivo": float(total_efectivo_contable),
+        "total_desglosado": float(total_desglosado),
         "fecha_calculo": datetime.now(timezone.utc).isoformat()
     }
 
@@ -754,6 +852,7 @@ async def descargar_comprobante_egreso(
             db.query(MovimientoTesoreria),
             current_user.tenant_id,
             scope_sid,
+            solo_activos=False,
         )
         .filter(MovimientoTesoreria.id == movimiento_id)
         .first()
@@ -763,6 +862,12 @@ async def descargar_comprobante_egreso(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Movimiento no encontrado"
+        )
+
+    if movimiento.anulado:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se puede descargar el comprobante de un movimiento anulado.",
         )
     
     # Validar que sea un egreso
@@ -843,7 +948,8 @@ def obtener_categorias(
             {"value": "prestamo", "label": "Préstamo"},
             {"value": "aporte_socio", "label": "Aporte de Socio"},
             {"value": "ingreso_externo", "label": "Ingreso Externo"},
-            {"value": "otro_ingreso", "label": "Otro Ingreso"}
+            {"value": "otro_ingreso", "label": "Otro Ingreso"},
+            {"value": "ajuste_correccion", "label": "Ajuste / corrección de monto"},
         ],
         "egresos": [
             {"value": "nomina", "label": "Nómina y Salarios"},
@@ -853,7 +959,8 @@ def obtener_categorias(
             {"value": "compra_inventario", "label": "Compra de Inventario"},
             {"value": "mantenimiento", "label": "Mantenimiento"},
             {"value": "impuestos", "label": "Impuestos"},
-            {"value": "otros_gastos", "label": "Otros Gastos"}
+            {"value": "otros_gastos", "label": "Otros Gastos"},
+            {"value": "ajuste_correccion", "label": "Ajuste / corrección de monto"},
         ],
         "metodos_pago": [
             {"value": "efectivo", "label": "Efectivo"},

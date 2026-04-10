@@ -1,23 +1,27 @@
 """
 Endpoints de Reportes - Dashboard General y Consolidados
 """
-from fastapi import APIRouter, Depends, Query, Request
-from sqlalchemy.orm import Session
-from sqlalchemy import func, and_
-from datetime import datetime, timedelta, date, timezone
+from collections import defaultdict
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import func, and_, or_, cast, Date
+from datetime import datetime, timedelta, date, time, timezone
 from decimal import Decimal
 from typing import Optional
 from calendar import monthrange
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from app.core.deps import get_db, get_contador_or_admin
-from app.core.sucursal_scope import resolve_reporte_sucursal_id
+from app.core.sucursal_scope import resolve_reporte_sucursal_id, get_principal_sucursal_id
 from app.models.usuario import Usuario
-from app.models.caja import MovimientoCaja, Caja
+from app.models.caja import MovimientoCaja, Caja, EstadoCaja
 from app.models.tesoreria import MovimientoTesoreria
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo
 from app.models.sucursal import Sucursal
 from app.models.factus import FacturaElectronica
+from app.models.appointment import Appointment
 
 router = APIRouter()
 
@@ -30,6 +34,18 @@ def _vp_scope(tenant_id, scope_sid: Optional[UUID], *extra):
 
 
 def _mt_scope(tenant_id, scope_sid: Optional[UUID], *extra):
+    cond = [
+        MovimientoTesoreria.tenant_id == tenant_id,
+        or_(MovimientoTesoreria.anulado == False, MovimientoTesoreria.anulado.is_(None)),
+        *extra,
+    ]
+    if scope_sid is not None:
+        cond.append(MovimientoTesoreria.sucursal_id == scope_sid)
+    return and_(*cond)
+
+
+def _mt_scope_incluye_anulados(tenant_id, scope_sid: Optional[UUID], *extra):
+    """Listados donde conviene ver también movimientos anulados."""
     cond = [MovimientoTesoreria.tenant_id == tenant_id, *extra]
     if scope_sid is not None:
         cond.append(MovimientoTesoreria.sucursal_id == scope_sid)
@@ -575,7 +591,7 @@ def obtener_movimientos_detallados(
     movimientos_tesoreria = (
         db.query(MovimientoTesoreria)
         .filter(
-            _mt_scope(
+            _mt_scope_incluye_anulados(
                 tid,
                 scope_sid,
                 MovimientoTesoreria.fecha_movimiento >= fecha_inicio_dt,
@@ -618,6 +634,7 @@ def obtener_movimientos_detallados(
             "metodo_pago": mov.metodo_pago.value,
             "usuario": usuario_nombre,
             "numero_comprobante": mov.numero_comprobante or "N/A",
+            "anulado": bool(getattr(mov, "anulado", False)),
             "vehiculo_id": None,
             "numero_factura_dian": None,
             "factura_public_url": None,
@@ -1060,3 +1077,298 @@ def obtener_resumen_mensual(
         "promedio_diario_ingresos": total_ingresos / dias_mes,
         "promedio_diario_egresos": total_egresos / dias_mes,
     }
+
+
+# --- Métricas de agendamiento (tenant completo; las citas no llevan sede en el modelo actual) ---
+
+
+class AgendamientoMetricasPorEstado(BaseModel):
+    scheduled: int = 0
+    confirmed: int = 0
+    checked_in: int = 0
+    cancelled: int = 0
+    no_show: int = 0
+
+
+class AgendamientoMetricasOrigen(BaseModel):
+    public_link: int = 0
+    manual: int = 0
+    otros: int = 0
+
+
+class AgendamientoSerieDia(BaseModel):
+    fecha: str
+    total: int
+    checked_in: int
+    canceladas: int
+    no_show: int = 0
+
+
+class AgendamientoMetricasResponse(BaseModel):
+    periodo: str
+    fecha_generacion: str
+    total_citas: int
+    por_estado: AgendamientoMetricasPorEstado
+    por_origen: AgendamientoMetricasOrigen
+    citas_con_email: int = Field(description="Citas con correo del cliente (elegibles para recordatorio)")
+    citas_sin_email: int
+    recordatorios_enviados: int
+    recordatorios_pendientes: int
+    recordatorios_fallidos: int
+    recordatorios_omitidos: int
+    tasa_check_in_pct: float = Field(
+        description="Check-in / citas no canceladas en el periodo (0–100)"
+    )
+    serie_diaria: list[AgendamientoSerieDia] = Field(default_factory=list)
+
+
+@router.get("/agendamiento-metricas", response_model=AgendamientoMetricasResponse)
+def obtener_agendamiento_metricas(
+    fecha: Optional[date] = Query(None, description="Día único (default hoy si no hay rango)"),
+    fecha_inicio: Optional[date] = Query(None),
+    fecha_fin: Optional[date] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """
+    KPIs de citas del tenant para el panel de reportes (actualización periódica vía refetch en el cliente).
+    Alcance: todo el tenant; el modelo de citas no discrimina por sede.
+    """
+    try:
+        inicio_dt, fin_dt, etiqueta = resolve_report_date_window(
+            fecha=fecha,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    tid = current_user.tenant_id
+    rows = (
+        db.query(Appointment)
+        .filter(
+            Appointment.tenant_id == tid,
+            Appointment.scheduled_at >= inicio_dt,
+            Appointment.scheduled_at <= fin_dt,
+        )
+        .all()
+    )
+
+    por_estado = AgendamientoMetricasPorEstado()
+    origen_pub = 0
+    origen_manual = 0
+    origen_otros = 0
+    con_email = 0
+    sin_email = 0
+    rec_enviados = 0
+    rec_pendientes = 0
+    rec_fallidos = 0
+    rec_omitidos = 0
+
+    serie: dict[str, dict[str, int]] = defaultdict(lambda: {"total": 0, "checked_in": 0, "canceladas": 0, "no_show": 0})
+
+    for r in rows:
+        st = (r.status or "").strip().lower()
+        if st == "scheduled":
+            por_estado.scheduled += 1
+        elif st == "confirmed":
+            por_estado.confirmed += 1
+        elif st == "checked_in":
+            por_estado.checked_in += 1
+        elif st == "cancelled":
+            por_estado.cancelled += 1
+        elif st == "no_show":
+            por_estado.no_show += 1
+
+        src = (r.source or "").strip().lower()
+        if src == "public_link":
+            origen_pub += 1
+        elif src == "manual":
+            origen_manual += 1
+        else:
+            origen_otros += 1
+
+        if (r.cliente_email or "").strip():
+            con_email += 1
+        else:
+            sin_email += 1
+
+        rs = (r.reminder_status or "pending").strip().lower()
+        if r.reminder_sent_at is not None:
+            rec_enviados += 1
+        elif rs == "failed":
+            rec_fallidos += 1
+        elif rs == "skipped":
+            rec_omitidos += 1
+        elif rs == "pending" and (r.cliente_email or "").strip():
+            rec_pendientes += 1
+
+        day_key = r.scheduled_at.date().isoformat() if r.scheduled_at else None
+        if day_key:
+            serie[day_key]["total"] += 1
+            if st == "checked_in":
+                serie[day_key]["checked_in"] += 1
+            if st == "cancelled":
+                serie[day_key]["canceladas"] += 1
+            if st == "no_show":
+                serie[day_key]["no_show"] += 1
+
+    total = len(rows)
+    no_canceladas = total - por_estado.cancelled
+    tasa_check_in = round(100.0 * por_estado.checked_in / no_canceladas, 1) if no_canceladas > 0 else 0.0
+
+    serie_list = [
+        AgendamientoSerieDia(
+            fecha=k,
+            total=v["total"],
+            checked_in=v["checked_in"],
+            canceladas=v["canceladas"],
+            no_show=v["no_show"],
+        )
+        for k, v in sorted(serie.items())
+    ]
+
+    return AgendamientoMetricasResponse(
+        periodo=etiqueta,
+        fecha_generacion=datetime.now(timezone.utc).isoformat(),
+        total_citas=total,
+        por_estado=por_estado,
+        por_origen=AgendamientoMetricasOrigen(
+            public_link=origen_pub,
+            manual=origen_manual,
+            otros=origen_otros,
+        ),
+        citas_con_email=con_email,
+        citas_sin_email=sin_email,
+        recordatorios_enviados=rec_enviados,
+        recordatorios_pendientes=rec_pendientes,
+        recordatorios_fallidos=rec_fallidos,
+        recordatorios_omitidos=rec_omitidos,
+        tasa_check_in_pct=tasa_check_in,
+        serie_diaria=serie_list,
+    )
+
+
+CIERRES_CAJA_REPORTE_MAX_DIAS = 366
+CIERRES_CAJA_REPORTE_MAX_LIMIT = 500
+
+
+class CierreCajaReporteItem(BaseModel):
+    """Cierre de caja para auditoría en panel de reportes (admin/contador)."""
+
+    id: UUID
+    cajero_nombre: str
+    sucursal_nombre: Optional[str] = None
+    fecha_apertura: datetime
+    fecha_cierre: Optional[datetime] = None
+    turno: str
+    monto_inicial: Decimal
+    monto_final_sistema: Optional[Decimal] = None
+    monto_final_fisico: Optional[Decimal] = None
+    diferencia: Optional[Decimal] = None
+    observaciones_cierre: Optional[str] = None
+
+
+@router.get("/cierres-caja", response_model=list[CierreCajaReporteItem])
+def listar_cierres_caja_reporte(
+    request: Request,
+    fecha_cierre_desde: date = Query(..., description="Inicio del rango por día de cierre (Colombia)"),
+    fecha_cierre_hasta: date = Query(..., description="Fin del rango por día de cierre (Colombia)"),
+    limit: int = Query(200, ge=1, le=CIERRES_CAJA_REPORTE_MAX_LIMIT),
+    sucursal_id: Optional[UUID] = Query(None),
+    consolidar_todas: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """
+    Historial de cierres de caja por cajero para auditoría gerencial.
+    Respeta el mismo alcance de sede que el resto de reportes (activa, sede elegida o todas).
+    """
+    if fecha_cierre_desde > fecha_cierre_hasta:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La fecha inicial no puede ser posterior a la final",
+        )
+    if (fecha_cierre_hasta - fecha_cierre_desde).days > CIERRES_CAJA_REPORTE_MAX_DIAS:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"El rango máximo permitido es de {CIERRES_CAJA_REPORTE_MAX_DIAS} días",
+        )
+
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=sucursal_id,
+        consolidar_todas=consolidar_todas,
+    )
+    tid = current_user.tenant_id
+    principal_id = get_principal_sucursal_id(db, tid)
+
+    query = (
+        db.query(Caja)
+        .options(joinedload(Caja.usuario), joinedload(Caja.sucursal))
+        .filter(
+            Caja.tenant_id == tid,
+            Caja.estado == EstadoCaja.CERRADA,
+            Caja.fecha_cierre.isnot(None),
+        )
+    )
+
+    if scope_sid is not None:
+        query = query.filter(
+            or_(
+                Caja.sucursal_id == scope_sid,
+                and_(Caja.sucursal_id.is_(None), scope_sid == principal_id),
+            )
+        )
+
+    bind = db.get_bind()
+    if bind.dialect.name == "postgresql":
+        utc_tstz = func.timezone("UTC", Caja.fecha_cierre)
+        bogota_naive = func.timezone("America/Bogota", utc_tstz)
+        dia_cierre = cast(bogota_naive, Date)
+        query = query.filter(
+            dia_cierre >= fecha_cierre_desde,
+            dia_cierre <= fecha_cierre_hasta,
+        )
+    else:
+        tz = ZoneInfo("America/Bogota")
+        start_local = datetime.combine(fecha_cierre_desde, time.min, tzinfo=tz)
+        end_exclusive_local = datetime.combine(fecha_cierre_hasta + timedelta(days=1), time.min, tzinfo=tz)
+        start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
+        end_utc = end_exclusive_local.astimezone(timezone.utc).replace(tzinfo=None)
+        query = query.filter(
+            Caja.fecha_cierre >= start_utc,
+            Caja.fecha_cierre < end_utc,
+        )
+
+    cajas = query.order_by(Caja.fecha_cierre.desc()).limit(limit).all()
+
+    out: list[CierreCajaReporteItem] = []
+    for caja in cajas:
+        u = caja.usuario
+        cajero_nombre = (u.nombre_completo or "").strip() if u else ""
+        if not cajero_nombre:
+            cajero_nombre = "—"
+        sede_nombre = None
+        if caja.sucursal and getattr(caja.sucursal, "nombre", None):
+            sede_nombre = caja.sucursal.nombre
+        turno_val = caja.turno.value if hasattr(caja.turno, "value") else str(caja.turno)
+        out.append(
+            CierreCajaReporteItem(
+                id=caja.id,
+                cajero_nombre=cajero_nombre,
+                sucursal_nombre=sede_nombre,
+                fecha_apertura=caja.fecha_apertura,
+                fecha_cierre=caja.fecha_cierre,
+                turno=turno_val,
+                monto_inicial=caja.monto_inicial,
+                monto_final_sistema=caja.monto_final_sistema,
+                monto_final_fisico=caja.monto_final_fisico,
+                diferencia=caja.diferencia,
+                observaciones_cierre=caja.observaciones_cierre,
+            )
+        )
+    return out

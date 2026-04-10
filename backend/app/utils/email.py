@@ -178,6 +178,31 @@ def _render_email_corporativo(title: str, body_html: str, label: str = "CDASOFT"
     """
 
 
+def _email_cta_button(href: str, text: str) -> str:
+    """Botón CTA en HTML para correos (tabla + estilos inline; mejor soporte en clientes de correo)."""
+    href_esc = html.escape(href, quote=True)
+    text_esc = html.escape(text)
+    # Mismo degradado que .brand-head; bgcolor fallback para clientes sin gradiente.
+    btn_td = (
+        '<td align="center" bgcolor="#0f172a" '
+        'style="border-radius:8px;background-color:#0f172a;'
+        'background-image:linear-gradient(135deg,#0f172a,#1e3a8a);">'
+        f'<a href="{href_esc}" target="_blank" rel="noopener noreferrer" '
+        'style="display:inline-block;padding:14px 26px;font-family:Segoe UI,Arial,sans-serif;'
+        'font-size:15px;font-weight:600;color:#ffffff !important;text-decoration:none;'
+        'line-height:1.25;mso-line-height-rule:exactly;">'
+        f"{text_esc}</a></td>"
+    )
+    return (
+        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
+        'style="width:100%;border-collapse:collapse;margin:0;">'
+        '<tr><td align="center" style="padding:14px 0 0 0;">'
+        '<table role="presentation" cellspacing="0" cellpadding="0" border="0" '
+        'style="border-collapse:separate;mso-table-lspace:0pt;mso-table-rspace:0pt;">'
+        f"<tr>{btn_td}</tr></table></td></tr></table>"
+    )
+
+
 def generar_email_recuperacion_password(
     nombre: str,
     enlace_reset: str,
@@ -334,12 +359,8 @@ def generar_email_recibo_pago_cliente(
         if num:
             fac_block += f"<strong>Factura electrónica (DIAN):</strong> {html.escape(num)}<br />"
         if factura_url:
-            u_esc = html.escape(factura_url, quote=True)
-            fac_block += f'<a href="{u_esc}">Ver o descargar factura electrónica</a>'
-            fac_block += (
-                '<br /><span class="muted" style="word-break:break-all;font-size:12px;">'
-                + html.escape(factura_url)
-                + "</span>"
+            fac_block += _email_cta_button(
+                factura_url, "Ver o descargar factura electrónica"
             )
         fac_block += "</p>"
 

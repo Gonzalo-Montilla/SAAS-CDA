@@ -1,3 +1,4 @@
+
 """
 Endpoints de autenticación global SaaS (backoffice).
 """
@@ -8,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy import func
 from sqlalchemy.orm import Session, aliased
 from uuid import UUID
 
@@ -531,7 +533,15 @@ def saas_login(
     form_data: OAuth2PasswordRequestForm = Depends(),
     db: Session = Depends(get_db),
 ):
-    user = db.query(SaaSUser).filter(SaaSUser.email == form_data.username).first()
+    # Misma UX que tenant: el mensaje es genérico; normalizar email evita fallos por mayúsculas/espacios.
+    email_key = (form_data.username or "").strip().lower()
+    user = (
+        db.query(SaaSUser)
+        .filter(func.lower(SaaSUser.email) == email_key)
+        .first()
+        if email_key
+        else None
+    )
     if not user:
         create_saas_audit_log(
             db=db,
