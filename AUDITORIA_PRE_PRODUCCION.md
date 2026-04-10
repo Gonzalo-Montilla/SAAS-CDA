@@ -2,6 +2,8 @@
 **Fecha**: 2 de Enero 2026  
 **Estado**: En Progreso
 
+**Nota:** El checklist operativo actual para go-live está en **[`PRODUCTION_CHECKLIST.md`](PRODUCTION_CHECKLIST.md)**. Este archivo conserva el histórico de hallazgos y correcciones.
+
 ---
 
 ## ✅ CORREGIDO

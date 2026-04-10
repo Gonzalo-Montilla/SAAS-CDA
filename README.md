@@ -2,6 +2,10 @@
 
 Sistema completo de gestión y punto de venta. CDASOFT — sistema integral para administracion de cda.
 
+### Salida a producción
+
+Antes de desplegar en un servidor real, sigue el **[checklist de producción](PRODUCTION_CHECKLIST.md)** (secretos, CORS, build del frontend con `VITE_API_URL`, base de datos, smoke tests y operación). Detalle de variables del backend: [`backend/GUIA_ENV_PRODUCCION.md`](backend/GUIA_ENV_PRODUCCION.md).
+
 ## 🚀 Características
 
 - ✅ **Módulo de Recepción**: Registro rápido de vehículos
@@ -115,7 +119,7 @@ Abre tu navegador en `http://localhost:8000/docs` y verás la documentación int
 
 7. **POST /api/v1/vehiculos/cobrar** - Cobrar vehículo
 
-### 6. Configurar Frontend (Pendiente)
+### 6. Configurar Frontend
 
 ```bash
 cd frontend
@@ -123,8 +127,13 @@ cd frontend
 # Instalar dependencias
 npm install
 
-# Crear .env.local
-echo "VITE_API_URL=http://localhost:8000/api/v1" > .env.local
+# Variables de entorno (plantilla con comentarios)
+cp .env.example .env.local   # Linux/macOS
+copy .env.example .env.local   # Windows
+
+# Edita .env.local: en local suele bastar VITE_API_URL=http://localhost:8000/api/v1
+# o el proxy de Vite según vite.config.ts. En PRODUCCIÓN el build DEBE definir
+# VITE_API_URL con la URL pública HTTPS del API — ver PRODUCTION_CHECKLIST.md
 
 # Iniciar desarrollo
 npm run dev

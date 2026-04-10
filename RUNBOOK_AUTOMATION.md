@@ -1,5 +1,7 @@
 # Runbook de Automatización SaaS
 
+La puesta en marcha en producción (cron, backups, variables) se cruza con **[`PRODUCTION_CHECKLIST.md`](PRODUCTION_CHECKLIST.md)**.
+
 Este runbook deja operativas las tareas automáticas críticas:
 
 - Cambio de estado de tenants demo/pago vencido.

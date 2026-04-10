@@ -1,5 +1,7 @@
 # Guía de Variables de Entorno para Producción
 
+Para una verificación ordenada por fases (incluye frontend, base de datos y smoke tests), usa primero el checklist del repositorio: **[`PRODUCTION_CHECKLIST.md`](../PRODUCTION_CHECKLIST.md)**.
+
 ## 📋 Checklist de Configuración
 
 Antes de deployar a producción, asegúrate de configurar correctamente todas las variables de entorno en el VPS de Hostinger.
