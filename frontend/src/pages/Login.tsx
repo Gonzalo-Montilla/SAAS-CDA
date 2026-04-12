@@ -27,8 +27,9 @@ function isValidColombianCell(value: string): boolean {
 export default function Login() {
   const { tenantSlug } = useParams<{ tenantSlug?: string }>();
   const location = useLocation();
-  const turnstileEnabled = import.meta.env.VITE_TURNSTILE_ENABLED === 'true';
-  const turnstileSiteKey = import.meta.env.VITE_TURNSTILE_SITE_KEY || '';
+  const turnstileSiteKey = String(import.meta.env.VITE_TURNSTILE_SITE_KEY ?? '').trim();
+  const turnstileEnvFlag = String(import.meta.env.VITE_TURNSTILE_ENABLED ?? '').toLowerCase();
+  const turnstileEnabled = turnstileEnvFlag === 'true' && turnstileSiteKey.length > 0;
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
