@@ -28,20 +28,23 @@ fi
 
 cd "$BACKEND_DIR"
 
-if [[ -f ".venv/bin/activate" ]]; then
-  # Linux/Mac virtualenv
-  # shellcheck disable=SC1091
-  source ".venv/bin/activate"
+# Intérprete del venv (cron no siempre hereda activate; rutas explícitas).
+if [[ -x "$BACKEND_DIR/venv/bin/python" ]]; then
+  PYTHON_BIN="$BACKEND_DIR/venv/bin/python"
+elif [[ -x "$BACKEND_DIR/.venv/bin/python" ]]; then
+  PYTHON_BIN="$BACKEND_DIR/.venv/bin/python"
 elif [[ -f ".venv/Scripts/activate" ]]; then
-  # Git Bash en Windows
   # shellcheck disable=SC1091
   source ".venv/Scripts/activate"
+  PYTHON_BIN="python"
+else
+  PYTHON_BIN="python3"
 fi
 
 {
   echo "======================================================"
   echo "[RUN] $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
-  python "scripts/run_saas_automation.py" \
+  "$PYTHON_BIN" "scripts/run_saas_automation.py" \
     --appointments-limit "$APPOINTMENTS_LIMIT" \
     --quality-limit "$QUALITY_LIMIT" \
     --rtm-limit "$RTM_LIMIT"
