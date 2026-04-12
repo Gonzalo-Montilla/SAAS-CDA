@@ -390,7 +390,7 @@ export default function Login() {
         <img
           src={loginWatermarkIcon}
           alt=""
-          className="absolute left-0 top-1/2 w-[min(125vw,720px)] sm:w-[min(118vw,880px)] lg:w-[min(102vw,1020px)] max-w-none h-auto -translate-y-1/2 -translate-x-[6%] sm:-translate-x-[10%] lg:-translate-x-[14%] opacity-[0.09] mix-blend-multiply select-none"
+          className="absolute left-0 top-1/2 w-[min(125vw,720px)] sm:w-[min(118vw,880px)] lg:w-[min(102vw,1020px)] max-w-none h-auto -translate-y-1/2 -translate-x-[6%] sm:-translate-x-[10%] lg:-translate-x-[14%] opacity-[0.12] mix-blend-multiply select-none"
         />
       </div>
 
