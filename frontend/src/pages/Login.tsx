@@ -7,6 +7,7 @@ import { apiClient } from '../api/client';
 import type { AuthScope, TenantSelfRegisterRequest } from '../types';
 import { PasswordInput } from '../components/PasswordInput';
 import { extractApiErrorMessage } from '../utils/apiError';
+import loginWatermarkIcon from '../assets/icono-marca-agua.png';
 
 function normalizeNitInput(value: string): string {
   return value.toUpperCase().replace(/[^0-9A-Z-]/g, '');
@@ -381,7 +382,19 @@ export default function Login() {
   }, [mostrarRegistroTenant]);
 
   return (
-    <div className="corporate-shell flex flex-col">
+    <div className="corporate-shell flex flex-col overflow-x-hidden">
+      <div
+        className="pointer-events-none absolute inset-0 z-[1] overflow-hidden"
+        aria-hidden
+      >
+        <img
+          src={loginWatermarkIcon}
+          alt=""
+          className="absolute left-0 top-1/2 w-[min(92vw,480px)] sm:w-[min(88vw,560px)] max-w-none h-auto -translate-y-1/2 -translate-x-[12%] sm:-translate-x-[10%] opacity-[0.09] mix-blend-multiply select-none"
+        />
+      </div>
+
+      <div className="relative z-10 flex flex-col flex-1">
       <div className="flex-1 flex items-center justify-center p-4">
         <div className="w-full max-w-md glass-card px-7 py-8">
           <div className="mb-8 flex flex-col items-center text-center">
@@ -861,6 +874,7 @@ export default function Login() {
           </p>
         )}
         <p>Copyright © 2026 Prometheus Tech. Todos los derechos reservados.</p>
+      </div>
       </div>
     </div>
   );
