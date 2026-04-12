@@ -1,6 +1,8 @@
 """
 Endpoints de Vehículos
 """
+import re
+import traceback
 from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File
@@ -43,6 +45,7 @@ from app.utils.email import (
 from app.utils.quality import create_quality_survey_invite
 from app.utils.rtm_reminders import schedule_rtm_renewal_reminder_for_vehicle
 from app.utils.comprobantes import generar_recibo_pago_vehiculo_pdf
+from app.utils.habeas_autorizacion_pdf import generar_habeas_autorizacion_pdf
 
 
 def _try_download_factura_pdf_desde_url_publica(url: str, max_bytes: int = 8 * 1024 * 1024) -> bytes | None:
@@ -332,11 +335,53 @@ def registrar_vehiculo(
                 else (tenant.nombre if tenant else "CDASOFT")
             )
             asunto = f"Bienvenido a {nombre_cda}"
+            correo_cda = (
+                (tenant.correo_electronico or "").strip()
+                if tenant
+                else ""
+            )
             cuerpo_html = generar_email_bienvenida_recepcion_cliente(
                 nombre_cda=nombre_cda,
                 placa_vehiculo=placa_upper,
+                correo_contacto_cda=correo_cda or None,
             )
-            enviar_email(cliente_email_normalizado, asunto, cuerpo_html)
+            adjuntos: list[tuple[str, bytes, str]] = []
+            try:
+                ahora_utc = datetime.now(timezone.utc)
+                pdf_bytes = generar_habeas_autorizacion_pdf(
+                    nombre_cda=nombre_cda,
+                    nit_cda=tenant.nit_cda if tenant else None,
+                    correo_cda=correo_cda or None,
+                    celular_cda=(tenant.celular or "").strip() if tenant else None,
+                    direccion_cda=(tenant.direccion_facturacion or "").strip() if tenant else None,
+                    tenant_logo_url=(tenant.logo_url or "").strip() if tenant else None,
+                    cliente_nombre=nuevo_vehiculo.cliente_nombre or "",
+                    cliente_documento=nuevo_vehiculo.cliente_documento or "",
+                    placa=placa_upper,
+                    cliente_email=cliente_email_normalizado,
+                    momento_aceptacion_utc=ahora_utc,
+                )
+                placa_fn = re.sub(r"[^A-Za-z0-9_-]+", "", placa_upper) or "vehiculo"
+                adjuntos.append(
+                    (
+                        f"Autorizacion-datos-personales-{placa_fn}.pdf",
+                        pdf_bytes,
+                        "application/pdf",
+                    )
+                )
+            except Exception as pdf_err:
+                print(
+                    f"[WARN] No se pudo generar PDF habeas data (correo se envía sin adjunto): {pdf_err}",
+                    flush=True,
+                )
+                traceback.print_exc()
+
+            enviar_email_con_adjuntos(
+                cliente_email_normalizado,
+                asunto,
+                cuerpo_html,
+                adjuntos,
+            )
         except Exception as e:
             print(f"[WARN] No se pudo enviar email de recepción al cliente: {e}")
     

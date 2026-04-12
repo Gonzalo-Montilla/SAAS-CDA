@@ -5,6 +5,9 @@ import react from '@vitejs/plugin-react';
 export default defineConfig({
   plugins: [react()],
   server: {
+    // 127.0.0.1 evita ambigüedad IPv6/localhost y reduce errores tipo net::ERR_HTTP2_PROTOCOL_ERROR con el proxy.
+    host: '127.0.0.1',
+    port: 5173,
     proxy: {
       // Mismo origen en dev: el front usa VITE_API_URL=/api/v1 y Vite reenvía al backend (evita CORS y fallos con localhost/IPv6).
       '/api': {

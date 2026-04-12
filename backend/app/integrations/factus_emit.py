@@ -87,6 +87,18 @@ def _nombre_linea_rtm_con_desglose(bruto_con_iva: Decimal) -> str:
     return s[:200]
 
 
+def _nombre_linea_terceros_con_desglose(bruto_con_iva: Decimal) -> str:
+    """Ítem terceros en factura electrónica: mismo IVA que RTM; texto requerido por negocio en descripción DIAN."""
+    base = _base_gravable_desde_total_con_iva_incluido_dian(bruto_con_iva)
+    iva = _quantize_moneda(bruto_con_iva - base)
+    p = int(settings.FACTUS_IVA_PORCENTAJE_GENERAL)
+    s = (
+        f"Servicios de terceros (RUNT, SICOV, BANCARIZACION, ANSV) — "
+        f"Base {_fmt_cop_nota(base)} + IVA {p}% {_fmt_cop_nota(iva)}"
+    )
+    return s[:200]
+
+
 def _nombre_linea_servicio_unico_con_desglose(bruto_con_iva: Decimal) -> str:
     base = _base_gravable_desde_total_con_iva_incluido_dian(bruto_con_iva)
     iva = _quantize_moneda(bruto_con_iva - base)
@@ -237,8 +249,9 @@ def _items_factura_cobro(
     Monto total a facturar = valor almacenado en vehiculo.valor_rtm (en registro es tarifa.valor_total:
     RTM + terceros). No incluye comisión SOAT.
 
-    Si hay tarifa alineada con ese total: línea 1 RTM con IVA (tarifa.valor_rtm = precio con IVA
-    incluido), línea 2 terceros sin IVA. Si no, una línea con todo gravado a la misma tarifa.
+    Si hay tarifa alineada con ese total: línea 1 RTM gravada (tarifa.valor_rtm = precio con IVA
+    incluido), línea 2 terceros gravada igual (tarifa.valor_terceros con IVA incluido, misma tarifa).
+    Si no, una línea con todo gravado a la misma tarifa.
 
     Factus exige `price` = precio **con impuestos incluidos**; la API desagrega base e IVA en totales y
     XML DIAN. La representación gráfica suele repetir ese valor en «Valor unitario»; el desglose
@@ -274,11 +287,11 @@ def _items_factura_cobro(
             items.append(
                 {
                     **_item_linea_comun(vehiculo.placa, "TER"),
-                    "name": "Servicios de terceros",
-                    "note": "Monto sin IVA (exento / 0%).",
+                    "name": _nombre_linea_terceros_con_desglose(ter_bruto),
+                    "note": _nota_desglose_linea_gravada_iva(ter_bruto),
                     "price": float(_quantize_moneda(ter_bruto)),
-                    "tax_rate": "0.00",
-                    "is_excluded": 1,
+                    "tax_rate": _iva_tax_rate_string_factus(),
+                    "is_excluded": 0,
                     "tribute_id": 1,
                 }
             )
@@ -357,7 +370,10 @@ def build_validate_body(
     addr_est = _resolve_establishment_address(sede, tenant)
 
     ref = f"cdsoft-{vehiculo.id.hex[:8]}-{uuid.uuid4().hex[:12]}"
-    obs = f"Placa {vehiculo.placa} — RTM + terceros (total servicio)"
+    obs = (
+        f"Placa {vehiculo.placa} — RTM + terceros "
+        f"(RUNT, SICOV, BANCARIZACION, ANSV) = total servicio"
+    )
 
     body: dict[str, Any] = {
         "document": "01",

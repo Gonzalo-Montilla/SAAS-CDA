@@ -2,12 +2,21 @@
 Utilidad para envío de emails
 """
 import html
+import re
 import smtplib
 from email import encoders
+from email.mime.application import MIMEApplication
 from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from app.core.config import settings
+
+
+def _ascii_attachment_filename(nombre: str) -> str:
+    """Nombre de archivo seguro para Content-Disposition (evita rechazos SMTP/clientes)."""
+    raw = (nombre or "adjunto").strip()
+    base = re.sub(r"[^\w.\-]+", "_", raw, flags=re.UNICODE)
+    return (base or "adjunto")[:180]
 
 
 def enviar_email(destinatario: str, asunto: str, cuerpo_html: str) -> bool:
@@ -62,17 +71,31 @@ def enviar_email_con_adjuntos(
         mensaje["To"] = destinatario
         mensaje["Subject"] = asunto
 
+        # alternative: texto plano + HTML mejora compatibilidad con clientes y adjuntos
         cuerpo = MIMEMultipart("alternative")
+        texto_plano = (
+            "Este mensaje requiere un cliente de correo con soporte HTML. "
+            "Si no ve el contenido formateado, contacte al CDA."
+        )
+        cuerpo.attach(MIMEText(texto_plano, "plain", "utf-8"))
         cuerpo.attach(MIMEText(cuerpo_html, "html", "utf-8"))
         mensaje.attach(cuerpo)
 
         for nombre, contenido, mime_type in adjuntos:
-            main_type, sub_type = (mime_type.split("/", 1) + ["octet-stream"])[:2]
-            part = MIMEBase(main_type, sub_type)
-            part.set_payload(contenido)
-            encoders.encode_base64(part)
-            part.add_header("Content-Disposition", f'attachment; filename="{nombre}"')
-            mensaje.attach(part)
+            if not contenido:
+                continue
+            fname = _ascii_attachment_filename(nombre)
+            if mime_type == "application/pdf":
+                part = MIMEApplication(contenido, _subtype="pdf")
+                part.add_header("Content-Disposition", "attachment", filename=fname)
+                mensaje.attach(part)
+            else:
+                main_type, sub_type = (mime_type.split("/", 1) + ["octet-stream"])[:2]
+                part = MIMEBase(main_type, sub_type)
+                part.set_payload(contenido)
+                encoders.encode_base64(part)
+                part.add_header("Content-Disposition", "attachment", filename=fname)
+                mensaje.attach(part)
 
         with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
             server.starttls()
@@ -286,8 +309,42 @@ def generar_email_bienvenida_tenant(nombre_cda: str, nombre_admin: str, login_ur
 def generar_email_bienvenida_recepcion_cliente(
     nombre_cda: str,
     placa_vehiculo: str,
+    *,
+    correo_contacto_cda: str | None = None,
 ) -> str:
-    """Email de bienvenida para cliente al registrar su vehículo en recepción."""
+    """Email de bienvenida para cliente al registrar su vehículo en recepción (incluye aviso Ley 1581)."""
+    safe_cda = html.escape(nombre_cda or "")
+    safe_placa = html.escape(placa_vehiculo or "")
+    contacto = (correo_contacto_cda or "").strip()
+    if contacto:
+        contacto_html = (
+            "Para ejercer sus derechos de <strong>acceso, rectificación, actualización, supresión y revocación</strong> "
+            "(según corresponda y según lo indicado en dicha política), puede escribirnos a "
+            f'<a href="mailto:{html.escape(contacto)}">{html.escape(contacto)}</a>.'
+        )
+    else:
+        contacto_html = (
+            "Para ejercer sus derechos de <strong>acceso, rectificación, actualización, supresión y revocación</strong> "
+            "(según corresponda y según lo indicado en dicha política), puede contactarnos en nuestro "
+            "punto de atención o solicitar el canal habilitado por el CDA."
+        )
+
+    habeas_html = f"""
+    <div style="margin-top:22px; padding-top:18px; border-top:1px solid #e2e8f0;">
+        <p style="font-size:14px; line-height:1.6; color:#334155; margin:0 0 12px 0;">
+            Al hacer uso de nuestros servicios y registrar su vehículo en <strong>{safe_cda}</strong>, usted acepta de manera
+            <strong>expresa, informada y previa</strong> el tratamiento de sus datos personales conforme a la
+            <strong>Ley 1581 de 2012</strong> y demás normas aplicables.
+        </p>
+        <p style="font-size:14px; line-height:1.6; color:#334155; margin:0 0 12px 0;">
+            Adjunto encontrará la <strong>política de tratamiento de datos personales</strong> (documento PDF).
+        </p>
+        <p style="font-size:14px; line-height:1.6; color:#334155; margin:0;">
+            {contacto_html}
+        </p>
+    </div>
+    """
+
     body_html = f"""
     <p class="muted">
         Queremos que sepas que estamos muy felices de que cuentes con nosotros y nos sentimos
@@ -295,20 +352,21 @@ def generar_email_bienvenida_recepcion_cliente(
         Para nosotros es un placer atenderte.
     </p>
     <div class="highlight">
-        Tu vehículo de placa <strong>{placa_vehiculo}</strong> ya se encuentra en revisión.
+        Tu vehículo de placa <strong>{safe_placa}</strong> ya se encuentra en revisión.
         Mientras tanto, te invitamos a pasar a nuestra sala de espera, donde puedes relajarte
-        y disfrutar de las amenidades que {nombre_cda} tiene preparadas para ti.
+        y disfrutar de las amenidades que {safe_cda} tiene preparadas para ti.
     </div>
     <p>Estamos para servirte.</p>
     <p class="muted">
         Saludos,<br />
-        El equipo de {nombre_cda}
+        El equipo de {safe_cda}
     </p>
+    {habeas_html}
     """
     return _render_email_corporativo(
-        title=f"¡Bienvenido a {nombre_cda}!",
+        title=f"¡Bienvenido a {html.escape(nombre_cda or '')}!",
         body_html=body_html,
-        label=f"Notificación de recepción - {nombre_cda}",
+        label=f"Notificación de recepción - {html.escape(nombre_cda or '')}",
     )
 
 

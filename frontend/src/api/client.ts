@@ -1,10 +1,26 @@
 import axios, { type InternalAxiosRequestConfig } from 'axios';
 import { getStoredTenantLoginPath } from '../utils/authRedirect';
 
-/** En desarrollo, por defecto mismo origen + proxy en vite.config (evita timeouts por CORS/red con localhost). */
-const API_URL =
-  import.meta.env.VITE_API_URL?.trim() ||
-  (import.meta.env.DEV ? '/api/v1' : 'http://127.0.0.1:8000/api/v1');
+/**
+ * URL base del API. En `npm run dev` usamos el proxy de Vite salvo URL local explícita.
+ * Importante: si en PowerShell dejaste $env:VITE_API_URL="https://dominio.com/..." para un build,
+ * esa variable sigue activa y rompería el local; en DEV ignoramos URLs https a dominios remotos.
+ */
+function resolveApiBaseUrl(): string {
+  const raw = import.meta.env.VITE_API_URL?.trim() ?? '';
+  if (import.meta.env.DEV) {
+    if (!raw) return '/api/v1';
+    if (raw.startsWith('/')) return raw;
+    const lower = raw.toLowerCase();
+    if (lower.startsWith('http://127.0.0.1') || lower.startsWith('http://localhost')) {
+      return raw;
+    }
+    return '/api/v1';
+  }
+  return raw || 'http://127.0.0.1:8000/api/v1';
+}
+
+const API_URL = resolveApiBaseUrl();
 
 /** En dev más margen por DB lenta; en prod configurable con VITE_API_TIMEOUT_MS. */
 const REQUEST_TIMEOUT_MS =
