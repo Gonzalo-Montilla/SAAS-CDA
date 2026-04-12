@@ -7,7 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
-from app.core.config import settings
+from app.core.config import parse_backend_cors_origins, settings
 from app.db.database import init_db
 from app.api.v1.api import api_router
 
@@ -56,7 +56,7 @@ app.add_middleware(SecurityHeadersMiddleware)
 # CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.BACKEND_CORS_ORIGINS,
+    allow_origins=parse_backend_cors_origins(settings.BACKEND_CORS_ORIGINS),
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],

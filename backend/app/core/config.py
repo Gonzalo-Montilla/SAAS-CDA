@@ -4,7 +4,27 @@ Configuración central de la aplicación
 import json
 from typing import List, Optional
 from pydantic_settings import BaseSettings
-from pydantic import Field, validator
+from pydantic import Field
+
+
+def parse_backend_cors_origins(raw: str) -> List[str]:
+    """
+    Convierte BACKEND_CORS_ORIGINS del .env (texto) en lista para CORSMiddleware.
+    Acepta: JSON array, URLs separadas por comas, o '*' (solo desarrollo / compat).
+    Se define como str en Settings para evitar que pydantic-settings haga json.loads
+    sobre List[str] antes de poder interpretar el formato con comas.
+    """
+    s = (raw or "").strip()
+    if not s or s == "*":
+        return ["*"]
+    if s.startswith("["):
+        try:
+            parsed = json.loads(s)
+            if isinstance(parsed, list):
+                return [str(i).strip() for i in parsed if str(i).strip()]
+        except Exception:
+            pass
+    return [i.strip() for i in s.split(",") if i.strip()] or ["*"]
 
 
 class Settings(BaseSettings):
@@ -47,8 +67,8 @@ class Settings(BaseSettings):
     ONBOARDING_EMAIL_CODE_TTL_MINUTES: int = 15
     ONBOARDING_EMAIL_CODE_MAX_ATTEMPTS: int = 5
     
-    # CORS
-    BACKEND_CORS_ORIGINS: List[str] = ["*"]
+    # CORS (texto en .env: comas o JSON array; ver parse_backend_cors_origins en main)
+    BACKEND_CORS_ORIGINS: str = Field(default="*", env="BACKEND_CORS_ORIGINS")
     
     # URLs sistemas externos
     RUNT_URL: str = "https://b2crunt2prd.b2clogin.com/runtprologin.runt.gov.co/b2c_1a_singin/oauth2/v2.0/authorize?client_id=4e0d509e-3bb5-44b9-b712-53e221b97393&scope=https%3A%2F%2FB2Crunt2prd.onmicrosoft.com%2FRNFTransversalMS%2Faccess.all%20openid%20profile%20offline_access&redirect_uri=https%3A%2F%2Fruntpro.runt.gov.co%2F"
@@ -90,20 +110,6 @@ class Settings(BaseSettings):
     SMTP_USER: str = Field(default="", env="SMTP_USER")  # Email de Gmail
     SMTP_PASSWORD: str = Field(default="", env="SMTP_PASSWORD")  # Contraseña de aplicación
     FRONTEND_URL: str = Field(default="http://localhost:5173", env="FRONTEND_URL")
-    
-    @validator("BACKEND_CORS_ORIGINS", pre=True)
-    def assemble_cors_origins(cls, v):
-        if isinstance(v, str):
-            raw = v.strip()
-            if raw.startswith("["):
-                try:
-                    parsed = json.loads(raw)
-                    if isinstance(parsed, list):
-                        return [str(i).strip() for i in parsed]
-                except Exception:
-                    pass
-            return [i.strip() for i in raw.split(",") if i.strip()]
-        return v
     
     class Config:
         env_file = ".env"
