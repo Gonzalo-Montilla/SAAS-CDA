@@ -453,6 +453,10 @@ export default function ReportesPage() {
     try {
       await tesoreriaApi.descargarComprobanteEgreso(movimientoId, {
         consolidarTodas: reporteSedeScope === 'todas',
+        sucursalId:
+          reporteSedeScope === 'sucursal' && reporteSedeId.trim()
+            ? reporteSedeId.trim()
+            : undefined,
       });
     } catch {
       showToast(
