@@ -32,6 +32,7 @@ def generar_comprobante_egreso(
     desglose_efectivo: Optional[dict] = None,
     tenant_logo_url: Optional[str] = None,
     nombre_comercial_cda: Optional[str] = None,
+    beneficiario_tipo_identificacion: Optional[str] = None,
 ) -> BytesIO:
     """
     Genera un comprobante de egreso en PDF
@@ -40,6 +41,7 @@ def generar_comprobante_egreso(
         numero_comprobante: Número único del comprobante
         fecha: Fecha del egreso
         beneficiario: Persona o entidad que recibe el dinero
+        beneficiario_tipo_identificacion: Tipo de documento del beneficiario (ej. C.C, NIT)
         concepto: Descripción del egreso
         categoria: Categoría del egreso
         monto: Monto del egreso (positivo)
@@ -162,10 +164,12 @@ def generar_comprobante_egreso(
         'consignacion': 'Consignación'
     }
     
+    tipo_id_label = (beneficiario_tipo_identificacion or "—").strip() or "—"
     detalles_data = [
-        ["Pagado a:", beneficiario],
+        ["Pagado a:", _safe_text(beneficiario)],
+        ["Tipo identificación:", _safe_text(tipo_id_label)],
         ["Categoría:", categorias_map.get(categoria, categoria)],
-        ["Concepto:", concepto],
+        ["Concepto:", _safe_text(concepto)],
         ["Método de pago:", metodos_map.get(metodo_pago, metodo_pago)],
     ]
     

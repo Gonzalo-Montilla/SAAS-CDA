@@ -29,7 +29,8 @@ from app.schemas.tesoreria import (
     ResumenTesoreria,
     ConfiguracionTesoreriaResponse,
     ConfiguracionTesoreriaUpdate,
-    EstadisticasTesoreria
+    EstadisticasTesoreria,
+    BENEFICIARIO_TIPOS_IDENTIFICACION_TESORERIA,
 )
 from app.utils.comprobantes import generar_comprobante_egreso
 
@@ -204,6 +205,25 @@ def crear_movimiento(
             detail="Debe especificar una categoría de egreso válida"
         )
 
+    if movimiento_data.tipo == "egreso":
+        ben = (movimiento_data.beneficiario or "").strip()
+        if len(ben) < 2:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El beneficiario / pagado a es obligatorio para egresos (mínimo 2 caracteres).",
+            )
+        tid = (movimiento_data.beneficiario_tipo_identificacion or "").strip()
+        if not tid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El tipo de identificación del beneficiario es obligatorio para egresos.",
+            )
+        if tid not in BENEFICIARIO_TIPOS_IDENTIFICACION_TESORERIA:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tipo de identificación del beneficiario no válido.",
+            )
+
     # Validar desglose de efectivo si el método de pago es efectivo
     if movimiento_data.metodo_pago == "efectivo":
         if not movimiento_data.desglose_efectivo:
@@ -273,6 +293,13 @@ def crear_movimiento(
     # Convertir monto según el tipo (ingreso positivo, egreso negativo)
     monto_final = movimiento_data.monto if movimiento_data.tipo == "ingreso" else -movimiento_data.monto
     
+    ben_norm = (movimiento_data.beneficiario or "").strip() if movimiento_data.tipo == "egreso" else None
+    tid_norm = (
+        (movimiento_data.beneficiario_tipo_identificacion or "").strip()
+        if movimiento_data.tipo == "egreso"
+        else None
+    )
+
     # Crear movimiento
     nuevo_movimiento = MovimientoTesoreria(
         tenant_id=current_user.tenant_id,
@@ -286,7 +313,9 @@ def crear_movimiento(
         origen_caja_id=movimiento_data.origen_caja_id,
         numero_comprobante=movimiento_data.numero_comprobante,
         fecha_movimiento=movimiento_data.fecha_movimiento or datetime.now(timezone.utc),
-        created_by=current_user.id
+        created_by=current_user.id,
+        beneficiario=ben_norm,
+        beneficiario_tipo_identificacion=tid_norm,
     )
     
     db.add(nuevo_movimiento)
@@ -908,11 +937,26 @@ async def descargar_comprobante_egreso(
     
     tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
 
+    if movimiento.beneficiario:
+        beneficiario_pdf = movimiento.beneficiario
+    elif " - " in (movimiento.concepto or ""):
+        beneficiario_pdf = movimiento.concepto.split(" - ", 1)[0].strip()
+    else:
+        beneficiario_pdf = "N/A"
+
+    tipo_id_pdf = movimiento.beneficiario_tipo_identificacion or "—"
+    concepto_pdf = (
+        movimiento.concepto.split(" - ", 1)[1].strip()
+        if (not movimiento.beneficiario) and " - " in (movimiento.concepto or "")
+        else (movimiento.concepto or "")
+    )
+
     pdf_buffer = generar_comprobante_egreso(
         numero_comprobante=numero_comprobante,
         fecha=movimiento.fecha_movimiento,
-        beneficiario=movimiento.concepto.split(" - ")[0] if " - " in movimiento.concepto else "N/A",
-        concepto=movimiento.concepto,
+        beneficiario=beneficiario_pdf,
+        beneficiario_tipo_identificacion=tipo_id_pdf,
+        concepto=concepto_pdf,
         categoria=categoria_str,
         monto=abs(movimiento.monto),
         metodo_pago=metodo_pago_str,

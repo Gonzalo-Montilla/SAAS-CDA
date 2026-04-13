@@ -7,6 +7,10 @@ export interface MovimientoTesoreria {
   categoria_egreso?: string;
   monto: number;
   concepto: string;
+  /** Egresos: persona o entidad pagada (columna dedicada). */
+  beneficiario?: string | null;
+  /** Egresos: tipo de documento del beneficiario. */
+  beneficiario_tipo_identificacion?: string | null;
   metodo_pago: string;
   origen_caja_id?: string;
   numero_comprobante?: string;

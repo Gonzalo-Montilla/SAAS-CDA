@@ -690,6 +690,19 @@ def ensure_sucursales_schema(db):
     )
 
 
+def ensure_movimiento_tesoreria_beneficiario_columns(db):
+    """Beneficiario y tipo de identificación en egresos de tesorería."""
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    db.execute(text("ALTER TABLE movimientos_tesoreria ADD COLUMN IF NOT EXISTS beneficiario VARCHAR(300)"))
+    db.execute(
+        text(
+            "ALTER TABLE movimientos_tesoreria ADD COLUMN IF NOT EXISTS beneficiario_tipo_identificacion VARCHAR(80)"
+        )
+    )
+
+
 def ensure_tesoreria_anulacion_y_enum(db):
     """
     Anulación de movimientos (soft delete) y valores enum de categoría ajuste_correccion en PostgreSQL.
@@ -1046,6 +1059,7 @@ def init_db():
         ensure_rtm_reminders_schema(db)
         ensure_sucursales_schema(db)
         ensure_tesoreria_anulacion_y_enum(db)
+        ensure_movimiento_tesoreria_beneficiario_columns(db)
         ensure_facturacion_ubicacion_schema(db)
         ensure_factus_schema(db)
         ensure_quality_survey_responses_schema(db)

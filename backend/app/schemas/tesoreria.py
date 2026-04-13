@@ -8,6 +8,19 @@ from typing import Optional
 from uuid import UUID
 
 
+# Tipos de identificación del beneficiario en egresos de tesorería (deben coincidir con el front)
+BENEFICIARIO_TIPOS_IDENTIFICACION_TESORERIA = frozenset(
+    {
+        "C.C",
+        "NIT",
+        "TARJETA DE IDENTIDAD",
+        "C.E",
+        "PASAPORTE",
+        "P.E.P",
+    }
+)
+
+
 class DesgloseEfectivoCreate(BaseModel):
     """Desglose de billetes y monedas para efectivo"""
     billetes_100000: int = Field(default=0, ge=0)
@@ -63,6 +76,9 @@ class MovimientoTesoreriaCreate(BaseModel):
     numero_comprobante: Optional[str] = None
     fecha_movimiento: Optional[datetime] = None  # Si no se envía, usa la fecha actual
     desglose_efectivo: Optional[DesgloseEfectivoCreate] = None  # Solo si metodo_pago es efectivo
+    # Solo egreso (obligatorios vía validación en endpoint)
+    beneficiario: Optional[str] = Field(default=None, max_length=300)
+    beneficiario_tipo_identificacion: Optional[str] = Field(default=None, max_length=80)
     
     @field_validator('categoria_ingreso', 'categoria_egreso', mode='before')
     @classmethod
@@ -86,6 +102,8 @@ class MovimientoTesoreriaResponse(BaseModel):
     fecha_movimiento: datetime
     created_at: datetime
     created_by: UUID
+    beneficiario: Optional[str] = None
+    beneficiario_tipo_identificacion: Optional[str] = None
 
     anulado: bool = False
     motivo_anulacion: Optional[str] = None

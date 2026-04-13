@@ -29,6 +29,16 @@ import {
   Trash2
 } from 'lucide-react';
 
+/** Valores alineados con el backend (`BENEFICIARIO_TIPOS_IDENTIFICACION_TESORERIA`). */
+const TIPOS_IDENTIFICACION_BENEFICIARIO_TESORERIA = [
+  'C.C',
+  'NIT',
+  'TARJETA DE IDENTIDAD',
+  'C.E',
+  'PASAPORTE',
+  'P.E.P',
+] as const;
+
 export default function TesoreriaPage() {
   const [vistaActual, setVistaActual] = useState<'dashboard' | 'registrar' | 'historial'>('dashboard');
 
@@ -439,7 +449,21 @@ function Dashboard() {
                       {new Date(mov.fecha_movimiento).toLocaleDateString('es-CO')}
                     </span>
                   </div>
-                  <p className="text-sm font-medium text-slate-900">{mov.concepto}</p>
+                  <div className="text-sm font-medium text-slate-900">
+                    {mov.beneficiario ? (
+                      <>
+                        <span className="font-semibold block">{mov.beneficiario}</span>
+                        {mov.beneficiario_tipo_identificacion ? (
+                          <span className="text-xs text-slate-500 font-normal block">
+                            {mov.beneficiario_tipo_identificacion}
+                          </span>
+                        ) : null}
+                        <span className="text-slate-700 font-normal block mt-0.5">{mov.concepto}</span>
+                      </>
+                    ) : (
+                      mov.concepto
+                    )}
+                  </div>
                 </div>
                 <p className={`text-xl font-bold ml-4 ${
                   mov.tipo === 'ingreso' ? 'text-green-600' : 'text-red-600'
@@ -466,7 +490,8 @@ function RegistrarMovimiento() {
     categoria: '',
     monto: '',
     concepto: '',
-    beneficiario: '',  // Nuevo campo
+    beneficiario: '',
+    beneficiario_tipo_identificacion: '',
     metodo_pago: 'efectivo',
     numero_comprobante: '',
   });
@@ -529,6 +554,7 @@ function RegistrarMovimiento() {
         monto: '',
         concepto: '',
         beneficiario: '',
+        beneficiario_tipo_identificacion: '',
         metodo_pago: 'efectivo',
         numero_comprobante: '',
       });
@@ -613,19 +639,38 @@ function RegistrarMovimiento() {
       }
     }
 
-    // Construir concepto completo con beneficiario si es egreso
-    const conceptoCompleto = tipoMovimiento === 'egreso' && formData.beneficiario
-      ? `${formData.beneficiario} - ${formData.concepto}`
-      : formData.concepto;
-    
+    if (tipoMovimiento === 'egreso') {
+      const ben = formData.beneficiario.trim();
+      const tid = formData.beneficiario_tipo_identificacion.trim();
+      if (ben.length < 2) {
+        setFeedback({
+          type: 'error',
+          message: 'Indica el beneficiario / pagado a (mínimo 2 caracteres).',
+        });
+        return;
+      }
+      if (!tid) {
+        setFeedback({
+          type: 'error',
+          message: 'Selecciona el tipo de identificación del beneficiario.',
+        });
+        return;
+      }
+    }
+
     const data: Record<string, unknown> = {
       tipo: tipoMovimiento,
       [tipoMovimiento === 'ingreso' ? 'categoria_ingreso' : 'categoria_egreso']: formData.categoria,
       monto,
-      concepto: conceptoCompleto,
+      concepto: formData.concepto.trim(),
       metodo_pago: formData.metodo_pago,
       numero_comprobante: formData.numero_comprobante || undefined,
     };
+
+    if (tipoMovimiento === 'egreso') {
+      data.beneficiario = formData.beneficiario.trim();
+      data.beneficiario_tipo_identificacion = formData.beneficiario_tipo_identificacion.trim();
+    }
     
     // Incluir desglose si es efectivo
     if (formData.metodo_pago === 'efectivo' && desgloseEfectivo) {
@@ -657,10 +702,14 @@ function RegistrarMovimiento() {
         value: `$${formatCurrency(monto)}`,
       },
     ];
-    if (tipoMovimiento === 'egreso' && formData.beneficiario) {
-      resumen.push({ label: 'Beneficiario', value: formData.beneficiario });
+    if (tipoMovimiento === 'egreso') {
+      resumen.push({ label: 'Beneficiario / Pagado a', value: formData.beneficiario.trim() });
+      resumen.push({
+        label: 'Tipo de identificación',
+        value: formData.beneficiario_tipo_identificacion.trim(),
+      });
     }
-    resumen.push({ label: 'Concepto', value: conceptoCompleto });
+    resumen.push({ label: 'Concepto / Detalle', value: formData.concepto.trim() });
     resumen.push({ label: 'Método de pago', value: metodoLabel });
     if (formData.numero_comprobante.trim()) {
       resumen.push({ label: 'Número de comprobante', value: formData.numero_comprobante.trim() });
@@ -838,20 +887,42 @@ function RegistrarMovimiento() {
 
           {/* Beneficiario (solo para egresos) */}
           {tipoMovimiento === 'egreso' && (
-            <div className="mb-6">
-              <label className="block text-lg font-bold text-slate-900 mb-3">
-                Beneficiario / Pagado a
-              </label>
-              <input
-                type="text"
-                value={formData.beneficiario}
-                onChange={(e) => setFormData({ ...formData, beneficiario: e.target.value })}
-                className="input-pos"
-                placeholder="Nombre de la persona o entidad"
-                minLength={3}
-                required
-              />
-            </div>
+            <>
+              <div className="mb-6">
+                <label className="block text-lg font-bold text-slate-900 mb-3">
+                  Beneficiario / Pagado a
+                </label>
+                <input
+                  type="text"
+                  value={formData.beneficiario}
+                  onChange={(e) => setFormData({ ...formData, beneficiario: e.target.value })}
+                  className="input-pos"
+                  placeholder="Nombre de la persona o entidad"
+                  minLength={2}
+                  required
+                />
+              </div>
+              <div className="mb-6">
+                <label className="block text-lg font-bold text-slate-900 mb-3">
+                  Tipo de identificación
+                </label>
+                <select
+                  value={formData.beneficiario_tipo_identificacion}
+                  onChange={(e) =>
+                    setFormData({ ...formData, beneficiario_tipo_identificacion: e.target.value })
+                  }
+                  className="input-pos"
+                  required
+                >
+                  <option value="">Selecciona un tipo</option>
+                  {TIPOS_IDENTIFICACION_BENEFICIARIO_TESORERIA.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </>
           )}
 
           {/* Concepto */}
@@ -944,6 +1015,7 @@ function RegistrarMovimiento() {
                 monto: '',
                 concepto: '',
                 beneficiario: '',
+                beneficiario_tipo_identificacion: '',
                 metodo_pago: 'efectivo',
                 numero_comprobante: '',
               })}
@@ -1115,7 +1187,8 @@ function Historial() {
     const searchLower = busqueda.toLowerCase();
     return (
       mov.concepto.toLowerCase().includes(searchLower) ||
-      (mov.numero_comprobante && mov.numero_comprobante.toLowerCase().includes(searchLower))
+      (mov.numero_comprobante && mov.numero_comprobante.toLowerCase().includes(searchLower)) ||
+      (mov.beneficiario && mov.beneficiario.toLowerCase().includes(searchLower))
     );
   });
 
@@ -1135,6 +1208,8 @@ function Historial() {
         'ID (soporte)': mov.id,
         'Tipo': mov.tipo === 'ingreso' ? 'Ingreso' : 'Egreso',
         'Categoría': mov.categoria_ingreso || mov.categoria_egreso || 'N/A',
+        'Beneficiario': mov.beneficiario || '',
+        'Tipo identificación': mov.beneficiario_tipo_identificacion || '',
         'Concepto': mov.concepto,
         'Método de Pago': mov.metodo_pago,
         'Monto': mov.monto,
@@ -1184,7 +1259,7 @@ function Historial() {
         <div className="mb-4">
           <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-1">
             <Search className="w-4 h-4" />
-            Buscar en Concepto o Número de Comprobante
+            Buscar en Concepto, Beneficiario o Número de Comprobante
           </label>
           <input
             type="text"
@@ -1316,7 +1391,19 @@ function Historial() {
                     </td>
                     <td className="text-sm text-slate-900 break-words min-w-0">
                       <span className={mov.anulado ? 'line-through text-slate-500' : ''}>
-                        {mov.concepto}
+                        {mov.beneficiario ? (
+                          <>
+                            <span className="font-medium block">{mov.beneficiario}</span>
+                            {mov.beneficiario_tipo_identificacion ? (
+                              <span className="text-xs text-slate-500 block">
+                                {mov.beneficiario_tipo_identificacion}
+                              </span>
+                            ) : null}
+                            <span className="text-slate-700 block mt-0.5">{mov.concepto}</span>
+                          </>
+                        ) : (
+                          mov.concepto
+                        )}
                       </span>
                     </td>
                     <td className="text-sm align-middle">
