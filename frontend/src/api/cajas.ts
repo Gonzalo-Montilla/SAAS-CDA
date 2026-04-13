@@ -146,7 +146,7 @@ export const cajasApi = {
   descargarComprobanteEgresoCaja: async (
     movimientoId: string,
     opts?: { consolidarTodas?: boolean; sucursalId?: string },
-  ): Promise<void> => {
+  ): Promise<string> => {
     const token = localStorage.getItem('access_token');
     if (!token) {
       throw new Error('No hay token de autenticación');
@@ -185,5 +185,6 @@ export const cajasApi = {
     link.click();
     link.remove();
     window.URL.revokeObjectURL(url);
+    return filename;
   },
 };

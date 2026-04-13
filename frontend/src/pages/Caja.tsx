@@ -1615,8 +1615,7 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
 // Componente Modal de Gasto
 function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: () => void }) {
   const queryClient = useQueryClient();
-  const { user } = useAuth();
-  const brand = useBrand();
+  const { showToast } = useToast();
   const formRef = useRef<HTMLFormElement>(null);
   const montoInputRef = useRef<HTMLInputElement>(null);
   const [formData, setFormData] = useState({
@@ -1629,32 +1628,22 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
   const [mostrarExito, setMostrarExito] = useState(false);
   const [nombreArchivoPDF, setNombreArchivoPDF] = useState('');
 
-  // Obtener caja activa para datos del comprobante
-  const { data: cajaActiva } = useQuery({
-    queryKey: ['caja-activa'],
-    queryFn: cajasApi.obtenerActiva,
-  });
-
   const registrarGastoMutation = useMutation({
     mutationFn: cajasApi.crearMovimiento,
     onSuccess: async (movimientoCreado: MovimientoCaja) => {
-      const shortId = movimientoCreado.id.replace(/-/g, '').slice(0, 8).toUpperCase();
-      const numeroComprobante = `EGR-CAJA-${shortId}`;
+      let nombrePDF: string;
+      try {
+        // Mismo PDF que Reportes → Detalle → Docs (servidor / ReportLab)
+        nombrePDF = await cajasApi.descargarComprobanteEgresoCaja(movimientoCreado.id);
+      } catch {
+        showToast(
+          'error',
+          'Comprobante no descargado',
+          'El movimiento quedó registrado. Puedes descargar el comprobante desde Reportes → Detalle → Docs.',
+        );
+        nombrePDF = '— (revisa la carpeta de descargas o usa Reportes → Detalle)';
+      }
 
-      const { generarPDFComprobanteEgreso } = await import('../utils/generarPDFComprobanteEgreso');
-      const nombrePDF = await generarPDFComprobanteEgreso({
-        numeroComprobante,
-        tipo: formData.tipo,
-        monto: Math.abs(parseFloat(formData.monto)),
-        concepto: formData.concepto,
-        fecha: new Date(),
-        nombreCajero: user?.nombre_completo || 'Cajero',
-        turno: cajaActiva?.turno || 'N/A',
-        logoUrl: brand.logoSrc,
-        beneficiario: formData.beneficiario.trim(),
-        beneficiarioTipoIdentificacion: formData.beneficiario_tipo_identificacion.trim(),
-      });
-      
       setNombreArchivoPDF(nombrePDF);
       setMostrarExito(true);
       
@@ -1778,7 +1767,7 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
             <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 mb-6">
               <p className="text-sm font-semibold text-blue-900 mb-2 flex items-center justify-center gap-2">
                 <FileText className="w-5 h-5" />
-                Comprobante Generado
+                Comprobante descargado (mismo que en Reportes → Detalle)
               </p>
               <p className="text-xs text-blue-700 break-all">
                 {nombreArchivoPDF}
