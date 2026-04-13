@@ -13,7 +13,7 @@ import { useToast } from '../contexts/ToastContext';
 import { formatCurrency } from '../utils/formatNumber';
 import { formatDateTimeShort, formatTime24, formatDateWithWeekday } from '../utils/formatDate';
 import { extractApiErrorMessage } from '../utils/apiError';
-import type { CajaApertura, Vehiculo } from '../types';
+import type { CajaApertura, MovimientoCaja, Vehiculo } from '../types';
 import { 
   AlertTriangle, 
   RefreshCw, 
@@ -58,6 +58,16 @@ const formatLocalDate = (d: Date): string => {
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
+
+/** Mismos valores que tesorería / backend `BENEFICIARIO_TIPOS_IDENTIFICACION_TESORERIA`. */
+const TIPOS_IDENTIFICACION_BENEFICIARIO_CAJA = [
+  'C.C',
+  'NIT',
+  'TARJETA DE IDENTIDAD',
+  'C.E',
+  'PASAPORTE',
+  'P.E.P',
+] as const;
 
 const saveBlobAsFile = (blob: Blob, filename: string): void => {
   if (!blob || blob.size === 0) {
@@ -1613,6 +1623,8 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
     tipo: 'gasto',
     monto: '',
     concepto: '',
+    beneficiario: '',
+    beneficiario_tipo_identificacion: '',
   });
   const [mostrarExito, setMostrarExito] = useState(false);
   const [nombreArchivoPDF, setNombreArchivoPDF] = useState('');
@@ -1625,11 +1637,10 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
 
   const registrarGastoMutation = useMutation({
     mutationFn: cajasApi.crearMovimiento,
-    onSuccess: async () => {
-      // Generar número de comprobante (usar ID del movimiento)
-      const numeroComprobante = `EG-${new Date().getFullYear()}-${String(Date.now()).slice(-6)}`;
-      
-      // Generar PDF del comprobante
+    onSuccess: async (movimientoCreado: MovimientoCaja) => {
+      const shortId = movimientoCreado.id.replace(/-/g, '').slice(0, 8).toUpperCase();
+      const numeroComprobante = `EGR-CAJA-${shortId}`;
+
       const { generarPDFComprobanteEgreso } = await import('../utils/generarPDFComprobanteEgreso');
       const nombrePDF = await generarPDFComprobanteEgreso({
         numeroComprobante,
@@ -1640,6 +1651,8 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
         nombreCajero: user?.nombre_completo || 'Cajero',
         turno: cajaActiva?.turno || 'N/A',
         logoUrl: brand.logoSrc,
+        beneficiario: formData.beneficiario.trim(),
+        beneficiarioTipoIdentificacion: formData.beneficiario_tipo_identificacion.trim(),
       });
       
       setNombreArchivoPDF(nombrePDF);
@@ -1657,9 +1670,19 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    
+
     const monto = parseFloat(formData.monto);
-    
+    const ben = formData.beneficiario.trim();
+    const tid = formData.beneficiario_tipo_identificacion.trim();
+    if (ben.length < 2) {
+      window.alert('Indica el beneficiario / pagado a (mínimo 2 caracteres).');
+      return;
+    }
+    if (!tid) {
+      window.alert('Selecciona el tipo de identificación del beneficiario.');
+      return;
+    }
+
     // Confirmación para gastos grandes (>$50,000)
     if (monto > 50000) {
       const confirmar = window.confirm(
@@ -1680,7 +1703,9 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
       monto: montoNegativo,
       concepto: formData.concepto,
       metodo_pago: 'efectivo',
-      ingresa_efectivo: false, // Sale de efectivo (NO ingresa)
+      ingresa_efectivo: false,
+      beneficiario: ben,
+      beneficiario_tipo_identificacion: tid,
     });
   };
 
@@ -1842,6 +1867,43 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
               </div>
             </div>
 
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+              <div>
+                <label className="block text-lg font-bold text-slate-900 mb-3">
+                  Beneficiario / Pagado a
+                </label>
+                <input
+                  type="text"
+                  value={formData.beneficiario}
+                  onChange={(e) => setFormData({ ...formData, beneficiario: e.target.value })}
+                  className="input-pos"
+                  placeholder="Nombre de la persona o entidad"
+                  minLength={2}
+                  required
+                />
+              </div>
+              <div>
+                <label className="block text-lg font-bold text-slate-900 mb-3">
+                  Tipo de identificación
+                </label>
+                <select
+                  value={formData.beneficiario_tipo_identificacion}
+                  onChange={(e) =>
+                    setFormData({ ...formData, beneficiario_tipo_identificacion: e.target.value })
+                  }
+                  className="input-pos"
+                  required
+                >
+                  <option value="">Selecciona un tipo</option>
+                  {TIPOS_IDENTIFICACION_BENEFICIARIO_CAJA.map((t) => (
+                    <option key={t} value={t}>
+                      {t}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
             <div className="grid grid-cols-1 xl:grid-cols-5 gap-4 mb-6">
               {/* Monto */}
               <div className="xl:col-span-2">
@@ -1895,18 +1957,24 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
             </div>
 
             {/* Vista Previa */}
-            {montoNumerico > 0 && formData.concepto.length >= 5 && (
+            {montoNumerico > 0 &&
+              formData.concepto.length >= 5 &&
+              formData.beneficiario.trim().length >= 2 &&
+              formData.beneficiario_tipo_identificacion.trim() && (
               <div className="mb-6 p-4 bg-slate-50 border border-slate-200 rounded-lg">
                 <p className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
                   <Eye className="w-5 h-5" />
                   Vista Previa:
                 </p>
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-3">
-                  <div>
-                    <p className="text-sm text-slate-600">Se registrará:</p>
+                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
+                  <div className="space-y-1">
+                    <p className="text-sm text-slate-600">Beneficiario</p>
+                    <p className="font-semibold text-slate-900">{formData.beneficiario.trim()}</p>
+                    <p className="text-xs text-slate-500">{formData.beneficiario_tipo_identificacion}</p>
+                    <p className="text-sm text-slate-600 pt-1">Concepto</p>
                     <p className="font-bold text-slate-900">{formData.concepto}</p>
                   </div>
-                  <p className="text-2xl font-bold text-red-600">
+                  <p className="text-2xl font-bold text-red-600 shrink-0">
                     -${formatCurrency(montoNumerico)}
                   </p>
                 </div>
@@ -1925,7 +1993,13 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
               </button>
               <button
                 type="submit"
-                disabled={registrarGastoMutation.isLoading || !formData.monto || formData.concepto.length < 5}
+                disabled={
+                  registrarGastoMutation.isLoading ||
+                  !formData.monto ||
+                  formData.concepto.length < 5 ||
+                  formData.beneficiario.trim().length < 2 ||
+                  !formData.beneficiario_tipo_identificacion.trim()
+                }
                 className="flex-1 btn-pos btn-danger disabled:opacity-50 inline-flex items-center justify-center gap-2"
               >
                 {registrarGastoMutation.isLoading ? (
@@ -2552,7 +2626,17 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                             {egreso.tipo}
                           </span>
                         </div>
-                        <p className="text-sm font-medium text-gray-900">{egreso.concepto}</p>
+                        {egreso.beneficiario ? (
+                          <>
+                            <p className="text-sm font-semibold text-gray-900">{egreso.beneficiario}</p>
+                            {egreso.beneficiario_tipo_identificacion ? (
+                              <p className="text-xs text-gray-500">{egreso.beneficiario_tipo_identificacion}</p>
+                            ) : null}
+                            <p className="text-sm font-medium text-gray-800 mt-0.5">{egreso.concepto}</p>
+                          </>
+                        ) : (
+                          <p className="text-sm font-medium text-gray-900">{egreso.concepto}</p>
+                        )}
                       </div>
                       <p className="text-xl font-bold text-red-600 ml-4">
                         -${formatCurrency(Math.abs(egreso.monto))}

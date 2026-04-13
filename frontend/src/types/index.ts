@@ -562,6 +562,8 @@ export interface MovimientoCaja {
   concepto: string;
   ingresa_efectivo: boolean;
   created_at: string;
+  beneficiario?: string | null;
+  beneficiario_tipo_identificacion?: string | null;
 }
 
 // Tarifas

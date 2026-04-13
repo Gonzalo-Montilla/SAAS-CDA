@@ -111,7 +111,9 @@ class MovimientoCaja(Base):
     monto = Column(Numeric(10, 2), nullable=False)  # Positivo=ingreso, Negativo=egreso
     metodo_pago = Column(String(50))  # efectivo, tarjeta, etc
     concepto = Column(Text, nullable=False)
-    
+    beneficiario = Column(String(300), nullable=True)
+    beneficiario_tipo_identificacion = Column(String(80), nullable=True)
+
     # Control especial para CrediSmart
     ingresa_efectivo = Column(Boolean, default=True, nullable=False)
     

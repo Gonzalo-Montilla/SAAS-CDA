@@ -62,6 +62,8 @@ class MovimientoCreate(BaseModel):
     metodo_pago: Optional[str] = None
     concepto: str = Field(min_length=5)
     ingresa_efectivo: bool = True
+    beneficiario: Optional[str] = Field(default=None, max_length=300)
+    beneficiario_tipo_identificacion: Optional[str] = Field(default=None, max_length=80)
 
 
 class MovimientoResponse(BaseModel):
@@ -73,7 +75,9 @@ class MovimientoResponse(BaseModel):
     concepto: str
     ingresa_efectivo: bool
     created_at: datetime
-    
+    beneficiario: Optional[str] = None
+    beneficiario_tipo_identificacion: Optional[str] = None
+
     model_config = ConfigDict(from_attributes=True)
 
 

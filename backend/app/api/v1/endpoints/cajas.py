@@ -23,8 +23,9 @@ from app.schemas.caja import (
     MovimientoResponse,
     CajaResponse,
     CajaDetalle,
-    CajaResumen
+    CajaResumen,
 )
+from app.schemas.tesoreria import BENEFICIARIO_TIPOS_IDENTIFICACION_TESORERIA
 from app.utils.audit import audit_caja_operation
 from app.models.audit_log import AuditAction
 from app.utils.comprobantes_caja import generar_comprobante_cierre_caja
@@ -379,17 +380,43 @@ def crear_movimiento(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No tienes una caja abierta"
         )
-    
+
+    tipo_enum = TipoMovimiento(movimiento_data.tipo)
+    ben_norm = None
+    tid_norm = None
+    if tipo_enum in (TipoMovimiento.GASTO, TipoMovimiento.DEVOLUCION, TipoMovimiento.AJUSTE) and movimiento_data.monto < 0:
+        ben = (movimiento_data.beneficiario or "").strip()
+        tid = (movimiento_data.beneficiario_tipo_identificacion or "").strip()
+        if len(ben) < 2:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El beneficiario / pagado a es obligatorio para este movimiento (mínimo 2 caracteres).",
+            )
+        if not tid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El tipo de identificación del beneficiario es obligatorio.",
+            )
+        if tid not in BENEFICIARIO_TIPOS_IDENTIFICACION_TESORERIA:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tipo de identificación del beneficiario no válido.",
+            )
+        ben_norm = ben
+        tid_norm = tid
+
     # Crear movimiento
     movimiento = MovimientoCaja(
         tenant_id=current_user.tenant_id,
         caja_id=caja.id,
-        tipo=TipoMovimiento(movimiento_data.tipo),
+        tipo=tipo_enum,
         monto=movimiento_data.monto,
         metodo_pago=movimiento_data.metodo_pago,
         concepto=movimiento_data.concepto,
         ingresa_efectivo=movimiento_data.ingresa_efectivo,
-        created_by=current_user.id
+        beneficiario=ben_norm,
+        beneficiario_tipo_identificacion=tid_norm,
+        created_by=current_user.id,
     )
     
     db.add(movimiento)
@@ -416,10 +443,12 @@ def crear_movimiento(
             "tipo": movimiento_data.tipo,
             "monto": float(movimiento_data.monto),
             "metodo_pago": movimiento_data.metodo_pago,
-            "concepto": movimiento_data.concepto
-        }
+            "concepto": movimiento_data.concepto,
+            "beneficiario": ben_norm,
+            "beneficiario_tipo_identificacion": tid_norm,
+        },
     )
-    
+
     return movimiento
 
 

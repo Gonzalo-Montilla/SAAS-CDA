@@ -11,6 +11,8 @@ interface DatosEgresoPDF {
   nombreCajero: string;
   turno: string;
   logoUrl?: string;
+  beneficiario: string;
+  beneficiarioTipoIdentificacion: string;
 }
 
 export async function generarPDFComprobanteEgreso(datos: DatosEgresoPDF): Promise<string> {
@@ -100,11 +102,17 @@ export async function generarPDFComprobanteEgreso(datos: DatosEgresoPDF): Promis
   y = addText(`Fecha: ${fechaFormateada}`, leftMargin, y);
   y = addText(`Hora: ${horaFormateada}`, leftMargin, y);
   y = addText(`Turno: ${datos.turno}`, leftMargin, y);
+  y = addText(`Pagado a: ${datos.beneficiario}`, leftMargin, y);
+  y = addText(`Tipo identificación: ${datos.beneficiarioTipoIdentificacion}`, leftMargin, y);
   y += 3;
-  
+
   // Tipo de movimiento
-  const tipoLabel = datos.tipo === 'gasto' ? 'GASTO' : 
-                   datos.tipo === 'devolucion' ? 'DEVOLUCION' : 'AJUSTE';
+  const tipoLabel =
+    datos.tipo === 'gasto'
+      ? 'GASTO'
+      : datos.tipo === 'devolucion'
+        ? 'DEVOLUCIÓN'
+        : 'AJUSTE';
   
   doc.setFillColor(255, 240, 240);
   doc.rect(leftMargin, y, contentWidth, 12, 'F');
