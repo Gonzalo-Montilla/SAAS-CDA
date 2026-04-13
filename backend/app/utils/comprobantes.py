@@ -287,7 +287,206 @@ def generar_comprobante_egreso(
     # Construir PDF
     doc.build(elementos)
     buffer.seek(0)
-    
+
+    return buffer
+
+
+def generar_comprobante_egreso_caja(
+    *,
+    numero_comprobante: str,
+    fecha: datetime,
+    tipo_movimiento_label: str,
+    turno: str,
+    beneficiario: str,
+    beneficiario_tipo_identificacion: str,
+    concepto: str,
+    monto: Decimal,
+    metodo_pago: str,
+    nombre_cajero: str,
+    tenant_logo_url: Optional[str] = None,
+    nombre_comercial_cda: Optional[str] = None,
+) -> BytesIO:
+    """
+    Comprobante PDF de egreso registrado en caja (gasto, devolución, ajuste).
+    Coherente con el comprobante generado en el cliente, persistiendo datos en servidor.
+    """
+    buffer = BytesIO()
+    doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5 * inch, bottomMargin=0.5 * inch)
+
+    styles = getSampleStyleSheet()
+
+    titulo_style = ParagraphStyle(
+        "TituloComprobanteCaja",
+        parent=styles["Heading1"],
+        fontSize=18,
+        textColor=colors.HexColor("#0a1d3d"),
+        alignment=TA_CENTER,
+        spaceAfter=12,
+        fontName="Helvetica-Bold",
+    )
+
+    subtitulo_style = ParagraphStyle(
+        "SubtituloComprobanteCaja",
+        parent=styles["Normal"],
+        fontSize=12,
+        textColor=colors.HexColor("#0a1d3d"),
+        alignment=TA_CENTER,
+        spaceAfter=20,
+    )
+
+    label_style = ParagraphStyle(
+        "LabelCaja",
+        parent=styles["Normal"],
+        fontSize=10,
+        textColor=colors.gray,
+        fontName="Helvetica-Bold",
+    )
+
+    elementos = []
+
+    tenant_logo_local_path = _resolve_tenant_logo_path(tenant_logo_url)
+    tenant_logo_remote_buffer = _download_remote_logo(tenant_logo_url)
+    fallback_logo_path = os.path.join(os.path.dirname(__file__), "logo_cda.png")
+
+    logo_source = None
+    if tenant_logo_local_path and os.path.exists(tenant_logo_local_path):
+        logo_source = tenant_logo_local_path
+    elif tenant_logo_remote_buffer:
+        logo_source = tenant_logo_remote_buffer
+    elif os.path.exists(fallback_logo_path):
+        logo_source = fallback_logo_path
+
+    if logo_source:
+        logo = Image(logo_source, width=1.5 * inch, height=1.1 * inch, kind="proportional")
+        logo.hAlign = "CENTER"
+        elementos.append(logo)
+        elementos.append(Spacer(1, 0.1 * inch))
+
+    elementos.append(Paragraph("COMPROBANTE DE EGRESO DE CAJA", titulo_style))
+    subtitulo_texto = (nombre_comercial_cda or "").strip() or "CDASOFT"
+    elementos.append(Paragraph(_safe_text(subtitulo_texto), subtitulo_style))
+    elementos.append(Spacer(1, 0.2 * inch))
+
+    info_data = [
+        ["Comprobante N°:", numero_comprobante, "Fecha:", fecha.strftime("%d/%m/%Y %H:%M")],
+    ]
+
+    info_table = Table(info_data, colWidths=[1.5 * inch, 2 * inch, 1 * inch, 2 * inch])
+    info_table.setStyle(
+        TableStyle(
+            [
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("FONTNAME", (2, 0), (2, -1), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 10),
+                ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#0a1d3d")),
+                ("TEXTCOLOR", (2, 0), (2, -1), colors.HexColor("#0a1d3d")),
+                ("BACKGROUND", (1, 0), (1, -1), colors.HexColor("#f5f5f5")),
+                ("BACKGROUND", (3, 0), (3, -1), colors.HexColor("#f5f5f5")),
+                ("ALIGN", (0, 0), (-1, -1), "LEFT"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("GRID", (0, 0), (-1, -1), 1, colors.HexColor("#cccccc")),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ]
+        )
+    )
+    elementos.append(info_table)
+    elementos.append(Spacer(1, 0.3 * inch))
+
+    ben_l = (beneficiario or "").strip() or "—"
+    tid_l = (beneficiario_tipo_identificacion or "").strip() or "—"
+
+    detalles_data = [
+        ["Tipo de movimiento:", _safe_text(tipo_movimiento_label)],
+        ["Turno:", _safe_text(turno)],
+        ["Pagado a:", _safe_text(ben_l)],
+        ["Tipo identificación:", _safe_text(tid_l)],
+        ["Concepto:", _safe_text(concepto)],
+        ["Método de pago:", _safe_text(metodo_pago or "N/A")],
+        ["Cajero(a) que registra:", _safe_text(nombre_cajero)],
+    ]
+
+    detalles_table = Table(detalles_data, colWidths=[2 * inch, 4.5 * inch])
+    detalles_table.setStyle(
+        TableStyle(
+            [
+                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 10),
+                ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#0a1d3d")),
+                ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f0f4f8")),
+                ("ALIGN", (0, 0), (0, -1), "LEFT"),
+                ("ALIGN", (1, 0), (1, -1), "LEFT"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("GRID", (0, 0), (-1, -1), 1, colors.HexColor("#cccccc")),
+                ("TOPPADDING", (0, 0), (-1, -1), 10),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+            ]
+        )
+    )
+    elementos.append(detalles_table)
+    elementos.append(Spacer(1, 0.3 * inch))
+
+    monto_data = [["TOTAL EGRESO:", f"${float(monto):,.0f}"]]
+
+    monto_table = Table(monto_data, colWidths=[3 * inch, 3.5 * inch])
+    monto_table.setStyle(
+        TableStyle(
+            [
+                ("FONTNAME", (0, 0), (-1, -1), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 14),
+                ("TEXTCOLOR", (0, 0), (-1, -1), colors.white),
+                ("BACKGROUND", (0, 0), (-1, -1), colors.HexColor("#dc2626")),
+                ("ALIGN", (0, 0), (0, -1), "LEFT"),
+                ("ALIGN", (1, 0), (1, -1), "RIGHT"),
+                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("TOPPADDING", (0, 0), (-1, -1), 12),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
+                ("LEFTPADDING", (0, 0), (-1, -1), 15),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 15),
+            ]
+        )
+    )
+    elementos.append(monto_table)
+    elementos.append(Spacer(1, 0.4 * inch))
+
+    elementos.append(Paragraph("<b>IMPORTANTE:</b> Comprobante para firma de quien recibe el dinero.", label_style))
+    elementos.append(Spacer(1, 0.25 * inch))
+
+    firmas_data = [
+        ["_________________________", "_________________________"],
+        ["Recibido por (beneficiario):", "Entregó (cajero):"],
+        [_safe_text(ben_l), _safe_text(nombre_cajero)],
+    ]
+
+    firmas_table = Table(firmas_data, colWidths=[3.25 * inch, 3.25 * inch])
+    firmas_table.setStyle(
+        TableStyle(
+            [
+                ("FONTNAME", (0, 1), (-1, 1), "Helvetica-Bold"),
+                ("FONTSIZE", (0, 0), (-1, -1), 10),
+                ("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("TOPPADDING", (0, 0), (-1, 0), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 5),
+                ("TOPPADDING", (0, 1), (-1, -1), 8),
+            ]
+        )
+    )
+    elementos.append(firmas_table)
+    elementos.append(Spacer(1, 0.3 * inch))
+
+    fecha_generacion = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+    pie_style = ParagraphStyle(
+        "PieCaja",
+        parent=styles["Normal"],
+        fontSize=8,
+        textColor=colors.gray,
+        alignment=TA_CENTER,
+    )
+    elementos.append(Paragraph(f"Documento generado el {fecha_generacion}", pie_style))
+
+    doc.build(elementos)
+    buffer.seek(0)
     return buffer
 
 

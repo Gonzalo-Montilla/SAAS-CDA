@@ -2,20 +2,21 @@
 Endpoints de Cajas
 """
 from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
-from fastapi.responses import Response
+from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, cast, Date, func, or_
 from datetime import datetime, timezone, date, time, timedelta
 from decimal import Decimal
-from typing import List
+from typing import List, Optional
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from app.core.deps import get_db, get_current_user, get_cajero_or_admin, get_admin, get_active_sucursal_id
-from app.core.sucursal_scope import get_principal_sucursal_id
+from app.core.sucursal_scope import get_principal_sucursal_id, resolve_reporte_sucursal_id
 from app.models.usuario import Usuario, RolEnum
 from app.models.caja import Caja, MovimientoCaja, TurnoEnum, EstadoCaja, TipoMovimiento, DesgloseEfectivoCierre
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo
+from app.models.tenant import Tenant
 from app.schemas.caja import (
     CajaApertura,
     CajaCierre,
@@ -29,6 +30,7 @@ from app.schemas.tesoreria import BENEFICIARIO_TIPOS_IDENTIFICACION_TESORERIA
 from app.utils.audit import audit_caja_operation
 from app.models.audit_log import AuditAction
 from app.utils.comprobantes_caja import generar_comprobante_cierre_caja
+from app.utils.comprobantes import generar_comprobante_egreso_caja
 
 router = APIRouter()
 
@@ -450,6 +452,116 @@ def crear_movimiento(
     )
 
     return movimiento
+
+
+@router.get("/movimientos/{movimiento_id}/comprobante-egreso")
+def descargar_comprobante_egreso_movimiento_caja(
+    movimiento_id: str,
+    request: Request,
+    consolidar_todas: bool = Query(False),
+    sucursal_id: Optional[UUID] = Query(
+        None,
+        description="Filtrar por sede del reporte (administrador o contador).",
+    ),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """
+    PDF del comprobante de egreso de caja (gasto, devolución, ajuste).
+    Contador/administrador: alcance como reportes. Cajero: solo movimientos de sus propias cajas.
+    """
+    if current_user.rol not in (RolEnum.CONTADOR, RolEnum.ADMINISTRADOR, RolEnum.CAJERO):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No autorizado para descargar este comprobante.",
+        )
+
+    try:
+        mid = UUID(str(movimiento_id).strip())
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Identificador de movimiento inválido",
+        )
+
+    q = (
+        db.query(MovimientoCaja)
+        .join(Caja, MovimientoCaja.caja_id == Caja.id)
+        .filter(
+            MovimientoCaja.id == mid,
+            MovimientoCaja.tenant_id == current_user.tenant_id,
+        )
+    )
+
+    if current_user.rol in (RolEnum.CONTADOR, RolEnum.ADMINISTRADOR):
+        payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+        scope_sid = resolve_reporte_sucursal_id(
+            db,
+            current_user,
+            payload if isinstance(payload, dict) else {},
+            sucursal_id_param=sucursal_id,
+            consolidar_todas=consolidar_todas,
+        )
+        if scope_sid is not None:
+            q = q.filter(Caja.sucursal_id == scope_sid)
+    else:
+        q = q.filter(Caja.usuario_id == current_user.id)
+
+    mov = q.first()
+    if not mov:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Movimiento no encontrado",
+        )
+
+    if mov.tipo not in (TipoMovimiento.GASTO, TipoMovimiento.DEVOLUCION, TipoMovimiento.AJUSTE):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo hay comprobante para gasto, devolución o ajuste de caja.",
+        )
+    if mov.monto >= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo aplica a egresos de caja (monto negativo).",
+        )
+
+    tipo_labels = {
+        "gasto": "Gasto",
+        "devolucion": "Devolución",
+        "ajuste": "Ajuste",
+    }
+    label = tipo_labels.get(mov.tipo.value, mov.tipo.value)
+
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    usuario_reg = db.query(Usuario).filter(Usuario.id == mov.created_by).first() if mov.created_by else None
+    nombre_cajero = usuario_reg.nombre_completo if usuario_reg else "N/A"
+    turno = mov.caja.turno.value if mov.caja and mov.caja.turno else "N/A"
+
+    numero = f"EGR-CAJA-{str(mov.id).replace('-', '')[:8].upper()}"
+
+    pdf_buffer = generar_comprobante_egreso_caja(
+        numero_comprobante=numero,
+        fecha=mov.created_at,
+        tipo_movimiento_label=label,
+        turno=turno,
+        beneficiario=mov.beneficiario or "",
+        beneficiario_tipo_identificacion=mov.beneficiario_tipo_identificacion or "",
+        concepto=mov.concepto or "",
+        monto=abs(Decimal(str(mov.monto))),
+        metodo_pago=mov.metodo_pago or "efectivo",
+        nombre_cajero=nombre_cajero,
+        tenant_logo_url=tenant.logo_url if tenant else None,
+        nombre_comercial_cda=tenant.nombre_comercial if tenant else None,
+    )
+
+    fecha_str = mov.created_at.strftime("%Y%m%d")
+    nombre_archivo = f"comprobante_egreso_caja_{fecha_str}_{numero.replace(' ', '_')}.pdf"
+
+    return StreamingResponse(
+        pdf_buffer,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{nombre_archivo}"'},
+    )
 
 
 @router.get("/vehiculos-por-metodo")

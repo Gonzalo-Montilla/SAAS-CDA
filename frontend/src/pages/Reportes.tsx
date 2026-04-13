@@ -132,6 +132,7 @@ export default function ReportesPage() {
   const [reportesSeccion, setReportesSeccion] = useState<ReportesSeccion>('resumen');
   const [cierrePdfLoadingId, setCierrePdfLoadingId] = useState<string | null>(null);
   const [tesoreriaEgresoPdfLoadingId, setTesoreriaEgresoPdfLoadingId] = useState<string | null>(null);
+  const [cajaEgresoPdfLoadingId, setCajaEgresoPdfLoadingId] = useState<string | null>(null);
   const rangoInvalido = modoVista === 'rango' && fechaInicio > fechaFin;
   const periodoActual = modoVista === 'rango' ? `${fechaInicio} a ${fechaFin}` : fechaSeleccionada;
   const reportesEnabled = !rangoInvalido;
@@ -466,6 +467,27 @@ export default function ReportesPage() {
       );
     } finally {
       setTesoreriaEgresoPdfLoadingId(null);
+    }
+  };
+
+  const descargarComprobanteEgresoCajaReporte = async (movimientoId: string) => {
+    setCajaEgresoPdfLoadingId(movimientoId);
+    try {
+      await cajasApi.descargarComprobanteEgresoCaja(movimientoId, {
+        consolidarTodas: reporteSedeScope === 'todas',
+        sucursalId:
+          reporteSedeScope === 'sucursal' && reporteSedeId.trim()
+            ? reporteSedeId.trim()
+            : undefined,
+      });
+    } catch {
+      showToast(
+        'error',
+        'Descarga fallida',
+        'No fue posible obtener el comprobante de egreso de caja. Verifica permisos o el alcance de sede del reporte.',
+      );
+    } finally {
+      setCajaEgresoPdfLoadingId(null);
     }
   };
 
@@ -1541,6 +1563,10 @@ export default function ReportesPage() {
                   const mostrarDocsCaja = m.modulo === 'Caja' && m.vehiculo_id && m.categoria === 'rtm';
                   const mostrarComprobanteTesoreriaEgreso =
                     m.modulo === 'Tesorería' && !m.es_ingreso && !m.anulado;
+                  const mostrarComprobanteCajaEgresoManual =
+                    m.modulo === 'Caja' &&
+                    !m.es_ingreso &&
+                    ['gasto', 'devolucion', 'ajuste'].includes(m.categoria);
                   return (
                   <tr key={m.id} className="border-t">
                     <td className="px-3 py-2">{m.hora}</td>
@@ -1554,7 +1580,9 @@ export default function ReportesPage() {
                     <td className={`px-3 py-2 text-right font-semibold ${m.es_ingreso ? 'text-green-700' : 'text-red-700'}`}>{formatCOP(m.monto)}</td>
                     <td className="px-3 py-2">{m.usuario}</td>
                     <td className="px-3 py-2 text-center">
-                      {mostrarDocsCaja || mostrarComprobanteTesoreriaEgreso ? (
+                      {mostrarDocsCaja ||
+                      mostrarComprobanteTesoreriaEgreso ||
+                      mostrarComprobanteCajaEgresoManual ? (
                         <div className="flex flex-wrap justify-center gap-1">
                           {mostrarDocsCaja ? (
                             <>
@@ -1576,6 +1604,17 @@ export default function ReportesPage() {
                                 <Landmark className="w-4 h-4" />
                               </button>
                             </>
+                          ) : null}
+                          {mostrarComprobanteCajaEgresoManual ? (
+                            <button
+                              type="button"
+                              title="Comprobante de egreso de caja (PDF)"
+                              disabled={cajaEgresoPdfLoadingId === m.id}
+                              onClick={() => descargarComprobanteEgresoCajaReporte(m.id)}
+                              className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-orange-50 text-orange-800 disabled:opacity-40"
+                            >
+                              <Wallet className="w-4 h-4" />
+                            </button>
                           ) : null}
                           {mostrarComprobanteTesoreriaEgreso ? (
                             <button

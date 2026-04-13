@@ -1,4 +1,4 @@
-import apiClient from './client';
+import apiClient, { apiBaseUrl } from './client';
 import type { Caja, CajaApertura, CajaCierre, CajaResumen, MovimientoCaja } from '../types';
 
 export const cajasApi = {
@@ -140,5 +140,50 @@ export const cajasApi = {
       }
     }
     throw lastError;
+  },
+
+  /** Comprobante PDF de egreso de caja (gasto / devolución / ajuste). Mismo alcance de sede que reportes. */
+  descargarComprobanteEgresoCaja: async (
+    movimientoId: string,
+    opts?: { consolidarTodas?: boolean; sucursalId?: string },
+  ): Promise<void> => {
+    const token = localStorage.getItem('access_token');
+    if (!token) {
+      throw new Error('No hay token de autenticación');
+    }
+    const params = new URLSearchParams();
+    if (opts?.consolidarTodas) params.set('consolidar_todas', 'true');
+    if (opts?.sucursalId?.trim()) params.set('sucursal_id', opts.sucursalId.trim());
+    const qs = params.toString() ? `?${params.toString()}` : '';
+
+    const response = await fetch(
+      `${apiBaseUrl}/cajas/movimientos/${movimientoId}/comprobante-egreso${qs}`,
+      {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      },
+    );
+
+    if (!response.ok) {
+      throw new Error(`Error al descargar comprobante: ${response.status}`);
+    }
+
+    const blob = await response.blob();
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    const contentDisposition = response.headers.get('content-disposition');
+    let filename = `comprobante_egreso_caja_${movimientoId.slice(0, 8)}.pdf`;
+    if (contentDisposition) {
+      const filenameMatch = contentDisposition.match(/filename="?([^";]+)"?/i);
+      if (filenameMatch?.[1]) {
+        filename = filenameMatch[1].trim();
+      }
+    }
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
   },
 };
