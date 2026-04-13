@@ -10,7 +10,7 @@ from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
 
-from app.core.deps import get_db, get_current_user, get_admin, get_active_sucursal_id
+from app.core.deps import get_db, get_current_user, get_admin, get_contador_or_admin, get_active_sucursal_id
 from app.models.usuario import Usuario
 from app.models.tenant import Tenant
 from app.models.tesoreria import (
@@ -869,7 +869,7 @@ async def descargar_comprobante_egreso(
     movimiento_id: str,
     consolidar_todas: bool = Query(False),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin),
+    current_user: Usuario = Depends(get_contador_or_admin),
     active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """

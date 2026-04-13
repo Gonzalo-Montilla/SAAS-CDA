@@ -160,16 +160,21 @@ export const tesoreriaApi = {
   },
 
   // Comprobantes
-  descargarComprobanteEgreso: async (movimientoId: string): Promise<void> => {
+  descargarComprobanteEgreso: async (
+    movimientoId: string,
+    opts?: { consolidarTodas?: boolean },
+  ): Promise<void> => {
     // Obtener token del localStorage
     const token = localStorage.getItem('access_token');
     if (!token) {
       throw new Error('No hay token de autenticación');
     }
-    
+
+    const qs = opts?.consolidarTodas ? '?consolidar_todas=true' : '';
+
     // Usar fetch en lugar de axios para mejor manejo de blobs
     const response = await fetch(
-      `${apiBaseUrl}/tesoreria/movimientos/${movimientoId}/comprobante`,
+      `${apiBaseUrl}/tesoreria/movimientos/${movimientoId}/comprobante${qs}`,
       {
         method: 'GET',
         headers: {

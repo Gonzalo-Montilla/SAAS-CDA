@@ -5,6 +5,7 @@ import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import apiClient from '../api/client';
 import { reportesApi, type AgendamientoMetricasResponse, type CierreCajaReporteItem } from '../api/reportes';
+import { tesoreriaApi } from '../api/tesoreria';
 import { cajasApi } from '../api/cajas';
 import { vehiculosApi } from '../api/vehiculos';
 import { useAuth } from '../contexts/AuthContext';
@@ -67,6 +68,8 @@ interface Movimiento {
   vehiculo_id?: string | null;
   numero_factura_dian?: string | null;
   factura_public_url?: string | null;
+  /** Solo filas de tesorería (reporte movimientos detallados). */
+  anulado?: boolean;
 }
 
 interface Tramite {
@@ -128,6 +131,7 @@ export default function ReportesPage() {
   const [modalRecibo, setModalRecibo] = useState<{ blobUrl: string } | null>(null);
   const [reportesSeccion, setReportesSeccion] = useState<ReportesSeccion>('resumen');
   const [cierrePdfLoadingId, setCierrePdfLoadingId] = useState<string | null>(null);
+  const [tesoreriaEgresoPdfLoadingId, setTesoreriaEgresoPdfLoadingId] = useState<string | null>(null);
   const rangoInvalido = modoVista === 'rango' && fechaInicio > fechaFin;
   const periodoActual = modoVista === 'rango' ? `${fechaInicio} a ${fechaFin}` : fechaSeleccionada;
   const reportesEnabled = !rangoInvalido;
@@ -441,6 +445,23 @@ export default function ReportesPage() {
       showToast('error', 'Descarga fallida', 'No fue posible obtener el comprobante de cierre.');
     } finally {
       setCierrePdfLoadingId(null);
+    }
+  };
+
+  const descargarComprobanteEgresoTesoreriaReporte = async (movimientoId: string) => {
+    setTesoreriaEgresoPdfLoadingId(movimientoId);
+    try {
+      await tesoreriaApi.descargarComprobanteEgreso(movimientoId, {
+        consolidarTodas: reporteSedeScope === 'todas',
+      });
+    } catch {
+      showToast(
+        'error',
+        'Descarga fallida',
+        'No fue posible obtener el comprobante de egreso. Verifica permisos, sede activa o que el movimiento no esté anulado.',
+      );
+    } finally {
+      setTesoreriaEgresoPdfLoadingId(null);
     }
   };
 
@@ -1513,7 +1534,9 @@ export default function ReportesPage() {
                   </tr>
                 )}
                 {movimientosFiltrados.map((m: Movimiento) => {
-                  const mostrarDocs = m.modulo === 'Caja' && m.vehiculo_id && m.categoria === 'rtm';
+                  const mostrarDocsCaja = m.modulo === 'Caja' && m.vehiculo_id && m.categoria === 'rtm';
+                  const mostrarComprobanteTesoreriaEgreso =
+                    m.modulo === 'Tesorería' && !m.es_ingreso && !m.anulado;
                   return (
                   <tr key={m.id} className="border-t">
                     <td className="px-3 py-2">{m.hora}</td>
@@ -1527,25 +1550,40 @@ export default function ReportesPage() {
                     <td className={`px-3 py-2 text-right font-semibold ${m.es_ingreso ? 'text-green-700' : 'text-red-700'}`}>{formatCOP(m.monto)}</td>
                     <td className="px-3 py-2">{m.usuario}</td>
                     <td className="px-3 py-2 text-center">
-                      {mostrarDocs ? (
+                      {mostrarDocsCaja || mostrarComprobanteTesoreriaEgreso ? (
                         <div className="flex flex-wrap justify-center gap-1">
-                          <button
-                            type="button"
-                            title="Recibo de pago (PDF interno)"
-                            onClick={() => m.vehiculo_id && abrirReciboCliente(m.vehiculo_id)}
-                            className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-primary-50 text-primary-700"
-                          >
-                            <Receipt className="w-4 h-4" />
-                          </button>
-                          <button
-                            type="button"
-                            title="Factura electrónica DIAN (Factus)"
-                            onClick={() => abrirFacturaOficial(m.factura_public_url)}
-                            className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-amber-50 text-amber-800 disabled:opacity-40"
-                            disabled={!m.factura_public_url}
-                          >
-                            <Landmark className="w-4 h-4" />
-                          </button>
+                          {mostrarDocsCaja ? (
+                            <>
+                              <button
+                                type="button"
+                                title="Recibo de pago (PDF interno)"
+                                onClick={() => m.vehiculo_id && abrirReciboCliente(m.vehiculo_id)}
+                                className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-primary-50 text-primary-700"
+                              >
+                                <Receipt className="w-4 h-4" />
+                              </button>
+                              <button
+                                type="button"
+                                title="Factura electrónica DIAN (Factus)"
+                                onClick={() => abrirFacturaOficial(m.factura_public_url)}
+                                className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-amber-50 text-amber-800 disabled:opacity-40"
+                                disabled={!m.factura_public_url}
+                              >
+                                <Landmark className="w-4 h-4" />
+                              </button>
+                            </>
+                          ) : null}
+                          {mostrarComprobanteTesoreriaEgreso ? (
+                            <button
+                              type="button"
+                              title="Comprobante de egreso (PDF)"
+                              disabled={tesoreriaEgresoPdfLoadingId === m.id}
+                              onClick={() => descargarComprobanteEgresoTesoreriaReporte(m.id)}
+                              className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-red-50 text-red-700 disabled:opacity-40"
+                            >
+                              <FileText className="w-4 h-4" />
+                            </button>
+                          ) : null}
                         </div>
                       ) : (
                         <span className="text-slate-300">—</span>
