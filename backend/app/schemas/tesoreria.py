@@ -79,6 +79,7 @@ class MovimientoTesoreriaCreate(BaseModel):
     # Solo egreso (obligatorios vía validación en endpoint)
     beneficiario: Optional[str] = Field(default=None, max_length=300)
     beneficiario_tipo_identificacion: Optional[str] = Field(default=None, max_length=80)
+    beneficiario_numero_identificacion: Optional[str] = Field(default=None, max_length=80)
     
     @field_validator('categoria_ingreso', 'categoria_egreso', mode='before')
     @classmethod
@@ -104,6 +105,7 @@ class MovimientoTesoreriaResponse(BaseModel):
     created_by: UUID
     beneficiario: Optional[str] = None
     beneficiario_tipo_identificacion: Optional[str] = None
+    beneficiario_numero_identificacion: Optional[str] = None
 
     anulado: bool = False
     motivo_anulacion: Optional[str] = None

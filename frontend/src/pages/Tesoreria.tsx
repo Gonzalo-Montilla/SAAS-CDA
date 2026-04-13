@@ -456,6 +456,13 @@ function Dashboard() {
                         {mov.beneficiario_tipo_identificacion ? (
                           <span className="text-xs text-slate-500 font-normal block">
                             {mov.beneficiario_tipo_identificacion}
+                            {mov.beneficiario_numero_identificacion
+                              ? ` · ${mov.beneficiario_numero_identificacion}`
+                              : ''}
+                          </span>
+                        ) : mov.beneficiario_numero_identificacion ? (
+                          <span className="text-xs text-slate-500 font-normal block">
+                            {mov.beneficiario_numero_identificacion}
                           </span>
                         ) : null}
                         <span className="text-slate-700 font-normal block mt-0.5">{mov.concepto}</span>
@@ -492,6 +499,7 @@ function RegistrarMovimiento() {
     concepto: '',
     beneficiario: '',
     beneficiario_tipo_identificacion: '',
+    beneficiario_numero_identificacion: '',
     metodo_pago: 'efectivo',
     numero_comprobante: '',
   });
@@ -555,6 +563,7 @@ function RegistrarMovimiento() {
         concepto: '',
         beneficiario: '',
         beneficiario_tipo_identificacion: '',
+        beneficiario_numero_identificacion: '',
         metodo_pago: 'efectivo',
         numero_comprobante: '',
       });
@@ -642,6 +651,7 @@ function RegistrarMovimiento() {
     if (tipoMovimiento === 'egreso') {
       const ben = formData.beneficiario.trim();
       const tid = formData.beneficiario_tipo_identificacion.trim();
+      const numId = formData.beneficiario_numero_identificacion.trim();
       if (ben.length < 2) {
         setFeedback({
           type: 'error',
@@ -653,6 +663,13 @@ function RegistrarMovimiento() {
         setFeedback({
           type: 'error',
           message: 'Selecciona el tipo de identificación del beneficiario.',
+        });
+        return;
+      }
+      if (numId.length < 4) {
+        setFeedback({
+          type: 'error',
+          message: 'Indica el número de identificación del beneficiario (mínimo 4 caracteres).',
         });
         return;
       }
@@ -670,6 +687,7 @@ function RegistrarMovimiento() {
     if (tipoMovimiento === 'egreso') {
       data.beneficiario = formData.beneficiario.trim();
       data.beneficiario_tipo_identificacion = formData.beneficiario_tipo_identificacion.trim();
+      data.beneficiario_numero_identificacion = formData.beneficiario_numero_identificacion.trim();
     }
     
     // Incluir desglose si es efectivo
@@ -707,6 +725,10 @@ function RegistrarMovimiento() {
       resumen.push({
         label: 'Tipo de identificación',
         value: formData.beneficiario_tipo_identificacion.trim(),
+      });
+      resumen.push({
+        label: 'No. identificación',
+        value: formData.beneficiario_numero_identificacion.trim(),
       });
     }
     resumen.push({ label: 'Concepto / Detalle', value: formData.concepto.trim() });
@@ -922,6 +944,28 @@ function RegistrarMovimiento() {
                   ))}
                 </select>
               </div>
+              <div className="mb-6">
+                <label className="block text-lg font-bold text-slate-900 mb-3">
+                  Número de identificación
+                </label>
+                <input
+                  type="text"
+                  inputMode="text"
+                  autoComplete="off"
+                  value={formData.beneficiario_numero_identificacion}
+                  onChange={(e) =>
+                    setFormData({ ...formData, beneficiario_numero_identificacion: e.target.value })
+                  }
+                  className="input-pos"
+                  placeholder="Ej: 1234567890, 900.123.456-7"
+                  minLength={4}
+                  maxLength={80}
+                  required
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Cédula, NIT u otro número según el tipo elegido (no uses este campo en el concepto).
+                </p>
+              </div>
             </>
           )}
 
@@ -935,7 +979,7 @@ function RegistrarMovimiento() {
               onChange={(e) => setFormData({ ...formData, concepto: e.target.value })}
               className="input-pos"
               rows={3}
-              placeholder="Describe el movimiento..."
+              placeholder="Describe el motivo o detalle del pago (sin repetir el número de documento)…"
               minLength={5}
               required
             />
@@ -1016,6 +1060,7 @@ function RegistrarMovimiento() {
                 concepto: '',
                 beneficiario: '',
                 beneficiario_tipo_identificacion: '',
+                beneficiario_numero_identificacion: '',
                 metodo_pago: 'efectivo',
                 numero_comprobante: '',
               })}
@@ -1026,7 +1071,17 @@ function RegistrarMovimiento() {
             </button>
             <button
               type="submit"
-              disabled={registrarMutation.isLoading || !!modalConfirmar}
+              disabled={
+                registrarMutation.isLoading ||
+                !!modalConfirmar ||
+                (tipoMovimiento === 'egreso' &&
+                  (formData.beneficiario.trim().length < 2 ||
+                    !formData.beneficiario_tipo_identificacion.trim() ||
+                    formData.beneficiario_numero_identificacion.trim().length < 4 ||
+                    formData.concepto.trim().length < 5 ||
+                    !formData.categoria ||
+                    !formData.monto))
+              }
               className="flex-1 btn-pos btn-primary disabled:opacity-50 flex items-center justify-center gap-2"
             >
               {registrarMutation.isLoading ? 'Registrando...' : (
@@ -1188,7 +1243,9 @@ function Historial() {
     return (
       mov.concepto.toLowerCase().includes(searchLower) ||
       (mov.numero_comprobante && mov.numero_comprobante.toLowerCase().includes(searchLower)) ||
-      (mov.beneficiario && mov.beneficiario.toLowerCase().includes(searchLower))
+      (mov.beneficiario && mov.beneficiario.toLowerCase().includes(searchLower)) ||
+      (mov.beneficiario_numero_identificacion &&
+        mov.beneficiario_numero_identificacion.toLowerCase().includes(searchLower))
     );
   });
 
@@ -1210,6 +1267,7 @@ function Historial() {
         'Categoría': mov.categoria_ingreso || mov.categoria_egreso || 'N/A',
         'Beneficiario': mov.beneficiario || '',
         'Tipo identificación': mov.beneficiario_tipo_identificacion || '',
+        'No. identificación': mov.beneficiario_numero_identificacion || '',
         'Concepto': mov.concepto,
         'Método de Pago': mov.metodo_pago,
         'Monto': mov.monto,
@@ -1259,7 +1317,7 @@ function Historial() {
         <div className="mb-4">
           <label className="block text-sm font-medium text-slate-700 mb-2 flex items-center gap-1">
             <Search className="w-4 h-4" />
-            Buscar en Concepto, Beneficiario o Número de Comprobante
+            Buscar en concepto, beneficiario, no. identificación o número de comprobante
           </label>
           <input
             type="text"
@@ -1397,6 +1455,13 @@ function Historial() {
                             {mov.beneficiario_tipo_identificacion ? (
                               <span className="text-xs text-slate-500 block">
                                 {mov.beneficiario_tipo_identificacion}
+                                {mov.beneficiario_numero_identificacion
+                                  ? ` · ${mov.beneficiario_numero_identificacion}`
+                                  : ''}
+                              </span>
+                            ) : mov.beneficiario_numero_identificacion ? (
+                              <span className="text-xs text-slate-500 block">
+                                {mov.beneficiario_numero_identificacion}
                               </span>
                             ) : null}
                             <span className="text-slate-700 block mt-0.5">{mov.concepto}</span>

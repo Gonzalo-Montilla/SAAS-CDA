@@ -585,6 +585,9 @@ def obtener_movimientos_detallados(
             "vehiculo_id": doc_vehiculo_id,
             "numero_factura_dian": doc_numero_factura,
             "factura_public_url": doc_factura_url,
+            "beneficiario": getattr(mov, "beneficiario", None),
+            "beneficiario_tipo_identificacion": getattr(mov, "beneficiario_tipo_identificacion", None),
+            "beneficiario_numero_identificacion": getattr(mov, "beneficiario_numero_identificacion", None),
         })
     
     # ==================== MOVIMIENTOS DE TESORERÍA ====================
@@ -638,6 +641,9 @@ def obtener_movimientos_detallados(
             "vehiculo_id": None,
             "numero_factura_dian": None,
             "factura_public_url": None,
+            "beneficiario": getattr(mov, "beneficiario", None),
+            "beneficiario_tipo_identificacion": getattr(mov, "beneficiario_tipo_identificacion", None),
+            "beneficiario_numero_identificacion": getattr(mov, "beneficiario_numero_identificacion", None),
         })
     
     # Combinar y ordenar por hora

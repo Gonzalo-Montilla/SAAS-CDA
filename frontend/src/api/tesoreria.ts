@@ -11,6 +11,8 @@ export interface MovimientoTesoreria {
   beneficiario?: string | null;
   /** Egresos: tipo de documento del beneficiario. */
   beneficiario_tipo_identificacion?: string | null;
+  /** Egresos: número del documento (cédula, NIT, etc.). */
+  beneficiario_numero_identificacion?: string | null;
   metodo_pago: string;
   origen_caja_id?: string;
   numero_comprobante?: string;
@@ -66,6 +68,48 @@ export interface CategoriasResponse {
   ingresos: Categoria[];
   egresos: Categoria[];
   metodos_pago: Categoria[];
+}
+
+async function fetchComprobanteEgresoPdf(
+  movimientoId: string,
+  opts?: { consolidarTodas?: boolean; sucursalId?: string },
+): Promise<{ blob: Blob; filename: string }> {
+  const token = localStorage.getItem('access_token');
+  if (!token) {
+    throw new Error('No hay token de autenticación');
+  }
+
+  const params = new URLSearchParams();
+  if (opts?.consolidarTodas) params.set('consolidar_todas', 'true');
+  if (opts?.sucursalId?.trim()) params.set('sucursal_id', opts.sucursalId.trim());
+  const qs = params.toString() ? `?${params.toString()}` : '';
+
+  const response = await fetch(
+    `${apiBaseUrl}/tesoreria/movimientos/${movimientoId}/comprobante${qs}`,
+    {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Error al descargar comprobante: ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  const contentDisposition = response.headers.get('content-disposition');
+  let filename = `Comprobante_Egreso_${movimientoId}.pdf`;
+
+  if (contentDisposition) {
+    const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
+    if (filenameMatch && filenameMatch[1]) {
+      filename = filenameMatch[1];
+    }
+  }
+
+  return { blob, filename };
 }
 
 export const tesoreriaApi = {
@@ -160,53 +204,17 @@ export const tesoreriaApi = {
   },
 
   // Comprobantes
+  /** Obtiene el PDF sin disparar descarga (p. ej. vista previa en modal). */
+  obtenerComprobanteEgresoPdf: fetchComprobanteEgresoPdf,
+
   descargarComprobanteEgreso: async (
     movimientoId: string,
     opts?: { consolidarTodas?: boolean; sucursalId?: string },
   ): Promise<void> => {
-    // Obtener token del localStorage
-    const token = localStorage.getItem('access_token');
-    if (!token) {
-      throw new Error('No hay token de autenticación');
-    }
-
-    const params = new URLSearchParams();
-    if (opts?.consolidarTodas) params.set('consolidar_todas', 'true');
-    if (opts?.sucursalId?.trim()) params.set('sucursal_id', opts.sucursalId.trim());
-    const qs = params.toString() ? `?${params.toString()}` : '';
-
-    // Usar fetch en lugar de axios para mejor manejo de blobs
-    const response = await fetch(
-      `${apiBaseUrl}/tesoreria/movimientos/${movimientoId}/comprobante${qs}`,
-      {
-        method: 'GET',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
-      }
-    );
-    
-    if (!response.ok) {
-      throw new Error(`Error al descargar comprobante: ${response.status}`);
-    }
-    
-    // Obtener blob y crear URL
-    const blob = await response.blob();
+    const { blob, filename } = await fetchComprobanteEgresoPdf(movimientoId, opts);
     const url = window.URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    
-    // Obtener nombre del archivo del header Content-Disposition si existe
-    const contentDisposition = response.headers.get('content-disposition');
-    let filename = `Comprobante_Egreso_${movimientoId}.pdf`;
-    
-    if (contentDisposition) {
-      const filenameMatch = contentDisposition.match(/filename="?(.+)"?/i);
-      if (filenameMatch && filenameMatch[1]) {
-        filename = filenameMatch[1];
-      }
-    }
-    
     link.setAttribute('download', filename);
     document.body.appendChild(link);
     link.click();

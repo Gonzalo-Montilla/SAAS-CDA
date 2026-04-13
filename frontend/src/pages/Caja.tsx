@@ -1624,6 +1624,7 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
     concepto: '',
     beneficiario: '',
     beneficiario_tipo_identificacion: '',
+    beneficiario_numero_identificacion: '',
   });
   const [mostrarExito, setMostrarExito] = useState(false);
   const [nombreArchivoPDF, setNombreArchivoPDF] = useState('');
@@ -1671,6 +1672,11 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
       window.alert('Selecciona el tipo de identificación del beneficiario.');
       return;
     }
+    const numId = formData.beneficiario_numero_identificacion.trim();
+    if (numId.length < 4) {
+      window.alert('Indica el número de identificación del beneficiario (mínimo 4 caracteres).');
+      return;
+    }
 
     // Confirmación para gastos grandes (>$50,000)
     if (monto > 50000) {
@@ -1695,6 +1701,7 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
       ingresa_efectivo: false,
       beneficiario: ben,
       beneficiario_tipo_identificacion: tid,
+      beneficiario_numero_identificacion: numId,
     });
   };
 
@@ -1856,7 +1863,7 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
               <div>
                 <label className="block text-lg font-bold text-slate-900 mb-3">
                   Beneficiario / Pagado a
@@ -1890,6 +1897,28 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
                     </option>
                   ))}
                 </select>
+              </div>
+              <div className="md:col-span-2 xl:col-span-1">
+                <label className="block text-lg font-bold text-slate-900 mb-3">
+                  Número de identificación
+                </label>
+                <input
+                  type="text"
+                  inputMode="text"
+                  autoComplete="off"
+                  value={formData.beneficiario_numero_identificacion}
+                  onChange={(e) =>
+                    setFormData({ ...formData, beneficiario_numero_identificacion: e.target.value })
+                  }
+                  className="input-pos"
+                  placeholder="Ej: 1234567890, 900.123.456-7"
+                  minLength={4}
+                  maxLength={80}
+                  required
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Cédula, NIT u otro número según el tipo (no lo repitas en el concepto).
+                </p>
               </div>
             </div>
 
@@ -1935,7 +1964,7 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
                   onChange={(e) => setFormData({ ...formData, concepto: e.target.value })}
                   className="input-pos"
                   rows={5}
-                  placeholder="Ej: Compra de papel higiénico, pago de agua, devolución a cliente Juan Pérez..."
+                  placeholder="Ej: Compra de insumos, pago de servicio… (sin repetir el número de documento)"
                   minLength={5}
                   required
                 />
@@ -1949,7 +1978,8 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
             {montoNumerico > 0 &&
               formData.concepto.length >= 5 &&
               formData.beneficiario.trim().length >= 2 &&
-              formData.beneficiario_tipo_identificacion.trim() && (
+              formData.beneficiario_tipo_identificacion.trim() &&
+              formData.beneficiario_numero_identificacion.trim().length >= 4 && (
               <div className="mb-6 p-4 bg-slate-50 border border-slate-200 rounded-lg">
                 <p className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
                   <Eye className="w-5 h-5" />
@@ -1959,7 +1989,12 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
                   <div className="space-y-1">
                     <p className="text-sm text-slate-600">Beneficiario</p>
                     <p className="font-semibold text-slate-900">{formData.beneficiario.trim()}</p>
-                    <p className="text-xs text-slate-500">{formData.beneficiario_tipo_identificacion}</p>
+                    <p className="text-xs text-slate-500">
+                      {formData.beneficiario_tipo_identificacion}
+                      {formData.beneficiario_numero_identificacion.trim()
+                        ? ` · ${formData.beneficiario_numero_identificacion.trim()}`
+                        : ''}
+                    </p>
                     <p className="text-sm text-slate-600 pt-1">Concepto</p>
                     <p className="font-bold text-slate-900">{formData.concepto}</p>
                   </div>
@@ -1987,7 +2022,8 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
                   !formData.monto ||
                   formData.concepto.length < 5 ||
                   formData.beneficiario.trim().length < 2 ||
-                  !formData.beneficiario_tipo_identificacion.trim()
+                  !formData.beneficiario_tipo_identificacion.trim() ||
+                  formData.beneficiario_numero_identificacion.trim().length < 4
                 }
                 className="flex-1 btn-pos btn-danger disabled:opacity-50 inline-flex items-center justify-center gap-2"
               >
@@ -2619,7 +2655,14 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                           <>
                             <p className="text-sm font-semibold text-gray-900">{egreso.beneficiario}</p>
                             {egreso.beneficiario_tipo_identificacion ? (
-                              <p className="text-xs text-gray-500">{egreso.beneficiario_tipo_identificacion}</p>
+                              <p className="text-xs text-gray-500">
+                                {egreso.beneficiario_tipo_identificacion}
+                                {egreso.beneficiario_numero_identificacion
+                                  ? ` · ${egreso.beneficiario_numero_identificacion}`
+                                  : ''}
+                              </p>
+                            ) : egreso.beneficiario_numero_identificacion ? (
+                              <p className="text-xs text-gray-500">{egreso.beneficiario_numero_identificacion}</p>
                             ) : null}
                             <p className="text-sm font-medium text-gray-800 mt-0.5">{egreso.concepto}</p>
                           </>

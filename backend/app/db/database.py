@@ -701,6 +701,11 @@ def ensure_movimiento_tesoreria_beneficiario_columns(db):
             "ALTER TABLE movimientos_tesoreria ADD COLUMN IF NOT EXISTS beneficiario_tipo_identificacion VARCHAR(80)"
         )
     )
+    db.execute(
+        text(
+            "ALTER TABLE movimientos_tesoreria ADD COLUMN IF NOT EXISTS beneficiario_numero_identificacion VARCHAR(80)"
+        )
+    )
 
 
 def ensure_movimiento_caja_beneficiario_columns(db):
@@ -712,6 +717,11 @@ def ensure_movimiento_caja_beneficiario_columns(db):
     db.execute(
         text(
             "ALTER TABLE movimientos_caja ADD COLUMN IF NOT EXISTS beneficiario_tipo_identificacion VARCHAR(80)"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE movimientos_caja ADD COLUMN IF NOT EXISTS beneficiario_numero_identificacion VARCHAR(80)"
         )
     )
 

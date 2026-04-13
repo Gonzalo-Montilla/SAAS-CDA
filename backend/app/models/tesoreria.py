@@ -71,6 +71,7 @@ class MovimientoTesoreria(Base):
     # Egreso: beneficiario y tipo de documento (obligatorios en API para egresos nuevos)
     beneficiario = Column(String(300), nullable=True)
     beneficiario_tipo_identificacion = Column(String(80), nullable=True)
+    beneficiario_numero_identificacion = Column(String(80), nullable=True)
     
     # Referencias
     origen_caja_id = Column(UUID(as_uuid=True), ForeignKey("cajas.id"), nullable=True)  # Si viene de una caja diaria

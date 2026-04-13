@@ -64,6 +64,7 @@ class MovimientoCreate(BaseModel):
     ingresa_efectivo: bool = True
     beneficiario: Optional[str] = Field(default=None, max_length=300)
     beneficiario_tipo_identificacion: Optional[str] = Field(default=None, max_length=80)
+    beneficiario_numero_identificacion: Optional[str] = Field(default=None, max_length=80)
 
 
 class MovimientoResponse(BaseModel):
@@ -77,6 +78,7 @@ class MovimientoResponse(BaseModel):
     created_at: datetime
     beneficiario: Optional[str] = None
     beneficiario_tipo_identificacion: Optional[str] = None
+    beneficiario_numero_identificacion: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

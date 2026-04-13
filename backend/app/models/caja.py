@@ -113,6 +113,7 @@ class MovimientoCaja(Base):
     concepto = Column(Text, nullable=False)
     beneficiario = Column(String(300), nullable=True)
     beneficiario_tipo_identificacion = Column(String(80), nullable=True)
+    beneficiario_numero_identificacion = Column(String(80), nullable=True)
 
     # Control especial para CrediSmart
     ingresa_efectivo = Column(Boolean, default=True, nullable=False)

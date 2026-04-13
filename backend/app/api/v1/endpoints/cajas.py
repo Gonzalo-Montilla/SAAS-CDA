@@ -386,9 +386,11 @@ def crear_movimiento(
     tipo_enum = TipoMovimiento(movimiento_data.tipo)
     ben_norm = None
     tid_norm = None
+    num_id_norm = None
     if tipo_enum in (TipoMovimiento.GASTO, TipoMovimiento.DEVOLUCION, TipoMovimiento.AJUSTE) and movimiento_data.monto < 0:
         ben = (movimiento_data.beneficiario or "").strip()
         tid = (movimiento_data.beneficiario_tipo_identificacion or "").strip()
+        num_id = (movimiento_data.beneficiario_numero_identificacion or "").strip()
         if len(ben) < 2:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -404,8 +406,14 @@ def crear_movimiento(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Tipo de identificación del beneficiario no válido.",
             )
+        if len(num_id) < 4:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El número de identificación del beneficiario es obligatorio (mínimo 4 caracteres).",
+            )
         ben_norm = ben
         tid_norm = tid
+        num_id_norm = num_id
 
     # Crear movimiento
     movimiento = MovimientoCaja(
@@ -418,6 +426,7 @@ def crear_movimiento(
         ingresa_efectivo=movimiento_data.ingresa_efectivo,
         beneficiario=ben_norm,
         beneficiario_tipo_identificacion=tid_norm,
+        beneficiario_numero_identificacion=num_id_norm,
         created_by=current_user.id,
     )
     
@@ -448,6 +457,7 @@ def crear_movimiento(
             "concepto": movimiento_data.concepto,
             "beneficiario": ben_norm,
             "beneficiario_tipo_identificacion": tid_norm,
+            "beneficiario_numero_identificacion": num_id_norm,
         },
     )
 
@@ -546,6 +556,7 @@ def descargar_comprobante_egreso_movimiento_caja(
         turno=turno,
         beneficiario=mov.beneficiario or "",
         beneficiario_tipo_identificacion=mov.beneficiario_tipo_identificacion or "",
+        beneficiario_numero_identificacion=mov.beneficiario_numero_identificacion or "",
         concepto=mov.concepto or "",
         monto=abs(Decimal(str(mov.monto))),
         metodo_pago=mov.metodo_pago or "efectivo",

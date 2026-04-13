@@ -249,6 +249,12 @@ def crear_movimiento(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Tipo de identificación del beneficiario no válido.",
             )
+        num_id = (movimiento_data.beneficiario_numero_identificacion or "").strip()
+        if len(num_id) < 4:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El número de identificación del beneficiario es obligatorio para egresos (mínimo 4 caracteres).",
+            )
 
     # Validar desglose de efectivo si el método de pago es efectivo
     if movimiento_data.metodo_pago == "efectivo":
@@ -325,6 +331,11 @@ def crear_movimiento(
         if movimiento_data.tipo == "egreso"
         else None
     )
+    num_id_norm = (
+        (movimiento_data.beneficiario_numero_identificacion or "").strip()
+        if movimiento_data.tipo == "egreso"
+        else None
+    )
 
     # Crear movimiento
     nuevo_movimiento = MovimientoTesoreria(
@@ -342,6 +353,7 @@ def crear_movimiento(
         created_by=current_user.id,
         beneficiario=ben_norm,
         beneficiario_tipo_identificacion=tid_norm,
+        beneficiario_numero_identificacion=num_id_norm,
     )
     
     db.add(nuevo_movimiento)
@@ -981,6 +993,7 @@ async def descargar_comprobante_egreso(
         beneficiario_pdf = "N/A"
 
     tipo_id_pdf = movimiento.beneficiario_tipo_identificacion or "—"
+    numero_id_pdf = movimiento.beneficiario_numero_identificacion or "—"
     concepto_pdf = (
         movimiento.concepto.split(" - ", 1)[1].strip()
         if (not movimiento.beneficiario) and " - " in (movimiento.concepto or "")
@@ -992,6 +1005,7 @@ async def descargar_comprobante_egreso(
         fecha=movimiento.fecha_movimiento,
         beneficiario=beneficiario_pdf,
         beneficiario_tipo_identificacion=tipo_id_pdf,
+        beneficiario_numero_identificacion=numero_id_pdf,
         concepto=concepto_pdf,
         categoria=categoria_str,
         monto=abs(movimiento.monto),

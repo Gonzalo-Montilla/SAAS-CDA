@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { BarChart3, TrendingUp, TrendingDown, Wallet, Building2, FileText, Download, DollarSign, ArrowUpCircle, ArrowDownCircle, CalendarDays, TimerReset, AlertTriangle, GaugeCircle, Receipt, Landmark, X, Lock, Printer } from 'lucide-react';
 import Layout from '../components/Layout';
@@ -64,6 +64,10 @@ interface Movimiento {
   metodo_pago: string;
   usuario: string;
   numero_comprobante?: string;
+  /** Tesorería / egresos de caja manual (reporte detalle). */
+  beneficiario?: string | null;
+  beneficiario_tipo_identificacion?: string | null;
+  beneficiario_numero_identificacion?: string | null;
   sede?: string | null;
   vehiculo_id?: string | null;
   numero_factura_dian?: string | null;
@@ -128,7 +132,12 @@ export default function ReportesPage() {
   const [filtroTipo, setFiltroTipo] = useState<string>('todos');
   const [filtroMetodo, setFiltroMetodo] = useState<string>('todos');
   const [filtroConcepto, setFiltroConcepto] = useState<string>('');
-  const [modalRecibo, setModalRecibo] = useState<{ blobUrl: string } | null>(null);
+  /** Vista previa de PDFs propios (recibo, comprobantes); la factura DIAN sigue en nueva pestaña. */
+  const [pdfPreview, setPdfPreview] = useState<{
+    blobUrl: string;
+    title: string;
+    fileName: string;
+  } | null>(null);
   const [reportesSeccion, setReportesSeccion] = useState<ReportesSeccion>('resumen');
   const [cierrePdfLoadingId, setCierrePdfLoadingId] = useState<string | null>(null);
   const [tesoreriaEgresoPdfLoadingId, setTesoreriaEgresoPdfLoadingId] = useState<string | null>(null);
@@ -302,8 +311,17 @@ export default function ReportesPage() {
   const movimientosFiltrados = (movimientosData?.movimientos || []).filter((m: Movimiento) => {
     const cumpleTipo = filtroTipo === 'todos' || m.tipo_movimiento === filtroTipo;
     const cumpleMetodo = filtroMetodo === 'todos' || m.metodo_pago === filtroMetodo;
-    const cumpleConcepto = filtroConcepto === '' || m.concepto.toLowerCase().includes(filtroConcepto.toLowerCase());
-    return cumpleTipo && cumpleMetodo && cumpleConcepto;
+    const q = filtroConcepto.toLowerCase();
+    const cumpleTexto =
+      filtroConcepto === '' ||
+      m.concepto.toLowerCase().includes(q) ||
+      (m.beneficiario && m.beneficiario.toLowerCase().includes(q)) ||
+      (m.beneficiario_tipo_identificacion &&
+        m.beneficiario_tipo_identificacion.toLowerCase().includes(q)) ||
+      (m.beneficiario_numero_identificacion &&
+        m.beneficiario_numero_identificacion.toLowerCase().includes(q)) ||
+      (m.numero_comprobante && m.numero_comprobante.toLowerCase().includes(q));
+    return cumpleTipo && cumpleMetodo && cumpleTexto;
   });
 
   // Obtener valores únicos para los filtros
@@ -317,14 +335,24 @@ export default function ReportesPage() {
     setFiltroConcepto('');
   };
 
-  const cerrarModalRecibo = () => {
-    setModalRecibo((prev) => {
+  const cerrarPdfPreview = useCallback(() => {
+    setPdfPreview((prev) => {
       if (prev) {
         URL.revokeObjectURL(prev.blobUrl);
       }
       return null;
     });
-  };
+  }, []);
+
+  /** Sustituye la vista previa y libera el blob anterior si había uno abierto. */
+  const abrirPdfPreview = useCallback((next: { blobUrl: string; title: string; fileName: string }) => {
+    setPdfPreview((prev) => {
+      if (prev) {
+        URL.revokeObjectURL(prev.blobUrl);
+      }
+      return next;
+    });
+  }, []);
 
   const abrirReciboCliente = async (vehiculoId: string) => {
     try {
@@ -349,7 +377,11 @@ export default function ReportesPage() {
         logoUrl: brand.logoSrc,
       });
       const url = URL.createObjectURL(blob);
-      setModalRecibo({ blobUrl: url });
+      abrirPdfPreview({
+        blobUrl: url,
+        title: 'Recibo de pago',
+        fileName: `Recibo_${v.placa.replace(/[^a-zA-Z0-9._-]/g, '_')}.pdf`,
+      });
     } catch {
       alert('No fue posible generar el recibo. El trámite debe estar cobrado.');
     }
@@ -369,22 +401,17 @@ export default function ReportesPage() {
   };
 
   useEffect(() => {
-    if (!modalRecibo) {
+    if (!pdfPreview) {
       return;
     }
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
-        setModalRecibo((prev) => {
-          if (prev) {
-            URL.revokeObjectURL(prev.blobUrl);
-          }
-          return null;
-        });
+        cerrarPdfPreview();
       }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [modalRecibo]);
+  }, [pdfPreview, cerrarPdfPreview]);
 
   // Función para exportar a CSV
   const exportarCSV = (datos: any[], nombreArchivo: string) => {
@@ -426,7 +453,15 @@ export default function ReportesPage() {
     document.body.removeChild(link);
   };
 
-  const descargarComprobanteCierreReporte = async (cajaId: string) => {
+  const reporteSedeOpts = {
+    consolidarTodas: reporteSedeScope === 'todas',
+    sucursalId:
+      reporteSedeScope === 'sucursal' && reporteSedeId.trim()
+        ? reporteSedeId.trim()
+        : undefined,
+  };
+
+  const verComprobanteCierreReporte = async (cajaId: string) => {
     setCierrePdfLoadingId(cajaId);
     try {
       const blob = await cajasApi.descargarComprobanteCierre(cajaId);
@@ -434,35 +469,37 @@ export default function ReportesPage() {
         showToast('error', 'PDF vacío', 'El comprobante no se generó correctamente.');
         return;
       }
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `comprobante_cierre_${cajaId.slice(0, 8)}.pdf`;
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
+      const blobUrl = URL.createObjectURL(blob);
+      abrirPdfPreview({
+        blobUrl,
+        title: 'Comprobante de cierre de caja',
+        fileName: `comprobante_cierre_${cajaId.slice(0, 8)}.pdf`,
+      });
     } catch {
-      showToast('error', 'Descarga fallida', 'No fue posible obtener el comprobante de cierre.');
+      showToast('error', 'No se pudo abrir', 'No fue posible obtener el comprobante de cierre.');
     } finally {
       setCierrePdfLoadingId(null);
     }
   };
 
-  const descargarComprobanteEgresoTesoreriaReporte = async (movimientoId: string) => {
+  const verComprobanteEgresoTesoreriaReporte = async (movimientoId: string) => {
     setTesoreriaEgresoPdfLoadingId(movimientoId);
     try {
-      await tesoreriaApi.descargarComprobanteEgreso(movimientoId, {
-        consolidarTodas: reporteSedeScope === 'todas',
-        sucursalId:
-          reporteSedeScope === 'sucursal' && reporteSedeId.trim()
-            ? reporteSedeId.trim()
-            : undefined,
+      const { blob, filename } = await tesoreriaApi.obtenerComprobanteEgresoPdf(movimientoId, reporteSedeOpts);
+      if (!blob || blob.size === 0) {
+        showToast('error', 'PDF vacío', 'El comprobante no se generó correctamente.');
+        return;
+      }
+      const blobUrl = URL.createObjectURL(blob);
+      abrirPdfPreview({
+        blobUrl,
+        title: 'Comprobante de egreso (tesorería)',
+        fileName: filename,
       });
     } catch {
       showToast(
         'error',
-        'Descarga fallida',
+        'No se pudo abrir',
         'No fue posible obtener el comprobante de egreso. Verifica permisos, sede activa o que el movimiento no esté anulado.',
       );
     } finally {
@@ -470,20 +507,24 @@ export default function ReportesPage() {
     }
   };
 
-  const descargarComprobanteEgresoCajaReporte = async (movimientoId: string) => {
+  const verComprobanteEgresoCajaReporte = async (movimientoId: string) => {
     setCajaEgresoPdfLoadingId(movimientoId);
     try {
-      await cajasApi.descargarComprobanteEgresoCaja(movimientoId, {
-        consolidarTodas: reporteSedeScope === 'todas',
-        sucursalId:
-          reporteSedeScope === 'sucursal' && reporteSedeId.trim()
-            ? reporteSedeId.trim()
-            : undefined,
+      const { blob, filename } = await cajasApi.obtenerComprobanteEgresoCajaPdf(movimientoId, reporteSedeOpts);
+      if (!blob || blob.size === 0) {
+        showToast('error', 'PDF vacío', 'El comprobante no se generó correctamente.');
+        return;
+      }
+      const blobUrl = URL.createObjectURL(blob);
+      abrirPdfPreview({
+        blobUrl,
+        title: 'Comprobante de egreso (caja)',
+        fileName: filename,
       });
     } catch {
       showToast(
         'error',
-        'Descarga fallida',
+        'No se pudo abrir',
         'No fue posible obtener el comprobante de egreso de caja. Verifica permisos o el alcance de sede del reporte.',
       );
     } finally {
@@ -1430,9 +1471,9 @@ export default function ReportesPage() {
                       <td className="px-3 py-2.5 text-center">
                         <button
                           type="button"
-                          title="Descargar comprobante de cierre"
+                          title="Ver comprobante de cierre (vista previa)"
                           disabled={cierrePdfLoadingId === r.id}
-                          onClick={() => descargarComprobanteCierreReporte(r.id)}
+                          onClick={() => verComprobanteCierreReporte(r.id)}
                           className="inline-flex items-center justify-center rounded-lg border border-slate-200 bg-white p-2 text-primary-700 hover:bg-primary-50 disabled:opacity-50"
                         >
                           <Printer className="h-4 w-4" />
@@ -1514,13 +1555,13 @@ export default function ReportesPage() {
 
               <div className="flex-1 min-w-[200px]">
                 <label className="block text-sm font-semibold text-slate-700 mb-1">
-                  Buscar por Concepto:
+                  Buscar (concepto, beneficiario, documento…):
                 </label>
                 <input
                   type="text"
                   value={filtroConcepto}
                   onChange={(e) => setFiltroConcepto(e.target.value)}
-                  placeholder="Escribir para buscar..."
+                  placeholder="Concepto, beneficiario, no. identificación, comprobante…"
                   className="input-corporate w-full px-3 py-2"
                 />
               </div>
@@ -1574,7 +1615,28 @@ export default function ReportesPage() {
                     <td className="px-3 py-2 text-slate-600">{m.sede ?? '—'}</td>
                     <td className="px-3 py-2">{m.turno}</td>
                     <td className={`px-3 py-2 ${m.es_ingreso ? 'text-green-700' : 'text-red-700'}`}>{m.tipo_movimiento}</td>
-                    <td className="px-3 py-2">{m.concepto}</td>
+                    <td className="px-3 py-2 break-words min-w-0">
+                      {m.beneficiario ? (
+                        <>
+                          <span className="font-medium block">{m.beneficiario}</span>
+                          {m.beneficiario_tipo_identificacion ? (
+                            <span className="text-xs text-slate-500 block">
+                              {m.beneficiario_tipo_identificacion}
+                              {m.beneficiario_numero_identificacion
+                                ? ` · ${m.beneficiario_numero_identificacion}`
+                                : ''}
+                            </span>
+                          ) : m.beneficiario_numero_identificacion ? (
+                            <span className="text-xs text-slate-500 block">
+                              {m.beneficiario_numero_identificacion}
+                            </span>
+                          ) : null}
+                          <span className="text-slate-700 block mt-0.5">{m.concepto}</span>
+                        </>
+                      ) : (
+                        m.concepto
+                      )}
+                    </td>
                     <td className="px-3 py-2">{m.categoria}</td>
                     <td className="px-3 py-2">{m.metodo_pago}</td>
                     <td className={`px-3 py-2 text-right font-semibold ${m.es_ingreso ? 'text-green-700' : 'text-red-700'}`}>{formatCOP(m.monto)}</td>
@@ -1588,7 +1650,7 @@ export default function ReportesPage() {
                             <>
                               <button
                                 type="button"
-                                title="Recibo de pago (PDF interno)"
+                                title="Ver recibo de pago (vista previa)"
                                 onClick={() => m.vehiculo_id && abrirReciboCliente(m.vehiculo_id)}
                                 className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-primary-50 text-primary-700"
                               >
@@ -1596,7 +1658,7 @@ export default function ReportesPage() {
                               </button>
                               <button
                                 type="button"
-                                title="Factura electrónica DIAN (Factus)"
+                                title="Factura electrónica DIAN — abre en nueva pestaña"
                                 onClick={() => abrirFacturaOficial(m.factura_public_url)}
                                 className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-amber-50 text-amber-800 disabled:opacity-40"
                                 disabled={!m.factura_public_url}
@@ -1608,9 +1670,9 @@ export default function ReportesPage() {
                           {mostrarComprobanteCajaEgresoManual ? (
                             <button
                               type="button"
-                              title="Comprobante de egreso de caja (PDF)"
+                              title="Ver comprobante de egreso de caja (vista previa)"
                               disabled={cajaEgresoPdfLoadingId === m.id}
-                              onClick={() => descargarComprobanteEgresoCajaReporte(m.id)}
+                              onClick={() => verComprobanteEgresoCajaReporte(m.id)}
                               className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-orange-50 text-orange-800 disabled:opacity-40"
                             >
                               <Wallet className="w-4 h-4" />
@@ -1619,9 +1681,9 @@ export default function ReportesPage() {
                           {mostrarComprobanteTesoreriaEgreso ? (
                             <button
                               type="button"
-                              title="Comprobante de egreso (PDF)"
+                              title="Ver comprobante de egreso de tesorería (vista previa)"
                               disabled={tesoreriaEgresoPdfLoadingId === m.id}
-                              onClick={() => descargarComprobanteEgresoTesoreriaReporte(m.id)}
+                              onClick={() => verComprobanteEgresoTesoreriaReporte(m.id)}
                               className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-red-50 text-red-700 disabled:opacity-40"
                             >
                               <FileText className="w-4 h-4" />
@@ -1714,28 +1776,50 @@ export default function ReportesPage() {
         )}
       </div>
 
-      {modalRecibo && (
+      {pdfPreview && (
         <div
           className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"
           role="dialog"
           aria-modal="true"
+          aria-labelledby="pdf-preview-titulo"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) cerrarPdfPreview();
+          }}
         >
           <div className="bg-white rounded-xl shadow-2xl max-w-5xl w-full max-h-[92vh] flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200 bg-slate-50">
-              <h4 className="font-bold text-slate-900 flex items-center gap-2 text-sm sm:text-base">
-                <Receipt className="w-5 h-5 text-primary-600 shrink-0" /> Recibo de pago (sistema)
-              </h4>
-              <button
-                type="button"
-                onClick={cerrarModalRecibo}
-                className="p-2 rounded-lg hover:bg-slate-200 text-slate-600"
-                aria-label="Cerrar"
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-slate-200 bg-slate-50">
+              <h4
+                id="pdf-preview-titulo"
+                className="font-bold text-slate-900 flex items-center gap-2 text-sm sm:text-base min-w-0 pr-2"
               >
-                <X className="w-5 h-5" />
-              </button>
+                <FileText className="w-5 h-5 text-primary-600 shrink-0" />
+                <span className="truncate">{pdfPreview.title}</span>
+              </h4>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={pdfPreview.blobUrl}
+                  download={pdfPreview.fileName}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-100"
+                >
+                  <Download className="w-4 h-4" />
+                  Descargar
+                </a>
+                <button
+                  type="button"
+                  onClick={cerrarPdfPreview}
+                  className="p-2 rounded-lg hover:bg-slate-200 text-slate-600"
+                  aria-label="Cerrar"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
             </div>
             <div className="flex-1 min-h-0 bg-slate-100 flex flex-col">
-              <iframe title="Recibo PDF" src={modalRecibo.blobUrl} className="w-full flex-1 min-h-[70vh] border-0" />
+              <iframe
+                title={pdfPreview.title}
+                src={pdfPreview.blobUrl}
+                className="w-full flex-1 min-h-[70vh] border-0"
+              />
             </div>
           </div>
         </div>

@@ -33,6 +33,7 @@ def generar_comprobante_egreso(
     tenant_logo_url: Optional[str] = None,
     nombre_comercial_cda: Optional[str] = None,
     beneficiario_tipo_identificacion: Optional[str] = None,
+    beneficiario_numero_identificacion: Optional[str] = None,
 ) -> BytesIO:
     """
     Genera un comprobante de egreso en PDF
@@ -42,6 +43,7 @@ def generar_comprobante_egreso(
         fecha: Fecha del egreso
         beneficiario: Persona o entidad que recibe el dinero
         beneficiario_tipo_identificacion: Tipo de documento del beneficiario (ej. C.C, NIT)
+        beneficiario_numero_identificacion: Número del documento del beneficiario
         concepto: Descripción del egreso
         categoria: Categoría del egreso
         monto: Monto del egreso (positivo)
@@ -165,9 +167,11 @@ def generar_comprobante_egreso(
     }
     
     tipo_id_label = (beneficiario_tipo_identificacion or "—").strip() or "—"
+    num_id_label = (beneficiario_numero_identificacion or "—").strip() or "—"
     detalles_data = [
         ["Pagado a:", _safe_text(beneficiario)],
         ["Tipo identificación:", _safe_text(tipo_id_label)],
+        ["No. identificación:", _safe_text(num_id_label)],
         ["Categoría:", categorias_map.get(categoria, categoria)],
         ["Concepto:", _safe_text(concepto)],
         ["Método de pago:", metodos_map.get(metodo_pago, metodo_pago)],
@@ -305,6 +309,7 @@ def generar_comprobante_egreso_caja(
     nombre_cajero: str,
     tenant_logo_url: Optional[str] = None,
     nombre_comercial_cda: Optional[str] = None,
+    beneficiario_numero_identificacion: str = "",
 ) -> BytesIO:
     """
     Comprobante PDF de egreso registrado en caja (gasto, devolución, ajuste).
@@ -395,12 +400,14 @@ def generar_comprobante_egreso_caja(
 
     ben_l = (beneficiario or "").strip() or "—"
     tid_l = (beneficiario_tipo_identificacion or "").strip() or "—"
+    num_l = (beneficiario_numero_identificacion or "").strip() or "—"
 
     detalles_data = [
         ["Tipo de movimiento:", _safe_text(tipo_movimiento_label)],
         ["Turno:", _safe_text(turno)],
         ["Pagado a:", _safe_text(ben_l)],
         ["Tipo identificación:", _safe_text(tid_l)],
+        ["No. identificación:", _safe_text(num_l)],
         ["Concepto:", _safe_text(concepto)],
         ["Método de pago:", _safe_text(metodo_pago or "N/A")],
         ["Cajero(a) que registra:", _safe_text(nombre_cajero)],
