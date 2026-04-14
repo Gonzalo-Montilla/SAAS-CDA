@@ -143,3 +143,28 @@ def resolve_reporte_sucursal_id(
         assert_sucursal_in_tenant(db, sucursal_id_param, user.tenant_id)
         return sucursal_id_param
     return active
+
+
+def comprobante_egreso_scope_sid(
+    db: Session,
+    user: Usuario,
+    *,
+    consolidar_todas: bool,
+    active_sucursal_id: UUID,
+    sucursal_id_param: Optional[UUID],
+) -> Optional[UUID]:
+    """
+    Alcance al descargar comprobante PDF (tesorería / caja).
+    Usa la misma sede activa que ``get_active_sucursal_id`` (coherente con el token).
+    """
+    if consolidar_todas:
+        return None
+    if sucursal_id_param is not None:
+        if user.rol not in (RolEnum.ADMINISTRADOR, RolEnum.CONTADOR):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="No autorizado para filtrar por sede en esta descarga.",
+            )
+        assert_sucursal_in_tenant(db, sucursal_id_param, user.tenant_id)
+        return sucursal_id_param
+    return active_sucursal_id

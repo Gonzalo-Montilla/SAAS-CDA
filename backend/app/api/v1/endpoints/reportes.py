@@ -53,14 +53,25 @@ def _mt_scope_incluye_anulados(tenant_id, scope_sid: Optional[UUID], *extra):
 
 
 def _mc_scope(db: Session, tenant_id, scope_sid: Optional[UUID], *extra):
+    """
+    Movimientos de caja visibles según sede del reporte.
+    Coherente con el PDF de comprobante de egreso de caja: si el tenant tiene una sola
+    sede activa, incluye cajas con sucursal_id NULL (datos previos a asignar sede).
+    """
     cond = [MovimientoCaja.tenant_id == tenant_id, *extra]
     if scope_sid is not None:
+        n_sedes = (
+            db.query(Sucursal)
+            .filter(Sucursal.tenant_id == tenant_id, Sucursal.activa.is_(True))
+            .count()
+        )
+        if n_sedes <= 1:
+            caja_sede_clause = or_(Caja.sucursal_id == scope_sid, Caja.sucursal_id.is_(None))
+        else:
+            caja_sede_clause = Caja.sucursal_id == scope_sid
         cond.append(
             MovimientoCaja.caja_id.in_(
-                db.query(Caja.id).filter(
-                    Caja.tenant_id == tenant_id,
-                    Caja.sucursal_id == scope_sid,
-                )
+                db.query(Caja.id).filter(Caja.tenant_id == tenant_id, caja_sede_clause)
             )
         )
     return and_(*cond)

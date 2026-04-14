@@ -95,7 +95,20 @@ async function fetchComprobanteEgresoPdf(
   );
 
   if (!response.ok) {
-    throw new Error(`Error al descargar comprobante: ${response.status}`);
+    let detail = `HTTP ${response.status}`;
+    try {
+      const ct = response.headers.get('content-type') || '';
+      if (ct.includes('application/json')) {
+        const err = await response.json();
+        if (err?.detail !== undefined) {
+          detail =
+            typeof err.detail === 'string' ? err.detail : JSON.stringify(err.detail);
+        }
+      }
+    } catch {
+      /* ignorar parseo */
+    }
+    throw new Error(detail);
   }
 
   const blob = await response.blob();

@@ -11,7 +11,7 @@ from typing import List, Optional
 from uuid import UUID
 
 from app.core.deps import get_db, get_current_user, get_admin, get_contador_or_admin, get_active_sucursal_id
-from app.core.sucursal_scope import assert_sucursal_in_tenant
+from app.core.sucursal_scope import assert_sucursal_in_tenant, comprobante_egreso_scope_sid
 from app.models.usuario import Usuario, RolEnum
 from app.models.tenant import Tenant
 from app.models.tesoreria import (
@@ -41,31 +41,6 @@ router = APIRouter()
 def _tesoreria_sucursal_scope(consolidar_todas: bool, active_sucursal_id: UUID) -> Optional[UUID]:
     """None = todas las sedes (consolidado tenant)."""
     return None if consolidar_todas else active_sucursal_id
-
-
-def _comprobante_egreso_scope_sid(
-    db: Session,
-    user: Usuario,
-    *,
-    consolidar_todas: bool,
-    active_sucursal_id: UUID,
-    sucursal_id_param: Optional[UUID],
-) -> Optional[UUID]:
-    """
-    Sede efectiva para localizar el movimiento al descargar comprobante.
-    Mismo criterio que reportes: todas | sede elegida (admin/contador) | sede activa del token.
-    """
-    if consolidar_todas:
-        return None
-    if sucursal_id_param is not None:
-        if user.rol not in (RolEnum.ADMINISTRADOR, RolEnum.CONTADOR):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="No autorizado para filtrar por sede en esta descarga.",
-            )
-        assert_sucursal_in_tenant(db, sucursal_id_param, user.tenant_id)
-        return sucursal_id_param
-    return active_sucursal_id
 
 
 def _filter_movimientos_tesoreria(
@@ -917,7 +892,7 @@ async def descargar_comprobante_egreso(
     """
     Generar y descargar comprobante de egreso en PDF
     """
-    scope_sid = _comprobante_egreso_scope_sid(
+    scope_sid = comprobante_egreso_scope_sid(
         db,
         current_user,
         consolidar_todas=consolidar_todas,

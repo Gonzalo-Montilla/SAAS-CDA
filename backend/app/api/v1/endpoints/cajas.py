@@ -12,11 +12,12 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from app.core.deps import get_db, get_current_user, get_cajero_or_admin, get_admin, get_active_sucursal_id
-from app.core.sucursal_scope import get_principal_sucursal_id, resolve_reporte_sucursal_id
+from app.core.sucursal_scope import get_principal_sucursal_id, comprobante_egreso_scope_sid
 from app.models.usuario import Usuario, RolEnum
 from app.models.caja import Caja, MovimientoCaja, TurnoEnum, EstadoCaja, TipoMovimiento, DesgloseEfectivoCierre
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo
 from app.models.tenant import Tenant
+from app.models.sucursal import Sucursal
 from app.schemas.caja import (
     CajaApertura,
     CajaCierre,
@@ -467,7 +468,6 @@ def crear_movimiento(
 @router.get("/movimientos/{movimiento_id}/comprobante-egreso")
 def descargar_comprobante_egreso_movimiento_caja(
     movimiento_id: str,
-    request: Request,
     consolidar_todas: bool = Query(False),
     sucursal_id: Optional[UUID] = Query(
         None,
@@ -475,6 +475,7 @@ def descargar_comprobante_egreso_movimiento_caja(
     ),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     PDF del comprobante de egreso de caja (gasto, devolución, ajuste).
@@ -504,16 +505,23 @@ def descargar_comprobante_egreso_movimiento_caja(
     )
 
     if current_user.rol in (RolEnum.CONTADOR, RolEnum.ADMINISTRADOR):
-        payload = getattr(request.state, "tenant_jwt_payload", None) or {}
-        scope_sid = resolve_reporte_sucursal_id(
+        scope_sid = comprobante_egreso_scope_sid(
             db,
             current_user,
-            payload if isinstance(payload, dict) else {},
-            sucursal_id_param=sucursal_id,
             consolidar_todas=consolidar_todas,
+            active_sucursal_id=active_sucursal_id,
+            sucursal_id_param=sucursal_id,
         )
         if scope_sid is not None:
-            q = q.filter(Caja.sucursal_id == scope_sid)
+            n_sedes = (
+                db.query(Sucursal)
+                .filter(Sucursal.tenant_id == current_user.tenant_id, Sucursal.activa.is_(True))
+                .count()
+            )
+            if n_sedes <= 1:
+                q = q.filter(or_(Caja.sucursal_id == scope_sid, Caja.sucursal_id.is_(None)))
+            else:
+                q = q.filter(Caja.sucursal_id == scope_sid)
     else:
         q = q.filter(Caja.usuario_id == current_user.id)
 

@@ -496,12 +496,10 @@ export default function ReportesPage() {
         title: 'Comprobante de egreso (tesorería)',
         fileName: filename,
       });
-    } catch {
-      showToast(
-        'error',
-        'No se pudo abrir',
-        'No fue posible obtener el comprobante de egreso. Verifica permisos, sede activa o que el movimiento no esté anulado.',
-      );
+    } catch (e: unknown) {
+      const msg =
+        e instanceof Error ? e.message : 'Error al obtener el comprobante de tesorería.';
+      showToast('error', 'No se pudo abrir', msg);
     } finally {
       setTesoreriaEgresoPdfLoadingId(null);
     }
@@ -521,12 +519,10 @@ export default function ReportesPage() {
         title: 'Comprobante de egreso (caja)',
         fileName: filename,
       });
-    } catch {
-      showToast(
-        'error',
-        'No se pudo abrir',
-        'No fue posible obtener el comprobante de egreso de caja. Verifica permisos o el alcance de sede del reporte.',
-      );
+    } catch (e: unknown) {
+      const msg =
+        e instanceof Error ? e.message : 'Error al obtener el comprobante de caja.';
+      showToast('error', 'No se pudo abrir', msg);
     } finally {
       setCajaEgresoPdfLoadingId(null);
     }
