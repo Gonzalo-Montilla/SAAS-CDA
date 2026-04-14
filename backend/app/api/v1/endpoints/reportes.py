@@ -13,6 +13,7 @@ from calendar import monthrange
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+from app.core.config import settings
 from app.core.deps import get_db, get_contador_or_admin
 from app.core.sucursal_scope import resolve_reporte_sucursal_id, get_principal_sucursal_id
 from app.models.usuario import Usuario
@@ -84,24 +85,32 @@ def resolve_report_date_window(
     fecha_fin: Optional[date],
 ) -> tuple[datetime, datetime, str]:
     """
-    Resuelve y valida ventana de fechas para reportes.
-    - Día: usa `fecha` o hoy.
-    - Rango: requiere fecha_inicio y fecha_fin.
+    Resuelve ventana de fechas para reportes.
+    Los límites del día calendario se interpretan en ``settings.TIMEZONE`` (p. ej. America/Bogota)
+    y se convierten a UTC para comparar con ``created_at`` / timestamps almacenados en UTC.
     """
     if (fecha_inicio is None) != (fecha_fin is None):
         raise ValueError("Debes enviar fecha_inicio y fecha_fin juntos para usar modo rango")
 
+    tz = ZoneInfo(settings.TIMEZONE)
+
+    def _local_day_to_utc_range(d: date) -> tuple[datetime, datetime]:
+        start_local = datetime.combine(d, datetime.min.time(), tzinfo=tz)
+        end_local = datetime.combine(d, datetime.max.time(), tzinfo=tz)
+        start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
+        end_utc = end_local.astimezone(timezone.utc).replace(tzinfo=None)
+        return start_utc, end_utc
+
     if fecha_inicio and fecha_fin:
         if fecha_inicio > fecha_fin:
             raise ValueError("fecha_inicio no puede ser mayor que fecha_fin")
-        inicio_dt = datetime.combine(fecha_inicio, datetime.min.time())
-        fin_dt = datetime.combine(fecha_fin, datetime.max.time())
+        inicio_dt, _ = _local_day_to_utc_range(fecha_inicio)
+        _, fin_dt = _local_day_to_utc_range(fecha_fin)
         label = f"{fecha_inicio.strftime('%Y-%m-%d')} a {fecha_fin.strftime('%Y-%m-%d')}"
         return inicio_dt, fin_dt, label
 
-    fecha_base = fecha or date.today()
-    inicio_dt = datetime.combine(fecha_base, datetime.min.time())
-    fin_dt = datetime.combine(fecha_base, datetime.max.time())
+    fecha_base = fecha if fecha is not None else datetime.now(tz).date()
+    inicio_dt, fin_dt = _local_day_to_utc_range(fecha_base)
     label = fecha_base.strftime("%Y-%m-%d")
     return inicio_dt, fin_dt, label
 
