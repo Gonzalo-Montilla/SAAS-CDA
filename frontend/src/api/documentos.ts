@@ -53,6 +53,35 @@ export interface DocumentoAuditoriaItem {
   created_at: string;
 }
 
+export interface ListarAuditoriaParams {
+  skip?: number;
+  limit?: number;
+  q?: string;
+  accion?: string;
+  fecha_inicio?: string;
+  fecha_fin?: string;
+  sort?: 'asc' | 'desc';
+}
+
+export interface DocumentoAuditoriaPage {
+  items: DocumentoAuditoriaItem[];
+  total: number;
+  skip: number;
+  limit: number;
+}
+
+export interface GenerarCertificacionCuentaParams {
+  incluir_hash?: boolean;
+  solo_actuales?: boolean;
+}
+
+/** POST certificación: el backend no guarda el PDF; devuelve el archivo y el código en cabecera. */
+export interface CertificacionCuentaGenerada {
+  blob: Blob;
+  suggestedFilename: string;
+  codigoVerificacion: string | null;
+}
+
 function buildListParams(p: ListarDocumentosParams): Record<string, string | number | boolean> {
   const params: Record<string, string | number | boolean> = {
     skip: p.skip ?? 0,
@@ -78,9 +107,18 @@ export const documentosApi = {
     return response.data;
   },
 
-  listarAuditoria: async (skip = 0, limit = 100): Promise<DocumentoAuditoriaItem[]> => {
-    const response = await apiClient.get<DocumentoAuditoriaItem[]>('/documentos/auditoria', {
-      params: { skip, limit },
+  listarAuditoria: async (p: ListarAuditoriaParams = {}): Promise<DocumentoAuditoriaPage> => {
+    const params: Record<string, string | number> = {
+      skip: p.skip ?? 0,
+      limit: p.limit ?? 100,
+      sort: p.sort ?? 'desc',
+    };
+    if (p.q?.trim()) params.q = p.q.trim();
+    if (p.accion?.trim()) params.accion = p.accion.trim();
+    if (p.fecha_inicio?.trim()) params.fecha_inicio = p.fecha_inicio.trim();
+    if (p.fecha_fin?.trim()) params.fecha_fin = p.fecha_fin.trim();
+    const response = await apiClient.get<DocumentoAuditoriaPage>('/documentos/auditoria', {
+      params,
     });
     return response.data;
   },
@@ -143,5 +181,27 @@ export const documentosApi = {
 
   eliminar: async (id: string): Promise<void> => {
     await apiClient.delete(`/documentos/${id}`);
+  },
+
+  generarCertificacionCuenta: async (
+    p: GenerarCertificacionCuentaParams = {}
+  ): Promise<CertificacionCuentaGenerada> => {
+    const response = await apiClient.post<Blob>('/documentos/certificacion-en-cuenta', null, {
+      params: {
+        incluir_hash: p.incluir_hash ?? true,
+        solo_actuales: p.solo_actuales ?? true,
+      },
+      responseType: 'blob',
+    });
+    const disp = response.headers['content-disposition'] as string | undefined;
+    let suggestedFilename = `certificacion_en_cuenta_${Date.now()}.pdf`;
+    if (disp) {
+      const m = /filename="([^"]+)"/.exec(disp) ?? /filename=([^;\s]+)/.exec(disp);
+      if (m?.[1]) suggestedFilename = m[1].trim().replace(/^"|"$/g, '');
+    }
+    const rawCodigo = response.headers['x-certificacion-codigo'];
+    const codigoVerificacion =
+      typeof rawCodigo === 'string' && rawCodigo.trim() ? rawCodigo.trim() : null;
+    return { blob: response.data, suggestedFilename, codigoVerificacion };
   },
 };

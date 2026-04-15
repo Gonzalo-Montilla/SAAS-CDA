@@ -47,3 +47,27 @@ class DocumentoAuditoriaResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DocumentoAuditoriaPageResponse(BaseModel):
+    items: list[DocumentoAuditoriaResponse]
+    total: int
+    skip: int
+    limit: int
+
+
+class CertificacionCuentaVerificacionResponse(BaseModel):
+    tenant_slug: str | None = None
+    codigo: str
+    valido: bool
+    generated_at: datetime | None = None
+    documento_id: UUID | None = None
+    documento_titulo: str | None = None
+    documento_nombre_archivo: str | None = None
+    total_documentos_certificados: int | None = None
+    hash_incluido: bool | None = None
+    sello_electronico: str | None = Field(
+        default=None,
+        description="Sello del PDF (derivado SHA-256); ausente en certificaciones antiguas.",
+    )
+    detalle: str | None = None

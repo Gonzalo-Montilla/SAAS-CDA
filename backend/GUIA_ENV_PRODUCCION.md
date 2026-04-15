@@ -127,6 +127,23 @@ SMTP_PASSWORD=abcd efgh ijkl mnop
 
 ## 🌐 URLs y Frontend
 
+### BACKEND_PUBLIC_BASE_URL
+**Descripción:** URL **pública** del API (origen HTTPS, **sin** `/api/v1` al final).  
+**Requerido:** ✅ SÍ en producción si usan onboarding, correos con enlaces generados por el backend, o **certificación en cuenta** (el PDF y la página de verificación usan esta base).
+
+**Ejemplos:**
+```bash
+# Mismo dominio que el front, API detrás de Nginx en /api/
+BACKEND_PUBLIC_BASE_URL=https://tudominio.com
+
+# API en subdominio
+BACKEND_PUBLIC_BASE_URL=https://api.tudominio.com
+```
+
+**Nunca** dejar en producción un valor tipo `http://localhost:8000`: los enlaces del PDF de certificación apuntarían a la máquina del servidor, no a los usuarios.
+
+---
+
 ### FRONTEND_URL
 **Descripción:** URL del frontend para enlaces en emails  
 **Requerido:** ⚠️ Recomendado  
@@ -194,8 +211,17 @@ SMTP_PORT=587
 SMTP_USER=cdasoft@gmail.com
 SMTP_PASSWORD=abcd efgh ijkl mnop
 
-# ==================== FRONTEND ====================
+# ==================== FRONTEND / URL PÚBLICA API ====================
 FRONTEND_URL=https://cdasoft.com
+# Misma lógica que en PRODUCTION_CHECKLIST (HTTPS, dominio real)
+BACKEND_PUBLIC_BASE_URL=https://cdasoft.com
+
+# ==================== MÓDULO DOCUMENTAL (opcional explícito) ====================
+# Rutas relativas al directorio de trabajo del backend o absolutas; deben ser persistentes en el VPS
+# DOCUMENTOS_STORAGE_DIR=private_uploads/documentos
+# DOCUMENTOS_MAX_SIZE_MB=25
+# Vacío = buscar soffice en PATH (instalar LibreOffice en el servidor para vista previa Office→PDF)
+# DOCUMENTOS_LIBREOFFICE_PATH=
 
 # ==================== TIMEZONE ====================
 TIMEZONE=America/Bogota

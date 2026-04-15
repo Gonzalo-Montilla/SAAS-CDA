@@ -38,10 +38,12 @@ Documento operativo para validar el despliegue antes de exponer el sistema a cli
 - [ ] **`ENVIRONMENT=production`** y **`DEBUG=False`** (obligatorio).
 - [ ] **`BACKEND_CORS_ORIGINS`**: lista **cerrada** de orígenes HTTPS del frontend (no `*` en producción). Formato admitido: lista separada por comas o JSON array (ver [`backend/app/core/config.py`](backend/app/core/config.py)).
 - [ ] **`FRONTEND_URL`**: URL HTTPS que reciben los usuarios (enlaces en correos).
-- [ ] **`BACKEND_PUBLIC_BASE_URL`**: URL base **pública** del API (onboarding, webhooks, enlaces que devuelve el backend).
+- [ ] **`BACKEND_PUBLIC_BASE_URL`**: URL base **pública HTTPS** del API tal como la abre un navegador (sin `/api/v1` al final; es el origen del servicio). Se usa en onboarding, enlaces de correo y **enlaces embebidos en el PDF de certificación en cuenta** y en la página de verificación. Debe coincidir con tu Nginx/dominio real (nunca `http://localhost:8000` en prod).
 - [ ] **SMTP** (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`): probado envío real (recuperación de contraseña, códigos de onboarding, notificaciones).
 - [ ] **`TURNSTILE_ENABLED`** y claves: acorde a la política deseada para el registro público de tenants.
 - [ ] **`TENANT_LOGO_UPLOAD_DIR`**: ruta en disco **persistente** entre despliegues; el directorio existe y el proceso puede escribir.
+- [ ] **`DOCUMENTOS_STORAGE_DIR`** (módulo documental): ruta **persistente** para archivos privados por tenant (p. ej. `private_uploads/documentos` bajo el backend o un volumen dedicado). Incluir en **backups** junto con PostgreSQL (ver [`backend/docs/NTC5385_modulo_documental.md`](backend/docs/NTC5385_modulo_documental.md)).
+- [ ] **LibreOffice** (opcional): si quieren **vista previa PDF** de Word/Excel/PowerPoint en el navegador, instalar `soffice` en el servidor o fijar `DOCUMENTOS_LIBREOFFICE_PATH`. Sin LibreOffice, el resto del módulo documental sigue funcionando (subida, descarga, certificación).
 - [ ] Revisión rápida del resto de variables según [`backend/.env.example`](backend/.env.example).
 
 ---
@@ -67,7 +69,7 @@ Documento operativo para validar el despliegue antes de exponer el sistema a cli
 ## Fase 5 — Infraestructura y red
 
 - [ ] TLS válido (certificados) en front y API.
-- [ ] Proxy reverso (Nginx, Caddy, etc.) con timeouts razonables para subidas y reportes.
+- [ ] Proxy reverso (Nginx, Caddy, etc.) con timeouts razonables para subidas y reportes; **`client_max_body_size`** (o equivalente) ≥ tamaño máximo de documentos (p. ej. 30–50 MB si `DOCUMENTOS_MAX_SIZE_MB` es 25).
 - [ ] Firewall: solo puertos necesarios expuestos; PostgreSQL no público salvo requisito explícito.
 - [ ] Endpoint **`GET /health`** accesible para monitoreo (sin datos sensibles).
 
@@ -80,6 +82,7 @@ Documento operativo para validar el despliegue antes de exponer el sistema a cli
 - [ ] Backoffice SaaS (si lo usan) solo con credenciales de producción endurecidas.
 - [ ] Envío de al menos **un correo** transaccional end-to-end.
 - [ ] Si usan **Factus**: emisión o consulta en el ambiente acordado (sandbox o producción).
+- [ ] **Módulo documental** (si lo usan): subir un archivo, descargar, y **certificación en cuenta** → abrir el enlace del PDF y comprobar la página de verificación (o `?formato=json` si integran).
 - [ ] **Documentación OpenAPI** (`/docs`): debe estar **desactivada** en producción salvo decisión explícita (`ENVIRONMENT` distinto de `development`).
 
 ---

@@ -86,6 +86,14 @@ sudo apt update
 sudo apt install -y git nginx python3 python3-venv python3-pip postgresql postgresql-contrib certbot python3-certbot-nginx
 ```
 
+**Opcional — vista previa PDF de Office en el módulo documental:** instalar componentes LibreOffice y dejar `DOCUMENTOS_LIBREOFFICE_PATH` vacío si `soffice` queda en el `PATH` del servicio, o fijar la ruta en `.env`.
+
+```bash
+sudo apt install -y libreoffice-writer libreoffice-calc libreoffice-impress
+```
+
+Sin esto, subida/descarga y certificación siguen funcionando; solo falla la conversión a PDF en el navegador para `.docx`, `.xlsx`, etc.
+
 ---
 
 ## 6. PostgreSQL: base y usuario solo para CDASOFT
@@ -248,8 +256,8 @@ ExecStart=/var/www/cdasoft/repo/backend/venv/bin/uvicorn app.main:app --host 127
 Restart=always
 RestartSec=5
 
-# Carpeta de subidas (logos tenant)
-ReadWritePaths=/var/www/cdasoft/repo/backend/uploads
+# Subidas persistidas: logos de tenant y módulo documental (ajusta si cambias rutas en .env)
+ReadWritePaths=/var/www/cdasoft/repo/backend/uploads /var/www/cdasoft/repo/backend/private_uploads
 
 [Install]
 WantedBy=multi-user.target
@@ -261,8 +269,12 @@ Permisos para que `www-data` lea el código y el `.env`:
 sudo chown -R www-data:www-data /var/www/cdasoft/repo/backend
 sudo chmod 600 /var/www/cdasoft/repo/backend/.env
 sudo mkdir -p /var/www/cdasoft/repo/backend/uploads/tenant-logos
+sudo mkdir -p /var/www/cdasoft/repo/backend/private_uploads/documentos
 sudo chown -R www-data:www-data /var/www/cdasoft/repo/backend/uploads
+sudo chown -R www-data:www-data /var/www/cdasoft/repo/backend/private_uploads
 ```
+
+Si en `.env` usas otras rutas absolutas para `TENANT_LOGO_UPLOAD_DIR` o `DOCUMENTOS_STORAGE_DIR`, crea esos directorios y añade las mismas rutas en `ReadWritePaths=` del unit (systemd restringe escritura fuera de lo listado en algunas configuraciones).
 
 Activa el servicio:
 
@@ -293,6 +305,9 @@ Contenido (ajusta `server_name` y rutas a `dist`):
 server {
     listen 80;
     server_name tudominio.com www.tudominio.com;
+
+    # Subidas al API (documentos hasta ~25 MB por defecto; sube el valor si aumentas DOCUMENTOS_MAX_SIZE_MB)
+    client_max_body_size 30M;
 
     root /var/www/cdasoft/repo/frontend/dist;
     index index.html;
@@ -428,5 +443,6 @@ rsync -avz --delete ./frontend/dist/ USUARIO@IP:/var/www/cdasoft/repo/frontend/d
 - [ ] Certbot / HTTPS.
 - [ ] Cron de automatización.
 - [ ] Backups de PostgreSQL (fuera del alcance de esta guía, imprescindible en producción).
+- [ ] Backup del disco de **`private_uploads/documentos`** (y logos) si usan el módulo documental.
 
 Si me indicas **si usarás un solo dominio con `/api/` o dos subdominios**, y el **sistema del VPS** (Ubuntu 22.04, etc.), puedes pegar aquí tu `server_name` y rutas y te devuelvo los bloques Nginx y el valor exacto de `VITE_API_URL` sin ambigüedad.

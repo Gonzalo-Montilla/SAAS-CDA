@@ -3,15 +3,23 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ChevronDown,
   ChevronRight,
+  Filter,
   Download,
   Eye,
+  File,
   FileCheck,
   FileStack,
+  FileText,
+  Folder,
   History,
+  Image as ImageIcon,
+  LayoutGrid,
   Layers,
+  List,
   MoreHorizontal,
   Pencil,
   RefreshCw,
+  ShieldCheck,
   ScrollText,
   Trash2,
   Upload,
@@ -55,6 +63,7 @@ function etiquetaAccionAuditoria(accion: string): string {
     descargar: 'Descarga',
     metadata_update: 'Cambio de metadatos',
     eliminar: 'Eliminación',
+    certificacion_cuenta: 'Certificación en cuenta',
   };
   return m[accion] ?? accion;
 }
@@ -77,11 +86,38 @@ const EXTENSIONES_DOCUMENTO_PERMITIDAS = new Set([
 ]);
 
 const MAX_DOCUMENTO_BYTES = 25 * 1024 * 1024;
+const UNCATEGORIZED_FOLDER_KEY = '__sin_categoria__';
+const VISTA_CARPETA_STORAGE_KEY = 'cdasoft-documentos-vista-carpeta';
+
+function leerVistaCarpetaGuardada(): 'tabla' | 'tarjetas' {
+  try {
+    const raw = localStorage.getItem(VISTA_CARPETA_STORAGE_KEY);
+    if (raw === 'tabla' || raw === 'tarjetas') return raw;
+  } catch {
+    /* modo privado / no disponible */
+  }
+  return 'tarjetas';
+}
+
+type CarpetaCategoria = {
+  key: string;
+  nombre: string;
+  total: number;
+};
+
+type OrdenDocumentosCampo = 'fecha' | 'titulo';
+type OrdenDocumentosDir = 'desc' | 'asc';
 
 function extensionDeNombre(nombre: string): string {
   const i = nombre.lastIndexOf('.');
   if (i < 0) return '';
   return nombre.slice(i).toLowerCase();
+}
+
+function categoriaFolderKey(categoria: string | null | undefined): string {
+  const c = (categoria ?? '').trim();
+  if (!c) return UNCATEGORIZED_FOLDER_KEY;
+  return c.toLocaleLowerCase('es-CO');
 }
 
 function validarArchivoDocumento(file: File): string | null {
@@ -119,6 +155,33 @@ function etiquetaTipoArchivo(mime: string): string {
   return short ? short.slice(0, 12) : 'Archivo';
 }
 
+function claseColorTipoArchivo(mime: string): string {
+  const m = mime.toLowerCase().split(';')[0].trim();
+  if (m === 'application/pdf') return 'bg-red-50 text-red-700 border-red-200';
+  if (m.includes('wordprocessingml') || m === 'application/msword' || m.includes('word')) {
+    return 'bg-blue-50 text-blue-700 border-blue-200';
+  }
+  if (m.includes('spreadsheetml') || m.includes('excel') || m.includes('spreadsheet')) {
+    return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+  }
+  if (m.includes('presentationml') || m.includes('powerpoint') || m.includes('presentation')) {
+    return 'bg-amber-50 text-amber-700 border-amber-200';
+  }
+  if (m.startsWith('image/')) return 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-200';
+  if (m === 'text/plain' || m === 'text/csv') return 'bg-slate-100 text-slate-700 border-slate-200';
+  return 'bg-slate-100 text-slate-700 border-slate-200';
+}
+
+function IconoTipoArchivo({ mime }: { mime: string }) {
+  const m = mime.toLowerCase().split(';')[0].trim();
+  if (m.startsWith('image/')) return <ImageIcon className="w-5 h-5" />;
+  if (m === 'application/pdf') return <FileText className="w-5 h-5" />;
+  if (m.includes('word') || m.includes('excel') || m.includes('powerpoint') || m.includes('presentation')) {
+    return <FileText className="w-5 h-5" />;
+  }
+  return <File className="w-5 h-5" />;
+}
+
 export default function Documentos() {
   const { user } = useAuth();
   const tenantUser = user && 'tenant_id' in user ? (user as Usuario) : null;
@@ -129,7 +192,18 @@ export default function Documentos() {
   const [sucursalSubida, setSucursalSubida] = useState<string>('');
   const [searchInput, setSearchInput] = useState('');
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const [filtroCategoria, setFiltroCategoria] = useState('');
+  const [carpetaActiva, setCarpetaActiva] = useState<string | null>(null);
+  const [vistaCarpeta, setVistaCarpetaState] = useState<'tabla' | 'tarjetas'>(leerVistaCarpetaGuardada);
+  const setVistaCarpeta = useCallback((next: 'tabla' | 'tarjetas') => {
+    setVistaCarpetaState(next);
+    try {
+      localStorage.setItem(VISTA_CARPETA_STORAGE_KEY, next);
+    } catch {
+      /* ignorar */
+    }
+  }, []);
+  const [ordenCampo, setOrdenCampo] = useState<OrdenDocumentosCampo>('fecha');
+  const [ordenDir, setOrdenDir] = useState<OrdenDocumentosDir>('desc');
   const [alcanceSede, setAlcanceSede] = useState<AlcanceSedeFiltro>('todas');
   const [soloActuales, setSoloActuales] = useState(true);
   const [historialPara, setHistorialPara] = useState<TenantDocumento | null>(null);
@@ -140,7 +214,7 @@ export default function Documentos() {
   const [nvDragActivo, setNvDragActivo] = useState(false);
   const fileInputNvRef = useRef<HTMLInputElement>(null);
   const [docAccionesMenuId, setDocAccionesMenuId] = useState<string | null>(null);
-  const [subidaSeccionAbierta, setSubidaSeccionAbierta] = useState(true);
+  const [subidaSeccionAbierta, setSubidaSeccionAbierta] = useState(false);
   const [subidaDragActivo, setSubidaDragActivo] = useState(false);
   const [archivoSubiendoNombre, setArchivoSubiendoNombre] = useState<string | null>(null);
   /** Archivo elegido pero aún no enviado al servidor (subida nueva). */
@@ -159,6 +233,14 @@ export default function Documentos() {
   const [previewStatus, setPreviewStatus] = useState<
     'idle' | 'loading' | 'ready' | 'error' | 'unsupported' | 'preview_pending'
   >('idle');
+  const [auditoriaQ, setAuditoriaQ] = useState('');
+  const [auditoriaQDebounced, setAuditoriaQDebounced] = useState('');
+  const [auditoriaAccion, setAuditoriaAccion] = useState('');
+  const [auditoriaFechaInicio, setAuditoriaFechaInicio] = useState('');
+  const [auditoriaFechaFin, setAuditoriaFechaFin] = useState('');
+  const [auditoriaSort, setAuditoriaSort] = useState<'asc' | 'desc'>('desc');
+  const [auditoriaPage, setAuditoriaPage] = useState(0);
+  const [auditoriaPageSize, setAuditoriaPageSize] = useState(50);
 
   const esAdmin = user?.rol === 'administrador';
   const activeSucursalId = tenantUser?.active_sucursal_id?.trim() || null;
@@ -168,6 +250,11 @@ export default function Documentos() {
     const t = setTimeout(() => setDebouncedSearch(searchInput.trim()), 350);
     return () => clearTimeout(t);
   }, [searchInput]);
+
+  useEffect(() => {
+    const t = setTimeout(() => setAuditoriaQDebounced(auditoriaQ.trim()), 300);
+    return () => clearTimeout(t);
+  }, [auditoriaQ]);
 
   const nombreSedePorId = useMemo(() => {
     const m = new Map<string, string>();
@@ -180,12 +267,11 @@ export default function Documentos() {
       skip: 0,
       limit: 100,
       q: debouncedSearch || undefined,
-      categoria: filtroCategoria.trim() || undefined,
       sucursalId: activeSucursalId,
       alcanceSede,
       soloActuales,
     }),
-    [debouncedSearch, filtroCategoria, activeSucursalId, alcanceSede, soloActuales]
+    [debouncedSearch, activeSucursalId, alcanceSede, soloActuales]
   );
 
   const categoriasQuery = useQuery({
@@ -198,12 +284,77 @@ export default function Documentos() {
     queryFn: () => documentosApi.listar(listFilters),
   });
 
+  const carpetas = useMemo<CarpetaCategoria[]>(() => {
+    const map = new Map<string, CarpetaCategoria>();
+    for (const doc of listQuery.data ?? []) {
+      const nombre = (doc.categoria ?? '').trim() || 'Sin categoría';
+      const key = categoriaFolderKey(doc.categoria);
+      const prev = map.get(key);
+      if (prev) {
+        prev.total += 1;
+        continue;
+      }
+      map.set(key, { key, nombre, total: 1 });
+    }
+    return Array.from(map.values()).sort((a, b) => {
+      if (a.key === UNCATEGORIZED_FOLDER_KEY) return 1;
+      if (b.key === UNCATEGORIZED_FOLDER_KEY) return -1;
+      return a.nombre.localeCompare(b.nombre, 'es-CO');
+    });
+  }, [listQuery.data]);
+
+  const documentosCarpetaActiva = useMemo(() => {
+    const docs = listQuery.data ?? [];
+    const filtrados = carpetaActiva ? docs.filter((d) => categoriaFolderKey(d.categoria) === carpetaActiva) : docs;
+    const out = [...filtrados];
+    out.sort((a, b) => {
+      let cmp = 0;
+      if (ordenCampo === 'fecha') {
+        cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      } else {
+        cmp = a.titulo.localeCompare(b.titulo, 'es-CO');
+      }
+      return ordenDir === 'asc' ? cmp : -cmp;
+    });
+    return out;
+  }, [listQuery.data, carpetaActiva, ordenCampo, ordenDir]);
+
+  const nombreCarpetaActiva = useMemo(() => {
+    if (!carpetaActiva) return null;
+    const found = carpetas.find((c) => c.key === carpetaActiva);
+    return found?.nombre ?? 'Sin categoría';
+  }, [carpetaActiva, carpetas]);
+
+  const auditoriaParams = useMemo(
+    () => ({
+      skip: auditoriaPage * auditoriaPageSize,
+      limit: auditoriaPageSize,
+      q: auditoriaQDebounced || undefined,
+      accion: auditoriaAccion || undefined,
+      fecha_inicio: auditoriaFechaInicio || undefined,
+      fecha_fin: auditoriaFechaFin || undefined,
+      sort: auditoriaSort,
+    }),
+    [
+      auditoriaPage,
+      auditoriaPageSize,
+      auditoriaQDebounced,
+      auditoriaAccion,
+      auditoriaFechaInicio,
+      auditoriaFechaFin,
+      auditoriaSort,
+    ]
+  );
+
   const auditoriaQuery = useQuery({
-    queryKey: ['tenant-documentos-auditoria'],
-    queryFn: () => documentosApi.listarAuditoria(0, 150),
+    queryKey: ['tenant-documentos-auditoria', auditoriaParams],
+    queryFn: () => documentosApi.listarAuditoria(auditoriaParams),
     enabled: esAdmin,
     staleTime: 30_000,
   });
+  const auditoriaItems = auditoriaQuery.data?.items ?? [];
+  const auditoriaTotal = auditoriaQuery.data?.total ?? 0;
+  const auditoriaTotalPages = Math.max(1, Math.ceil(auditoriaTotal / Math.max(1, auditoriaPageSize)));
 
   const versionesQuery = useQuery({
     queryKey: ['tenant-documentos-versiones', historialPara?.id],
@@ -230,7 +381,9 @@ export default function Documentos() {
       }
       return documentosApi.subir(file, {
         titulo: titulo || undefined,
-        categoria: categoriaNueva || undefined,
+        categoria:
+          categoriaNueva ||
+          (carpetaActiva && carpetaActiva !== UNCATEGORIZED_FOLDER_KEY ? nombreCarpetaActiva ?? undefined : undefined),
         sucursal_id: sucursalSubida.trim() || null,
         sustituye_a_id: null,
       });
@@ -316,6 +469,53 @@ export default function Documentos() {
     },
     onError: () => {
       setFeedback({ type: 'error', message: 'No se pudo eliminar el documento.' });
+    },
+  });
+
+  const certificarCuentaMutation = useMutation({
+    mutationFn: () =>
+      documentosApi.generarCertificacionCuenta({
+        incluir_hash: true,
+        solo_actuales: true,
+      }),
+    onSuccess: async ({ blob, suggestedFilename, codigoVerificacion }) => {
+      setFeedback({
+        type: 'success',
+        message: codigoVerificacion
+          ? `Certificación generada. Código de verificación: ${codigoVerificacion}. El PDF se descargó (no se guarda en la biblioteca).`
+          : 'Certificación generada. El PDF se descargó (no se guarda en la biblioteca).',
+      });
+      void queryClient.invalidateQueries({ queryKey: ['tenant-documentos-auditoria'] });
+      try {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = suggestedFilename;
+        a.click();
+        URL.revokeObjectURL(url);
+      } catch {
+        // no-op
+      }
+    },
+    onError: (e: unknown) => {
+      const msg = (() => {
+        if (typeof e !== 'object' || e === null || !('response' in e)) return undefined;
+        const data = (e as { response?: { data?: unknown } }).response?.data;
+        if (typeof data === 'string' && data.trim()) return data;
+        if (
+          typeof data === 'object' &&
+          data !== null &&
+          'detail' in data &&
+          typeof (data as { detail?: unknown }).detail === 'string'
+        ) {
+          return (data as { detail: string }).detail;
+        }
+        return undefined;
+      })();
+      setFeedback({
+        type: 'error',
+        message: typeof msg === 'string' ? msg : 'No se pudo generar la certificación en cuenta.',
+      });
     },
   });
 
@@ -451,7 +651,7 @@ export default function Documentos() {
   const limpiarFiltros = useCallback(() => {
     setSearchInput('');
     setDebouncedSearch('');
-    setFiltroCategoria('');
+    setCarpetaActiva(null);
     setAlcanceSede('todas');
     setSoloActuales(true);
   }, []);
@@ -516,7 +716,18 @@ export default function Documentos() {
     return () => document.removeEventListener('mousedown', onDoc);
   }, [docAccionesMenuId]);
 
-  const totalListado = listQuery.data?.length ?? 0;
+  useEffect(() => {
+    setAuditoriaPage(0);
+  }, [auditoriaQDebounced, auditoriaAccion, auditoriaFechaInicio, auditoriaFechaFin, auditoriaSort, auditoriaPageSize]);
+
+  useEffect(() => {
+    const maxPage = Math.max(0, auditoriaTotalPages - 1);
+    if (auditoriaPage > maxPage) {
+      setAuditoriaPage(maxPage);
+    }
+  }, [auditoriaPage, auditoriaTotalPages]);
+
+  const totalListado = documentosCarpetaActiva.length;
 
   return (
     <Layout title="Documentos del CDA">
@@ -533,6 +744,17 @@ export default function Documentos() {
               </p>
             </div>
           </div>
+          {esAdmin && (
+            <button
+              type="button"
+              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+              disabled={certificarCuentaMutation.isLoading}
+              onClick={() => certificarCuentaMutation.mutate()}
+            >
+              <ShieldCheck className="w-4 h-4" />
+              {certificarCuentaMutation.isLoading ? 'Generando certificación…' : 'Certificación en cuenta'}
+            </button>
+          )}
         </div>
 
         {feedback && (
@@ -549,7 +771,12 @@ export default function Documentos() {
 
         <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
-            <h2 className="text-lg font-semibold text-slate-900">Filtros</h2>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center shrink-0">
+                <Filter className="w-5 h-5" />
+              </div>
+              <h2 className="text-lg font-semibold text-slate-900">Filtros</h2>
+            </div>
             <button
               type="button"
               className="text-sm text-primary-700 font-medium hover:underline"
@@ -570,16 +797,16 @@ export default function Documentos() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Categoría</label>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Carpeta (categoría)</label>
               <select
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
-                value={filtroCategoria}
-                onChange={(e) => setFiltroCategoria(e.target.value)}
+                value={carpetaActiva ?? ''}
+                onChange={(e) => setCarpetaActiva(e.target.value || null)}
               >
-                <option value="">Todas</option>
-                {(categoriasQuery.data ?? []).map((c) => (
-                  <option key={c} value={c}>
-                    {c}
+                <option value="">Todas las carpetas</option>
+                {carpetas.map((c) => (
+                  <option key={c.key} value={c.key}>
+                    {c.nombre} ({c.total})
                   </option>
                 ))}
               </select>
@@ -845,15 +1072,94 @@ export default function Documentos() {
 
         <section className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
           <div className="px-5 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">Documentos</h2>
-              {listQuery.data && !listQuery.isLoading && (
-                <p className="text-xs text-slate-500 mt-0.5">
-                  Mostrando {totalListado} documento{totalListado === 1 ? '' : 's'}
+            <div className="flex items-center gap-3 min-w-0">
+              {!carpetaActiva && (
+                <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center shrink-0">
+                  <Folder className="w-5 h-5" />
+                </div>
+              )}
+              {carpetaActiva && (
+                <div className="w-10 h-10 rounded-xl bg-amber-50 text-amber-700 border border-amber-200 flex items-center justify-center shrink-0">
+                  <Folder className="w-5 h-5" />
+                </div>
+              )}
+              <div className="min-w-0">
+              {carpetaActiva && (
+                <p className="text-xs text-slate-500 mb-0.5">
+                  Documentos <span className="mx-1">/</span> <span className="text-slate-700">{nombreCarpetaActiva}</span>{' '}
+                  <span className="mx-1 text-slate-300">·</span>
+                  <span>{documentosCarpetaActiva.length} archivo{documentosCarpetaActiva.length === 1 ? '' : 's'}</span>
                 </p>
               )}
+              <h2 className="text-lg font-semibold text-slate-900">
+                {carpetaActiva ? `Carpeta: ${nombreCarpetaActiva}` : 'Carpetas'}
+              </h2>
+              {listQuery.data && !listQuery.isLoading && (
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {carpetaActiva
+                    ? `Mostrando ${totalListado} documento${totalListado === 1 ? '' : 's'} en esta carpeta`
+                    : `Mostrando ${carpetas.length} carpeta${carpetas.length === 1 ? '' : 's'}`}
+                </p>
+              )}
+              </div>
             </div>
-            {listQuery.isFetching && <span className="text-xs text-slate-500">Actualizando…</span>}
+            <div className="flex items-center gap-2">
+              {carpetaActiva && (
+                <>
+                <select
+                  className="text-xs rounded-lg border border-slate-200 px-2 py-1.5 text-slate-700 bg-white"
+                  value={ordenCampo}
+                  onChange={(e) => setOrdenCampo(e.target.value as OrdenDocumentosCampo)}
+                  title="Campo de orden"
+                >
+                  <option value="fecha">Orden: Fecha</option>
+                  <option value="titulo">Orden: Título</option>
+                </select>
+                <button
+                  type="button"
+                  className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+                  onClick={() => setOrdenDir((d) => (d === 'asc' ? 'desc' : 'asc'))}
+                  title="Cambiar dirección de orden"
+                >
+                  {ordenDir === 'asc' ? 'Asc' : 'Desc'}
+                </button>
+                <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5">
+                  <button
+                    type="button"
+                    className={`px-2 py-1 rounded-md text-xs inline-flex items-center gap-1 ${
+                      vistaCarpeta === 'tabla' ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'
+                    }`}
+                    onClick={() => setVistaCarpeta('tabla')}
+                    title="Vista de tabla"
+                  >
+                    <List className="w-3.5 h-3.5" />
+                    Tabla
+                  </button>
+                  <button
+                    type="button"
+                    className={`px-2 py-1 rounded-md text-xs inline-flex items-center gap-1 ${
+                      vistaCarpeta === 'tarjetas' ? 'bg-slate-100 text-slate-900' : 'text-slate-600 hover:bg-slate-50'
+                    }`}
+                    onClick={() => setVistaCarpeta('tarjetas')}
+                    title="Vista de tarjetas"
+                  >
+                    <LayoutGrid className="w-3.5 h-3.5" />
+                    Tarjetas
+                  </button>
+                </div>
+                </>
+              )}
+              {carpetaActiva && (
+                <button
+                  type="button"
+                  className="text-xs px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50"
+                  onClick={() => setCarpetaActiva(null)}
+                >
+                  Volver a carpetas
+                </button>
+              )}
+              {listQuery.isFetching && <span className="text-xs text-slate-500">Actualizando…</span>}
+            </div>
           </div>
           {listQuery.isError && (
             <p className="p-5 text-sm text-red-600">No se pudo cargar el listado. Intenta de nuevo.</p>
@@ -871,7 +1177,34 @@ export default function Documentos() {
               </ol>
             </div>
           )}
-          {listQuery.data && listQuery.data.length > 0 && (
+          {listQuery.data && listQuery.data.length > 0 && !carpetaActiva && (
+            <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {carpetas.map((c) => (
+                <button
+                  key={c.key}
+                  type="button"
+                  onClick={() => setCarpetaActiva(c.key)}
+                  className="text-left rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-4 py-3 shadow-sm"
+                >
+                  <div className="flex items-center gap-2">
+                    <Folder className="w-4 h-4 text-amber-600" />
+                    <p className="font-medium text-slate-900 truncate">{c.nombre}</p>
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {c.total} documento{c.total === 1 ? '' : 's'}
+                  </p>
+                </button>
+              ))}
+            </div>
+          )}
+          {listQuery.data && listQuery.data.length > 0 && carpetaActiva && documentosCarpetaActiva.length === 0 && (
+            <div className="p-8 text-center text-slate-600 text-sm">
+              No hay documentos en esta carpeta con los filtros actuales.
+            </div>
+          )}
+          {listQuery.data && listQuery.data.length > 0 && carpetaActiva && documentosCarpetaActiva.length > 0 && (
+            <>
+            {vistaCarpeta === 'tabla' ? (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="bg-slate-50 text-left text-slate-600">
@@ -888,7 +1221,7 @@ export default function Documentos() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {listQuery.data.map((row) => (
+                  {documentosCarpetaActiva.map((row) => (
                     <tr key={row.id} className="hover:bg-slate-50/80">
                       <td className="px-4 py-3">
                         <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-mono text-slate-800">
@@ -1035,6 +1368,110 @@ export default function Documentos() {
                 </tbody>
               </table>
             </div>
+            ) : (
+              <div className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+                {documentosCarpetaActiva.map((row) => (
+                  <article key={row.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow">
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-2 mb-1.5">
+                          <span
+                            className={`inline-flex h-8 w-8 items-center justify-center rounded-lg border ${claseColorTipoArchivo(row.mime_type)}`}
+                            title={row.mime_type}
+                          >
+                            <IconoTipoArchivo mime={row.mime_type} />
+                          </span>
+                          <span className={`inline-flex rounded-md border px-2 py-0.5 text-[11px] font-medium ${claseColorTipoArchivo(row.mime_type)}`}>
+                            {etiquetaTipoArchivo(row.mime_type)}
+                          </span>
+                        </div>
+                        <p className="font-semibold text-slate-900 truncate">{row.titulo}</p>
+                        <p className="text-xs text-slate-500 truncate" title={row.nombre_archivo_original}>
+                          {row.nombre_archivo_original}
+                        </p>
+                      </div>
+                      <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-mono text-slate-700 shrink-0">
+                        v{row.version_seq}
+                      </span>
+                    </div>
+                    <div className="mt-3 space-y-1 text-xs text-slate-600">
+                      <p>Tipo MIME: {row.mime_type}</p>
+                      <p>Sede: {sedeLabel(row)}</p>
+                      <p>Tamaño: {formatBytes(row.tamano_bytes)}</p>
+                      <p>Creado: {new Date(row.created_at).toLocaleString('es-CO')}</p>
+                    </div>
+                    <div className="mt-3 flex flex-wrap items-center gap-1">
+                      <button
+                        type="button"
+                        className="p-2 rounded-lg text-primary-600 hover:bg-primary-50"
+                        title="Descargar"
+                        onClick={() => void handleDownload(row.id, row.nombre_archivo_original)}
+                      >
+                        <Download className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        className="p-2 rounded-lg text-indigo-600 hover:bg-indigo-50"
+                        title="Vista previa"
+                        onClick={() => void abrirVistaPrevia(row)}
+                      >
+                        <Eye className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        className="p-2 rounded-lg text-slate-600 hover:bg-slate-100"
+                        title="Historial de versiones"
+                        onClick={() => {
+                          setHistorialPara(row);
+                          setEditing(null);
+                          cerrarModalNuevaVersion();
+                        }}
+                      >
+                        <History className="w-4 h-4" />
+                      </button>
+                      <button
+                        type="button"
+                        className="p-2 rounded-lg text-teal-700 hover:bg-teal-50"
+                        title="Subir nueva versión"
+                        onClick={() => abrirNuevaVersionDesdeFila(row)}
+                      >
+                        <Layers className="w-4 h-4" />
+                      </button>
+                      {esAdmin && (
+                        <>
+                          <button
+                            type="button"
+                            className="p-2 rounded-lg text-slate-600 hover:bg-slate-100"
+                            title="Editar metadatos"
+                            onClick={() => openEdit(row)}
+                          >
+                            <Pencil className="w-4 h-4" />
+                          </button>
+                          <button
+                            type="button"
+                            className="p-2 rounded-lg text-red-700 hover:bg-red-50"
+                            title="Eliminar versión"
+                            disabled={deleteMutation.isLoading}
+                            onClick={() => {
+                              if (
+                                window.confirm(
+                                  '¿Eliminar esta versión? Si era la actual, la versión anterior pasará a ser la vigente.'
+                                )
+                              ) {
+                                deleteMutation.mutate(row.id);
+                              }
+                            }}
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+            </>
           )}
         </section>
 
@@ -1063,15 +1500,72 @@ export default function Documentos() {
                 Actualizar
               </button>
             </div>
+            <div className="px-5 py-3 border-b border-slate-100 bg-slate-50/50">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-6 gap-2">
+                <input
+                  type="search"
+                  className="xl:col-span-2 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  placeholder="Buscar usuario o detalle…"
+                  value={auditoriaQ}
+                  onChange={(e) => setAuditoriaQ(e.target.value)}
+                />
+                <select
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  value={auditoriaAccion}
+                  onChange={(e) => setAuditoriaAccion(e.target.value)}
+                >
+                  <option value="">Todas las acciones</option>
+                  <option value="subir">Subida</option>
+                  <option value="descargar">Descarga</option>
+                  <option value="metadata_update">Cambio metadatos</option>
+                  <option value="eliminar">Eliminación</option>
+                  <option value="certificacion_cuenta">Certificación en cuenta</option>
+                </select>
+                <input
+                  type="date"
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  value={auditoriaFechaInicio}
+                  onChange={(e) => setAuditoriaFechaInicio(e.target.value)}
+                  title="Desde"
+                />
+                <input
+                  type="date"
+                  className="rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  value={auditoriaFechaFin}
+                  onChange={(e) => setAuditoriaFechaFin(e.target.value)}
+                  title="Hasta"
+                />
+                <div className="flex gap-2">
+                  <select
+                    className="flex-1 rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    value={auditoriaSort}
+                    onChange={(e) => setAuditoriaSort(e.target.value as 'asc' | 'desc')}
+                  >
+                    <option value="desc">Más reciente</option>
+                    <option value="asc">Más antiguo</option>
+                  </select>
+                  <select
+                    className="w-24 rounded-lg border border-slate-300 px-2 py-2 text-sm"
+                    value={auditoriaPageSize}
+                    onChange={(e) => setAuditoriaPageSize(Number(e.target.value))}
+                    title="Filas por página"
+                  >
+                    <option value={25}>25</option>
+                    <option value={50}>50</option>
+                    <option value={100}>100</option>
+                  </select>
+                </div>
+              </div>
+            </div>
             {auditoriaQuery.isError && (
               <p className="p-5 text-sm text-red-600">
                 No se pudo cargar el registro de actividad. Verifique que su usuario sea administrador.
               </p>
             )}
-            {auditoriaQuery.data && auditoriaQuery.data.length === 0 && (
+            {auditoriaQuery.data && auditoriaItems.length === 0 && (
               <p className="p-8 text-center text-slate-600 text-sm">Aún no hay eventos registrados.</p>
             )}
-            {auditoriaQuery.data && auditoriaQuery.data.length > 0 && (
+            {auditoriaQuery.data && auditoriaItems.length > 0 && (
               <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
                 <table className="w-full text-sm">
                   <thead className="bg-slate-50 text-left text-slate-600 sticky top-0">
@@ -1084,7 +1578,7 @@ export default function Documentos() {
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {auditoriaQuery.data.map((ev) => (
+                    {auditoriaItems.map((ev) => (
                       <tr key={ev.id} className="hover:bg-slate-50/80">
                         <td className="px-4 py-2 text-slate-700 whitespace-nowrap">
                           {new Date(ev.created_at).toLocaleString('es-CO')}
@@ -1127,6 +1621,32 @@ export default function Documentos() {
                 </table>
               </div>
             )}
+            <div className="px-5 py-3 border-t border-slate-100 bg-white flex items-center justify-between gap-3">
+              <p className="text-xs text-slate-500">
+                Página {Math.min(auditoriaPage + 1, auditoriaTotalPages)} de {auditoriaTotalPages}
+                {auditoriaQuery.data
+                  ? ` · ${auditoriaItems.length} fila${auditoriaItems.length === 1 ? '' : 's'} (total ${auditoriaTotal})`
+                  : ''}
+              </p>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  disabled={auditoriaPage === 0 || auditoriaQuery.isFetching}
+                  onClick={() => setAuditoriaPage((p) => Math.max(0, p - 1))}
+                >
+                  Anterior
+                </button>
+                <button
+                  type="button"
+                  className="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+                  disabled={auditoriaQuery.isFetching || (auditoriaPage + 1) >= auditoriaTotalPages}
+                  onClick={() => setAuditoriaPage((p) => p + 1)}
+                >
+                  Siguiente
+                </button>
+              </div>
+            </div>
           </section>
         )}
       </div>

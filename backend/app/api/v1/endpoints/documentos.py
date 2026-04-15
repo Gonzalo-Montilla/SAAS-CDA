@@ -4,30 +4,42 @@ Documentos del tenant: listado, carga y descarga autenticada.
 Trazabilidad y lineamientos de seguridad de la información: ver
 ``backend/docs/NTC5385_modulo_documental.md`` (NTC 5385, referencia NTC-ISO/IEC 27002).
 """
+import html
 import logging
 import os
 import uuid
-from datetime import datetime, timezone
+import hashlib
+from urllib.parse import quote
+from datetime import date, datetime, time, timezone
 from pathlib import Path
 from uuid import UUID
 
-from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, UploadFile, status
-from fastapi.responses import FileResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.deps import get_admin, get_current_user, get_db
+from app.core.timezone_utils import get_app_timezone
 from app.models.documento_auditoria import TenantDocumentoAuditoria
 from app.models.documento_tenant import TenantDocumento
 from app.models.sucursal import Sucursal
+from app.models.tenant import Tenant
 from app.models.usuario import Usuario
 from app.schemas.documento import (
+    CertificacionCuentaVerificacionResponse,
+    DocumentoAuditoriaPageResponse,
     DocumentoAuditoriaResponse,
     DocumentoMetadataUpdate,
     DocumentoResponse,
 )
 from app.services.documento_preview import PREVIEW_OFFICE_EXTENSIONS, schedule_preview_build, try_generate_preview_pdf
+from app.utils.certificacion_cuenta_pdf import (
+    CertificacionDocumentoItem,
+    _sello_electronico_hex,
+    generar_certificacion_en_cuenta_pdf,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +67,17 @@ def _storage_dir() -> Path:
 
 
 def _abs_path(relpath: str) -> Path:
-    return _storage_dir() / relpath
+    root = _storage_dir().resolve()
+    rel = (relpath or "").replace("\\", "/").lstrip("/")
+    path = (root / rel).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ruta de documento inválida.",
+        )
+    return path
 
 
 def _parse_sucursal_id(db: Session, tenant_id: UUID, raw: str | None) -> UUID | None:
@@ -121,17 +143,210 @@ def _log_documento_auditoria(
     )
 
 
-@router.get("/auditoria", response_model=list[DocumentoAuditoriaResponse])
+def _sha256_file_hex(path: Path) -> str | None:
+    if not path.is_file():
+        return None
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        for chunk in iter(lambda: f.read(1024 * 1024), b""):
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _parse_certificacion_detalle(detalle: str | None) -> tuple[int | None, bool | None, str | None]:
+    raw = (detalle or "").strip()
+    if not raw:
+        return None, None, None
+    parts = [p.strip() for p in raw.split("|")]
+    docs_val = None
+    hash_val = None
+    sello_val = None
+    for p in parts:
+        if p.startswith("docs="):
+            try:
+                docs_val = int(p.split("=", 1)[1].strip())
+            except ValueError:
+                docs_val = None
+        elif p.startswith("hash="):
+            v = p.split("=", 1)[1].strip().lower()
+            if v in {"si", "sí", "true", "1"}:
+                hash_val = True
+            elif v in {"no", "false", "0"}:
+                hash_val = False
+        elif p.startswith("sello="):
+            sello_val = p.split("=", 1)[1].strip() or None
+    return docs_val, hash_val, sello_val
+
+
+def _accept_prefiere_html(accept: str | None) -> bool:
+    if not accept:
+        return False
+    a = accept.lower()
+    return "text/html" in a or "application/xhtml+xml" in a
+
+
+def _verificacion_usar_html(
+    *,
+    vista: bool,
+    formato: str | None,
+    accept: str | None,
+) -> bool:
+    """Página legible: explícito (vista/formato) o navegador típico vía Accept."""
+    f = (formato or "").strip().lower()
+    if f == "json":
+        return False
+    if f == "html":
+        return True
+    if vista:
+        return True
+    return _accept_prefiere_html(accept)
+
+
+def _verificacion_entregar(
+    payload: CertificacionCuentaVerificacionResponse,
+    *,
+    organizacion_nombre: str | None,
+    usar_html: bool,
+) -> HTMLResponse | CertificacionCuentaVerificacionResponse:
+    if usar_html:
+        return HTMLResponse(
+            content=_html_verificacion_certificacion(payload=payload, organizacion_nombre=organizacion_nombre),
+            status_code=200,
+            media_type="text/html; charset=utf-8",
+        )
+    return payload
+
+
+def _html_verificacion_certificacion(
+    *,
+    payload: CertificacionCuentaVerificacionResponse,
+    organizacion_nombre: str | None,
+) -> str:
+    """Página pública legible en navegador (sin JSON)."""
+    e = html.escape
+    ok = payload.valido
+    badge_bg = "#dcfce7" if ok else "#fee2e2"
+    badge_fg = "#166534" if ok else "#991b1b"
+    badge_tx = "Certificación verificada" if ok else "No es posible verificar esta certificación"
+    org = e(organizacion_nombre.strip()) if (organizacion_nombre and organizacion_nombre.strip()) else None
+    slug = e(payload.tenant_slug or "")
+    code = e(payload.codigo)
+    detalle_err = e((payload.detalle or "").strip()) if not ok else ""
+    consulta = ""
+    if not ok:
+        consulta = f"""
+        <dl class="grid">
+          <dt>Identificador de cuenta (slug)</dt><dd><code>{slug}</code></dd>
+          <dt>Código consultado</dt><dd><code class="codigo">{code}</code></dd>
+        </dl>
+        """
+    err_block = f'<p class="err">{detalle_err}</p>' if (not ok and detalle_err) else ""
+
+    bloque_extra = ""
+    if ok and payload.generated_at:
+        gen = payload.generated_at
+        fecha_txt = gen.strftime("%d/%m/%Y %H:%M:%S")
+        if gen.tzinfo is not None:
+            fecha_txt += f" ({gen.tzname() or 'UTC'})"
+        docs_n = payload.total_documentos_certificados
+        docs_txt = str(docs_n) if docs_n is not None else "—"
+        hash_txt = (
+            "Sí (SHA-256 por archivo, cuando el archivo estaba disponible)"
+            if payload.hash_incluido is True
+            else ("No" if payload.hash_incluido is False else "—")
+        )
+        sello = e(payload.sello_electronico) if payload.sello_electronico else "—"
+        doc_ref = ""
+        if payload.documento_titulo or payload.documento_nombre_archivo:
+            t = e(payload.documento_titulo or "")
+            n = e(payload.documento_nombre_archivo or "")
+            doc_ref = f"<p class='muted'>Archivo de respaldo en biblioteca: <strong>{t}</strong> — {n}</p>"
+
+        bloque_extra = f"""
+        <dl class="grid">
+          <dt>Organización</dt><dd>{org or slug}</dd>
+          <dt>Identificador de cuenta (slug)</dt><dd><code>{slug}</code></dd>
+          <dt>Código de verificación</dt><dd><code class="codigo">{code}</code></dd>
+          <dt>Generada</dt><dd>{e(fecha_txt)}</dd>
+          <dt>Documentos certificados</dt><dd>{e(docs_txt)}</dd>
+          <dt>Huellas en PDF</dt><dd>{e(hash_txt)}</dd>
+          <dt>Sello electrónico (PDF)</dt><dd><code class="sello">{sello}</code></dd>
+        </dl>
+        {doc_ref}
+        <p class="muted small">
+          Este resultado confirma que consta un registro de emisión en el sistema CDASOFT para el código indicado.
+          Compare el código y el sello con su PDF. PROMETHEUS TECH SAS / CDASOFT no validan el contenido de los archivos certificados.
+        </p>
+        """
+    elif ok:
+        bloque_extra = "<p class='muted'>Registro encontrado; faltan algunos metadatos para mostrar.</p>"
+
+    return f"""<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{e("Verificación — Certificación en cuenta")}</title>
+  <style>
+    :root {{ font-family: system-ui, Segoe UI, Roboto, sans-serif; background: #f1f5f9; color: #0f172a; }}
+    body {{ margin: 0; padding: 1.25rem; }}
+    .wrap {{ max-width: 40rem; margin: 0 auto; }}
+    .card {{ background: #fff; border-radius: 12px; box-shadow: 0 4px 24px rgba(15,23,42,.08); padding: 1.5rem 1.75rem; }}
+    .badge {{ display: inline-block; padding: .35rem .75rem; border-radius: 999px; font-weight: 600; font-size: .9rem;
+      background: {badge_bg}; color: {badge_fg}; margin-bottom: 1rem; }}
+    h1 {{ font-size: 1.15rem; margin: 0 0 .5rem 0; color: #0a1d3d; }}
+    .grid {{ display: grid; grid-template-columns: 9.5rem 1fr; gap: .5rem .75rem; font-size: .9rem; margin: 1rem 0; }}
+    dt {{ color: #64748b; font-weight: 500; }}
+    dd {{ margin: 0; }}
+    code {{ font-size: .85rem; background: #f8fafc; padding: .1rem .35rem; border-radius: 4px; }}
+    code.codigo, code.sello {{ display: inline-block; word-break: break-all; font-size: .8rem; }}
+    .muted {{ color: #64748b; }}
+    .small {{ font-size: .8rem; line-height: 1.4; }}
+    .err {{ color: #991b1b; font-size: .9rem; margin-top: .75rem; }}
+    footer {{ margin-top: 1.5rem; text-align: center; font-size: .75rem; color: #94a3b8; }}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="badge">{e(badge_tx)}</div>
+      <h1>Verificación de certificación en cuenta</h1>
+      {consulta}
+      {err_block}
+      {bloque_extra}
+    </div>
+    <footer>CDASOFT · Resultado de verificación de certificación en cuenta</footer>
+  </div>
+</body>
+</html>"""
+
+
+@router.get("/auditoria", response_model=DocumentoAuditoriaPageResponse)
 def listar_auditoria_documentos(
     skip: int = 0,
     limit: int = 50,
+    q: str | None = Query(default=None, max_length=200),
+    accion: str | None = Query(default=None, max_length=40),
+    fecha_inicio: date | None = Query(default=None),
+    fecha_fin: date | None = Query(default=None),
+    sort: str = Query(default="desc", pattern="^(asc|desc)$"),
     db: Session = Depends(get_db),
     admin: Usuario = Depends(get_admin),
 ):
     """Historial de acciones (solo administrador). Util para evidencias ante auditoria."""
     if limit > settings.MAX_PAGE_SIZE:
         limit = settings.MAX_PAGE_SIZE
-    q = (
+    if skip < 0:
+        skip = 0
+    if fecha_inicio and fecha_fin and fecha_inicio > fecha_fin:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="fecha_inicio no puede ser mayor que fecha_fin",
+        )
+
+    rows_q = (
         db.query(
             TenantDocumentoAuditoria,
             Usuario.nombre_completo,
@@ -139,12 +354,36 @@ def listar_auditoria_documentos(
         )
         .outerjoin(Usuario, TenantDocumentoAuditoria.usuario_id == Usuario.id)
         .filter(TenantDocumentoAuditoria.tenant_id == admin.tenant_id)
-        .order_by(TenantDocumentoAuditoria.created_at.desc())
-        .offset(skip)
-        .limit(limit)
     )
-    rows = q.all()
-    return [
+
+    if accion and accion.strip():
+        rows_q = rows_q.filter(TenantDocumentoAuditoria.accion == accion.strip()[:40])
+
+    if fecha_inicio is not None:
+        rows_q = rows_q.filter(TenantDocumentoAuditoria.created_at >= datetime.combine(fecha_inicio, time.min))
+    if fecha_fin is not None:
+        rows_q = rows_q.filter(TenantDocumentoAuditoria.created_at <= datetime.combine(fecha_fin, time.max))
+
+    search_text = (q or "").strip()
+    if search_text:
+        term = f"%{search_text}%"
+        rows_q = rows_q.filter(
+            or_(
+                TenantDocumentoAuditoria.detalle.ilike(term),
+                Usuario.nombre_completo.ilike(term),
+                Usuario.email.ilike(term),
+            )
+        )
+
+    total = rows_q.count()
+
+    if sort == "asc":
+        rows_q = rows_q.order_by(TenantDocumentoAuditoria.created_at.asc())
+    else:
+        rows_q = rows_q.order_by(TenantDocumentoAuditoria.created_at.desc())
+
+    rows = rows_q.offset(skip).limit(limit).all()
+    items = [
         DocumentoAuditoriaResponse(
             id=ev.id,
             tenant_id=ev.tenant_id,
@@ -158,6 +397,161 @@ def listar_auditoria_documentos(
         )
         for ev, nombre, email in rows
     ]
+    return DocumentoAuditoriaPageResponse(items=items, total=total, skip=skip, limit=limit)
+
+
+def _resolver_verificacion_certificacion_cuenta(
+    db: Session,
+    request: Request,
+    *,
+    tenant_slug: str,
+    codigo: str,
+    vista: bool = False,
+    formato: str | None = None,
+) -> HTMLResponse | CertificacionCuentaVerificacionResponse:
+    """Lógica compartida: consulta ?… y ruta corta /v/{slug}/{codigo}."""
+    usar_html = _verificacion_usar_html(
+        vista=vista,
+        formato=formato,
+        accept=request.headers.get("accept"),
+    )
+    slug = tenant_slug.strip()
+    code = codigo.strip()
+    if not slug or not code:
+        bad = CertificacionCuentaVerificacionResponse(
+            tenant_slug=slug or None,
+            codigo=code or "",
+            valido=False,
+            detalle="Parámetros inválidos: indique organización (slug) y código de verificación.",
+        )
+        if usar_html:
+            return _verificacion_entregar(bad, organizacion_nombre=None, usar_html=True)
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Parámetros inválidos.")
+
+    tenant = (
+        db.query(Tenant)
+        .filter(Tenant.slug == slug, Tenant.activo.is_(True))
+        .first()
+    )
+    if not tenant:
+        tenant = (
+            db.query(Tenant)
+            .filter(func.lower(Tenant.slug) == slug.lower(), Tenant.activo.is_(True))
+            .first()
+        )
+    if not tenant:
+        out = CertificacionCuentaVerificacionResponse(
+            tenant_slug=slug,
+            codigo=code,
+            valido=False,
+            detalle="Organización no encontrada o inactiva.",
+        )
+        return _verificacion_entregar(out, organizacion_nombre=None, usar_html=usar_html)
+
+    ev = (
+        db.query(TenantDocumentoAuditoria)
+        .filter(
+            TenantDocumentoAuditoria.tenant_id == tenant.id,
+            TenantDocumentoAuditoria.accion == "certificacion_cuenta",
+            TenantDocumentoAuditoria.detalle.ilike(f"{code}%"),
+        )
+        .order_by(TenantDocumentoAuditoria.created_at.desc())
+        .first()
+    )
+    org = tenant.nombre_comercial or tenant.nombre
+    if not ev:
+        out = CertificacionCuentaVerificacionResponse(
+            tenant_slug=tenant.slug,
+            codigo=code,
+            valido=False,
+            detalle="No se encontró una certificación asociada al código suministrado.",
+        )
+        return _verificacion_entregar(out, organizacion_nombre=org, usar_html=usar_html)
+
+    doc = None
+    if ev.documento_id:
+        doc = (
+            db.query(TenantDocumento)
+            .filter(
+                TenantDocumento.id == ev.documento_id,
+                TenantDocumento.tenant_id == tenant.id,
+            )
+            .first()
+        )
+    total_docs, hash_incluido, sello_val = _parse_certificacion_detalle(ev.detalle)
+    out = CertificacionCuentaVerificacionResponse(
+        tenant_slug=tenant.slug,
+        codigo=code,
+        valido=True,
+        generated_at=ev.created_at,
+        documento_id=ev.documento_id,
+        documento_titulo=doc.titulo if doc else None,
+        documento_nombre_archivo=doc.nombre_archivo_original if doc else None,
+        total_documentos_certificados=total_docs,
+        hash_incluido=hash_incluido,
+        sello_electronico=sello_val,
+        detalle=ev.detalle,
+    )
+    return _verificacion_entregar(out, organizacion_nombre=org, usar_html=usar_html)
+
+
+@router.get("/certificacion-en-cuenta/v/{tenant_slug}/{codigo}")
+def verificar_certificacion_en_cuenta_por_ruta(
+    request: Request,
+    tenant_slug: str,
+    codigo: str,
+    vista: bool = Query(
+        False,
+        description="Si es true, fuerza página HTML (el PDF incluye vista=1).",
+    ),
+    formato: str | None = Query(
+        None,
+        description="Forzar salida: json o html.",
+        max_length=12,
+    ),
+    db: Session = Depends(get_db),
+):
+    """
+    Enlace corto para el PDF: evita URLs largas que se cortan al copiar desde el documento.
+    Ejemplo: ``/documentos/certificacion-en-cuenta/v/mi-org/CDA-XXXX-20260415120000?vista=1``
+    """
+    return _resolver_verificacion_certificacion_cuenta(
+        db,
+        request,
+        tenant_slug=tenant_slug,
+        codigo=codigo,
+        vista=vista,
+        formato=formato,
+    )
+
+
+@router.get("/certificacion-en-cuenta/verificar")
+def verificar_certificacion_en_cuenta(
+    request: Request,
+    tenant_slug: str = Query(..., min_length=1, max_length=120),
+    codigo: str = Query(..., min_length=8, max_length=120),
+    vista: bool = Query(
+        False,
+        description="Si es true, devuelve página HTML (el PDF incluye vista=1).",
+    ),
+    formato: str | None = Query(
+        None,
+        description="Forzar salida: json (API) o html (página). Si se omite, el navegador recibe HTML por Accept.",
+        max_length=12,
+    ),
+    db: Session = Depends(get_db),
+):
+    """
+    Verificación pública sin sesión (query string). Preferir ruta ``/v/{slug}/{codigo}`` en PDFs nuevos.
+    """
+    return _resolver_verificacion_certificacion_cuenta(
+        db,
+        request,
+        tenant_slug=tenant_slug,
+        codigo=codigo,
+        vista=vista,
+        formato=formato,
+    )
 
 
 @router.get("/categorias", response_model=list[str])
@@ -294,13 +688,23 @@ def subir_documento(
         grupo_id = prev.grupo_id
         max_seq = (
             db.query(func.max(TenantDocumento.version_seq))
-            .filter(TenantDocumento.grupo_id == grupo_id)
+            .filter(
+                TenantDocumento.grupo_id == grupo_id,
+                TenantDocumento.tenant_id == current_user.tenant_id,
+            )
             .scalar()
         )
         next_seq = (max_seq or 0) + 1
-        db.query(TenantDocumento).filter(TenantDocumento.grupo_id == grupo_id).update(
-            {TenantDocumento.es_version_actual: False},
-            synchronize_session=False,
+        (
+            db.query(TenantDocumento)
+            .filter(
+                TenantDocumento.grupo_id == grupo_id,
+                TenantDocumento.tenant_id == current_user.tenant_id,
+            )
+            .update(
+                {TenantDocumento.es_version_actual: False},
+                synchronize_session=False,
+            )
         )
         display_titulo = (titulo or "").strip() or prev.titulo or safe_base
         if (categoria is not None and str(categoria).strip()):
@@ -337,11 +741,144 @@ def subir_documento(
         created_by=current_user.id,
     )
     db.add(doc)
+    # Persistir el documento antes de auditoría: la FK exige que exista en tenant_documentos.
+    db.flush()
+    _log_documento_auditoria(
+        db,
+        tenant_id=current_user.tenant_id,
+        documento_id=doc.id,
+        usuario_id=current_user.id,
+        accion="subir",
+        detalle=f"{doc.titulo} (v{doc.version_seq})",
+    )
     db.commit()
     db.refresh(doc)
     if extension in PREVIEW_OFFICE_EXTENSIONS:
         background_tasks.add_task(schedule_preview_build, doc.id)
     return doc
+
+
+@router.post(
+    "/certificacion-en-cuenta",
+    status_code=status.HTTP_200_OK,
+    response_class=Response,
+)
+def generar_certificacion_en_cuenta(
+    incluir_hash: bool = Query(default=True),
+    solo_actuales: bool = Query(default=True),
+    db: Session = Depends(get_db),
+    admin: Usuario = Depends(get_admin),
+):
+    tenant_id_for_log = getattr(admin, "tenant_id", None)
+    try:
+        tenant = db.query(Tenant).filter(Tenant.id == admin.tenant_id).first()
+        if not tenant:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado.")
+
+        docs_q = db.query(TenantDocumento).filter(TenantDocumento.tenant_id == admin.tenant_id)
+        if solo_actuales:
+            docs_q = docs_q.filter(TenantDocumento.es_version_actual.is_(True))
+        docs = docs_q.order_by(TenantDocumento.created_at.desc()).all()
+        if not docs:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="No hay documentos para certificar con los filtros seleccionados.",
+            )
+
+        app_tz = get_app_timezone()
+        now_local = datetime.now(app_tz)
+        codigo_verificacion = f"CDA-{str(admin.tenant_id).split('-')[0].upper()}-{now_local.strftime('%Y%m%d%H%M%S')}"
+
+        items: list[CertificacionDocumentoItem] = []
+        for d in docs:
+            file_hash = None
+            if incluir_hash:
+                try:
+                    file_hash = _sha256_file_hex(_abs_path(d.storage_relpath))
+                except Exception:
+                    logger.exception("No fue posible calcular hash para documento %s", d.id)
+                    file_hash = None
+            fecha_base = d.updated_at or d.created_at
+            fecha_local = fecha_base.astimezone(app_tz) if fecha_base.tzinfo else fecha_base
+            items.append(
+                CertificacionDocumentoItem(
+                    identificacion=str(d.id),
+                    titulo=d.titulo,
+                    nombre_archivo=d.nombre_archivo_original,
+                    version=f"v{d.version_seq}",
+                    fecha_ultima_modificacion=fecha_local.strftime("%d/%m/%Y %H:%M:%S"),
+                    hash_sha256=file_hash,
+                )
+            )
+
+        principal = (
+            db.query(Sucursal)
+            .filter(Sucursal.tenant_id == admin.tenant_id, Sucursal.es_principal.is_(True))
+            .first()
+        )
+        ciudad_cert = None
+        if principal and principal.ciudad and str(principal.ciudad).strip():
+            ciudad_cert = str(principal.ciudad).strip()
+        base_url = (settings.BACKEND_PUBLIC_BASE_URL or "").strip().rstrip("/")
+        # Ruta corta: menos caracteres y sin query larga (al copiar desde el PDF no se trunca tenant_slug=…).
+        verification_url = (
+            f"{base_url}/api/v1/documentos/certificacion-en-cuenta/v/"
+            f"{quote(tenant.slug, safe='')}/{quote(codigo_verificacion, safe='')}?vista=1"
+        )
+        sello_hex = _sello_electronico_hex(
+            tenant_slug=tenant.slug,
+            codigo_verificacion=codigo_verificacion,
+            fecha_emision_iso=now_local.isoformat(),
+        )
+
+        pdf_buffer = generar_certificacion_en_cuenta_pdf(
+            tenant_nombre=tenant.nombre_comercial or tenant.nombre,
+            tenant_nit=tenant.nit_cda,
+            tenant_slug=tenant.slug,
+            fecha_emision=now_local,
+            codigo_verificacion=codigo_verificacion,
+            documentos=items,
+            usuario_emisor=admin.nombre_completo or admin.email,
+            tenant_logo_url=tenant.logo_url,
+            incluir_hash=incluir_hash,
+            ciudad_emision=ciudad_cert,
+            verification_url=verification_url,
+            format_version="v1.6",
+        )
+        content = pdf_buffer.getvalue()
+        original_name = f"certificacion_en_cuenta_{now_local.strftime('%Y%m%d_%H%M%S')}.pdf"
+
+        # No persistimos el PDF en biblioteca: solo trazabilidad en auditoría y descarga inmediata.
+        _log_documento_auditoria(
+            db,
+            tenant_id=admin.tenant_id,
+            documento_id=None,
+            usuario_id=admin.id,
+            accion="certificacion_cuenta",
+            detalle=(
+                f"{codigo_verificacion} | docs={len(items)} | hash={'si' if incluir_hash else 'no'} "
+                f"| sello={sello_hex}"
+            ),
+        )
+        db.commit()
+
+        return Response(
+            content=content,
+            media_type="application/pdf",
+            headers={
+                "Content-Disposition": f'attachment; filename="{original_name}"',
+                "X-Certificacion-Codigo": codigo_verificacion,
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Error generando certificación en cuenta tenant=%s", tenant_id_for_log)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error interno al generar certificación en cuenta: {type(exc).__name__}: {exc}",
+        )
 
 
 @router.get("/{documento_id}/preview")
