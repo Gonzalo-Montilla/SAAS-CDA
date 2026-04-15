@@ -56,6 +56,7 @@ logs/
 
 # Runtime uploads
 backend/uploads/
+backend/private_uploads/
 
 # Node.js (para frontend)
 node_modules/

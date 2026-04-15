@@ -20,6 +20,7 @@ from app.api.v1.endpoints import (
     quality,
     appointments,
     factus,
+    documentos,
 )
 
 api_router = APIRouter()
@@ -41,3 +42,4 @@ api_router.include_router(support.router, prefix="/support", tags=["support"])
 api_router.include_router(quality.router, prefix="/quality", tags=["quality"])
 api_router.include_router(appointments.router, prefix="/appointments", tags=["appointments"])
 api_router.include_router(factus.router, prefix="/factus", tags=["factus"])
+api_router.include_router(documentos.router, prefix="/documentos", tags=["documentos"])

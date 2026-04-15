@@ -57,6 +57,8 @@ class MovimientoTesoreria(Base):
     sucursal_id = Column(UUID(as_uuid=True), ForeignKey("sucursales.id"), nullable=True, index=True)
 
     # Tipo de movimiento
+    # PostgreSQL enum labels coinciden con los *nombres* de miembro (INGRESO, TRASLADO_CAJA, …),
+    # que es el comportamiento por defecto de SQLAlchemy para Python Enum.
     tipo = Column(SQLEnum(TipoMovimientoTesoreria), nullable=False)
     
     # Categoría (depende del tipo)

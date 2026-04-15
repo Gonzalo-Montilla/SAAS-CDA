@@ -4,7 +4,6 @@ Endpoints de agendamiento (público + gestión interna por tenant).
 from datetime import datetime, date, time, timedelta, timezone
 import hashlib
 from typing import Literal, Optional
-from zoneinfo import ZoneInfo
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -13,6 +12,7 @@ from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.timezone_utils import zoneinfo_from_name
 from app.core.deps import get_current_user, get_db, get_agendamiento_or_admin
 from app.models.appointment import Appointment
 from app.models.tenant import Tenant
@@ -137,12 +137,8 @@ def _now_naive() -> datetime:
 
 def _now_colombia_naive() -> datetime:
     # Validaciones de agenda usando hora operativa local (Colombia).
-    # En algunos entornos Windows no está disponible la base IANA (tzdata).
-    try:
-        return datetime.now(ZoneInfo(settings.TIMEZONE)).replace(tzinfo=None)
-    except Exception:
-        colombia_tz = timezone(timedelta(hours=-5))
-        return datetime.now(timezone.utc).astimezone(colombia_tz).replace(tzinfo=None)
+    tz = zoneinfo_from_name(settings.TIMEZONE)
+    return datetime.now(tz).replace(tzinfo=None)
 
 
 def _parse_date(value: str) -> date:
@@ -206,10 +202,7 @@ def _humanize_service(tipo_vehiculo: str) -> str:
 
 
 def _get_colombia_timezone():
-    try:
-        return ZoneInfo(settings.TIMEZONE)
-    except Exception:
-        return timezone(timedelta(hours=-5))
+    return zoneinfo_from_name(settings.TIMEZONE)
 
 
 def _colombia_naive_to_utc_aware(colombia_dt: datetime) -> datetime:

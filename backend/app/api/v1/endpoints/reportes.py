@@ -5,15 +5,14 @@ from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, and_, or_, cast, Date
+from sqlalchemy import func, and_, or_, cast, Date, String
 from datetime import datetime, timedelta, date, time, timezone
 from decimal import Decimal
 from typing import Optional
 from calendar import monthrange
 from uuid import UUID
-from zoneinfo import ZoneInfo
-
 from app.core.config import settings
+from app.core.timezone_utils import get_app_timezone, zoneinfo_from_name
 from app.core.deps import get_db, get_contador_or_admin
 from app.core.sucursal_scope import resolve_reporte_sucursal_id, get_principal_sucursal_id
 from app.models.usuario import Usuario
@@ -92,7 +91,7 @@ def resolve_report_date_window(
     if (fecha_inicio is None) != (fecha_fin is None):
         raise ValueError("Debes enviar fecha_inicio y fecha_fin juntos para usar modo rango")
 
-    tz = ZoneInfo(settings.TIMEZONE)
+    tz = get_app_timezone()
 
     def _local_day_to_utc_range(d: date) -> tuple[datetime, datetime]:
         start_local = datetime.combine(d, datetime.min.time(), tzinfo=tz)
@@ -741,13 +740,16 @@ def obtener_desglose_conceptos(
     from app.models.tesoreria import CategoriaIngresoTesoreria
 
     for cat in CategoriaIngresoTesoreria:
+        # PostgreSQL puede tener la etiqueta como nombre de miembro (TRASLADO_CAJA) o,
+        # en el caso de ajustes, solo ``ajuste_correccion`` añadida por un script antiguo.
+        cat_labels = {cat.name, cat.value}
         total = db.query(func.sum(MovimientoTesoreria.monto)).filter(
             _mt_scope(
                 tid,
                 scope_sid,
                 MovimientoTesoreria.fecha_movimiento >= fecha_inicio_dt,
                 MovimientoTesoreria.fecha_movimiento <= fecha_fin_dt,
-                MovimientoTesoreria.categoria_ingreso == cat,
+                cast(MovimientoTesoreria.categoria_ingreso, String).in_(cat_labels),
                 MovimientoTesoreria.monto > 0,
             )
         ).scalar() or Decimal(0)
@@ -779,13 +781,14 @@ def obtener_desglose_conceptos(
     from app.models.tesoreria import CategoriaEgresoTesoreria
 
     for cat in CategoriaEgresoTesoreria:
+        cat_labels = {cat.name, cat.value}
         total = db.query(func.sum(MovimientoTesoreria.monto)).filter(
             _mt_scope(
                 tid,
                 scope_sid,
                 MovimientoTesoreria.fecha_movimiento >= fecha_inicio_dt,
                 MovimientoTesoreria.fecha_movimiento <= fecha_fin_dt,
-                MovimientoTesoreria.categoria_egreso == cat,
+                cast(MovimientoTesoreria.categoria_egreso, String).in_(cat_labels),
                 MovimientoTesoreria.monto < 0,
             )
         ).scalar() or Decimal(0)
@@ -1360,7 +1363,7 @@ def listar_cierres_caja_reporte(
             dia_cierre <= fecha_cierre_hasta,
         )
     else:
-        tz = ZoneInfo("America/Bogota")
+        tz = zoneinfo_from_name("America/Bogota")
         start_local = datetime.combine(fecha_cierre_desde, time.min, tzinfo=tz)
         end_exclusive_local = datetime.combine(fecha_cierre_hasta + timedelta(days=1), time.min, tzinfo=tz)
         start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)

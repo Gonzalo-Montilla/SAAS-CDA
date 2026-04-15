@@ -18,6 +18,7 @@ const Tesoreria = lazy(() => import('./pages/Tesoreria'));
 const Reportes = lazy(() => import('./pages/Reportes'));
 const Organizacion = lazy(() => import('./pages/Organizacion'));
 const Soporte = lazy(() => import('./pages/Soporte'));
+const Documentos = lazy(() => import('./pages/Documentos'));
 const Calidad = lazy(() => import('./pages/Calidad'));
 const CalidadEncuesta = lazy(() => import('./pages/CalidadEncuesta'));
 const Agendamiento = lazy(() => import('./pages/Agendamiento'));
@@ -170,6 +171,14 @@ function App() {
               element={
                 <ProtectedRoute requiredScope="tenant">
                   <Soporte />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/documentos"
+              element={
+                <ProtectedRoute requiredScope="tenant">
+                  <Documentos />
                 </ProtectedRoute>
               }
             />

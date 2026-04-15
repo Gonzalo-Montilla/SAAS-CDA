@@ -9,9 +9,8 @@ from datetime import datetime, timezone, date, time, timedelta
 from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
-from zoneinfo import ZoneInfo
-
 from app.core.deps import get_db, get_current_user, get_cajero_or_admin, get_admin, get_active_sucursal_id
+from app.core.timezone_utils import zoneinfo_from_name
 from app.core.sucursal_scope import get_principal_sucursal_id, comprobante_egreso_scope_sid
 from app.models.usuario import Usuario, RolEnum
 from app.models.caja import Caja, MovimientoCaja, TurnoEnum, EstadoCaja, TipoMovimiento, DesgloseEfectivoCierre
@@ -786,7 +785,7 @@ def obtener_historial_cajas(
                 dia_cierre <= fecha_cierre_hasta,
             )
         else:
-            tz = ZoneInfo("America/Bogota")
+            tz = zoneinfo_from_name("America/Bogota")
             start_local = datetime.combine(fecha_cierre_desde, time.min, tzinfo=tz)
             end_exclusive_local = datetime.combine(fecha_cierre_hasta + timedelta(days=1), time.min, tzinfo=tz)
             start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)

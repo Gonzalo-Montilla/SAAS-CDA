@@ -14,30 +14,42 @@ BEGIN
   END IF;
 END $$;
 
+-- Label alineado con SQLAlchemy (nombres de miembro Enum), no el .value en minúsculas.
 DO $body$
 DECLARE
-  r record;
+  ing_typ text;
+  egr_typ text;
 BEGIN
-  FOR r IN
-    SELECT DISTINCT t.typname AS tn FROM pg_type t
-    JOIN pg_enum e ON t.oid = e.enumtypid
-    WHERE e.enumlabel = 'otro_ingreso'
-  LOOP
+  SELECT t.typname INTO ing_typ
+  FROM pg_attribute a
+  JOIN pg_type t ON a.atttypid = t.oid
+  WHERE a.attrelid = 'movimientos_tesoreria'::regclass
+    AND a.attname = 'categoria_ingreso'
+    AND a.attnum > 0 AND NOT a.attisdropped;
+
+  SELECT t.typname INTO egr_typ
+  FROM pg_attribute a
+  JOIN pg_type t ON a.atttypid = t.oid
+  WHERE a.attrelid = 'movimientos_tesoreria'::regclass
+    AND a.attname = 'categoria_egreso'
+    AND a.attnum > 0 AND NOT a.attisdropped;
+
+  IF ing_typ IS NOT NULL THEN
     BEGIN
-      EXECUTE format('ALTER TYPE %I ADD VALUE %L', r.tn, 'ajuste_correccion');
-    EXCEPTION
-      WHEN duplicate_object THEN NULL;
+      EXECUTE format('ALTER TYPE %I ADD VALUE %L', ing_typ, 'AJUSTE_CORRECCION');
+    EXCEPTION WHEN duplicate_object THEN NULL;
     END;
-  END LOOP;
-  FOR r IN
-    SELECT DISTINCT t.typname AS tn FROM pg_type t
-    JOIN pg_enum e ON t.oid = e.enumtypid
-    WHERE e.enumlabel = 'otros_gastos'
-  LOOP
+  END IF;
+  IF egr_typ IS NOT NULL THEN
     BEGIN
-      EXECUTE format('ALTER TYPE %I ADD VALUE %L', r.tn, 'ajuste_correccion');
-    EXCEPTION
-      WHEN duplicate_object THEN NULL;
+      EXECUTE format('ALTER TYPE %I ADD VALUE %L', egr_typ, 'AJUSTE_CORRECCION');
+    EXCEPTION WHEN duplicate_object THEN NULL;
     END;
-  END LOOP;
+  END IF;
 END $body$;
+
+UPDATE movimientos_tesoreria SET categoria_ingreso = 'AJUSTE_CORRECCION'
+WHERE categoria_ingreso IS NOT NULL AND categoria_ingreso::text = 'ajuste_correccion';
+
+UPDATE movimientos_tesoreria SET categoria_egreso = 'AJUSTE_CORRECCION'
+WHERE categoria_egreso IS NOT NULL AND categoria_egreso::text = 'ajuste_correccion';

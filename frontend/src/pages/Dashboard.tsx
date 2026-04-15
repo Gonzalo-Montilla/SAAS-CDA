@@ -19,6 +19,7 @@ import {
   LifeBuoy,
   MessageSquareHeart,
   CalendarClock,
+  FileStack,
 } from 'lucide-react';
 const WIZARD_KEY = 'cdasoft_sedes_wizard_dismissed';
 
@@ -274,6 +275,19 @@ export default function Dashboard() {
             <h3 className="text-xl font-bold text-slate-900 mb-2">Soporte</h3>
             <p className="text-slate-600 text-sm">
               Reportar incidentes y hacer seguimiento a solicitudes del CDA
+            </p>
+          </button>
+
+          <button
+            onClick={() => navigate('/documentos')}
+            className="card-pos text-left group animate-fade-in animate-delay-200"
+          >
+            <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-teal-100 text-teal-700 mb-4 group-hover:bg-teal-700 group-hover:text-white transition-all duration-300">
+              <FileStack className="w-8 h-8 icon-hover" />
+            </div>
+            <h3 className="text-xl font-bold text-slate-900 mb-2">Documentos</h3>
+            <p className="text-slate-600 text-sm">
+              Biblioteca de archivos del CDA: carga, consulta y descarga segura
             </p>
           </button>
         </div>

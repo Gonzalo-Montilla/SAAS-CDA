@@ -63,6 +63,11 @@ class Settings(BaseSettings):
     BACKEND_PUBLIC_BASE_URL: str = Field(default="http://localhost:8000", env="BACKEND_PUBLIC_BASE_URL")
     TENANT_LOGO_UPLOAD_DIR: str = Field(default="uploads/tenant-logos", env="TENANT_LOGO_UPLOAD_DIR")
     TENANT_LOGO_MAX_SIZE_MB: int = 4
+    # Archivos del módulo documental (no se exponen por /uploads estático)
+    DOCUMENTOS_STORAGE_DIR: str = Field(default="private_uploads/documentos", env="DOCUMENTOS_STORAGE_DIR")
+    DOCUMENTOS_MAX_SIZE_MB: int = Field(default=25, ge=1, le=200, env="DOCUMENTOS_MAX_SIZE_MB")
+    # Ruta al ejecutable soffice (LibreOffice). Vacío = buscar en PATH y rutas típicas de Windows.
+    DOCUMENTOS_LIBREOFFICE_PATH: str = Field(default="", env="DOCUMENTOS_LIBREOFFICE_PATH")
     ONBOARDING_EMAIL_VERIFICATION_REQUIRED: bool = True
     ONBOARDING_EMAIL_CODE_TTL_MINUTES: int = 15
     ONBOARDING_EMAIL_CODE_MAX_ATTEMPTS: int = 5

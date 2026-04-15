@@ -728,7 +728,11 @@ def ensure_movimiento_caja_beneficiario_columns(db):
 
 def ensure_tesoreria_anulacion_y_enum(db):
     """
-    Anulación de movimientos (soft delete) y valores enum de categoría ajuste_correccion en PostgreSQL.
+    Anulación de movimientos (soft delete) y etiqueta enum AJUSTE_CORRECCION en PostgreSQL.
+
+    SQLAlchemy persiste los *nombres* de miembro del Enum (p. ej. TRASLADO_CAJA, AJUSTE_CORRECCION).
+    Un script anterior añadió por error el valor ``ajuste_correccion`` (minúsculas); aquí se añade
+    ``AJUSTE_CORRECCION`` y se migran filas al label correcto.
     """
     bind = db.get_bind()
     if bind.dialect.name != "postgresql":
@@ -764,30 +768,50 @@ def ensure_tesoreria_anulacion_y_enum(db):
             """
             DO $body$
             DECLARE
-              r record;
+              ing_typ text;
+              egr_typ text;
             BEGIN
-              FOR r IN
-                SELECT DISTINCT t.typname AS tn FROM pg_type t
-                JOIN pg_enum e ON t.oid = e.enumtypid
-                WHERE e.enumlabel = 'otro_ingreso'
-              LOOP
+              SELECT t.typname INTO ing_typ
+              FROM pg_attribute a
+              JOIN pg_type t ON a.atttypid = t.oid
+              WHERE a.attrelid = 'movimientos_tesoreria'::regclass
+                AND a.attname = 'categoria_ingreso'
+                AND a.attnum > 0
+                AND NOT a.attisdropped;
+
+              SELECT t.typname INTO egr_typ
+              FROM pg_attribute a
+              JOIN pg_type t ON a.atttypid = t.oid
+              WHERE a.attrelid = 'movimientos_tesoreria'::regclass
+                AND a.attname = 'categoria_egreso'
+                AND a.attnum > 0
+                AND NOT a.attisdropped;
+
+              IF ing_typ IS NOT NULL THEN
                 BEGIN
-                  EXECUTE format('ALTER TYPE %I ADD VALUE %L', r.tn, 'ajuste_correccion');
+                  EXECUTE format('ALTER TYPE %I ADD VALUE %L', ing_typ, 'ajuste_correccion');
                 EXCEPTION
                   WHEN duplicate_object THEN NULL;
                 END;
-              END LOOP;
-              FOR r IN
-                SELECT DISTINCT t.typname AS tn FROM pg_type t
-                JOIN pg_enum e ON t.oid = e.enumtypid
-                WHERE e.enumlabel = 'otros_gastos'
-              LOOP
                 BEGIN
-                  EXECUTE format('ALTER TYPE %I ADD VALUE %L', r.tn, 'ajuste_correccion');
+                  EXECUTE format('ALTER TYPE %I ADD VALUE %L', ing_typ, 'AJUSTE_CORRECCION');
                 EXCEPTION
                   WHEN duplicate_object THEN NULL;
                 END;
-              END LOOP;
+              END IF;
+
+              IF egr_typ IS NOT NULL THEN
+                BEGIN
+                  EXECUTE format('ALTER TYPE %I ADD VALUE %L', egr_typ, 'ajuste_correccion');
+                EXCEPTION
+                  WHEN duplicate_object THEN NULL;
+                END;
+                BEGIN
+                  EXECUTE format('ALTER TYPE %I ADD VALUE %L', egr_typ, 'AJUSTE_CORRECCION');
+                EXCEPTION
+                  WHEN duplicate_object THEN NULL;
+                END;
+              END IF;
             END $body$;
             """
         )
@@ -1032,6 +1056,93 @@ def ensure_quality_survey_invites_sucursal_schema(db):
     )
 
 
+def ensure_tenant_documentos_schema(db):
+    """Columnas de categoría y sede en documentos del tenant (tabla puede existir desde create_all)."""
+    tbl = "tenant_documentos"
+    exists = db.execute(
+        text(
+            "SELECT 1 FROM information_schema.tables WHERE table_schema='public' AND table_name=:t"
+        ),
+        {"t": tbl},
+    ).scalar()
+    if not exists:
+        return
+    db.execute(text(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS categoria VARCHAR(120)"))
+    db.execute(
+        text(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS sucursal_id UUID REFERENCES sucursales(id)")
+    )
+    db.execute(text(f"CREATE INDEX IF NOT EXISTS ix_tenant_documentos_categoria ON {tbl}(categoria)"))
+    db.execute(
+        text(f"CREATE INDEX IF NOT EXISTS ix_tenant_documentos_sucursal_id ON {tbl}(sucursal_id)")
+    )
+    db.execute(text(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS grupo_id UUID"))
+    db.execute(
+        text(
+            f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS version_seq INTEGER NOT NULL DEFAULT 1"
+        )
+    )
+    db.execute(
+        text(
+            f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS es_version_actual BOOLEAN NOT NULL DEFAULT TRUE"
+        )
+    )
+    db.execute(
+        text(
+            f"""
+            UPDATE {tbl}
+            SET grupo_id = id
+            WHERE grupo_id IS NULL
+            """
+        )
+    )
+    db.execute(
+        text(
+            f"CREATE INDEX IF NOT EXISTS ix_tenant_documentos_grupo_actual ON {tbl}(grupo_id, es_version_actual)"
+        )
+    )
+    db.execute(
+        text(
+            f"CREATE UNIQUE INDEX IF NOT EXISTS ux_tenant_documentos_grupo_version ON {tbl}(grupo_id, version_seq)"
+        )
+    )
+    db.execute(text(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS preview_pdf_relpath VARCHAR(800)"))
+    db.execute(text(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITHOUT TIME ZONE"))
+    db.execute(
+        text(
+            f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS updated_by UUID REFERENCES usuarios(id)"
+        )
+    )
+
+
+def ensure_tenant_documento_auditoria_schema(db):
+    """Trazabilidad de acciones sobre documentos (NTC 5385 / prácticas tipo ISO 27002)."""
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS tenant_documento_auditoria (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id),
+                documento_id UUID REFERENCES tenant_documentos(id) ON DELETE SET NULL,
+                usuario_id UUID REFERENCES usuarios(id),
+                accion VARCHAR(40) NOT NULL,
+                detalle TEXT,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_doc_aud_tenant_fecha ON tenant_documento_auditoria(tenant_id, created_at DESC)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_doc_aud_documento ON tenant_documento_auditoria(documento_id)"
+        )
+    )
+
+
 def get_db():
     """
     Dependency para obtener sesión de base de datos
@@ -1060,6 +1171,8 @@ def init_db():
     from app.models.sucursal import Sucursal  # noqa: F401 — register model
     from app.models.tesoreria import MovimientoTesoreria, DesgloseEfectivoTesoreria, ConfiguracionTesoreria  # noqa: F401
     from app.models.factus import TenantFactusSettings, FacturaElectronica  # noqa: F401 — register model
+    from app.models.documento_tenant import TenantDocumento  # noqa: F401 — register model
+    from app.models.documento_auditoria import TenantDocumentoAuditoria  # noqa: F401 — register model
     from app.core.security import get_password_hash
     from datetime import date
     
@@ -1088,6 +1201,7 @@ def init_db():
         ensure_factus_schema(db)
         ensure_quality_survey_responses_schema(db)
         ensure_quality_survey_invites_sucursal_schema(db)
+        ensure_tenant_documentos_schema(db)
         db.commit()
 
         default_tenant = db.query(Tenant).filter(
