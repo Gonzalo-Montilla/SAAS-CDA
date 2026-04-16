@@ -224,7 +224,7 @@ def _html_verificacion_certificacion(
     payload: CertificacionCuentaVerificacionResponse,
     organizacion_nombre: str | None,
 ) -> str:
-    """Página pública legible en navegador (sin JSON)."""
+    """Página pública legible en navegador (sin JSON), alineada a identidad CDASOFT."""
     e = html.escape
     ok = payload.valido
     badge_bg = "#dcfce7" if ok else "#fee2e2"
@@ -262,7 +262,7 @@ def _html_verificacion_certificacion(
         if payload.documento_titulo or payload.documento_nombre_archivo:
             t = e(payload.documento_titulo or "")
             n = e(payload.documento_nombre_archivo or "")
-            doc_ref = f"<p class='muted'>Archivo de respaldo en biblioteca: <strong>{t}</strong> — {n}</p>"
+            doc_ref = f"<p class='muted doc-ref'>Archivo de respaldo en biblioteca: <strong>{t}</strong> — {n}</p>"
 
         bloque_extra = f"""
         <dl class="grid">
@@ -275,7 +275,7 @@ def _html_verificacion_certificacion(
           <dt>Sello electrónico (PDF)</dt><dd><code class="sello">{sello}</code></dd>
         </dl>
         {doc_ref}
-        <p class="muted small">
+        <p class="muted small legal">
           Este resultado confirma que consta un registro de emisión en el sistema CDASOFT para el código indicado.
           Compare el código y el sello con su PDF. PROMETHEUS TECH SAS / CDASOFT no validan el contenido de los archivos certificados.
         </p>
@@ -283,42 +283,162 @@ def _html_verificacion_certificacion(
     elif ok:
         bloque_extra = "<p class='muted'>Registro encontrado; faltan algunos metadatos para mostrar.</p>"
 
+    base_url = (settings.BACKEND_PUBLIC_BASE_URL or "").strip().rstrip("/")
+    logo_block = ""
+    if base_url:
+        logo_src = f"{base_url}/{quote('FAVICON SIAEC - CDASOFT.png')}"
+        logo_block = (
+            f'<img src="{e(logo_src)}" alt="" class="header-logo-img" width="44" height="44" loading="lazy" />'
+        )
+
     return f"""<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>{e("Verificación — Certificación en cuenta")}</title>
+  <meta name="theme-color" content="#0a1d3d" />
+  <title>{e("Verificación — Certificación en cuenta — CDASOFT")}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
-    :root {{ font-family: system-ui, Segoe UI, Roboto, sans-serif; background: #f1f5f9; color: #0f172a; }}
-    body {{ margin: 0; padding: 1.25rem; }}
-    .wrap {{ max-width: 40rem; margin: 0 auto; }}
-    .card {{ background: #fff; border-radius: 12px; box-shadow: 0 4px 24px rgba(15,23,42,.08); padding: 1.5rem 1.75rem; }}
-    .badge {{ display: inline-block; padding: .35rem .75rem; border-radius: 999px; font-weight: 600; font-size: .9rem;
-      background: {badge_bg}; color: {badge_fg}; margin-bottom: 1rem; }}
-    h1 {{ font-size: 1.15rem; margin: 0 0 .5rem 0; color: #0a1d3d; }}
-    .grid {{ display: grid; grid-template-columns: 9.5rem 1fr; gap: .5rem .75rem; font-size: .9rem; margin: 1rem 0; }}
-    dt {{ color: #64748b; font-weight: 500; }}
-    dd {{ margin: 0; }}
-    code {{ font-size: .85rem; background: #f8fafc; padding: .1rem .35rem; border-radius: 4px; }}
-    code.codigo, code.sello {{ display: inline-block; word-break: break-all; font-size: .8rem; }}
-    .muted {{ color: #64748b; }}
-    .small {{ font-size: .8rem; line-height: 1.4; }}
+    :root {{
+      --cdasoft-navy: #0a1d3d;
+      --cdasoft-navy-dark: #081628;
+      --cdasoft-gold: #f59e0b;
+      --cdasoft-slate: #64748b;
+      --cdasoft-page: #eef4ff;
+      --cdasoft-card: #ffffff;
+      font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+      background: var(--cdasoft-page);
+      color: #0f172a;
+    }}
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; min-height: 100vh; display: flex; flex-direction: column; }}
+    .site-header {{
+      background: linear-gradient(135deg, var(--cdasoft-navy) 0%, var(--cdasoft-navy-dark) 100%);
+      color: #fff;
+      padding: 1rem 1.25rem;
+      border-bottom: 4px solid var(--cdasoft-gold);
+      box-shadow: 0 10px 30px -18px rgba(15, 23, 42, 0.45);
+    }}
+    .site-header-inner {{
+      max-width: 42rem;
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }}
+    .header-logo-img {{
+      flex-shrink: 0;
+      border-radius: 10px;
+      background: rgba(255,255,255,.08);
+      object-fit: contain;
+    }}
+    .brand-text {{ display: flex; flex-direction: column; gap: .2rem; }}
+    .brand-name {{
+      font-weight: 700;
+      font-size: 1.35rem;
+      letter-spacing: -0.02em;
+      line-height: 1.2;
+    }}
+    .brand-name span.gold {{ color: var(--cdasoft-gold); }}
+    .brand-tagline {{ font-size: .78rem; opacity: .88; font-weight: 500; }}
+    .main-wrap {{
+      flex: 1;
+      padding: 1.5rem 1.25rem 2rem;
+      width: 100%;
+    }}
+    .wrap {{ max-width: 42rem; margin: 0 auto; }}
+    .card {{
+      background: var(--cdasoft-card);
+      border-radius: 1rem;
+      box-shadow: 0 10px 30px -18px rgba(15, 23, 42, 0.35);
+      border: 1px solid rgba(10, 29, 61, 0.06);
+      padding: 1.6rem 1.75rem 1.75rem;
+    }}
+    .badge {{
+      display: inline-block;
+      padding: .4rem .85rem;
+      border-radius: 999px;
+      font-weight: 600;
+      font-size: .82rem;
+      background: {badge_bg};
+      color: {badge_fg};
+      margin-bottom: 1rem;
+    }}
+    h1 {{
+      font-size: 1.2rem;
+      font-weight: 700;
+      margin: 0 0 1rem 0;
+      color: var(--cdasoft-navy);
+      letter-spacing: -0.02em;
+    }}
+    .grid {{
+      display: grid;
+      grid-template-columns: 10rem 1fr;
+      gap: .55rem .85rem;
+      font-size: .9rem;
+      margin: 1rem 0;
+    }}
+    @media (max-width: 520px) {{
+      .grid {{ grid-template-columns: 1fr; gap: .25rem; }}
+      .grid dt {{ padding-top: .5rem; border-top: 1px solid #e2e8f0; }}
+      .grid dt:first-child {{ border-top: none; padding-top: 0; }}
+    }}
+    dt {{ color: var(--cdasoft-slate); font-weight: 600; font-size: .82rem; }}
+    dd {{ margin: 0; color: #0f172a; }}
+    code {{
+      font-size: .82rem;
+      background: #f1f5f9;
+      padding: .15rem .4rem;
+      border-radius: 6px;
+      border: 1px solid #e2e8f0;
+    }}
+    code.codigo, code.sello {{
+      display: inline-block;
+      word-break: break-all;
+      font-size: .78rem;
+      line-height: 1.35;
+    }}
+    .muted {{ color: var(--cdasoft-slate); }}
+    .doc-ref {{ margin-top: 1rem; font-size: .88rem; line-height: 1.45; }}
+    .small {{ font-size: .8rem; line-height: 1.45; }}
+    .legal {{ margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid #e2e8f0; }}
     .err {{ color: #991b1b; font-size: .9rem; margin-top: .75rem; }}
-    footer {{ margin-top: 1.5rem; text-align: center; font-size: .75rem; color: #94a3b8; }}
+    .site-footer {{
+      text-align: center;
+      font-size: .75rem;
+      color: #94a3b8;
+      padding: 1rem 1.25rem 1.5rem;
+    }}
+    .site-footer strong {{ color: var(--cdasoft-slate); font-weight: 600; }}
   </style>
 </head>
 <body>
-  <div class="wrap">
-    <div class="card">
-      <div class="badge">{e(badge_tx)}</div>
-      <h1>Verificación de certificación en cuenta</h1>
-      {consulta}
-      {err_block}
-      {bloque_extra}
+  <header class="site-header">
+    <div class="site-header-inner">
+      {logo_block}
+      <div class="brand-text">
+        <div class="brand-name">CDA<span class="gold">SOFT</span></div>
+        <div class="brand-tagline">Verificación pública · Certificación en cuenta</div>
+      </div>
     </div>
-    <footer>CDASOFT · Resultado de verificación de certificación en cuenta</footer>
-  </div>
+  </header>
+  <main class="main-wrap">
+    <div class="wrap">
+      <div class="card">
+        <div class="badge">{e(badge_tx)}</div>
+        <h1>Verificación de certificación en cuenta</h1>
+        {consulta}
+        {err_block}
+        {bloque_extra}
+      </div>
+    </div>
+  </main>
+  <footer class="site-footer">
+    <strong>CDASOFT</strong> · Sistema integral para administración de CDA · Resultado de verificación
+  </footer>
 </body>
 </html>"""
 
