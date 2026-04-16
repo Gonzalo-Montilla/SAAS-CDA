@@ -40,7 +40,7 @@ Documento operativo para validar el despliegue antes de exponer el sistema a cli
 - [ ] **`FRONTEND_URL`**: URL HTTPS que reciben los usuarios (enlaces en correos).
 - [ ] **`BACKEND_PUBLIC_BASE_URL`**: URL base **pública HTTPS** del API tal como la abre un navegador (sin `/api/v1` al final; es el origen del servicio). Se usa en onboarding, enlaces de correo y **enlaces embebidos en el PDF de certificación en cuenta** y en la página de verificación. Debe coincidir con tu Nginx/dominio real (nunca `http://localhost:8000` en prod).
 - [ ] **SMTP** (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`): probado envío real (recuperación de contraseña, códigos de onboarding, notificaciones).
-- [ ] **`TURNSTILE_ENABLED`** y claves: acorde a la política deseada para el registro público de tenants.
+- [ ] **`TURNSTILE_ENABLED`** y claves: acorde a la política deseada para el registro público de tenants. Detalle Turnstile: **`TURNSTILE_SECRET_KEY`** en el backend y **`VITE_TURNSTILE_SITE_KEY`** deben ser del **mismo** widget en Cloudflare; cada vez que cambies la site key hay que **volver a hacer `npm run build`** del frontend. En el widget, **Hostnames** debe incluir cada URL donde se abre “Crear CDA” (p. ej. `cdasoft.com.co` y `www.cdasoft.com.co` si ambas se usan). Reglas de **CSP**, **WAF** o **Page Rules** no deben bloquear `https://challenges.cloudflare.com` (si falla con código 200500, suele ser bloqueo del iframe).
 - [ ] **`TENANT_LOGO_UPLOAD_DIR`**: ruta en disco **persistente** entre despliegues; el directorio existe y el proceso puede escribir.
 - [ ] **`DOCUMENTOS_STORAGE_DIR`** (módulo documental): ruta **persistente** para archivos privados por tenant (p. ej. `private_uploads/documentos` bajo el backend o un volumen dedicado). Incluir en **backups** junto con PostgreSQL (ver [`backend/docs/NTC5385_modulo_documental.md`](backend/docs/NTC5385_modulo_documental.md)).
 - [ ] **LibreOffice** (opcional): si quieren **vista previa PDF** de Word/Excel/PowerPoint en el navegador, instalar `soffice` en el servidor o fijar `DOCUMENTOS_LIBREOFFICE_PATH`. Sin LibreOffice, el resto del módulo documental sigue funcionando (subida, descarga, certificación).
@@ -51,6 +51,7 @@ Documento operativo para validar el despliegue antes de exponer el sistema a cli
 ## Fase 3 — Frontend (build de producción)
 
 - [ ] **`VITE_API_URL`** definida **en el momento del build** (`npm run build`), apuntando al API público con ruta `/api/v1`, p. ej. `https://api.tudominio.com/api/v1`. Sin esto, el bundle puede quedar apuntando a `127.0.0.1` (ver [`frontend/src/api/client.ts`](frontend/src/api/client.ts)).
+- [ ] Si Turnstile está activo: **`VITE_TURNSTILE_ENABLED=true`** y **`VITE_TURNSTILE_SITE_KEY`** en el entorno del build (misma clave pública que el widget de producción).
 - [ ] Opcional: **`VITE_API_TIMEOUT_MS`** ajustado si hay redes lentas o respuestas pesadas.
 - [ ] Tras el build, verificación en los assets o en runtime (red del navegador) de que las peticiones van al host correcto.
 - [ ] Front servido por **HTTPS** coherente con CORS y cookies/credenciales si aplica.

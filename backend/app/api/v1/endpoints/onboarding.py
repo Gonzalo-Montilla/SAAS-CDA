@@ -108,6 +108,17 @@ def resolve_available_slug(db: Session, requested_name: str) -> str:
 
 
 def get_client_ip(request: Request) -> str:
+    """
+    IP del visitante detrás de Nginx y/o Cloudflare.
+    Preferir CF-Connecting-IP cuando el tráfico pasa por la naranja de Cloudflare;
+    si solo se usa X-Forwarded-For mal formado, Turnstile siteverify puede fallar.
+    """
+    cf = request.headers.get("cf-connecting-ip") or request.headers.get("CF-Connecting-IP")
+    if cf and cf.strip():
+        return cf.strip()
+    true_client = request.headers.get("true-client-ip") or request.headers.get("True-Client-IP")
+    if true_client and true_client.strip():
+        return true_client.strip()
     forwarded_for = request.headers.get("x-forwarded-for")
     if forwarded_for:
         return forwarded_for.split(",")[0].strip()

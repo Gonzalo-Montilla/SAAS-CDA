@@ -8,6 +8,18 @@ import urllib.request
 from app.core.config import settings
 
 
+def _remote_ip_for_turnstile(remote_ip: str | None) -> str | None:
+    """Cloudflare rechaza o ignora mal `remoteip`; no enviar valores basura."""
+    if not remote_ip:
+        return None
+    s = remote_ip.strip()
+    if not s or s.lower() == "unknown":
+        return None
+    if len(s) > 45:
+        return None
+    return s
+
+
 def verify_turnstile_token(token: str, remote_ip: str | None = None) -> tuple[bool, str]:
     """
     Verifica token de Turnstile contra Cloudflare.
@@ -19,8 +31,9 @@ def verify_turnstile_token(token: str, remote_ip: str | None = None) -> tuple[bo
         "secret": settings.TURNSTILE_SECRET_KEY,
         "response": token,
     }
-    if remote_ip:
-        payload["remoteip"] = remote_ip
+    rip = _remote_ip_for_turnstile(remote_ip)
+    if rip:
+        payload["remoteip"] = rip
 
     encoded = urllib.parse.urlencode(payload).encode("utf-8")
     request = urllib.request.Request(

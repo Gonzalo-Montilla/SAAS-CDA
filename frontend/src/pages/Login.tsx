@@ -319,13 +319,50 @@ export default function Login() {
       return;
     }
 
-    const renderWidget = () => {
-      if (!window.turnstile || turnstileWidgetIdRef.current) {
+    let cancelled = false;
+
+    const messageForTurnstileError = (code?: string | number): string => {
+      const c = code != null ? String(code) : '';
+      // Códigos oficiales: https://developers.cloudflare.com/turnstile/troubleshooting/client-side-errors/error-codes/
+      if (c === '110100' || c === '110110' || c === '400020') {
+        return 'Site key inválida o no encontrada: revisa `VITE_TURNSTILE_SITE_KEY` en el build y el widget en el panel de Turnstile.';
+      }
+      if (c === '110200') {
+        return 'Dominio no autorizado: en Cloudflare Turnstile → tu widget → nombres de host, agrega este sitio (p. ej. apex y www por separado).';
+      }
+      if (c === '200500') {
+        return 'No se pudo cargar el iframe de Turnstile. Comprueba que no se bloquee `challenges.cloudflare.com` (CSP, WAF, extensión, red).';
+      }
+      if (c === '400070') {
+        return 'La site key está deshabilitada en Cloudflare Turnstile.';
+      }
+      if (c.startsWith('300') || c.startsWith('600')) {
+        return 'Fallo del desafío Turnstile (red, VPN, bloqueador o señal automática). Prueba otra red, incógnito o sin extensiones.';
+      }
+      if (c) {
+        return `No fue posible cargar el captcha (código ${c}). Revisa la consola del navegador y la documentación de códigos Turnstile en Cloudflare.`;
+      }
+      return (
+        'No fue posible cargar el captcha. Comprueba bloqueadores, VPN, que `challenges.cloudflare.com` no esté bloqueado (CSP/WAF) y que la site key y los hostnames del widget coincidan con este sitio.'
+      );
+    };
+
+    const mountWidget = () => {
+      if (cancelled || !isMountedRef.current || !window.turnstile) {
+        return;
+      }
+      if (turnstileWidgetIdRef.current) {
+        return;
+      }
+      const el = document.getElementById('turnstile-container');
+      if (!el) {
         return;
       }
 
-      turnstileWidgetIdRef.current = window.turnstile.render('#turnstile-container', {
+      turnstileWidgetIdRef.current = window.turnstile.render(el, {
         sitekey: turnstileSiteKey,
+        retry: 'auto',
+        'retry-interval': 8000,
         callback: (token: string) => {
           if (!isMountedRef.current) {
             return;
@@ -340,13 +377,25 @@ export default function Login() {
           setRegisterCaptchaToken('');
           setRegisterCaptchaError('El captcha expiró. Valídalo de nuevo.');
         },
-        'error-callback': () => {
+        'error-callback': (errorCode?: string | number) => {
+          if (import.meta.env.DEV) {
+            console.warn('[Turnstile] error-callback', errorCode);
+          }
           if (!isMountedRef.current) {
             return;
           }
           setRegisterCaptchaToken('');
-          setRegisterCaptchaError('No fue posible validar el captcha. Intenta nuevamente.');
+          setRegisterCaptchaError(messageForTurnstileError(errorCode));
         },
+      });
+    };
+
+    const renderWidget = () => {
+      requestAnimationFrame(() => {
+        if (cancelled) {
+          return;
+        }
+        requestAnimationFrame(mountWidget);
       });
     };
 
@@ -354,10 +403,7 @@ export default function Login() {
 
     if (window.turnstile) {
       renderWidget();
-      return;
-    }
-
-    if (!turnstileScriptLoadedRef.current) {
+    } else if (!turnstileScriptLoadedRef.current) {
       const script = document.createElement('script');
       script.id = 'turnstile-script';
       script.src = 'https://challenges.cloudflare.com/turnstile/v0/api.js?onload=onloadTurnstileCallback&render=explicit';
@@ -366,6 +412,18 @@ export default function Login() {
       document.body.appendChild(script);
       turnstileScriptLoadedRef.current = true;
     }
+
+    return () => {
+      cancelled = true;
+      if (window.turnstile && turnstileWidgetIdRef.current) {
+        try {
+          window.turnstile.remove(turnstileWidgetIdRef.current);
+        } catch {
+          /* ignore */
+        }
+        turnstileWidgetIdRef.current = null;
+      }
+    };
   }, [mostrarRegistroTenant, turnstileEnabled, turnstileSiteKey]);
 
   useEffect(() => {
