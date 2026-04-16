@@ -283,16 +283,12 @@ def _html_verificacion_certificacion(
     elif ok:
         bloque_extra = "<p class='muted'>Registro encontrado; faltan algunos metadatos para mostrar.</p>"
 
-    base_url = (settings.BACKEND_PUBLIC_BASE_URL or "").strip().rstrip("/")
-    favicon_link = ""
-    logo_block = ""
-    if base_url:
-        favicon_href = f"{base_url}/cdasoft-favicon.png"
-        logo_src = f"{base_url}/cdasoft-brand-logo.png"
-        favicon_link = f'  <link rel="icon" type="image/png" href="{e(favicon_href)}" />'
-        logo_block = f"""
+    # Mismo host que la página (evita logo/favicon rotos si www vs apex difiere de BACKEND_PUBLIC_BASE_URL).
+    # Nginx debe hacer proxy de estas rutas al API (ver DEPLOY_VPS.md).
+    favicon_link = '  <link rel="icon" type="image/png" href="/cdasoft-favicon.png" />'
+    logo_block = """
       <div class="header-brand-row">
-        <img src="{e(logo_src)}" alt="CDASOFT" class="header-logo-full" width="280" height="140" loading="lazy" />
+        <img src="/cdasoft-brand-logo.png" alt="CDASOFT" class="header-logo-full" width="280" height="140" loading="lazy" />
         <div class="header-titles">
           <p class="header-sub">Verificación pública · Certificación en cuenta</p>
         </div>
@@ -456,7 +452,7 @@ def _html_verificacion_certificacion(
 <body>
   <header class="site-header">
     <div class="site-header-inner">
-      {logo_block if logo_block else '<div class="header-brand-row"><p class="header-sub">CDASOFT · Verificación pública</p></div>'}
+      {logo_block}
     </div>
   </header>
   <main class="main-wrap">

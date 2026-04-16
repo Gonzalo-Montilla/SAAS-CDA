@@ -126,19 +126,19 @@ def _file_response_png(path: Path | None) -> FileResponse:
     return FileResponse(path, media_type="image/png")
 
 
-@app.get("/cdasoft-brand-logo.png", include_in_schema=False)
+@app.api_route("/cdasoft-brand-logo.png", methods=["GET", "HEAD"], include_in_schema=False)
 def cdasoft_brand_logo():
     """Logo completo para cabeceras HTML generadas por el API (p. ej. verificación certificación)."""
     return _file_response_png(_resolve_cdasoft_full_logo_path())
 
 
-@app.get("/cdasoft-favicon.png", include_in_schema=False)
+@app.api_route("/cdasoft-favicon.png", methods=["GET", "HEAD"], include_in_schema=False)
 def cdasoft_favicon():
     """Favicon para <link rel=\"icon\"> en páginas HTML del API."""
     return _file_response_png(_resolve_cdasoft_favicon_path())
 
 
-@app.get("/cdasoft-brand-icon.png", include_in_schema=False)
+@app.api_route("/cdasoft-brand-icon.png", methods=["GET", "HEAD"], include_in_schema=False)
 def cdasoft_brand_icon():
     """Compatibilidad: mismo recurso que el favicon (Nginx/proxy existentes)."""
     return _file_response_png(_resolve_cdasoft_favicon_path())

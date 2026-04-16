@@ -363,6 +363,28 @@ server {
 }
 ```
 
+### Recursos de marca (`/cdasoft-*.png`) y comprobaciones con `curl`
+
+El backend expone en la **raíz de la app** (no bajo `/api/v1`) tres PNG de marca para HTML generado por el API (p. ej. verificación de certificación en cuenta):
+
+| Ruta | Uso |
+|------|-----|
+| `/cdasoft-brand-logo.png` | Logo completo |
+| `/cdasoft-favicon.png` | Favicon (`<link rel="icon">`) |
+| `/cdasoft-brand-icon.png` | Mismo recurso que el favicon (compatibilidad) |
+
+Implementación: `backend/app/main.py` (resolución de archivos desde `app/utils`, `frontend/public`, etc.). Nginx debe tener los `location =` **antes** de `location /`, como en el ejemplo de arriba, para que el proxy llegue a Uvicorn.
+
+**GET y HEAD:** las rutas aceptan **GET** y **HEAD**. Los navegadores usan GET; herramientas como `curl -I` envían **HEAD**. Si solo estuviera registrado GET, una petición HEAD devolvería **405** Method Not Allowed con `Allow: GET` y cuerpo JSON de error, aunque el recurso fuera correcto. Tras desplegar código que incluya ambos métodos, `curl -I https://tudominio.com/cdasoft-favicon.png` debe responder **200** y `Content-Type: image/png`.
+
+Para comprobar solo cabeceras sin depender de HEAD:
+
+```bash
+curl -sD - -o /dev/null https://tudominio.com/cdasoft-favicon.png | head -8
+```
+
+Tras cambios en `main.py`, recuerda **`sudo systemctl restart cdasoft-backend`** en el VPS.
+
 Habilita el sitio y recarga Nginx:
 
 ```bash
