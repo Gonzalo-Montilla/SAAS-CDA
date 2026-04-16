@@ -2,9 +2,10 @@
 Aplicación principal FastAPI - CDASOFT
 """
 from pathlib import Path
-from fastapi import FastAPI, Request
+
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import Response
+from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.core.config import parse_backend_cors_origins, settings
@@ -40,9 +41,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         
-        # Content Security Policy
+        # Content Security Policy (páginas HTML del API, p. ej. verificación certificación, usan <style> inline)
         if settings.ENVIRONMENT == "production":
-            response.headers["Content-Security-Policy"] = "default-src 'self'"
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self'; "
+                "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; "
+                "font-src https://fonts.gstatic.com 'self' data:; "
+                "img-src 'self' https: data:; "
+                "base-uri 'self'"
+            )
         
         # No revelar información del servidor
         if "server" in response.headers:
@@ -79,6 +86,62 @@ def health_check():
         "version": settings.APP_VERSION,
         "environment": settings.ENVIRONMENT
     }
+
+
+def _repo_root() -> Path:
+    return Path(__file__).resolve().parent.parent.parent
+
+
+def _resolve_cdasoft_full_logo_path() -> Path | None:
+    """Logo completo (mismo archivo por defecto que BrandContext / Login)."""
+    repo = _repo_root()
+    candidates = [
+        repo / "backend" / "app" / "utils" / "LOGO_CDA_SOFT-SIN FONDO.png",
+        repo / "frontend" / "src" / "assets" / "LOGO_CDA_SOFT-SIN FONDO.png",
+        repo / "frontend" / "public" / "LOGO_CDA_SOFT-SIN FONDO.png",
+    ]
+    for p in candidates:
+        if p.is_file():
+            return p
+    return None
+
+
+def _resolve_cdasoft_favicon_path() -> Path | None:
+    """Favicon pestaña (icono pequeño en public/)."""
+    repo = _repo_root()
+    candidates = [
+        repo / "frontend" / "public" / "FAVICON SIAEC - CDASOFT.png",
+        repo / "frontend" / "public" / "cdasoft-brand-icon.png",
+        repo / "backend" / "app" / "utils" / "LOGO_CDA_SOFT-SIN FONDO.png",
+    ]
+    for p in candidates:
+        if p.is_file():
+            return p
+    return None
+
+
+def _file_response_png(path: Path | None) -> FileResponse:
+    if path is None:
+        raise HTTPException(status_code=404, detail="Recurso de marca no encontrado en el servidor")
+    return FileResponse(path, media_type="image/png")
+
+
+@app.get("/cdasoft-brand-logo.png", include_in_schema=False)
+def cdasoft_brand_logo():
+    """Logo completo para cabeceras HTML generadas por el API (p. ej. verificación certificación)."""
+    return _file_response_png(_resolve_cdasoft_full_logo_path())
+
+
+@app.get("/cdasoft-favicon.png", include_in_schema=False)
+def cdasoft_favicon():
+    """Favicon para <link rel=\"icon\"> en páginas HTML del API."""
+    return _file_response_png(_resolve_cdasoft_favicon_path())
+
+
+@app.get("/cdasoft-brand-icon.png", include_in_schema=False)
+def cdasoft_brand_icon():
+    """Compatibilidad: mismo recurso que el favicon (Nginx/proxy existentes)."""
+    return _file_response_png(_resolve_cdasoft_favicon_path())
 
 
 # Incluir routers de API

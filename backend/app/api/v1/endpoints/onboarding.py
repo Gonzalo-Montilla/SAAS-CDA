@@ -3,7 +3,6 @@ Onboarding público para registro de nuevos CDA (tenant).
 """
 import re
 import unicodedata
-import uuid
 import hashlib
 import secrets
 from pathlib import Path
@@ -25,6 +24,7 @@ from app.schemas.onboarding import (
     TenantSelfRegisterResponse,
 )
 from app.utils.captcha import verify_turnstile_token
+from app.utils.tenant_logo import save_tenant_logo_upload
 from app.utils.email import (
     enviar_email,
     generar_email_bienvenida_tenant,
@@ -32,7 +32,6 @@ from app.utils.email import (
 )
 
 router = APIRouter()
-ALLOWED_LOGO_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 
 
 def _parse_optional_factus_municipality_id(raw: str | None) -> int | None:
@@ -319,33 +318,6 @@ def validate_email_verification_code(db: Session, email: str, code: str):
     db.commit()
 
 
-def save_logo_upload(logo_file: UploadFile) -> str:
-    extension = Path(logo_file.filename or "").suffix.lower()
-    if extension not in ALLOWED_LOGO_EXTENSIONS:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Formato de logo no permitido. Usa PNG, JPG, JPEG o WEBP",
-        )
-
-    upload_dir = Path(settings.TENANT_LOGO_UPLOAD_DIR)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-
-    file_name = f"{uuid.uuid4().hex}{extension}"
-    destination = upload_dir / file_name
-    content = logo_file.file.read()
-    max_bytes = settings.TENANT_LOGO_MAX_SIZE_MB * 1024 * 1024
-    if len(content) > max_bytes:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"El logo supera el límite de {settings.TENANT_LOGO_MAX_SIZE_MB}MB",
-        )
-    with open(destination, "wb") as f:
-        f.write(content)
-
-    relative_url = f"/uploads/tenant-logos/{file_name}"
-    return f"{settings.BACKEND_PUBLIC_BASE_URL.rstrip('/')}{relative_url}"
-
-
 @router.post("/send-email-code", response_model=OnboardingSendCodeResponse)
 def send_onboarding_email_code(
     payload: OnboardingSendCodeRequest,
@@ -506,7 +478,7 @@ def register_tenant_self_service(
 
     resolved_logo_url = logo_url
     if logo_file is not None:
-        resolved_logo_url = save_logo_upload(logo_file)
+        resolved_logo_url = save_tenant_logo_upload(logo_file)
 
     tenant_slug = resolve_available_slug(db, nombre_cda)
     tenant = Tenant(

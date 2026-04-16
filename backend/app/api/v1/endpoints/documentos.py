@@ -284,78 +284,116 @@ def _html_verificacion_certificacion(
         bloque_extra = "<p class='muted'>Registro encontrado; faltan algunos metadatos para mostrar.</p>"
 
     base_url = (settings.BACKEND_PUBLIC_BASE_URL or "").strip().rstrip("/")
+    favicon_link = ""
     logo_block = ""
     if base_url:
-        logo_src = f"{base_url}/{quote('FAVICON SIAEC - CDASOFT.png')}"
-        logo_block = (
-            f'<img src="{e(logo_src)}" alt="" class="header-logo-img" width="44" height="44" loading="lazy" />'
-        )
+        favicon_href = f"{base_url}/cdasoft-favicon.png"
+        logo_src = f"{base_url}/cdasoft-brand-logo.png"
+        favicon_link = f'  <link rel="icon" type="image/png" href="{e(favicon_href)}" />'
+        logo_block = f"""
+      <div class="header-brand-row">
+        <img src="{e(logo_src)}" alt="CDASOFT" class="header-logo-full" width="280" height="140" loading="lazy" />
+        <div class="header-titles">
+          <p class="header-sub">Verificación pública · Certificación en cuenta</p>
+        </div>
+      </div>"""
 
     return f"""<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="theme-color" content="#0a1d3d" />
-  <title>{e("Verificación — Certificación en cuenta — CDASOFT")}</title>
+  <meta name="theme-color" content="#f8fbff" />
+{favicon_link}
+  <title>{e("CDASOFT - sistema integral para administracion de cda · Verificación")}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <style>
     :root {{
-      --cdasoft-navy: #0a1d3d;
-      --cdasoft-navy-dark: #081628;
-      --cdasoft-gold: #f59e0b;
-      --cdasoft-slate: #64748b;
-      --cdasoft-page: #eef4ff;
-      --cdasoft-card: #ffffff;
+      --navy: #0a1d3d;
+      --slate: #64748b;
+      --border: #d9e2ef;
       font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
-      background: var(--cdasoft-page);
       color: #0f172a;
     }}
     * {{ box-sizing: border-box; }}
-    body {{ margin: 0; min-height: 100vh; display: flex; flex-direction: column; }}
+    body {{
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background:
+        radial-gradient(1200px 500px at 10% -10%, rgba(37, 99, 235, 0.14), transparent 60%),
+        radial-gradient(900px 420px at 95% 0%, rgba(14, 165, 233, 0.12), transparent 60%),
+        linear-gradient(180deg, #f8fbff 0%, #f1f5fb 45%, #eef3f9 100%);
+    }}
     .site-header {{
-      background: linear-gradient(135deg, var(--cdasoft-navy) 0%, var(--cdasoft-navy-dark) 100%);
-      color: #fff;
-      padding: 1rem 1.25rem;
-      border-bottom: 4px solid var(--cdasoft-gold);
-      box-shadow: 0 10px 30px -18px rgba(15, 23, 42, 0.45);
+      position: sticky;
+      top: 0;
+      z-index: 40;
+      background-color: rgba(255, 255, 255, 0.92);
+      border-bottom: 1px solid rgba(217, 226, 239, 0.95);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
     }}
     .site-header-inner {{
-      max-width: 42rem;
+      max-width: 80rem;
       margin: 0 auto;
+      padding: 0.75rem 1rem;
+    }}
+    @media (min-width: 640px) {{
+      .site-header-inner {{ padding: 1rem 1.5rem; }}
+    }}
+    .header-brand-row {{
       display: flex;
+      flex-direction: column;
       align-items: center;
-      gap: 1rem;
+      gap: 0.75rem;
+      text-align: center;
     }}
-    .header-logo-img {{
-      flex-shrink: 0;
-      border-radius: 10px;
-      background: rgba(255,255,255,.08);
+    @media (min-width: 640px) {{
+      .header-brand-row {{
+        flex-direction: row;
+        align-items: center;
+        text-align: left;
+        gap: 1.25rem;
+      }}
+    }}
+    .header-logo-full {{
+      height: 5rem;
+      width: auto;
+      max-width: min(320px, 90vw);
       object-fit: contain;
-    }}
-    .brand-text {{ display: flex; flex-direction: column; gap: .2rem; }}
-    .brand-name {{
-      font-weight: 700;
-      font-size: 1.35rem;
-      letter-spacing: -0.02em;
-      line-height: 1.2;
-    }}
-    .brand-name span.gold {{ color: var(--cdasoft-gold); }}
-    .brand-tagline {{ font-size: .78rem; opacity: .88; font-weight: 500; }}
-    .main-wrap {{
-      flex: 1;
-      padding: 1.5rem 1.25rem 2rem;
-      width: 100%;
-    }}
-    .wrap {{ max-width: 42rem; margin: 0 auto; }}
-    .card {{
-      background: var(--cdasoft-card);
+      object-position: center;
       border-radius: 1rem;
       box-shadow: 0 10px 30px -18px rgba(15, 23, 42, 0.35);
-      border: 1px solid rgba(10, 29, 61, 0.06);
-      padding: 1.6rem 1.75rem 1.75rem;
+    }}
+    @media (min-width: 640px) {{
+      .header-logo-full {{ height: 5.5rem; max-width: 340px; }}
+    }}
+    .header-titles {{ min-width: 0; }}
+    .header-sub {{
+      margin: 0.25rem 0 0 0;
+      font-size: 0.875rem;
+      color: var(--slate);
+      font-weight: 500;
+    }}
+    .main-wrap {{
+      flex: 1;
+      width: 100%;
+      padding: 2rem 1rem 2.5rem;
+    }}
+    .wrap {{ max-width: 80rem; margin: 0 auto; }}
+    .card {{
+      background: rgba(255, 255, 255, 0.94);
+      border-radius: 1rem;
+      border: 1px solid var(--border);
+      box-shadow: 0 10px 30px -18px rgba(15, 23, 42, 0.35);
+      padding: 1.5rem 1.5rem 1.75rem;
+    }}
+    @media (min-width: 640px) {{
+      .card {{ padding: 1.75rem 2rem 2rem; border-radius: 1.15rem; }}
     }}
     .badge {{
       display: inline-block;
@@ -368,10 +406,10 @@ def _html_verificacion_certificacion(
       margin-bottom: 1rem;
     }}
     h1 {{
-      font-size: 1.2rem;
+      font-size: 1.125rem;
       font-weight: 700;
       margin: 0 0 1rem 0;
-      color: var(--cdasoft-navy);
+      color: var(--navy);
       letter-spacing: -0.02em;
     }}
     .grid {{
@@ -386,11 +424,11 @@ def _html_verificacion_certificacion(
       .grid dt {{ padding-top: .5rem; border-top: 1px solid #e2e8f0; }}
       .grid dt:first-child {{ border-top: none; padding-top: 0; }}
     }}
-    dt {{ color: var(--cdasoft-slate); font-weight: 600; font-size: .82rem; }}
+    dt {{ color: var(--slate); font-weight: 600; font-size: .82rem; }}
     dd {{ margin: 0; color: #0f172a; }}
     code {{
       font-size: .82rem;
-      background: #f1f5f9;
+      background: #f8fafc;
       padding: .15rem .4rem;
       border-radius: 6px;
       border: 1px solid #e2e8f0;
@@ -401,7 +439,7 @@ def _html_verificacion_certificacion(
       font-size: .78rem;
       line-height: 1.35;
     }}
-    .muted {{ color: var(--cdasoft-slate); }}
+    .muted {{ color: var(--slate); }}
     .doc-ref {{ margin-top: 1rem; font-size: .88rem; line-height: 1.45; }}
     .small {{ font-size: .8rem; line-height: 1.45; }}
     .legal {{ margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid #e2e8f0; }}
@@ -412,17 +450,13 @@ def _html_verificacion_certificacion(
       color: #94a3b8;
       padding: 1rem 1.25rem 1.5rem;
     }}
-    .site-footer strong {{ color: var(--cdasoft-slate); font-weight: 600; }}
+    .site-footer strong {{ color: var(--slate); font-weight: 600; }}
   </style>
 </head>
 <body>
   <header class="site-header">
     <div class="site-header-inner">
-      {logo_block}
-      <div class="brand-text">
-        <div class="brand-name">CDA<span class="gold">SOFT</span></div>
-        <div class="brand-tagline">Verificación pública · Certificación en cuenta</div>
-      </div>
+      {logo_block if logo_block else '<div class="header-brand-row"><p class="header-sub">CDASOFT · Verificación pública</p></div>'}
     </div>
   </header>
   <main class="main-wrap">

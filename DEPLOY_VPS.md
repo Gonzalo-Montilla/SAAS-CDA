@@ -320,6 +320,26 @@ server {
         proxy_set_header X-Forwarded-Proto $scheme;
     }
 
+    # Marca en páginas HTML del API (verificación certificación): logo completo, favicon y compat.
+    location = /cdasoft-brand-logo.png {
+        proxy_pass http://127.0.0.1:8010/cdasoft-brand-logo.png;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location = /cdasoft-favicon.png {
+        proxy_pass http://127.0.0.1:8010/cdasoft-favicon.png;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+    location = /cdasoft-brand-icon.png {
+        proxy_pass http://127.0.0.1:8010/cdasoft-brand-icon.png;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     location /api/ {
         proxy_pass http://127.0.0.1:8010/api/;
         proxy_http_version 1.1;

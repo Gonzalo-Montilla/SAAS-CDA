@@ -1,6 +1,29 @@
 import { apiClient } from './client';
 import type { SaaSSucursalResumen } from '../types';
 
+export interface SaaSTenantLogoUpdateResponse {
+  logo_url: string | null;
+}
+
+export async function patchSaasTenantLogo(
+  tenantId: string,
+  opts: { logoUrl?: string; logoFile?: File | null },
+): Promise<SaaSTenantLogoUpdateResponse> {
+  const form = new FormData();
+  if (opts.logoFile) {
+    form.append('logo_file', opts.logoFile);
+  } else if (opts.logoUrl?.trim()) {
+    form.append('logo_url', opts.logoUrl.trim());
+  } else {
+    throw new Error('Debes indicar URL del logo o un archivo');
+  }
+  const r = await apiClient.patch<SaaSTenantLogoUpdateResponse>(
+    `/saas/auth/tenants/${tenantId}/logo`,
+    form,
+  );
+  return r.data;
+}
+
 export async function patchSaasSucursalUbicacion(
   tenantId: string,
   sucursalId: string,

@@ -5,7 +5,7 @@ Endpoints de autenticación global SaaS (backoffice).
 from datetime import datetime, timedelta, timezone
 import csv
 import io
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
@@ -53,6 +53,7 @@ from app.services.factus_tenant_settings import (
 )
 from app.utils.email import enviar_email_con_adjuntos, generar_email_recibo_pago_saas
 from app.utils.saas_billing_receipts import build_saas_payment_receipt_pdf
+from app.utils.tenant_logo import normalize_external_logo_url, save_tenant_logo_upload
 
 router = APIRouter()
 
@@ -187,6 +188,10 @@ class SaaSTenantProfile(SaaSTenantSummary):
         default_factory=list,
         description="Sedes activas del tenant (operativas).",
     )
+
+
+class SaaSTenantLogoUpdateResponse(BaseModel):
+    logo_url: str | None = None
 
 
 class SaaSAuditLogItem(BaseModel):
@@ -865,6 +870,52 @@ def get_saas_tenant_profile(
             for s in sedes_rows
         ],
     )
+
+
+@router.patch("/tenants/{tenant_id}/logo", response_model=SaaSTenantLogoUpdateResponse)
+def patch_saas_tenant_logo(
+    tenant_id: str,
+    logo_url: str | None = Form(default=None),
+    logo_file: UploadFile | None = File(default=None),
+    db: Session = Depends(get_db),
+    _: SaaSUser = Depends(require_saas_role(["owner", "comercial", "soporte"])),
+):
+    """
+    Actualiza la marca (logo) del tenant desde el backoffice SaaS.
+    Misma lógica que el registro público: `logo_file` tiene prioridad sobre `logo_url`.
+    """
+    url_stripped = (logo_url or "").strip()
+    if not url_stripped and logo_file is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Debes enviar logo_url o subir logo_file",
+        )
+
+    try:
+        tenant_uuid = UUID(tenant_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ID de tenant inválido",
+        )
+
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant no encontrado",
+        )
+
+    if logo_file is not None:
+        resolved = save_tenant_logo_upload(logo_file)
+    else:
+        resolved = normalize_external_logo_url(url_stripped)
+
+    tenant.logo_url = resolved
+    db.commit()
+    db.refresh(tenant)
+
+    return SaaSTenantLogoUpdateResponse(logo_url=tenant.logo_url)
 
 
 @router.patch(

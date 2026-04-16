@@ -24,8 +24,8 @@ import { BackofficeSectionHeading } from '../components/BackofficeSectionHeading
 import FactusMunicipalitySearchField from '../components/FactusMunicipalitySearchField';
 import { useAuth } from '../contexts/AuthContext';
 import { apiClient } from '../api/client';
-import { patchSaasSucursalUbicacion } from '../api/saasTenant';
-import { useState } from 'react';
+import { patchSaasSucursalUbicacion, patchSaasTenantLogo } from '../api/saasTenant';
+import { useEffect, useState } from 'react';
 import { formatCurrency } from '../utils/formatNumber';
 import type {
   SaaSAuditLogItem,
@@ -97,6 +97,10 @@ export default function SaaSBackoffice() {
     factus_municipality_id: string;
   } | null>(null);
   const [sedeUbicacionError, setSedeUbicacionError] = useState('');
+  const [tenantLogoMode, setTenantLogoMode] = useState<'url' | 'file'>('url');
+  const [tenantLogoUrl, setTenantLogoUrl] = useState('');
+  const [tenantLogoFile, setTenantLogoFile] = useState<File | null>(null);
+  const [tenantLogoError, setTenantLogoError] = useState('');
 
   const formatAmountForInput = (amount: number): string => {
     if (!Number.isFinite(amount)) {
@@ -242,6 +246,52 @@ export default function SaaSBackoffice() {
       return response.data;
     },
     enabled: !!selectedTenantId,
+  });
+
+  useEffect(() => {
+    if (selectedTenantId) {
+      setTenantLogoMode('url');
+      setTenantLogoUrl('');
+      setTenantLogoFile(null);
+      setTenantLogoError('');
+    }
+  }, [selectedTenantId]);
+
+  const tenantLogoMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedTenantId) {
+        throw new Error('Sin tenant seleccionado');
+      }
+      if (tenantLogoMode === 'file') {
+        if (!tenantLogoFile) {
+          throw new Error('Selecciona un archivo de imagen');
+        }
+        return patchSaasTenantLogo(selectedTenantId, { logoFile: tenantLogoFile });
+      }
+      const u = tenantLogoUrl.trim();
+      if (!u) {
+        throw new Error('Ingresa la URL del logo');
+      }
+      return patchSaasTenantLogo(selectedTenantId, { logoUrl: u });
+    },
+    onSuccess: () => {
+      setTenantLogoError('');
+      setTenantLogoUrl('');
+      setTenantLogoFile(null);
+      queryClient.invalidateQueries({ queryKey: ['saas-tenant-profile', selectedTenantId] });
+      queryClient.invalidateQueries({ queryKey: ['saas-tenants-list'] });
+    },
+    onError: (err: unknown) => {
+      const detail =
+        typeof err === 'object' && err !== null && 'response' in err
+          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : undefined;
+      if (err instanceof Error && err.message && !detail) {
+        setTenantLogoError(err.message);
+        return;
+      }
+      setTenantLogoError(typeof detail === 'string' ? detail : 'No se pudo actualizar el logo.');
+    },
   });
 
   const patchSedeUbicacionMutation = useMutation({
@@ -1440,19 +1490,77 @@ export default function SaaSBackoffice() {
             {tenantProfileQuery.data && (
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                  <div className="md:col-span-1 rounded-xl border border-slate-200 p-4 flex flex-col items-center justify-center">
+                  <div className="md:col-span-1 rounded-xl border border-slate-200 p-4 flex flex-col items-stretch gap-3">
                     {tenantProfileQuery.data.logo_url ? (
                       <img
                         src={tenantProfileQuery.data.logo_url}
                         alt={tenantProfileQuery.data.nombre_comercial}
-                        className="max-h-28 object-contain mb-2"
+                        className="max-h-28 w-full object-contain mb-1"
                       />
                     ) : (
-                      <div className="h-28 w-full rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 text-xs mb-2">
+                      <div className="h-28 w-full rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 text-xs">
                         Sin logo
                       </div>
                     )}
-                    <p className="text-xs text-slate-500">Marca del CDA</p>
+                    <p className="text-xs font-medium text-slate-600 text-center">Marca del CDA</p>
+                    <p className="text-[11px] text-slate-500 text-center leading-snug">
+                      Si el CDA no cargó logo en el registro, puedes asignarlo aquí (misma opción que en el alta).
+                    </p>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button
+                        type="button"
+                        className={`rounded-lg px-2 py-1.5 text-[11px] font-semibold ${
+                          tenantLogoMode === 'url' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
+                        }`}
+                        onClick={() => {
+                          setTenantLogoMode('url');
+                          setTenantLogoFile(null);
+                          setTenantLogoError('');
+                        }}
+                      >
+                        Logo por URL
+                      </button>
+                      <button
+                        type="button"
+                        className={`rounded-lg px-2 py-1.5 text-[11px] font-semibold ${
+                          tenantLogoMode === 'file' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
+                        }`}
+                        onClick={() => {
+                          setTenantLogoMode('file');
+                          setTenantLogoUrl('');
+                          setTenantLogoError('');
+                        }}
+                      >
+                        Subir archivo
+                      </button>
+                    </div>
+                    {tenantLogoMode === 'url' ? (
+                      <input
+                        type="url"
+                        value={tenantLogoUrl}
+                        onChange={(e) => setTenantLogoUrl(e.target.value)}
+                        placeholder="https://…"
+                        className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                      />
+                    ) : (
+                      <input
+                        type="file"
+                        accept=".png,.jpg,.jpeg,.webp"
+                        onChange={(e) => setTenantLogoFile(e.target.files?.[0] ?? null)}
+                        className="w-full text-xs text-slate-600 file:mr-2 file:rounded file:border-0 file:bg-slate-100 file:px-2 file:py-1"
+                      />
+                    )}
+                    {tenantLogoError && (
+                      <p className="text-[11px] text-red-600">{tenantLogoError}</p>
+                    )}
+                    <button
+                      type="button"
+                      disabled={tenantLogoMutation.isLoading}
+                      onClick={() => tenantLogoMutation.mutate()}
+                      className="w-full rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                      {tenantLogoMutation.isLoading ? 'Guardando…' : 'Guardar logo'}
+                    </button>
                   </div>
                   <div className="md:col-span-2 space-y-4">
                     <div>
