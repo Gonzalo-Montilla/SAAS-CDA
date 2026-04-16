@@ -68,6 +68,9 @@ class Settings(BaseSettings):
     DOCUMENTOS_MAX_SIZE_MB: int = Field(default=25, ge=1, le=200, env="DOCUMENTOS_MAX_SIZE_MB")
     # Ruta al ejecutable soffice (LibreOffice). Vacío = buscar en PATH y rutas típicas de Windows.
     DOCUMENTOS_LIBREOFFICE_PATH: str = Field(default="", env="DOCUMENTOS_LIBREOFFICE_PATH")
+    # Directorio de perfil headless (UserInstallation). Vacío en Linux = junto al almacén documental
+    # (p. ej. private_uploads/.libreoffice-profile) para que systemd ReadWritePaths lo permita.
+    DOCUMENTOS_LIBREOFFICE_USER_PROFILE: str = Field(default="", env="DOCUMENTOS_LIBREOFFICE_USER_PROFILE")
     ONBOARDING_EMAIL_VERIFICATION_REQUIRED: bool = True
     ONBOARDING_EMAIL_CODE_TTL_MINUTES: int = 15
     ONBOARDING_EMAIL_CODE_MAX_ATTEMPTS: int = 5

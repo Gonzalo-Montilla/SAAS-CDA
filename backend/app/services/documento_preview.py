@@ -33,6 +33,35 @@ def _normalize_windows_env_path(raw: str) -> str:
     return str(Path(s))
 
 
+def _libreoffice_user_installation_argv() -> list[str]:
+    """
+    Perfil dedicado para soffice headless. Sin esto, en servidor suele fallar
+    «User installation could not be completed» (HOME no escribible o sandbox systemd).
+    Por defecto (Linux): private_uploads/.libreoffice-profile relativo a DOCUMENTOS_STORAGE_DIR.
+    """
+    if sys.platform == "win32":
+        raw = (settings.DOCUMENTOS_LIBREOFFICE_USER_PROFILE or "").strip()
+        if not raw:
+            return []
+        p = Path(_normalize_windows_env_path(raw))
+    else:
+        raw = (settings.DOCUMENTOS_LIBREOFFICE_USER_PROFILE or "").strip()
+        if raw:
+            p = Path(raw)
+        else:
+            storage = Path(settings.DOCUMENTOS_STORAGE_DIR).resolve()
+            p = storage.parent / ".libreoffice-profile"
+    try:
+        p.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        logger.warning("LibreOffice perfil: no se pudo crear %s: %s", p, e)
+    try:
+        uri = p.resolve().as_uri()
+    except ValueError:
+        return []
+    return [f"-env:UserInstallation={uri}"]
+
+
 def resolver_libreoffice_executable() -> str | None:
     """Ruta al binario soffice, o None si no hay conversor disponible."""
     explicit = (settings.DOCUMENTOS_LIBREOFFICE_PATH or "").strip()
@@ -90,23 +119,20 @@ def try_generate_preview_pdf(upload_root: Path, storage_relpath: str) -> str | N
         # Evita ventanas de consola/GUI que a veces bloquean o fallan al convertir
         run_kw["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
 
+    run_env = os.environ.copy()
+    if sys.platform != "win32":
+        # Ayuda en servidores sin display
+        run_env.setdefault("SAL_USE_VCLPLUGIN", "svp")
+
+    cmd = [soffice, *_libreoffice_user_installation_argv(), "--headless", "--invisible", "--nologo", "--nofirststartwizard", "--convert-to", "pdf", "--outdir", str(out_dir), str(src)]
+
     try:
         subprocess.run(
-            [
-                soffice,
-                "--headless",
-                "--invisible",
-                "--nologo",
-                "--nofirststartwizard",
-                "--convert-to",
-                "pdf",
-                "--outdir",
-                str(out_dir),
-                str(src),
-            ],
+            cmd,
             check=True,
             timeout=180,
             capture_output=True,
+            env=run_env,
             **run_kw,
         )
     except subprocess.TimeoutExpired:
