@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
-import { BarChart3, TrendingUp, TrendingDown, Wallet, Building2, FileText, Download, DollarSign, ArrowUpCircle, ArrowDownCircle, CalendarDays, TimerReset, AlertTriangle, GaugeCircle, Receipt, Landmark, X, Lock, Printer } from 'lucide-react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { BarChart3, TrendingUp, TrendingDown, Wallet, Building2, FileText, Download, DollarSign, ArrowUpCircle, ArrowDownCircle, CalendarDays, TimerReset, AlertTriangle, GaugeCircle, Receipt, Landmark, X, Lock, Printer, FileCheck, Eye } from 'lucide-react';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import apiClient from '../api/client';
@@ -22,6 +22,27 @@ const formatLocalDate = (d: Date): string => {
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 };
+
+/** Enlace que Factus a veces mete en JSON (logo PNG, CDN) y no es el visor DIAN del documento. */
+function urlPareceAssetMarcaOImagen(raw: string): boolean {
+  const s = raw.trim().split('?')[0].toLowerCase();
+  if (/\.(png|jpg|jpeg|gif|svg|webp|ico|bmp)(\/?|$)/.test(s)) return true;
+  return /\/logo|\/logos\/|\/favicon|\/icon\/|\/icons\/|\/img\/|\/images\/|\/assets\//i.test(s);
+}
+
+/**
+ * Factus/DIAN suelen entregar URLs del catálogo VPFE que abren «Buscar documento» con CUFE/CUDS precargado:
+ * el usuario debe pulsar «Buscar». No es fallo de integración; para «ver el documento» conviene el PDF vía API.
+ */
+function urlDianPareceConsultaConPasoExtra(raw: string): boolean {
+  const u = raw.trim().toLowerCase();
+  if (!u.startsWith('http')) return false;
+  if (!u.includes('dian.gov.co') && !u.includes('catalogo-vpfe')) return false;
+  if (u.includes('searchqr')) return true;
+  if (u.includes('documentkey=') || u.includes('documentkey?')) return true;
+  if (u.includes('buscar') && u.includes('documento')) return true;
+  return false;
+}
 
 interface DashboardData {
   fecha: string;
@@ -68,12 +89,18 @@ interface Movimiento {
   beneficiario?: string | null;
   beneficiario_tipo_identificacion?: string | null;
   beneficiario_numero_identificacion?: string | null;
+  beneficiario_direccion?: string | null;
+  beneficiario_email?: string | null;
+  beneficiario_telefono?: string | null;
+  beneficiario_factus_municipality_id?: number | null;
   sede?: string | null;
   vehiculo_id?: string | null;
   numero_factura_dian?: string | null;
   factura_public_url?: string | null;
   /** Solo filas de tesorería (reporte movimientos detallados). */
   anulado?: boolean;
+  documento_soporte_numero?: string | null;
+  documento_soporte_public_url?: string | null;
 }
 
 interface Tramite {
@@ -106,8 +133,38 @@ const REPORTES_SECCIONES: { id: ReportesSeccion; label: string; hint: string }[]
   { id: 'detalle', label: 'Detalle', hint: 'Movimientos y trámites con exportación CSV' },
 ];
 
+function movimientoElegibleDocumentoSoporte(m: Movimiento): boolean {
+  const esEgresoCajaManual =
+    m.modulo === 'Caja' &&
+    !m.es_ingreso &&
+    ['gasto', 'devolucion', 'ajuste'].includes(m.categoria);
+  const esEgresoTesoreria = m.modulo === 'Tesorería' && !m.es_ingreso && !m.anulado;
+  if (!esEgresoCajaManual && !esEgresoTesoreria) return false;
+  const doc = (m.beneficiario_numero_identificacion || '').replace(/\D/g, '');
+  if (doc.length < 5) return false;
+  const nom = (m.beneficiario || '').trim();
+  if (nom.length < 2) return false;
+  const dir = (m.beneficiario_direccion || '').trim();
+  if (dir.length < 8) return false;
+  const mail = (m.beneficiario_email || '').trim().toLowerCase();
+  const at = mail.indexOf('@');
+  if (at < 1) return false;
+  const dom = mail.slice(at + 1);
+  if (!dom.includes('.') || dom.length < 3) return false;
+  const tel = (m.beneficiario_telefono || '').replace(/\D/g, '');
+  if (tel.length < 7) return false;
+  const mid = m.beneficiario_factus_municipality_id;
+  if (mid == null || mid < 1) return false;
+  return true;
+}
+
+function moduloDocumentoSoporteApi(m: Movimiento): 'caja' | 'tesoreria' {
+  return m.modulo === 'Caja' ? 'caja' : 'tesoreria';
+}
+
 export default function ReportesPage() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const brand = useBrand();
   const { showToast } = useToast();
   const tenantUser = user && 'tenant_id' in user ? (user as Usuario) : null;
@@ -142,6 +199,8 @@ export default function ReportesPage() {
   const [cierrePdfLoadingId, setCierrePdfLoadingId] = useState<string | null>(null);
   const [tesoreriaEgresoPdfLoadingId, setTesoreriaEgresoPdfLoadingId] = useState<string | null>(null);
   const [cajaEgresoPdfLoadingId, setCajaEgresoPdfLoadingId] = useState<string | null>(null);
+  const [dsEmitLoadingId, setDsEmitLoadingId] = useState<string | null>(null);
+  const [dsPdfLoadingId, setDsPdfLoadingId] = useState<string | null>(null);
   const rangoInvalido = modoVista === 'rango' && fechaInicio > fechaFin;
   const periodoActual = modoVista === 'rango' ? `${fechaInicio} a ${fechaFin}` : fechaSeleccionada;
   const reportesEnabled = !rangoInvalido;
@@ -210,6 +269,42 @@ export default function ReportesPage() {
     },
     enabled: reportesEnabled,
     refetchInterval: 60000,
+  });
+
+  const emitirDocumentoSoporteMutation = useMutation({
+    mutationFn: async (payload: { modulo: 'caja' | 'tesoreria'; movimiento_id: string }) => {
+      const response = await apiClient.post('/factus/documentos-soporte/emitir', payload);
+      return response.data as {
+        numero_documento?: string | null;
+        public_url?: string | null;
+        reference_code: string;
+      };
+    },
+    onSuccess: async () => {
+      await queryClient.refetchQueries({ queryKey: ['movimientos-detallados'], type: 'active' });
+      showToast(
+        'success',
+        'Documento soporte',
+        'Emitido en Factus / DIAN. Use «Ver» para abrir el visor en una pestaña nueva.',
+      );
+    },
+    onError: (err: unknown) => {
+      const msg =
+        err &&
+        typeof err === 'object' &&
+        'response' in err &&
+        err.response &&
+        typeof err.response === 'object' &&
+        'data' in err.response &&
+        err.response.data &&
+        typeof err.response.data === 'object' &&
+        'detail' in err.response.data
+          ? String((err.response.data as { detail: unknown }).detail)
+          : err instanceof Error
+            ? err.message
+            : 'No fue posible emitir el documento soporte.';
+      showToast('error', 'Factus', msg);
+    },
   });
 
   // Query: Desglose por conceptos
@@ -387,10 +482,10 @@ export default function ReportesPage() {
     }
   };
 
-  const abrirFacturaOficial = (url: string | null | undefined) => {
+  const abrirEnlaceNuevoTab = (url: string | null | undefined, mensajeSiVacio: string) => {
     const u = (url || '').trim();
     if (!u) {
-      alert('No hay factura electrónica registrada para este cobro (modo manual o aún sin URL).');
+      alert(mensajeSiVacio);
       return;
     }
     // Factus/DIAN suelen bloquear iframes (X-Frame-Options); en pestaña nueva sí carga.
@@ -398,6 +493,13 @@ export default function ReportesPage() {
     if (!w) {
       alert('Permita ventanas emergentes para este sitio o abra el enlace manualmente.');
     }
+  };
+
+  const abrirFacturaOficial = (url: string | null | undefined) => {
+    abrirEnlaceNuevoTab(
+      url,
+      'No hay factura electrónica registrada para este cobro (modo manual o aún sin URL).',
+    );
   };
 
   useEffect(() => {
@@ -525,6 +627,121 @@ export default function ReportesPage() {
       showToast('error', 'No se pudo abrir', msg);
     } finally {
       setCajaEgresoPdfLoadingId(null);
+    }
+  };
+
+  const verDocumentoSoportePdf = async (m: Movimiento) => {
+    const mod = moduloDocumentoSoporteApi(m);
+    let pub = (m.documento_soporte_public_url || '').trim();
+    if (pub && urlPareceAssetMarcaOImagen(pub)) {
+      pub = '';
+    }
+    if (!pub) {
+      try {
+        const { data } = await apiClient.get<{ public_url: string }>(
+          `/factus/documentos-soporte/enlace-publico/${mod}/${m.id}`,
+        );
+        pub = (data?.public_url || '').trim();
+        if (pub) {
+          void queryClient.invalidateQueries({ queryKey: ['movimientos-detallados'] });
+        }
+      } catch {
+        /* sigue: proxy PDF o mensaje */
+      }
+    }
+    if (pub && urlPareceAssetMarcaOImagen(pub)) {
+      pub = '';
+    }
+
+    const abrirPdfDesdeProxy = async (): Promise<boolean> => {
+      setDsPdfLoadingId(m.id);
+      try {
+        const response = await apiClient.get(`/factus/documentos-soporte/pdf/${mod}/${m.id}`, {
+          responseType: 'blob',
+        });
+        const blob = response.data as Blob;
+        if (!blob || blob.size === 0) {
+          showToast('error', 'PDF vacío', 'Factus no devolvió el documento soporte.');
+          return false;
+        }
+        const blobUrl = URL.createObjectURL(blob);
+        abrirPdfPreview({
+          blobUrl,
+          title: `Documento soporte ${(m.documento_soporte_numero || '').trim() || m.id.slice(0, 8)}`,
+          fileName: `documento_soporte_${m.id.slice(0, 8)}.pdf`,
+        });
+        return true;
+      } catch (e: unknown) {
+        let msg = 'Error al descargar el documento soporte.';
+        if (e instanceof Error) {
+          msg = e.message;
+        }
+        const ax = e as { response?: { data?: unknown; status?: number } };
+        const data = ax.response?.data;
+        if (data instanceof Blob) {
+          try {
+            const text = await data.text();
+            const trimmed = text.trim();
+            if (trimmed.startsWith('{')) {
+              const parsed = JSON.parse(trimmed) as { detail?: unknown };
+              const d = parsed.detail;
+              msg =
+                typeof d === 'string'
+                  ? d
+                  : Array.isArray(d)
+                    ? d.map((x) => (typeof x === 'object' && x && 'msg' in x ? String((x as { msg: string }).msg) : String(x))).join(' ')
+                    : 'No fue posible obtener el PDF (revise el mensaje del servidor o Factus).';
+            } else if (trimmed) {
+              msg = trimmed.slice(0, 500);
+            } else {
+              msg = 'No fue posible obtener el PDF (revise sesión o configuración Factus).';
+            }
+          } catch {
+            msg = 'No fue posible obtener el PDF (revise sesión o configuración Factus).';
+          }
+        }
+        showToast('error', 'Documento soporte', msg);
+        return false;
+      } finally {
+        setDsPdfLoadingId(null);
+      }
+    };
+
+    // Enlaces típicos DIAN (searchqr / documentkey): abren formulario «Buscar»; el PDF es la vista directa.
+    if (pub && urlDianPareceConsultaConPasoExtra(pub)) {
+      const ok = await abrirPdfDesdeProxy();
+      if (!ok && pub) {
+        abrirEnlaceNuevoTab(
+          pub,
+          'No hay enlace público del documento soporte. Revise Factus o vuelva a emitir.',
+        );
+      }
+      return;
+    }
+
+    if (pub) {
+      abrirEnlaceNuevoTab(
+        pub,
+        'No hay enlace público del documento soporte. Revise Factus o vuelva a emitir.',
+      );
+      return;
+    }
+
+    await abrirPdfDesdeProxy();
+  };
+
+  const emitirDocumentoSoporte = async (m: Movimiento) => {
+    const mod = moduloDocumentoSoporteApi(m);
+    setDsEmitLoadingId(m.id);
+    try {
+      await emitirDocumentoSoporteMutation.mutateAsync({
+        modulo: mod,
+        movimiento_id: m.id,
+      });
+    } catch {
+      /* el toast va en onError del mutation */
+    } finally {
+      setDsEmitLoadingId(null);
     }
   };
 
@@ -1684,6 +1901,37 @@ export default function ReportesPage() {
                             >
                               <FileText className="w-4 h-4" />
                             </button>
+                          ) : null}
+                          {movimientoElegibleDocumentoSoporte(m) ? (
+                            <>
+                              {!m.documento_soporte_numero ? (
+                                <button
+                                  type="button"
+                                  title="Generar documento soporte electrónico (Factus / DIAN, una sola vez)"
+                                  disabled={
+                                    dsEmitLoadingId === m.id || emitirDocumentoSoporteMutation.isLoading
+                                  }
+                                  onClick={() => emitirDocumentoSoporte(m)}
+                                  className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-emerald-50 text-emerald-800 disabled:opacity-40"
+                                >
+                                  <FileCheck className="w-4 h-4" />
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  title={
+                                    m.documento_soporte_public_url
+                                      ? 'Ver documento soporte DIAN (Factus — nueva pestaña)'
+                                      : 'Ver documento (descarga por API si Factus no devolvió enlace público aún)'
+                                  }
+                                  disabled={dsPdfLoadingId === m.id}
+                                  onClick={() => verDocumentoSoportePdf(m)}
+                                  className="inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-200 bg-white hover:bg-emerald-50 text-emerald-900 disabled:opacity-40"
+                                >
+                                  <Eye className="w-4 h-4" />
+                                </button>
+                              )}
+                            </>
                           ) : null}
                         </div>
                       ) : (

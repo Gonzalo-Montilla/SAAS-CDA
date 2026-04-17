@@ -103,6 +103,14 @@ class Settings(BaseSettings):
     )
     # Decimales en pesos COP para bases y totales al desagregar IVA (habitual 2).
     FACTUS_MONEDA_DECIMALES: int = Field(default=2, ge=0, le=6, env="FACTUS_MONEDA_DECIMALES")
+    # Documento soporte: ISO 3166-1 alpha-2 para tipos extranjeros del catálogo Factus (C.E., pasaporte, PEP, etc.)
+    # y NIT otro país. NIT Colombia (6) —incl. C.C./T.I. mapeadas a NIT persona natural— va siempre en CO.
+    FACTUS_DOCUMENTO_SOPORTE_PAIS_EXTRANJERO_DEFAULT: str = Field(
+        default="US",
+        min_length=2,
+        max_length=2,
+        env="FACTUS_DOCUMENTO_SOPORTE_PAIS_EXTRANJERO_DEFAULT",
+    )
 
     # Localización Colombia
     TIMEZONE: str = "America/Bogota"

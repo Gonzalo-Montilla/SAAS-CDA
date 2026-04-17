@@ -7,7 +7,11 @@ import FactusMunicipalitySearchField from '../components/FactusMunicipalitySearc
 import FactusMultiSedeGuide from '../components/FactusMultiSedeGuide';
 import apiClient from '../api/client';
 import { configApi } from '../api/config';
-import { factusApi, type FactusNumberingRangeItem } from '../api/factus';
+import {
+  factusApi,
+  type FactusDocumentoSoporteNotificacionesPatch,
+  type FactusNumberingRangeItem,
+} from '../api/factus';
 import { useAuth } from '../contexts/AuthContext';
 import type { SucursalAdminRow, Usuario } from '../types';
 import UsuariosPage from './Usuarios';
@@ -121,6 +125,29 @@ export default function OrganizacionPage() {
     },
   });
 
+  const patchDocSoporteNotifMutation = useMutation({
+    mutationFn: (payload: FactusDocumentoSoporteNotificacionesPatch) =>
+      factusApi.patchDocumentoSoporteNotificaciones(payload),
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['factus-settings'] });
+      setFeedback({
+        type: 'success',
+        message:
+          'Notificaciones de documento soporte guardadas. Factus puede enviar al proveedor; el correo interno recibe copia vía CDASOFT al validar.',
+      });
+    },
+    onError: (e: unknown) => {
+      const detail =
+        typeof e === 'object' && e !== null && 'response' in e
+          ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : undefined;
+      setFeedback({
+        type: 'error',
+        message: typeof detail === 'string' ? detail : 'No se pudieron guardar las preferencias.',
+      });
+    },
+  });
+
   const [rangesPreviewSede, setRangesPreviewSede] = useState<FactusNumberingRangeItem[] | null>(null);
 
   const rangesFactusMutation = useMutation({
@@ -166,6 +193,15 @@ export default function OrganizacionPage() {
       });
     },
   });
+
+  const [dsNotificarProveedor, setDsNotificarProveedor] = useState(true);
+  const [dsCorreoCda, setDsCorreoCda] = useState('');
+
+  useEffect(() => {
+    if (!factusSettings) return;
+    setDsNotificarProveedor(factusSettings.documento_soporte_notificar_proveedor_factus !== false);
+    setDsCorreoCda(factusSettings.documento_soporte_correo_notificacion_cda ?? '');
+  }, [factusSettings]);
 
   const countSedes = sedesLista?.length ?? sedesActuales;
   const puedeCrearMas = limitePlan == null || countSedes < limitePlan;
@@ -501,6 +537,70 @@ export default function OrganizacionPage() {
                   </div>
                 )}
               </details>
+              <div className="rounded-lg border border-slate-200 bg-slate-50/90 p-3 space-y-3">
+                <h4 className="text-xs font-bold text-slate-800">Documento soporte — notificaciones (admin)</h4>
+                <p className="text-xs text-slate-600 leading-relaxed">
+                  Misma lógica que la factura de venta: puede pedirse a Factus el envío al{' '}
+                  <strong>correo del proveedor</strong> indicado en cada egreso. Opcionalmente, un correo del CDA recibe
+                  copia por SMTP CDASOFT al validar el documento. El rango tipo 24 y credenciales los define CDASOFT en
+                  backoffice.
+                </p>
+                <p className="text-xs text-amber-950 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 leading-relaxed">
+                  <strong>Adquiriente en el PDF:</strong> CDASOFT envía el bloque <strong>establecimiento</strong> (nombre,
+                  dirección, municipio, contacto) igual que en factura, desde <strong>matriz/sede</strong>. El{' '}
+                  <strong>NIT</strong> del adquiriente sigue siendo el del <strong>contribuyente habilitado en Factus</strong>{' '}
+                  (credenciales y resolución). En <strong>pruebas</strong> suele ser <strong>FACTUS SAS</strong>; en{' '}
+                  <strong>producción</strong> use su propia cuenta Factus con ese mismo NIT.
+                </p>
+                {loadingFactusModo ? (
+                  <p className="text-xs text-slate-500">Cargando…</p>
+                ) : (
+                  <>
+                    <label className="flex items-center gap-2 text-xs text-slate-800 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={dsNotificarProveedor}
+                        onChange={(e) => setDsNotificarProveedor(e.target.checked)}
+                        className="rounded border-slate-300"
+                        disabled={factusSettings?.modo !== 'factus'}
+                      />
+                      Solicitar a Factus notificar al proveedor al validar documento soporte
+                    </label>
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-700 mb-1">
+                        Correo interno del CDA (copia opcional)
+                      </label>
+                      <input
+                        type="email"
+                        className="input w-full max-w-md text-sm"
+                        value={dsCorreoCda}
+                        onChange={(e) => setDsCorreoCda(e.target.value)}
+                        placeholder="contabilidad@su-cda.com"
+                        autoComplete="off"
+                        disabled={factusSettings?.modo !== 'factus'}
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      className="btn-primary-solid px-3 py-1.5 text-xs disabled:opacity-50"
+                      disabled={
+                        patchDocSoporteNotifMutation.isLoading ||
+                        factusSettings?.modo !== 'factus' ||
+                        loadingFactusModo
+                      }
+                      onClick={() => {
+                        setFeedback(null);
+                        patchDocSoporteNotifMutation.mutate({
+                          documento_soporte_notificar_proveedor_factus: dsNotificarProveedor,
+                          documento_soporte_correo_notificacion_cda: dsCorreoCda.trim() || null,
+                        });
+                      }}
+                    >
+                      {patchDocSoporteNotifMutation.isLoading ? 'Guardando…' : 'Guardar notificaciones documento soporte'}
+                    </button>
+                  </>
+                )}
+              </div>
             </div>
 
             <div className="flex flex-wrap items-center justify-between gap-3">

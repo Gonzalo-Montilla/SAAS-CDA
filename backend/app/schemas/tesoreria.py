@@ -80,7 +80,12 @@ class MovimientoTesoreriaCreate(BaseModel):
     beneficiario: Optional[str] = Field(default=None, max_length=300)
     beneficiario_tipo_identificacion: Optional[str] = Field(default=None, max_length=80)
     beneficiario_numero_identificacion: Optional[str] = Field(default=None, max_length=80)
-    
+    beneficiario_direccion: Optional[str] = Field(default=None, max_length=500)
+    beneficiario_email: Optional[str] = Field(default=None, max_length=255)
+    beneficiario_telefono: Optional[str] = Field(default=None, max_length=30)
+    beneficiario_factus_municipality_id: Optional[int] = Field(default=None, ge=1)
+    proveedor_catalogo_id: Optional[UUID] = None
+
     @field_validator('categoria_ingreso', 'categoria_egreso', mode='before')
     @classmethod
     def validar_categoria(cls, v, info):
@@ -106,6 +111,11 @@ class MovimientoTesoreriaResponse(BaseModel):
     beneficiario: Optional[str] = None
     beneficiario_tipo_identificacion: Optional[str] = None
     beneficiario_numero_identificacion: Optional[str] = None
+    beneficiario_direccion: Optional[str] = None
+    beneficiario_email: Optional[str] = None
+    beneficiario_telefono: Optional[str] = None
+    beneficiario_factus_municipality_id: Optional[int] = None
+    proveedor_catalogo_id: Optional[UUID] = None
 
     anulado: bool = False
     motivo_anulacion: Optional[str] = None

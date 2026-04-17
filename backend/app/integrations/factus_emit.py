@@ -3,7 +3,6 @@ Construcción de payload y emisión de factura Factus para un cobro de vehículo
 """
 from __future__ import annotations
 
-import re
 import uuid
 from decimal import Decimal
 from typing import Any, Optional
@@ -16,6 +15,8 @@ from app.core.factus_crypto import decrypt_secret
 from app.integrations.factus_client import FactusAPIError, factus_base_url, obtain_token, validate_invoice
 from app.models.factus import FacturaElectronica, TenantFactusSettings
 from app.services.factus_tenant_settings import active_auth_encrypted
+from app.utils.factus_validators import email_valido_factus as _email_valido_factus
+from app.utils.factus_validators import solo_digitos as _solo_digitos
 from app.models.sucursal import Sucursal
 from app.models.tarifa import Tarifa
 from app.models.tenant import Tenant
@@ -166,18 +167,6 @@ def _map_metodo_pago_factus(metodo_pago: str) -> str:
     if m == "mixto":
         return "10"
     return "10"
-
-
-def _solo_digitos(s: str) -> str:
-    return re.sub(r"\D", "", s or "")
-
-
-def _email_valido_factus(email_raw: str | None) -> bool:
-    s = (email_raw or "").strip().lower()
-    if not s or "@" not in s:
-        return False
-    dom = s.split("@", 1)[-1]
-    return "." in dom and len(dom) >= 3
 
 
 def validar_datos_cliente_para_factus(vehiculo: VehiculoProceso) -> None:

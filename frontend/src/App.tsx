@@ -14,6 +14,7 @@ const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Recepcion = lazy(() => import('./pages/Recepcion'));
 const Caja = lazy(() => import('./pages/Caja'));
 const Tarifas = lazy(() => import('./pages/Tarifas'));
+const ProveedoresCatalogo = lazy(() => import('./pages/ProveedoresCatalogo'));
 const Tesoreria = lazy(() => import('./pages/Tesoreria'));
 const Reportes = lazy(() => import('./pages/Reportes'));
 const Organizacion = lazy(() => import('./pages/Organizacion'));
@@ -130,6 +131,14 @@ function App() {
               element={
                 <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador']}>
                   <Tarifas />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/proveedores-catalogo"
+              element={
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador']}>
+                  <ProveedoresCatalogo />
                 </ProtectedRoute>
               }
             />

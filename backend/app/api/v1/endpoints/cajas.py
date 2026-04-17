@@ -31,6 +31,8 @@ from app.utils.audit import audit_caja_operation
 from app.models.audit_log import AuditAction
 from app.utils.comprobantes_caja import generar_comprobante_cierre_caja
 from app.utils.comprobantes import generar_comprobante_egreso_caja
+from app.utils.egreso_proveedor_dian import normalizar_y_validar_contacto_proveedor_documento_soporte
+from app.services.proveedor_catalogo import cargar_beneficiario_desde_proveedor_catalogo
 
 router = APIRouter()
 
@@ -387,33 +389,68 @@ def crear_movimiento(
     ben_norm = None
     tid_norm = None
     num_id_norm = None
+    dir_norm = None
+    email_norm = None
+    phone_norm = None
+    mid_prov_norm = None
+    proveedor_fk = None
     if tipo_enum in (TipoMovimiento.GASTO, TipoMovimiento.DEVOLUCION, TipoMovimiento.AJUSTE) and movimiento_data.monto < 0:
-        ben = (movimiento_data.beneficiario or "").strip()
-        tid = (movimiento_data.beneficiario_tipo_identificacion or "").strip()
-        num_id = (movimiento_data.beneficiario_numero_identificacion or "").strip()
-        if len(ben) < 2:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El beneficiario / pagado a es obligatorio para este movimiento (mínimo 2 caracteres).",
-            )
-        if not tid:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El tipo de identificación del beneficiario es obligatorio.",
-            )
-        if tid not in BENEFICIARIO_TIPOS_IDENTIFICACION_TESORERIA:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Tipo de identificación del beneficiario no válido.",
-            )
-        if len(num_id) < 4:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El número de identificación del beneficiario es obligatorio (mínimo 4 caracteres).",
-            )
-        ben_norm = ben
-        tid_norm = tid
-        num_id_norm = num_id
+        if movimiento_data.proveedor_catalogo_id:
+            try:
+                snap = cargar_beneficiario_desde_proveedor_catalogo(
+                    db,
+                    tenant_id=current_user.tenant_id,
+                    proveedor_catalogo_id=movimiento_data.proveedor_catalogo_id,
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+            ben_norm = snap["beneficiario"]
+            tid_norm = snap["beneficiario_tipo_identificacion"]
+            num_id_norm = snap["beneficiario_numero_identificacion"]
+            dir_norm = snap["beneficiario_direccion"]
+            email_norm = snap["beneficiario_email"]
+            phone_norm = snap["beneficiario_telefono"]
+            mid_prov_norm = snap["beneficiario_factus_municipality_id"]
+            proveedor_fk = snap["proveedor_catalogo_id"]
+        else:
+            ben = (movimiento_data.beneficiario or "").strip()
+            tid = (movimiento_data.beneficiario_tipo_identificacion or "").strip()
+            num_id = (movimiento_data.beneficiario_numero_identificacion or "").strip()
+            if len(ben) < 2:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El beneficiario / pagado a es obligatorio para este movimiento (mínimo 2 caracteres).",
+                )
+            if not tid:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El tipo de identificación del beneficiario es obligatorio.",
+                )
+            if tid not in BENEFICIARIO_TIPOS_IDENTIFICACION_TESORERIA:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Tipo de identificación del beneficiario no válido.",
+                )
+            if len(num_id) < 4:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El número de identificación del beneficiario es obligatorio (mínimo 4 caracteres).",
+                )
+            try:
+                dir_norm, email_norm, phone_norm, mid_prov_norm = (
+                    normalizar_y_validar_contacto_proveedor_documento_soporte(
+                        direccion=movimiento_data.beneficiario_direccion,
+                        email=movimiento_data.beneficiario_email,
+                        telefono=movimiento_data.beneficiario_telefono,
+                        factus_municipality_id=movimiento_data.beneficiario_factus_municipality_id,
+                        requiere_municipio_factus=False,
+                    )
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+            ben_norm = ben
+            tid_norm = tid
+            num_id_norm = num_id
 
     # Crear movimiento
     movimiento = MovimientoCaja(
@@ -427,6 +464,11 @@ def crear_movimiento(
         beneficiario=ben_norm,
         beneficiario_tipo_identificacion=tid_norm,
         beneficiario_numero_identificacion=num_id_norm,
+        beneficiario_direccion=dir_norm,
+        beneficiario_email=email_norm,
+        beneficiario_telefono=phone_norm,
+        beneficiario_factus_municipality_id=mid_prov_norm,
+        proveedor_catalogo_id=proveedor_fk,
         created_by=current_user.id,
     )
     
@@ -570,6 +612,10 @@ def descargar_comprobante_egreso_movimiento_caja(
         nombre_cajero=nombre_cajero,
         tenant_logo_url=tenant.logo_url if tenant else None,
         nombre_comercial_cda=tenant.nombre_comercial if tenant else None,
+        beneficiario_direccion=mov.beneficiario_direccion,
+        beneficiario_email=mov.beneficiario_email,
+        beneficiario_telefono=mov.beneficiario_telefono,
+        beneficiario_factus_municipality_id=mov.beneficiario_factus_municipality_id,
     )
 
     fecha_str = mov.created_at.strftime("%Y%m%d")

@@ -65,6 +65,11 @@ class MovimientoCreate(BaseModel):
     beneficiario: Optional[str] = Field(default=None, max_length=300)
     beneficiario_tipo_identificacion: Optional[str] = Field(default=None, max_length=80)
     beneficiario_numero_identificacion: Optional[str] = Field(default=None, max_length=80)
+    beneficiario_direccion: Optional[str] = Field(default=None, max_length=500)
+    beneficiario_email: Optional[str] = Field(default=None, max_length=255)
+    beneficiario_telefono: Optional[str] = Field(default=None, max_length=30)
+    beneficiario_factus_municipality_id: Optional[int] = Field(default=None, ge=1)
+    proveedor_catalogo_id: Optional[UUID] = None
 
 
 class MovimientoResponse(BaseModel):
@@ -79,6 +84,11 @@ class MovimientoResponse(BaseModel):
     beneficiario: Optional[str] = None
     beneficiario_tipo_identificacion: Optional[str] = None
     beneficiario_numero_identificacion: Optional[str] = None
+    beneficiario_direccion: Optional[str] = None
+    beneficiario_email: Optional[str] = None
+    beneficiario_telefono: Optional[str] = None
+    beneficiario_factus_municipality_id: Optional[int] = None
+    proveedor_catalogo_id: Optional[UUID] = None
 
     model_config = ConfigDict(from_attributes=True)
 

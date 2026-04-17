@@ -34,6 +34,10 @@ def generar_comprobante_egreso(
     nombre_comercial_cda: Optional[str] = None,
     beneficiario_tipo_identificacion: Optional[str] = None,
     beneficiario_numero_identificacion: Optional[str] = None,
+    beneficiario_direccion: Optional[str] = None,
+    beneficiario_email: Optional[str] = None,
+    beneficiario_telefono: Optional[str] = None,
+    beneficiario_factus_municipality_id: Optional[int] = None,
 ) -> BytesIO:
     """
     Genera un comprobante de egreso en PDF
@@ -172,10 +176,24 @@ def generar_comprobante_egreso(
         ["Pagado a:", _safe_text(beneficiario)],
         ["Tipo identificación:", _safe_text(tipo_id_label)],
         ["No. identificación:", _safe_text(num_id_label)],
-        ["Categoría:", categorias_map.get(categoria, categoria)],
-        ["Concepto:", _safe_text(concepto)],
-        ["Método de pago:", metodos_map.get(metodo_pago, metodo_pago)],
     ]
+    if (beneficiario_direccion or "").strip():
+        detalles_data.append(["Dirección proveedor:", _safe_text((beneficiario_direccion or "").strip())])
+    if (beneficiario_email or "").strip():
+        detalles_data.append(["Correo proveedor:", _safe_text((beneficiario_email or "").strip())])
+    if (beneficiario_telefono or "").strip():
+        detalles_data.append(["Teléfono / celular:", _safe_text((beneficiario_telefono or "").strip())])
+    if beneficiario_factus_municipality_id is not None:
+        detalles_data.append(
+            ["Municipio proveedor (id Factus):", _safe_text(str(beneficiario_factus_municipality_id))]
+        )
+    detalles_data.extend(
+        [
+            ["Categoría:", categorias_map.get(categoria, categoria)],
+            ["Concepto:", _safe_text(concepto)],
+            ["Método de pago:", metodos_map.get(metodo_pago, metodo_pago)],
+        ]
+    )
     
     detalles_table = Table(detalles_data, colWidths=[2*inch, 4.5*inch])
     detalles_table.setStyle(TableStyle([
@@ -310,6 +328,10 @@ def generar_comprobante_egreso_caja(
     tenant_logo_url: Optional[str] = None,
     nombre_comercial_cda: Optional[str] = None,
     beneficiario_numero_identificacion: str = "",
+    beneficiario_direccion: Optional[str] = None,
+    beneficiario_email: Optional[str] = None,
+    beneficiario_telefono: Optional[str] = None,
+    beneficiario_factus_municipality_id: Optional[int] = None,
 ) -> BytesIO:
     """
     Comprobante PDF de egreso registrado en caja (gasto, devolución, ajuste).
@@ -408,10 +430,24 @@ def generar_comprobante_egreso_caja(
         ["Pagado a:", _safe_text(ben_l)],
         ["Tipo identificación:", _safe_text(tid_l)],
         ["No. identificación:", _safe_text(num_l)],
-        ["Concepto:", _safe_text(concepto)],
-        ["Método de pago:", _safe_text(metodo_pago or "N/A")],
-        ["Cajero(a) que registra:", _safe_text(nombre_cajero)],
     ]
+    if (beneficiario_direccion or "").strip():
+        detalles_data.append(["Dirección proveedor:", _safe_text((beneficiario_direccion or "").strip())])
+    if (beneficiario_email or "").strip():
+        detalles_data.append(["Correo proveedor:", _safe_text((beneficiario_email or "").strip())])
+    if (beneficiario_telefono or "").strip():
+        detalles_data.append(["Teléfono / celular:", _safe_text((beneficiario_telefono or "").strip())])
+    if beneficiario_factus_municipality_id is not None:
+        detalles_data.append(
+            ["Municipio proveedor (id Factus):", _safe_text(str(beneficiario_factus_municipality_id))]
+        )
+    detalles_data.extend(
+        [
+            ["Concepto:", _safe_text(concepto)],
+            ["Método de pago:", _safe_text(metodo_pago or "N/A")],
+            ["Cajero(a) que registra:", _safe_text(nombre_cajero)],
+        ]
+    )
 
     detalles_table = Table(detalles_data, colWidths=[2 * inch, 4.5 * inch])
     detalles_table.setStyle(

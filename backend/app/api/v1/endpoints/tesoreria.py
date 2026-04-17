@@ -34,6 +34,8 @@ from app.schemas.tesoreria import (
     BENEFICIARIO_TIPOS_IDENTIFICACION_TESORERIA,
 )
 from app.utils.comprobantes import generar_comprobante_egreso
+from app.utils.egreso_proveedor_dian import normalizar_y_validar_contacto_proveedor_documento_soporte
+from app.services.proveedor_catalogo import cargar_beneficiario_desde_proveedor_catalogo
 
 router = APIRouter()
 
@@ -206,30 +208,69 @@ def crear_movimiento(
             detail="Debe especificar una categoría de egreso válida"
         )
 
+    ben_norm = None
+    tid_norm = None
+    num_id_norm = None
+    dir_norm = None
+    email_norm = None
+    phone_norm = None
+    mid_bn = None
+    proveedor_fk = None
+
     if movimiento_data.tipo == "egreso":
-        ben = (movimiento_data.beneficiario or "").strip()
-        if len(ben) < 2:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El beneficiario / pagado a es obligatorio para egresos (mínimo 2 caracteres).",
-            )
-        tid = (movimiento_data.beneficiario_tipo_identificacion or "").strip()
-        if not tid:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El tipo de identificación del beneficiario es obligatorio para egresos.",
-            )
-        if tid not in BENEFICIARIO_TIPOS_IDENTIFICACION_TESORERIA:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Tipo de identificación del beneficiario no válido.",
-            )
-        num_id = (movimiento_data.beneficiario_numero_identificacion or "").strip()
-        if len(num_id) < 4:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="El número de identificación del beneficiario es obligatorio para egresos (mínimo 4 caracteres).",
-            )
+        if movimiento_data.proveedor_catalogo_id:
+            try:
+                snap = cargar_beneficiario_desde_proveedor_catalogo(
+                    db,
+                    tenant_id=current_user.tenant_id,
+                    proveedor_catalogo_id=movimiento_data.proveedor_catalogo_id,
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+            ben_norm = snap["beneficiario"]
+            tid_norm = snap["beneficiario_tipo_identificacion"]
+            num_id_norm = snap["beneficiario_numero_identificacion"]
+            dir_norm = snap["beneficiario_direccion"]
+            email_norm = snap["beneficiario_email"]
+            phone_norm = snap["beneficiario_telefono"]
+            mid_bn = snap["beneficiario_factus_municipality_id"]
+            proveedor_fk = snap["proveedor_catalogo_id"]
+        else:
+            ben = (movimiento_data.beneficiario or "").strip()
+            if len(ben) < 2:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El beneficiario / pagado a es obligatorio para egresos (mínimo 2 caracteres).",
+                )
+            tid = (movimiento_data.beneficiario_tipo_identificacion or "").strip()
+            if not tid:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El tipo de identificación del beneficiario es obligatorio para egresos.",
+                )
+            if tid not in BENEFICIARIO_TIPOS_IDENTIFICACION_TESORERIA:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Tipo de identificación del beneficiario no válido.",
+                )
+            num_id = (movimiento_data.beneficiario_numero_identificacion or "").strip()
+            if len(num_id) < 4:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El número de identificación del beneficiario es obligatorio para egresos (mínimo 4 caracteres).",
+                )
+            try:
+                dir_norm, email_norm, phone_norm, mid_bn = normalizar_y_validar_contacto_proveedor_documento_soporte(
+                    direccion=movimiento_data.beneficiario_direccion,
+                    email=movimiento_data.beneficiario_email,
+                    telefono=movimiento_data.beneficiario_telefono,
+                    factus_municipality_id=movimiento_data.beneficiario_factus_municipality_id,
+                )
+            except ValueError as e:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+            ben_norm = ben
+            tid_norm = tid
+            num_id_norm = num_id
 
     # Validar desglose de efectivo si el método de pago es efectivo
     if movimiento_data.metodo_pago == "efectivo":
@@ -299,18 +340,6 @@ def crear_movimiento(
     
     # Convertir monto según el tipo (ingreso positivo, egreso negativo)
     monto_final = movimiento_data.monto if movimiento_data.tipo == "ingreso" else -movimiento_data.monto
-    
-    ben_norm = (movimiento_data.beneficiario or "").strip() if movimiento_data.tipo == "egreso" else None
-    tid_norm = (
-        (movimiento_data.beneficiario_tipo_identificacion or "").strip()
-        if movimiento_data.tipo == "egreso"
-        else None
-    )
-    num_id_norm = (
-        (movimiento_data.beneficiario_numero_identificacion or "").strip()
-        if movimiento_data.tipo == "egreso"
-        else None
-    )
 
     # Crear movimiento
     nuevo_movimiento = MovimientoTesoreria(
@@ -329,6 +358,11 @@ def crear_movimiento(
         beneficiario=ben_norm,
         beneficiario_tipo_identificacion=tid_norm,
         beneficiario_numero_identificacion=num_id_norm,
+        beneficiario_direccion=dir_norm,
+        beneficiario_email=email_norm,
+        beneficiario_telefono=phone_norm,
+        beneficiario_factus_municipality_id=mid_bn,
+        proveedor_catalogo_id=proveedor_fk,
     )
     
     db.add(nuevo_movimiento)
@@ -989,6 +1023,10 @@ async def descargar_comprobante_egreso(
         desglose_efectivo=desglose_dict,
         tenant_logo_url=tenant.logo_url if tenant else None,
         nombre_comercial_cda=tenant.nombre_comercial if tenant else None,
+        beneficiario_direccion=movimiento.beneficiario_direccion,
+        beneficiario_email=movimiento.beneficiario_email,
+        beneficiario_telefono=movimiento.beneficiario_telefono,
+        beneficiario_factus_municipality_id=movimiento.beneficiario_factus_municipality_id,
     )
     
     # Nombre del archivo

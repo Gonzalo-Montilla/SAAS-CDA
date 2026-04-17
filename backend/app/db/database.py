@@ -759,6 +759,104 @@ def ensure_movimiento_caja_beneficiario_columns(db):
     )
 
 
+def ensure_movimiento_proveedor_contacto_documento_soporte(db):
+    """Dirección, correo, teléfono y municipio Factus del proveedor (egresos caja y tesorería)."""
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    for table in ("movimientos_caja", "movimientos_tesoreria"):
+        db.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS beneficiario_direccion TEXT"))
+        db.execute(
+            text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS beneficiario_email VARCHAR(255)")
+        )
+        db.execute(
+            text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS beneficiario_telefono VARCHAR(30)")
+        )
+        db.execute(
+            text(
+                f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS beneficiario_factus_municipality_id INTEGER"
+            )
+        )
+
+
+def ensure_proveedores_catalogo_schema(db):
+    """Catálogo de proveedores por tenant y vínculo opcional en egresos."""
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS proveedores_catalogo (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                alias VARCHAR(120),
+                razon_social_rut VARCHAR(300) NOT NULL,
+                tipo_identificacion VARCHAR(80) NOT NULL,
+                numero_identificacion VARCHAR(80) NOT NULL,
+                direccion TEXT NOT NULL,
+                email VARCHAR(255) NOT NULL,
+                telefono VARCHAR(30) NOT NULL,
+                factus_municipality_id INTEGER NOT NULL,
+                activo BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_proveedores_catalogo_tenant
+            ON proveedores_catalogo(tenant_id)
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_proveedores_catalogo_tenant_activo
+            ON proveedores_catalogo(tenant_id, activo)
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            ALTER TABLE movimientos_caja
+            ADD COLUMN IF NOT EXISTS proveedor_catalogo_id UUID
+            REFERENCES proveedores_catalogo(id) ON DELETE SET NULL
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            ALTER TABLE movimientos_tesoreria
+            ADD COLUMN IF NOT EXISTS proveedor_catalogo_id UUID
+            REFERENCES proveedores_catalogo(id) ON DELETE SET NULL
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_mov_caja_proveedor_cat
+            ON movimientos_caja(proveedor_catalogo_id)
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_mov_tes_proveedor_cat
+            ON movimientos_tesoreria(proveedor_catalogo_id)
+            """
+        )
+    )
+
+
 def ensure_tesoreria_anulacion_y_enum(db):
     """
     Anulación de movimientos (soft delete) y etiqueta enum AJUSTE_CORRECCION en PostgreSQL.
@@ -905,6 +1003,58 @@ def ensure_factus_schema(db):
     db.execute(text("ALTER TABLE tenant_factus_settings ADD COLUMN IF NOT EXISTS production_client_secret_encrypted TEXT"))
     db.execute(text("ALTER TABLE tenant_factus_settings ADD COLUMN IF NOT EXISTS production_api_username VARCHAR(255)"))
     db.execute(text("ALTER TABLE tenant_factus_settings ADD COLUMN IF NOT EXISTS production_api_password_encrypted TEXT"))
+    db.execute(
+        text(
+            "ALTER TABLE tenant_factus_settings ADD COLUMN IF NOT EXISTS documento_soporte_numbering_range_id INTEGER"
+        )
+    )
+    db.execute(
+        text(
+            """
+            ALTER TABLE tenant_factus_settings ADD COLUMN IF NOT EXISTS documento_soporte_notificar_proveedor_factus BOOLEAN NOT NULL DEFAULT TRUE
+            """
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE tenant_factus_settings ADD COLUMN IF NOT EXISTS documento_soporte_correo_notificacion_cda VARCHAR(255)"
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS documentos_soporte_electronicos (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                source_module VARCHAR(20) NOT NULL,
+                movimiento_id UUID NOT NULL,
+                reference_code VARCHAR(120) NOT NULL,
+                factus_document_id INTEGER,
+                numero_documento VARCHAR(80),
+                cuds VARCHAR(200),
+                public_url VARCHAR(800),
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_documentos_soporte_tenant_mod_mov "
+            "ON documentos_soporte_electronicos(tenant_id, source_module, movimiento_id)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_documentos_soporte_tenant ON documentos_soporte_electronicos(tenant_id)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_documentos_soporte_tenant_ref "
+            "ON documentos_soporte_electronicos(tenant_id, reference_code)"
+        )
+    )
 
 
 def ensure_quality_survey_responses_schema(db):
@@ -1206,6 +1356,7 @@ def init_db():
     from app.models.factus import TenantFactusSettings, FacturaElectronica  # noqa: F401 — register model
     from app.models.documento_tenant import TenantDocumento  # noqa: F401 — register model
     from app.models.documento_auditoria import TenantDocumentoAuditoria  # noqa: F401 — register model
+    from app.models.proveedor_catalogo import ProveedorCatalogo  # noqa: F401 — register model
     from app.core.security import get_password_hash
     from datetime import date
     
@@ -1230,6 +1381,8 @@ def init_db():
         ensure_tesoreria_anulacion_y_enum(db)
         ensure_movimiento_tesoreria_beneficiario_columns(db)
         ensure_movimiento_caja_beneficiario_columns(db)
+        ensure_movimiento_proveedor_contacto_documento_soporte(db)
+        ensure_proveedores_catalogo_schema(db)
         ensure_facturacion_ubicacion_schema(db)
         ensure_factus_schema(db)
         ensure_quality_survey_responses_schema(db)

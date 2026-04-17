@@ -1,7 +1,7 @@
 """
 Modelos de Tesorería (Caja Fuerte)
 """
-from sqlalchemy import Column, String, Numeric, Boolean, DateTime, ForeignKey, Enum as SQLEnum, Text
+from sqlalchemy import Column, String, Numeric, Boolean, DateTime, ForeignKey, Enum as SQLEnum, Text, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
@@ -74,7 +74,14 @@ class MovimientoTesoreria(Base):
     beneficiario = Column(String(300), nullable=True)
     beneficiario_tipo_identificacion = Column(String(80), nullable=True)
     beneficiario_numero_identificacion = Column(String(80), nullable=True)
-    
+    beneficiario_direccion = Column(Text, nullable=True)
+    beneficiario_email = Column(String(255), nullable=True)
+    beneficiario_telefono = Column(String(30), nullable=True)
+    beneficiario_factus_municipality_id = Column(Integer, nullable=True)
+    proveedor_catalogo_id = Column(
+        UUID(as_uuid=True), ForeignKey("proveedores_catalogo.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+
     # Referencias
     origen_caja_id = Column(UUID(as_uuid=True), ForeignKey("cajas.id"), nullable=True)  # Si viene de una caja diaria
     comprobante_url = Column(String(500), nullable=True)  # URL a factura/comprobante escaneado

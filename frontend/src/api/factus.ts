@@ -20,7 +20,13 @@ export interface FactusSettings {
   api_username: string | null;
   api_password_configured: boolean;
   default_numbering_range_id: number | null;
+  /** Rango Factus para documento soporte (DIAN tipo 24); distinto del de factura 01. */
+  documento_soporte_numbering_range_id: number | null;
   base_url_effective: string;
+  /** Pedir a Factus enviar PDF/enlace al correo del proveedor al validar documento soporte. */
+  documento_soporte_notificar_proveedor_factus: boolean;
+  /** Copia interna al correo del CDA (SMTP CDASOFT) tras emitir documento soporte. */
+  documento_soporte_correo_notificacion_cda: string | null;
 }
 
 /** PATCH /factus/settings/modo — solo admin del tenant. */
@@ -41,6 +47,14 @@ export interface FactusSettingsUpdatePayload {
   production_api_username?: string | null;
   production_api_password?: string | null;
   default_numbering_range_id?: number | null;
+  documento_soporte_numbering_range_id?: number | null;
+  documento_soporte_notificar_proveedor_factus?: boolean | null;
+  documento_soporte_correo_notificacion_cda?: string | null;
+}
+
+export interface FactusDocumentoSoporteNotificacionesPatch {
+  documento_soporte_notificar_proveedor_factus: boolean;
+  documento_soporte_correo_notificacion_cda?: string | null;
 }
 
 export interface FactusTestConnectionResult {
@@ -82,6 +96,16 @@ export const factusApi = {
   /** Conmutar manual ↔ Factus en emergencia (solo administrador del CDA). */
   patchModo: async (payload: FactusModoPatch): Promise<FactusSettings> => {
     const response = await apiClient.patch<FactusSettings>('/factus/settings/modo', payload);
+    return response.data;
+  },
+
+  patchDocumentoSoporteNotificaciones: async (
+    payload: FactusDocumentoSoporteNotificacionesPatch,
+  ): Promise<FactusSettings> => {
+    const response = await apiClient.patch<FactusSettings>(
+      '/factus/settings/documento-soporte-notificaciones',
+      payload,
+    );
     return response.data;
   },
 

@@ -17,6 +17,7 @@ from app.integrations.factus_client import (
     get_numbering_ranges,
     obtain_token,
 )
+from app.utils.factus_validators import email_valido_factus
 from app.models.factus import TenantFactusSettings
 from app.schemas.factus import (
     FactusEnvCredentialsOut,
@@ -111,7 +112,14 @@ def row_to_out(row: TenantFactusSettings) -> FactusSettingsOut:
         api_username=active.api_username,
         api_password_configured=active.api_password_configured,
         default_numbering_range_id=row.default_numbering_range_id,
+        documento_soporte_numbering_range_id=row.documento_soporte_numbering_range_id,
         base_url_effective=base_eff,
+        documento_soporte_notificar_proveedor_factus=(
+            getattr(row, "documento_soporte_notificar_proveedor_factus", None) is not False
+        ),
+        documento_soporte_correo_notificacion_cda=getattr(
+            row, "documento_soporte_correo_notificacion_cda", None
+        ),
     )
 
 
@@ -137,6 +145,24 @@ def apply_settings_update(db: Session, row: TenantFactusSettings, body: FactusSe
         row.production_api_password_encrypted = encrypt_secret(body.production_api_password)
     if "default_numbering_range_id" in data:
         row.default_numbering_range_id = data.get("default_numbering_range_id")
+    if "documento_soporte_numbering_range_id" in data:
+        row.documento_soporte_numbering_range_id = data.get("documento_soporte_numbering_range_id")
+    if "documento_soporte_notificar_proveedor_factus" in data:
+        v = data.get("documento_soporte_notificar_proveedor_factus")
+        if v is not None:
+            row.documento_soporte_notificar_proveedor_factus = bool(v)
+    if "documento_soporte_correo_notificacion_cda" in data:
+        raw = data.get("documento_soporte_correo_notificacion_cda")
+        if raw is None or (isinstance(raw, str) and not str(raw).strip()):
+            row.documento_soporte_correo_notificacion_cda = None
+        else:
+            ce = str(raw).strip().lower()
+            if not email_valido_factus(ce):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El correo de notificación interna (documento soporte) no es válido.",
+                )
+            row.documento_soporte_correo_notificacion_cda = ce[:255]
     db.commit()
     db.refresh(row)
 

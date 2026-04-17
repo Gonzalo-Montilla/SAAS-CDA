@@ -34,6 +34,10 @@ class TenantFactusSettings(Base):
     production_api_password_encrypted = Column(Text, nullable=True)
 
     default_numbering_range_id = Column(Integer, nullable=True)
+    documento_soporte_numbering_range_id = Column(Integer, nullable=True)
+    # Notificaciones documento soporte (análogo a send_email en factura: proveedor vía Factus + copia CDA vía SMTP)
+    documento_soporte_notificar_proveedor_factus = Column(Boolean, nullable=False, default=True)
+    documento_soporte_correo_notificacion_cda = Column(String(255), nullable=True)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
@@ -52,6 +56,25 @@ class FacturaElectronica(Base):
     factus_bill_id = Column(Integer, nullable=True)
     numero_documento = Column(String(80), nullable=True)
     cufe = Column(String(200), nullable=True)
+    public_url = Column(String(800), nullable=True)
+
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class DocumentoSoporteElectronico(Base):
+    """Documento soporte DIAN emitido por el comprador (CDA) vía Factus, vinculado a un egreso."""
+
+    __tablename__ = "documentos_soporte_electronicos"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    source_module = Column(String(20), nullable=False)
+    movimiento_id = Column(UUID(as_uuid=True), nullable=False, index=True)
+
+    reference_code = Column(String(120), nullable=False, index=True)
+    factus_document_id = Column(Integer, nullable=True)
+    numero_documento = Column(String(80), nullable=True)
+    cuds = Column(String(200), nullable=True)
     public_url = Column(String(800), nullable=True)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)

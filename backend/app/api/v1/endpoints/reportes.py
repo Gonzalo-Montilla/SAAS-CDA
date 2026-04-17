@@ -17,10 +17,10 @@ from app.core.deps import get_db, get_contador_or_admin
 from app.core.sucursal_scope import resolve_reporte_sucursal_id, get_principal_sucursal_id
 from app.models.usuario import Usuario
 from app.models.caja import MovimientoCaja, Caja, EstadoCaja
-from app.models.tesoreria import MovimientoTesoreria
+from app.models.tesoreria import MovimientoTesoreria, TipoMovimientoTesoreria
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo
 from app.models.sucursal import Sucursal
-from app.models.factus import FacturaElectronica
+from app.models.factus import DocumentoSoporteElectronico, FacturaElectronica
 from app.models.appointment import Appointment
 
 router = APIRouter()
@@ -562,6 +562,48 @@ def obtener_movimientos_detallados(
             if fe.vehiculo_proceso_id not in fe_by_vid:
                 fe_by_vid[fe.vehiculo_proceso_id] = fe
 
+    movimientos_tesoreria = (
+        db.query(MovimientoTesoreria)
+        .filter(
+            _mt_scope_incluye_anulados(
+                tid,
+                scope_sid,
+                MovimientoTesoreria.fecha_movimiento >= fecha_inicio_dt,
+                MovimientoTesoreria.fecha_movimiento <= fecha_fin_dt,
+            )
+        )
+        .order_by(MovimientoTesoreria.fecha_movimiento.asc())
+        .all()
+    )
+
+    caja_egreso_ids = [mov.id for mov in movimientos_caja if mov.monto < 0]
+    tes_egreso_ids = [
+        mov.id for mov in movimientos_tesoreria if mov.tipo == TipoMovimientoTesoreria.EGRESO
+    ]
+    ds_conditions = []
+    if caja_egreso_ids:
+        ds_conditions.append(
+            and_(
+                DocumentoSoporteElectronico.source_module == "caja",
+                DocumentoSoporteElectronico.movimiento_id.in_(caja_egreso_ids),
+            )
+        )
+    if tes_egreso_ids:
+        ds_conditions.append(
+            and_(
+                DocumentoSoporteElectronico.source_module == "tesoreria",
+                DocumentoSoporteElectronico.movimiento_id.in_(tes_egreso_ids),
+            )
+        )
+    ds_map: dict = {}
+    if ds_conditions:
+        for r in (
+            db.query(DocumentoSoporteElectronico)
+            .filter(DocumentoSoporteElectronico.tenant_id == tid, or_(*ds_conditions))
+            .all()
+        ):
+            ds_map[(r.source_module, r.movimiento_id)] = r
+
     lista_caja = []
     for mov in movimientos_caja:
         # Obtener nombre de usuario
@@ -586,6 +628,7 @@ def obtener_movimientos_detallados(
             doc_numero_factura = vp.numero_factura_dian if vp else None
             fe = fe_by_vid.get(vid)
             doc_factura_url = fe.public_url if fe else None
+        ds_row_caja = ds_map.get(("caja", mov.id))
         lista_caja.append({
             "id": str(mov.id),
             "hora": mov.created_at.strftime("%H:%M:%S"),
@@ -607,23 +650,15 @@ def obtener_movimientos_detallados(
             "beneficiario": getattr(mov, "beneficiario", None),
             "beneficiario_tipo_identificacion": getattr(mov, "beneficiario_tipo_identificacion", None),
             "beneficiario_numero_identificacion": getattr(mov, "beneficiario_numero_identificacion", None),
+            "beneficiario_direccion": getattr(mov, "beneficiario_direccion", None),
+            "beneficiario_email": getattr(mov, "beneficiario_email", None),
+            "beneficiario_telefono": getattr(mov, "beneficiario_telefono", None),
+            "beneficiario_factus_municipality_id": getattr(mov, "beneficiario_factus_municipality_id", None),
+            "documento_soporte_numero": ds_row_caja.numero_documento if ds_row_caja else None,
+            "documento_soporte_public_url": ds_row_caja.public_url if ds_row_caja else None,
         })
     
     # ==================== MOVIMIENTOS DE TESORERÍA ====================
-    movimientos_tesoreria = (
-        db.query(MovimientoTesoreria)
-        .filter(
-            _mt_scope_incluye_anulados(
-                tid,
-                scope_sid,
-                MovimientoTesoreria.fecha_movimiento >= fecha_inicio_dt,
-                MovimientoTesoreria.fecha_movimiento <= fecha_fin_dt,
-            )
-        )
-        .order_by(MovimientoTesoreria.fecha_movimiento.asc())
-        .all()
-    )
-    
     lista_tesoreria = []
     for mov in movimientos_tesoreria:
         # Obtener nombre de usuario
@@ -641,6 +676,7 @@ def obtener_movimientos_detallados(
         if mov.sucursal_id:
             s = db.query(Sucursal).filter(Sucursal.id == mov.sucursal_id).first()
             sede_t = s.nombre if s else None
+        ds_row_tes = ds_map.get(("tesoreria", mov.id))
         lista_tesoreria.append({
             "id": str(mov.id),
             "hora": mov.fecha_movimiento.strftime("%H:%M:%S"),
@@ -663,6 +699,12 @@ def obtener_movimientos_detallados(
             "beneficiario": getattr(mov, "beneficiario", None),
             "beneficiario_tipo_identificacion": getattr(mov, "beneficiario_tipo_identificacion", None),
             "beneficiario_numero_identificacion": getattr(mov, "beneficiario_numero_identificacion", None),
+            "beneficiario_direccion": getattr(mov, "beneficiario_direccion", None),
+            "beneficiario_email": getattr(mov, "beneficiario_email", None),
+            "beneficiario_telefono": getattr(mov, "beneficiario_telefono", None),
+            "beneficiario_factus_municipality_id": getattr(mov, "beneficiario_factus_municipality_id", None),
+            "documento_soporte_numero": ds_row_tes.numero_documento if ds_row_tes else None,
+            "documento_soporte_public_url": ds_row_tes.public_url if ds_row_tes else None,
         })
     
     # Combinar y ordenar por hora

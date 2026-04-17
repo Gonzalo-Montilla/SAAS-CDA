@@ -3,6 +3,7 @@ Registra modelos SQLAlchemy al cargar pytest (antes de importar los tests).
 """
 import app.models.appointment  # noqa: F401
 import app.models.audit_log  # noqa: F401
+import app.models.proveedor_catalogo  # noqa: F401
 import app.models.caja  # noqa: F401
 import app.models.notificacion_cierre  # noqa: F401
 import app.models.password_reset_token  # noqa: F401

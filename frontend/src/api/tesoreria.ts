@@ -13,6 +13,11 @@ export interface MovimientoTesoreria {
   beneficiario_tipo_identificacion?: string | null;
   /** Egresos: número del documento (cédula, NIT, etc.). */
   beneficiario_numero_identificacion?: string | null;
+  beneficiario_direccion?: string | null;
+  beneficiario_email?: string | null;
+  beneficiario_telefono?: string | null;
+  beneficiario_factus_municipality_id?: number | null;
+  proveedor_catalogo_id?: string | null;
   metodo_pago: string;
   origen_caja_id?: string;
   numero_comprobante?: string;

@@ -1,7 +1,7 @@
 """
 Modelos de Caja y Movimientos
 """
-from sqlalchemy import Column, String, Numeric, Boolean, DateTime, ForeignKey, Enum as SQLEnum, Text
+from sqlalchemy import Column, String, Numeric, Boolean, DateTime, ForeignKey, Enum as SQLEnum, Text, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
@@ -114,6 +114,13 @@ class MovimientoCaja(Base):
     beneficiario = Column(String(300), nullable=True)
     beneficiario_tipo_identificacion = Column(String(80), nullable=True)
     beneficiario_numero_identificacion = Column(String(80), nullable=True)
+    beneficiario_direccion = Column(Text, nullable=True)
+    beneficiario_email = Column(String(255), nullable=True)
+    beneficiario_telefono = Column(String(30), nullable=True)
+    beneficiario_factus_municipality_id = Column(Integer, nullable=True)
+    proveedor_catalogo_id = Column(
+        UUID(as_uuid=True), ForeignKey("proveedores_catalogo.id", ondelete="SET NULL"), nullable=True, index=True
+    )
 
     # Control especial para CrediSmart
     ingresa_efectivo = Column(Boolean, default=True, nullable=False)

@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import json
 import time
-from typing import Any, Optional
+from typing import Any, Optional, Union
 from urllib.parse import quote, urlencode
 
 import httpx
@@ -108,6 +108,20 @@ def format_factus_error_for_user(e: FactusAPIError) -> str:
             "(no indica un error de «ciudad» en el software). Suele deberse a un documento previo en cola "
             "ante la DIAN en esa misma cuenta (p. ej. pruebas en sandbox). Reenvíe este mensaje a CDASOFT "
             "para revisar la cuenta Factus; el cajero no debe pasar a facturación manual salvo indicación."
+        )
+        if len(detail) + len(hint) <= 5000:
+            return detail + hint
+    if "dsaj24b" in low or "dv del nit" in low:
+        hint = (
+            " [CDASOFT] Indique el NIT o cédula (como NIT) del proveedor **con guion y dígito de verificación** "
+            "tal como figura en el RUT/DIAN. Si solo pone dígitos, el sistema calcula el DV cuando no hay ambigüedad."
+        )
+        if len(detail) + len(hint) <= 5000:
+            return detail + hint
+    if "dsaj10" in low or "dsaj11" in low:
+        hint = (
+            " [CDASOFT] La DIAN cruza el nombre con el RUT: use la **razón social o nombre completo** exactamente "
+            "como está registrado ante la DIAN (orden de apellidos, tildes, puntos en S.A.S., etc.)."
         )
         if len(detail) + len(hint) <= 5000:
             return detail + hint
@@ -331,6 +345,196 @@ def get_bill_show(
             body=data,
         )
     return data if isinstance(data, dict) else {"raw": data}
+
+
+def validate_support_document(
+    *,
+    base_url: str,
+    access_token: str,
+    body: dict[str, Any],
+    timeout: float = 90.0,
+    max_attempts: int = 3,
+) -> dict[str, Any]:
+    """
+    POST /v1/support-documents/validate — documento soporte en adquisiciones (DIAN).
+    Documentación: https://developers.factus.com.co/v1/documentos-soporte/crear-documento-soporte/
+    """
+    url = f"{base_url.rstrip('/')}/v1/support-documents/validate"
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {access_token}",
+    }
+    for attempt in range(max(1, max_attempts)):
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                r = client.post(url, json=body, headers=headers)
+            data = _safe_json(r)
+            if r.status_code < 400:
+                return data if isinstance(data, dict) else {"raw": data}
+            if r.status_code in _TRANSIENT_VALIDATE_STATUS and attempt < max_attempts - 1:
+                time.sleep(min(2.0 * (attempt + 1), 8.0))
+                continue
+            raise FactusAPIError(
+                "Factus rechazó la validación del documento soporte",
+                status_code=r.status_code,
+                body=data,
+            )
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout) as exc:
+            if attempt < max_attempts - 1:
+                time.sleep(min(2.0 * (attempt + 1), 8.0))
+                continue
+            raise FactusAPIError(
+                f"Red o tiempo de espera con Factus al validar documento soporte ({exc!s})",
+                status_code=504,
+                body=None,
+            ) from exc
+    raise RuntimeError("validate_support_document: no result")  # pragma: no cover
+
+
+def get_support_document_show(
+    *,
+    base_url: str,
+    access_token: str,
+    number: str,
+    timeout: float = 60.0,
+) -> dict[str, Any]:
+    """GET /v1/support-documents/show/:number"""
+    n = quote((number or "").strip(), safe="")
+    url = f"{base_url.rstrip('/')}/v1/support-documents/show/{n}"
+    with httpx.Client(timeout=timeout) as client:
+        r = client.get(
+            url,
+            headers={
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {access_token}",
+            },
+        )
+    data = _safe_json(r)
+    if r.status_code >= 400:
+        raise FactusAPIError(
+            "No se pudo consultar el documento soporte en Factus",
+            status_code=r.status_code,
+            body=data,
+        )
+    return data if isinstance(data, dict) else {"raw": data}
+
+
+def download_support_document_pdf(
+    *,
+    base_url: str,
+    access_token: str,
+    number: str,
+    timeout: float = 120.0,
+) -> Union[dict[str, Any], bytes]:
+    """
+    GET /v1/support-documents/download-pdf/:number.
+    Factus puede responder JSON con base64 o el PDF binario (application/pdf / cuerpo %PDF).
+    """
+    n = quote((number or "").strip(), safe="")
+    url = f"{base_url.rstrip('/')}/v1/support-documents/download-pdf/{n}"
+    with httpx.Client(timeout=timeout) as client:
+        r = client.get(
+            url,
+            headers={
+                "Accept": "application/pdf, application/json, */*",
+                "Authorization": f"Bearer {access_token}",
+            },
+        )
+    if r.status_code >= 400:
+        data = _safe_json(r)
+        raise FactusAPIError(
+            "No se pudo descargar el PDF del documento soporte en Factus",
+            status_code=r.status_code,
+            body=data,
+        )
+    raw = r.content
+    ct = (r.headers.get("content-type") or "").lower()
+    if raw[:4] == b"%PDF" or "application/pdf" in ct:
+        return raw
+    if "octet-stream" in ct and raw[:4] == b"%PDF":
+        return raw
+    data = _safe_json(r)
+    return data if isinstance(data, dict) else {"raw": data}
+
+
+def download_support_document_pdf_resolved(
+    *,
+    base_url: str,
+    access_token: str,
+    numero_documento: Optional[str],
+    factus_document_id: Optional[int],
+    cuds: Optional[str],
+    timeout: float = 120.0,
+) -> Union[dict[str, Any], bytes]:
+    """
+    Intenta GET download-pdf con varios identificadores (número DIAN/prefijo, id Factus, CUDS).
+    Si falla, consulta show con cada candidato y reintenta con el número devuelto.
+    """
+    candidates: list[str] = []
+    for x in (
+        (numero_documento or "").strip() or None,
+        str(factus_document_id) if factus_document_id is not None else None,
+        (cuds or "").strip() or None,
+    ):
+        if x and x not in candidates:
+            candidates.append(x)
+    if not candidates:
+        raise FactusAPIError(
+            "No hay número ni id Factus guardados para descargar el PDF del documento soporte.",
+            status_code=404,
+            body=None,
+        )
+    last_err: Optional[FactusAPIError] = None
+    for cand in candidates:
+        try:
+            out = download_support_document_pdf(
+                base_url=base_url, access_token=access_token, number=cand, timeout=timeout
+            )
+            return out
+        except FactusAPIError as e:
+            last_err = e
+    # Fallback: show → número canónico
+    for cand in candidates:
+        try:
+            show = get_support_document_show(
+                base_url=base_url, access_token=access_token, number=cand, timeout=timeout
+            )
+            inner = show.get("data") if isinstance(show.get("data"), dict) else show
+            if not isinstance(inner, dict):
+                continue
+            doc = inner.get("support_document") or inner.get("supportDocument") or inner.get("document")
+            block = doc if isinstance(doc, dict) else inner
+            if not isinstance(block, dict):
+                continue
+            num = (
+                block.get("number")
+                or block.get("document_number")
+                or block.get("consecutive")
+                or inner.get("number")
+            )
+            if num is None:
+                continue
+            ns = str(num).strip()
+            if not ns or ns in candidates:
+                continue
+            try:
+                out = download_support_document_pdf(
+                    base_url=base_url, access_token=access_token, number=ns, timeout=timeout
+                )
+                return out
+            except FactusAPIError as e:
+                last_err = e
+        except FactusAPIError as e:
+            last_err = e
+    if last_err:
+        raise last_err
+    raise FactusAPIError(
+        "No se pudo descargar el PDF del documento soporte con los identificadores guardados.",
+        status_code=502,
+        body=None,
+    )
 
 
 def _safe_json(r: httpx.Response) -> Any:

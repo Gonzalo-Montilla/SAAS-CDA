@@ -3,6 +3,7 @@ Utilidades para Auditoría
 """
 from __future__ import annotations
 
+import logging
 from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
@@ -14,6 +15,8 @@ from sqlalchemy.orm import Session
 
 from app.models.audit_log import AuditLog, AuditAction
 from app.models.usuario import Usuario
+
+_audit_logger = logging.getLogger(__name__)
 
 
 def _sanitize_for_json(value: Any) -> Any:
@@ -108,14 +111,18 @@ def audit_login_success(
     request: Request
 ):
     """Auditar login exitoso"""
-    create_audit_log(
-        db=db,
-        action=AuditAction.LOGIN,
-        description=f"Login exitoso: {usuario.email}",
-        usuario=usuario,
-        request=request,
-        success="success"
-    )
+    try:
+        create_audit_log(
+            db=db,
+            action=AuditAction.LOGIN,
+            description=f"Login exitoso: {usuario.email}",
+            usuario=usuario,
+            request=request,
+            success="success",
+        )
+    except Exception:
+        db.rollback()
+        _audit_logger.exception("audit_login_success: fallo al escribir audit_logs (login sigue válido)")
 
 
 def audit_login_failed(
@@ -125,15 +132,19 @@ def audit_login_failed(
     reason: str = "Credenciales incorrectas"
 ):
     """Auditar intento de login fallido"""
-    create_audit_log(
-        db=db,
-        action=AuditAction.FAILED_LOGIN,
-        description=f"Intento de login fallido: {email}",
-        usuario=None,
-        request=request,
-        metadata={"email": email, "reason": reason},
-        success="failed"
-    )
+    try:
+        create_audit_log(
+            db=db,
+            action=AuditAction.FAILED_LOGIN,
+            description=f"Intento de login fallido: {email}",
+            usuario=None,
+            request=request,
+            metadata={"email": email, "reason": reason},
+            success="failed",
+        )
+    except Exception:
+        db.rollback()
+        _audit_logger.exception("audit_login_failed: fallo al escribir audit_logs")
 
 
 def audit_caja_operation(

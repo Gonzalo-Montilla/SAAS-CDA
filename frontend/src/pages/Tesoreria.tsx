@@ -7,6 +7,9 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import ContadorEfectivo, { type DesgloseEfectivo } from '../components/ContadorEfectivo';
 import NotificacionesCierreCaja from '../components/NotificacionesCierreCaja';
 import { tesoreriaApi } from '../api/tesoreria';
+import { factusApi } from '../api/factus';
+import { proveedoresCatalogoApi } from '../api/proveedoresCatalogo';
+import ProveedorCatalogoPicker from '../components/ProveedorCatalogoPicker';
 import { formatCurrency } from '../utils/formatNumber';
 import {
   Vault,
@@ -31,8 +34,8 @@ import {
 
 /** Valores alineados con el backend (`BENEFICIARIO_TIPOS_IDENTIFICACION_TESORERIA`). */
 const TIPOS_IDENTIFICACION_BENEFICIARIO_TESORERIA = [
-  'C.C',
   'NIT',
+  'C.C',
   'TARJETA DE IDENTIDAD',
   'C.E',
   'PASAPORTE',
@@ -493,16 +496,43 @@ function RegistrarMovimiento() {
   const queryClient = useQueryClient();
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [tipoMovimiento, setTipoMovimiento] = useState<'ingreso' | 'egreso'>('egreso');
+  const { data: factusCfg } = useQuery({
+    queryKey: ['factus-settings'],
+    queryFn: () => factusApi.getSettings(),
+    staleTime: 60_000,
+  });
+  const { data: proveedoresCatalogo = [] } = useQuery({
+    queryKey: ['proveedores-catalogo'],
+    queryFn: () => proveedoresCatalogoApi.listar(true),
+    staleTime: 30_000,
+  });
   const [formData, setFormData] = useState({
     categoria: '',
     monto: '',
     concepto: '',
+    proveedor_catalogo_id: '',
     beneficiario: '',
     beneficiario_tipo_identificacion: '',
     beneficiario_numero_identificacion: '',
+    beneficiario_direccion: '',
+    beneficiario_email: '',
+    beneficiario_telefono: '',
+    beneficiario_factus_municipality_id: '',
     metodo_pago: 'efectivo',
     numero_comprobante: '',
   });
+
+  const usarCatalogoProveedor = formData.proveedor_catalogo_id.trim().length > 0;
+  const proveedorDatosCompletos =
+    tipoMovimiento !== 'egreso' ||
+    usarCatalogoProveedor ||
+    (formData.beneficiario.trim().length >= 2 &&
+      Boolean(formData.beneficiario_tipo_identificacion.trim()) &&
+      formData.beneficiario_numero_identificacion.trim().length >= 4 &&
+      formData.beneficiario_direccion.trim().length >= 8 &&
+      formData.beneficiario_email.trim().includes('@') &&
+      formData.beneficiario_telefono.replace(/\D/g, '').length >= 7 &&
+      formData.beneficiario_factus_municipality_id.trim().length > 0);
   const [desgloseEfectivo, setDesgloseEfectivo] = useState<DesgloseEfectivo | null>(null);
 
   const [modalConfirmar, setModalConfirmar] = useState<{
@@ -561,9 +591,14 @@ function RegistrarMovimiento() {
         categoria: '',
         monto: '',
         concepto: '',
+        proveedor_catalogo_id: '',
         beneficiario: '',
         beneficiario_tipo_identificacion: '',
         beneficiario_numero_identificacion: '',
+        beneficiario_direccion: '',
+        beneficiario_email: '',
+        beneficiario_telefono: '',
+        beneficiario_factus_municipality_id: '',
         metodo_pago: 'efectivo',
         numero_comprobante: '',
       });
@@ -648,7 +683,7 @@ function RegistrarMovimiento() {
       }
     }
 
-    if (tipoMovimiento === 'egreso') {
+    if (tipoMovimiento === 'egreso' && !formData.proveedor_catalogo_id.trim()) {
       const ben = formData.beneficiario.trim();
       const tid = formData.beneficiario_tipo_identificacion.trim();
       const numId = formData.beneficiario_numero_identificacion.trim();
@@ -673,6 +708,42 @@ function RegistrarMovimiento() {
         });
         return;
       }
+      const dir = formData.beneficiario_direccion.trim();
+      if (dir.length < 8) {
+        setFeedback({
+          type: 'error',
+          message: 'Indique la dirección del proveedor (mínimo 8 caracteres), requerida para documento soporte DIAN.',
+        });
+        return;
+      }
+      const em = formData.beneficiario_email.trim().toLowerCase();
+      const at = em.indexOf('@');
+      if (at < 1) {
+        setFeedback({ type: 'error', message: 'Indique un correo electrónico válido del proveedor.' });
+        return;
+      }
+      const dom = em.slice(at + 1);
+      if (!dom.includes('.') || dom.length < 3) {
+        setFeedback({ type: 'error', message: 'Indique un correo electrónico válido del proveedor.' });
+        return;
+      }
+      const tel = formData.beneficiario_telefono.replace(/\D/g, '');
+      if (tel.length < 7) {
+        setFeedback({
+          type: 'error',
+          message: 'Indique celular o teléfono del proveedor (mínimo 7 dígitos).',
+        });
+        return;
+      }
+      const midStr = formData.beneficiario_factus_municipality_id.trim();
+      const mid = midStr ? parseInt(midStr, 10) : NaN;
+      if (!midStr || Number.isNaN(mid) || mid < 1) {
+        setFeedback({
+          type: 'error',
+          message: 'Seleccione o indique el id de municipio del proveedor en Factus.',
+        });
+        return;
+      }
     }
 
     const data: Record<string, unknown> = {
@@ -685,9 +756,21 @@ function RegistrarMovimiento() {
     };
 
     if (tipoMovimiento === 'egreso') {
-      data.beneficiario = formData.beneficiario.trim();
-      data.beneficiario_tipo_identificacion = formData.beneficiario_tipo_identificacion.trim();
-      data.beneficiario_numero_identificacion = formData.beneficiario_numero_identificacion.trim();
+      const pid = formData.proveedor_catalogo_id.trim();
+      if (pid) {
+        data.proveedor_catalogo_id = pid;
+      } else {
+        data.beneficiario = formData.beneficiario.trim();
+        data.beneficiario_tipo_identificacion = formData.beneficiario_tipo_identificacion.trim();
+        data.beneficiario_numero_identificacion = formData.beneficiario_numero_identificacion.trim();
+        data.beneficiario_direccion = formData.beneficiario_direccion.trim();
+        data.beneficiario_email = formData.beneficiario_email.trim().toLowerCase();
+        data.beneficiario_telefono = formData.beneficiario_telefono.trim();
+        data.beneficiario_factus_municipality_id = parseInt(
+          formData.beneficiario_factus_municipality_id.trim(),
+          10,
+        );
+      }
     }
     
     // Incluir desglose si es efectivo
@@ -721,7 +804,14 @@ function RegistrarMovimiento() {
       },
     ];
     if (tipoMovimiento === 'egreso') {
-      resumen.push({ label: 'Beneficiario / Pagado a', value: formData.beneficiario.trim() });
+      if (formData.proveedor_catalogo_id.trim()) {
+        resumen.push({
+          label: 'Proveedor',
+          value: `Catálogo · ${formData.beneficiario.trim() || '—'}`,
+        });
+      } else {
+        resumen.push({ label: 'Beneficiario / Pagado a', value: formData.beneficiario.trim() });
+      }
       resumen.push({
         label: 'Tipo de identificación',
         value: formData.beneficiario_tipo_identificacion.trim(),
@@ -729,6 +819,13 @@ function RegistrarMovimiento() {
       resumen.push({
         label: 'No. identificación',
         value: formData.beneficiario_numero_identificacion.trim(),
+      });
+      resumen.push({ label: 'Dirección proveedor', value: formData.beneficiario_direccion.trim() });
+      resumen.push({ label: 'Correo proveedor', value: formData.beneficiario_email.trim().toLowerCase() });
+      resumen.push({ label: 'Teléfono proveedor', value: formData.beneficiario_telefono.trim() });
+      resumen.push({
+        label: 'Municipio Factus (id)',
+        value: formData.beneficiario_factus_municipality_id.trim(),
       });
     }
     resumen.push({ label: 'Concepto / Detalle', value: formData.concepto.trim() });
@@ -910,6 +1007,33 @@ function RegistrarMovimiento() {
           {/* Beneficiario (solo para egresos) */}
           {tipoMovimiento === 'egreso' && (
             <>
+              <div className="mb-6 rounded-xl border border-indigo-200 bg-indigo-50/60 p-4">
+                <label className="block text-sm font-bold text-slate-900 mb-1">
+                  Proveedor del catálogo (recomendado)
+                </label>
+                <ProveedorCatalogoPicker
+                  proveedores={proveedoresCatalogo}
+                  selectedId={formData.proveedor_catalogo_id}
+                  onSelect={(p) =>
+                    setFormData((f) => ({
+                      ...f,
+                      proveedor_catalogo_id: p.id,
+                      beneficiario: p.razon_social_rut,
+                      beneficiario_tipo_identificacion: p.tipo_identificacion,
+                      beneficiario_numero_identificacion: p.numero_identificacion,
+                      beneficiario_direccion: p.direccion,
+                      beneficiario_email: p.email,
+                      beneficiario_telefono: p.telefono,
+                      beneficiario_factus_municipality_id: String(p.factus_municipality_id),
+                    }))
+                  }
+                  onClear={() => setFormData((f) => ({ ...f, proveedor_catalogo_id: '' }))}
+                  inputClassName="input-pos"
+                />
+                <p className="text-xs text-slate-600 mt-2">
+                  Busque por nombre, alias o documento. Sin proveedor del catálogo, use la captura manual del RUT.
+                </p>
+              </div>
               <div className="mb-6">
                 <label className="block text-lg font-bold text-slate-900 mb-3">
                   Beneficiario / Pagado a
@@ -921,7 +1045,8 @@ function RegistrarMovimiento() {
                   className="input-pos"
                   placeholder="Nombre de la persona o entidad"
                   minLength={2}
-                  required
+                  required={!usarCatalogoProveedor}
+                  readOnly={usarCatalogoProveedor}
                 />
               </div>
               <div className="mb-6">
@@ -934,7 +1059,8 @@ function RegistrarMovimiento() {
                     setFormData({ ...formData, beneficiario_tipo_identificacion: e.target.value })
                   }
                   className="input-pos"
-                  required
+                  required={!usarCatalogoProveedor}
+                  disabled={usarCatalogoProveedor}
                 >
                   <option value="">Selecciona un tipo</option>
                   {TIPOS_IDENTIFICACION_BENEFICIARIO_TESORERIA.map((t) => (
@@ -960,11 +1086,84 @@ function RegistrarMovimiento() {
                   placeholder="Ej: 1234567890, 900.123.456-7"
                   minLength={4}
                   maxLength={80}
-                  required
+                  required={!usarCatalogoProveedor}
+                  readOnly={usarCatalogoProveedor}
                 />
                 <p className="text-xs text-slate-500 mt-1">
-                  Cédula, NIT u otro número según el tipo elegido (no uses este campo en el concepto).
+                  C.C./T.I.: si hay dos DV posibles, deberá usar guion como en el RUT. NIT empresa sin ambigüedad puede ir
+                  solo dígitos. El PDF puede decir «NIT». No uses este campo en el concepto.
                 </p>
+              </div>
+              <div className="mb-6 rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-4">
+                <p className="text-sm font-bold text-slate-900">
+                  Datos del proveedor para documento soporte (DIAN / Factus)
+                </p>
+                <p className="text-xs text-slate-600">
+                  Nombre y documento deben coincidir con el <strong>RUT</strong> del proveedor ante la DIAN.
+                </p>
+                <div>
+                  <label className="block text-sm font-bold text-slate-900 mb-1">Dirección completa</label>
+                  <textarea
+                    value={formData.beneficiario_direccion}
+                    onChange={(e) => setFormData({ ...formData, beneficiario_direccion: e.target.value })}
+                    className="input-pos min-h-[72px]"
+                    placeholder="Calle, número, barrio, ciudad…"
+                    minLength={8}
+                    required={!usarCatalogoProveedor}
+                    readOnly={usarCatalogoProveedor}
+                  />
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-sm font-bold text-slate-900 mb-1">Correo electrónico</label>
+                    <input
+                      type="email"
+                      autoComplete="off"
+                      value={formData.beneficiario_email}
+                      onChange={(e) => setFormData({ ...formData, beneficiario_email: e.target.value })}
+                      className="input-pos"
+                      placeholder="proveedor@ejemplo.com"
+                      required={!usarCatalogoProveedor}
+                      readOnly={usarCatalogoProveedor}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-bold text-slate-900 mb-1">Celular o teléfono</label>
+                    <input
+                      type="tel"
+                      inputMode="tel"
+                      value={formData.beneficiario_telefono}
+                      onChange={(e) => setFormData({ ...formData, beneficiario_telefono: e.target.value })}
+                      className="input-pos"
+                      placeholder="Mínimo 7 dígitos"
+                      required={!usarCatalogoProveedor}
+                      readOnly={usarCatalogoProveedor}
+                    />
+                  </div>
+                </div>
+                <div>
+                  <label className="block text-sm font-bold text-slate-900 mb-1">
+                    Id municipio Factus del proveedor
+                  </label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    className="input-pos"
+                    placeholder="Ej: 1097"
+                    value={formData.beneficiario_factus_municipality_id}
+                    onChange={(e) => {
+                      const idDigits = e.target.value.replace(/\D/g, '').slice(0, 8);
+                      setFormData((f) => ({ ...f, beneficiario_factus_municipality_id: idDigits }));
+                    }}
+                    disabled={factusCfg?.modo !== 'factus' || usarCatalogoProveedor}
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Con proveedor del catálogo el id viene del registro guardado. Sin catálogo, use el mismo id numérico de
+                    Factus que en Organización (no el código DIAN); en modo manual puede pegar el id que indique
+                    administración.
+                  </p>
+                </div>
               </div>
             </>
           )}
@@ -1058,9 +1257,14 @@ function RegistrarMovimiento() {
                 categoria: '',
                 monto: '',
                 concepto: '',
+                proveedor_catalogo_id: '',
                 beneficiario: '',
                 beneficiario_tipo_identificacion: '',
                 beneficiario_numero_identificacion: '',
+                beneficiario_direccion: '',
+                beneficiario_email: '',
+                beneficiario_telefono: '',
+                beneficiario_factus_municipality_id: '',
                 metodo_pago: 'efectivo',
                 numero_comprobante: '',
               })}
@@ -1074,13 +1278,10 @@ function RegistrarMovimiento() {
               disabled={
                 registrarMutation.isLoading ||
                 !!modalConfirmar ||
-                (tipoMovimiento === 'egreso' &&
-                  (formData.beneficiario.trim().length < 2 ||
-                    !formData.beneficiario_tipo_identificacion.trim() ||
-                    formData.beneficiario_numero_identificacion.trim().length < 4 ||
-                    formData.concepto.trim().length < 5 ||
-                    !formData.categoria ||
-                    !formData.monto))
+                !formData.monto ||
+                !formData.categoria ||
+                formData.concepto.trim().length < 5 ||
+                (tipoMovimiento === 'egreso' && !proveedorDatosCompletos)
               }
               className="flex-1 btn-pos btn-primary disabled:opacity-50 flex items-center justify-center gap-2"
             >
@@ -1268,6 +1469,10 @@ function Historial() {
         'Beneficiario': mov.beneficiario || '',
         'Tipo identificación': mov.beneficiario_tipo_identificacion || '',
         'No. identificación': mov.beneficiario_numero_identificacion || '',
+        'Dirección proveedor': mov.beneficiario_direccion || '',
+        'Correo proveedor': mov.beneficiario_email || '',
+        'Teléfono proveedor': mov.beneficiario_telefono || '',
+        'Municipio Factus proveedor': mov.beneficiario_factus_municipality_id ?? '',
         'Concepto': mov.concepto,
         'Método de Pago': mov.metodo_pago,
         'Monto': mov.monto,

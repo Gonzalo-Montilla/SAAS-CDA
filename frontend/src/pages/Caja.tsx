@@ -7,6 +7,8 @@ import { cajasApi } from '../api/cajas';
 import { vehiculosApi } from '../api/vehiculos';
 import { configApi } from '../api/config';
 import { factusApi } from '../api/factus';
+import { proveedoresCatalogoApi } from '../api/proveedoresCatalogo';
+import ProveedorCatalogoPicker from '../components/ProveedorCatalogoPicker';
 import { useAuth } from '../contexts/AuthContext';
 import { useBrand } from '../contexts/BrandContext';
 import { useToast } from '../contexts/ToastContext';
@@ -60,9 +62,10 @@ const formatLocalDate = (d: Date): string => {
 };
 
 /** Mismos valores que tesorería / backend `BENEFICIARIO_TIPOS_IDENTIFICACION_TESORERIA`. */
+/** NIT primero por uso frecuente en proveedores jurídicos. */
 const TIPOS_IDENTIFICACION_BENEFICIARIO_CAJA = [
-  'C.C',
   'NIT',
+  'C.C',
   'TARJETA DE IDENTIDAD',
   'C.E',
   'PASAPORTE',
@@ -1618,16 +1621,41 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
   const { showToast } = useToast();
   const formRef = useRef<HTMLFormElement>(null);
   const montoInputRef = useRef<HTMLInputElement>(null);
+  const { data: factusCfg } = useQuery({
+    queryKey: ['factus-settings'],
+    queryFn: () => factusApi.getSettings(),
+    staleTime: 60_000,
+  });
+  const { data: proveedoresCatalogo = [] } = useQuery({
+    queryKey: ['proveedores-catalogo'],
+    queryFn: () => proveedoresCatalogoApi.listar(true),
+    staleTime: 30_000,
+  });
   const [formData, setFormData] = useState({
     tipo: 'gasto',
     monto: '',
     concepto: '',
+    proveedor_catalogo_id: '',
     beneficiario: '',
     beneficiario_tipo_identificacion: '',
     beneficiario_numero_identificacion: '',
+    beneficiario_direccion: '',
+    beneficiario_email: '',
+    beneficiario_telefono: '',
+    beneficiario_factus_municipality_id: '',
   });
   const [mostrarExito, setMostrarExito] = useState(false);
   const [nombreArchivoPDF, setNombreArchivoPDF] = useState('');
+
+  const usarCatalogoProveedor = formData.proveedor_catalogo_id.trim().length > 0;
+  const proveedorDatosCompletos =
+    usarCatalogoProveedor ||
+    (formData.beneficiario.trim().length >= 2 &&
+      Boolean(formData.beneficiario_tipo_identificacion.trim()) &&
+      formData.beneficiario_numero_identificacion.trim().length >= 4 &&
+      formData.beneficiario_direccion.trim().length >= 8 &&
+      formData.beneficiario_email.trim().includes('@') &&
+      formData.beneficiario_telefono.replace(/\D/g, '').length >= 7);
 
   const registrarGastoMutation = useMutation({
     mutationFn: cajasApi.crearMovimiento,
@@ -1662,20 +1690,45 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
     e.preventDefault();
 
     const monto = parseFloat(formData.monto);
-    const ben = formData.beneficiario.trim();
-    const tid = formData.beneficiario_tipo_identificacion.trim();
-    if (ben.length < 2) {
-      window.alert('Indica el beneficiario / pagado a (mínimo 2 caracteres).');
-      return;
-    }
-    if (!tid) {
-      window.alert('Selecciona el tipo de identificación del beneficiario.');
-      return;
-    }
-    const numId = formData.beneficiario_numero_identificacion.trim();
-    if (numId.length < 4) {
-      window.alert('Indica el número de identificación del beneficiario (mínimo 4 caracteres).');
-      return;
+    const catalogId = formData.proveedor_catalogo_id.trim();
+
+    if (!catalogId) {
+      const ben = formData.beneficiario.trim();
+      const tid = formData.beneficiario_tipo_identificacion.trim();
+      if (ben.length < 2) {
+        window.alert('Indica el beneficiario / pagado a (mínimo 2 caracteres).');
+        return;
+      }
+      if (!tid) {
+        window.alert('Selecciona el tipo de identificación del beneficiario.');
+        return;
+      }
+      const numId = formData.beneficiario_numero_identificacion.trim();
+      if (numId.length < 4) {
+        window.alert('Indica el número de identificación del beneficiario (mínimo 4 caracteres).');
+        return;
+      }
+      const dir = formData.beneficiario_direccion.trim();
+      if (dir.length < 8) {
+        window.alert('Indica la dirección del proveedor o beneficiario (mínimo 8 caracteres), requerida para documento soporte DIAN.');
+        return;
+      }
+      const em = formData.beneficiario_email.trim().toLowerCase();
+      const at = em.indexOf('@');
+      if (at < 1) {
+        window.alert('Indique un correo electrónico válido del proveedor.');
+        return;
+      }
+      const dom = em.slice(at + 1);
+      if (!dom.includes('.') || dom.length < 3) {
+        window.alert('Indique un correo electrónico válido del proveedor.');
+        return;
+      }
+      const tel = formData.beneficiario_telefono.replace(/\D/g, '');
+      if (tel.length < 7) {
+        window.alert('Indique celular o teléfono del proveedor (mínimo 7 dígitos).');
+        return;
+      }
     }
 
     // Confirmación para gastos grandes (>$50,000)
@@ -1692,8 +1745,27 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
     
     // Convertir monto a negativo para egresos
     const montoNegativo = -Math.abs(monto);
-    
-    registrarGastoMutation.mutate({
+
+    if (catalogId) {
+      registrarGastoMutation.mutate({
+        tipo: formData.tipo,
+        monto: montoNegativo,
+        concepto: formData.concepto,
+        metodo_pago: 'efectivo',
+        ingresa_efectivo: false,
+        proveedor_catalogo_id: catalogId,
+      });
+      return;
+    }
+
+    const ben = formData.beneficiario.trim();
+    const tid = formData.beneficiario_tipo_identificacion.trim();
+    const numId = formData.beneficiario_numero_identificacion.trim();
+    const dir = formData.beneficiario_direccion.trim();
+    const em = formData.beneficiario_email.trim().toLowerCase();
+    const midStr = formData.beneficiario_factus_municipality_id.trim();
+    const midParsed = midStr ? parseInt(midStr, 10) : NaN;
+    const payloadManual: Parameters<typeof cajasApi.crearMovimiento>[0] = {
       tipo: formData.tipo,
       monto: montoNegativo,
       concepto: formData.concepto,
@@ -1702,7 +1774,15 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
       beneficiario: ben,
       beneficiario_tipo_identificacion: tid,
       beneficiario_numero_identificacion: numId,
-    });
+      beneficiario_direccion: dir,
+      beneficiario_email: em,
+      beneficiario_telefono: formData.beneficiario_telefono.trim(),
+    };
+    if (Number.isFinite(midParsed) && midParsed >= 1) {
+      payloadManual.beneficiario_factus_municipality_id = midParsed;
+    }
+
+    registrarGastoMutation.mutate(payloadManual);
   };
 
   useEffect(() => {
@@ -1734,19 +1814,17 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
 
   const getTipoGastoStyles = (tipoId: string) => {
     const isSelected = formData.tipo === tipoId;
-    
     const styles: Record<string, string> = {
-      gasto: isSelected 
-        ? 'border-red-600 bg-red-50 text-red-900 scale-105' 
-        : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400',
-      devolucion: isSelected 
-        ? 'border-orange-600 bg-orange-50 text-orange-900 scale-105' 
-        : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400',
-      ajuste: isSelected 
-        ? 'border-blue-600 bg-blue-50 text-blue-900 scale-105' 
-        : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400',
+      gasto: isSelected
+        ? 'border-red-500 bg-red-50/80 text-red-900 shadow-sm'
+        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300',
+      devolucion: isSelected
+        ? 'border-amber-500 bg-amber-50/80 text-amber-900 shadow-sm'
+        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300',
+      ajuste: isSelected
+        ? 'border-sky-500 bg-sky-50/80 text-sky-900 shadow-sm'
+        : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300',
     };
-    
     return styles[tipoId] || '';
   };
 
@@ -1810,87 +1888,114 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="modal-panel max-w-4xl w-full">
-        <div className="p-6">
-          {/* Header */}
-          <div className="modal-header-sticky -mx-6 px-6 pt-1 pb-4 flex justify-between items-start mb-6 border-b border-slate-200">
+      <div className="modal-panel max-w-3xl w-full max-h-[92vh] overflow-y-auto">
+        <div className="p-5 sm:p-6">
+          <div className="modal-header-sticky -mx-5 sm:-mx-6 px-5 sm:px-6 pt-0 pb-3 flex justify-between items-start gap-3 mb-4 border-b border-slate-200">
             <div>
-              <h3 className="text-3xl font-bold text-slate-900 flex items-center gap-2">
-                <ArrowRight className="w-8 h-8" />
-                Registrar Gasto
+              <h3 className="text-xl sm:text-2xl font-bold text-slate-900 flex items-center gap-2">
+                <ArrowRight className="w-6 h-6 sm:w-7 sm:h-7 shrink-0 text-slate-600" />
+                Registrar gasto
               </h3>
-              <p className="text-sm text-slate-600 mt-1">Registra salidas de efectivo de la caja</p>
+              <p className="text-xs text-slate-500 mt-0.5">Salida de efectivo de la caja</p>
             </div>
             <button
+              type="button"
               onClick={onClose}
-              className="h-10 w-10 rounded-lg border border-slate-300 text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition flex items-center justify-center text-2xl"
+              className="h-9 w-9 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 text-xl leading-none shrink-0"
+              aria-label="Cerrar"
             >
               ×
             </button>
           </div>
 
           {registrarGastoMutation.isError && (
-            <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6">
-              <p className="text-red-800 font-semibold text-center flex items-center justify-center gap-2">
-                <XCircle className="w-5 h-5" />
-                {(registrarGastoMutation.error as Error & { response?: { data?: { detail?: string } } })?.response?.data?.detail || 'No fue posible registrar el gasto.'}
+            <div className="bg-red-50 border border-red-200 rounded-lg px-3 py-2.5 mb-4">
+              <p className="text-sm text-red-800 flex items-start gap-2">
+                <XCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <span>
+                  {(registrarGastoMutation.error as Error & { response?: { data?: { detail?: string } } })?.response
+                    ?.data?.detail || 'No fue posible registrar el gasto.'}
+                </span>
               </p>
             </div>
           )}
 
           <form ref={formRef} onSubmit={handleSubmit}>
-            {/* Tipo de Movimiento */}
-            <div className="mb-6">
-              <label className="block text-lg font-bold text-slate-900 mb-3 flex items-center gap-2">
-                <FileText className="w-5 h-5" />
-                Tipo de Movimiento
-              </label>
-              <div className="grid grid-cols-3 gap-3">
+            <div className="mb-4 rounded-lg border border-slate-200 bg-white p-3">
+              <label className="block text-xs font-semibold text-slate-700 mb-1.5">Proveedor del catálogo</label>
+              <ProveedorCatalogoPicker
+                proveedores={proveedoresCatalogo}
+                selectedId={formData.proveedor_catalogo_id}
+                onSelect={(p) =>
+                  setFormData((f) => ({
+                    ...f,
+                    proveedor_catalogo_id: p.id,
+                    beneficiario: p.razon_social_rut,
+                    beneficiario_tipo_identificacion: p.tipo_identificacion,
+                    beneficiario_numero_identificacion: p.numero_identificacion,
+                    beneficiario_direccion: p.direccion,
+                    beneficiario_email: p.email,
+                    beneficiario_telefono: p.telefono,
+                    beneficiario_factus_municipality_id: String(p.factus_municipality_id),
+                  }))
+                }
+                onClear={() =>
+                  setFormData((f) => ({
+                    ...f,
+                    proveedor_catalogo_id: '',
+                  }))
+                }
+                inputClassName="input-pos"
+              />
+              <p className="text-[11px] text-slate-500 mt-1.5">Opcional: autocompleta datos si ya está en catálogo.</p>
+            </div>
+
+            <div className="mb-4">
+              <span className="text-xs font-semibold text-slate-700">Tipo</span>
+              <div className="flex flex-wrap gap-2 mt-1.5">
                 {tiposGasto.map((tipo) => (
                   <button
                     key={tipo.id}
                     type="button"
+                    title={tipo.descripcion}
                     onClick={() => setFormData({ ...formData, tipo: tipo.id })}
-                    className={`p-4 rounded-lg border-2 font-semibold transition-all ${getTipoGastoStyles(tipo.id)}`}
+                    className={`inline-flex items-center gap-2 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${getTipoGastoStyles(
+                      tipo.id,
+                    )}`}
                   >
-                    <div className="flex justify-center mb-2">
-                      <tipo.Icono className="w-8 h-8" />
-                    </div>
-                    <div className="font-bold mb-1">{tipo.nombre}</div>
-                    <div className="text-xs opacity-75">{tipo.descripcion}</div>
+                    <tipo.Icono className="w-4 h-4 shrink-0 opacity-80" />
+                    {tipo.nombre}
                   </button>
                 ))}
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 mb-6">
-              <div>
-                <label className="block text-lg font-bold text-slate-900 mb-3">
-                  Beneficiario / Pagado a
-                </label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Beneficiario / pagado a</label>
                 <input
                   type="text"
                   value={formData.beneficiario}
                   onChange={(e) => setFormData({ ...formData, beneficiario: e.target.value })}
                   className="input-pos"
-                  placeholder="Nombre de la persona o entidad"
+                  placeholder="Nombre o razón social"
                   minLength={2}
-                  required
+                  required={!usarCatalogoProveedor}
+                  readOnly={usarCatalogoProveedor}
                 />
               </div>
               <div>
-                <label className="block text-lg font-bold text-slate-900 mb-3">
-                  Tipo de identificación
-                </label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Tipo ID</label>
                 <select
                   value={formData.beneficiario_tipo_identificacion}
                   onChange={(e) =>
                     setFormData({ ...formData, beneficiario_tipo_identificacion: e.target.value })
                   }
                   className="input-pos"
-                  required
+                  required={!usarCatalogoProveedor}
+                  disabled={usarCatalogoProveedor}
                 >
-                  <option value="">Selecciona un tipo</option>
+                  <option value="">Elegir…</option>
                   {TIPOS_IDENTIFICACION_BENEFICIARIO_CAJA.map((t) => (
                     <option key={t} value={t}>
                       {t}
@@ -1898,45 +2003,105 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
                   ))}
                 </select>
               </div>
-              <div className="md:col-span-2 xl:col-span-1">
-                <label className="block text-lg font-bold text-slate-900 mb-3">
-                  Número de identificación
-                </label>
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Número</label>
                 <input
                   type="text"
                   inputMode="text"
                   autoComplete="off"
+                  title="Como en el RUT; si el sistema pide DV con guion, ej. 1113695964-1"
                   value={formData.beneficiario_numero_identificacion}
                   onChange={(e) =>
                     setFormData({ ...formData, beneficiario_numero_identificacion: e.target.value })
                   }
                   className="input-pos"
-                  placeholder="Ej: 1234567890, 900.123.456-7"
+                  placeholder="Documento"
                   minLength={4}
                   maxLength={80}
-                  required
+                  required={!usarCatalogoProveedor}
+                  readOnly={usarCatalogoProveedor}
                 />
-                <p className="text-xs text-slate-500 mt-1">
-                  Cédula, NIT u otro número según el tipo (no lo repitas en el concepto).
-                </p>
               </div>
             </div>
 
-            <div className="grid grid-cols-1 xl:grid-cols-5 gap-4 mb-6">
-              {/* Monto */}
-              <div className="xl:col-span-2">
-                <label className="block text-lg font-bold text-slate-900 mb-3 flex items-center gap-2">
-                  <DollarSign className="w-5 h-5" />
-                  Monto del Gasto
+            <div className="mb-4 rounded-lg border border-slate-100 bg-slate-50/50 p-3 space-y-3">
+              <p className="text-xs font-semibold text-slate-600">Contacto del beneficiario</p>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">Dirección</label>
+                <textarea
+                  value={formData.beneficiario_direccion}
+                  onChange={(e) => setFormData({ ...formData, beneficiario_direccion: e.target.value })}
+                  className="input-pos min-h-[64px] text-sm"
+                  placeholder="Dirección completa"
+                  minLength={8}
+                  required={!usarCatalogoProveedor}
+                  readOnly={usarCatalogoProveedor}
+                />
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Correo</label>
+                  <input
+                    type="email"
+                    autoComplete="off"
+                    value={formData.beneficiario_email}
+                    onChange={(e) => setFormData({ ...formData, beneficiario_email: e.target.value })}
+                    className="input-pos text-sm"
+                    placeholder="correo@ejemplo.com"
+                    required={!usarCatalogoProveedor}
+                    readOnly={usarCatalogoProveedor}
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-600 mb-1">Teléfono</label>
+                  <input
+                    type="tel"
+                    inputMode="tel"
+                    value={formData.beneficiario_telefono}
+                    onChange={(e) => setFormData({ ...formData, beneficiario_telefono: e.target.value })}
+                    className="input-pos text-sm"
+                    placeholder="Mín. 7 dígitos"
+                    required={!usarCatalogoProveedor}
+                    readOnly={usarCatalogoProveedor}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1">
+                  Municipio Factus (id){' '}
+                  <span className="font-normal text-slate-400">— opcional manual</span>
+                </label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  autoComplete="off"
+                  title="Necesario solo si luego emite documento soporte; mismo id que en Organización."
+                  className="input-pos text-sm"
+                  placeholder="Ej. 1097"
+                  value={formData.beneficiario_factus_municipality_id}
+                  onChange={(e) => {
+                    const idDigits = e.target.value.replace(/\D/g, '').slice(0, 8);
+                    setFormData((f) => ({ ...f, beneficiario_factus_municipality_id: idDigits }));
+                  }}
+                  disabled={factusCfg?.modo !== 'factus' || usarCatalogoProveedor}
+                />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-5 gap-4 mb-4">
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
+                  <DollarSign className="w-3.5 h-3.5" />
+                  Monto
                 </label>
                 <div className="relative">
-                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-3xl font-bold text-slate-400">$</span>
+                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-xl font-bold text-slate-400">$</span>
                   <input
                     type="number"
                     value={formData.monto}
                     onChange={(e) => setFormData({ ...formData, monto: e.target.value })}
                     ref={montoInputRef}
-                    className="input-pos text-3xl text-center font-bold pl-12"
+                    className="input-pos text-2xl text-center font-bold pl-10 py-2.5"
                     placeholder="0"
                     step="any"
                     min="1"
@@ -1944,73 +2109,50 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
                   />
                 </div>
                 {montoNumerico > 0 && (
-                  <div className="mt-3 p-3 bg-red-50 border border-red-200 rounded-lg">
-                    <p className="text-sm text-red-800 text-center flex items-center justify-center gap-2">
-                      <AlertTriangle className="w-5 h-5" />
-                      Este monto <strong>saldrá</strong> del efectivo en caja
-                    </p>
-                  </div>
+                  <p className="text-[11px] text-amber-800 mt-1.5 flex items-center gap-1">
+                    <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                    Sale del efectivo en caja
+                  </p>
                 )}
               </div>
 
-              {/* Concepto */}
-              <div className="xl:col-span-3">
-                <label className="block text-lg font-bold text-slate-900 mb-3 flex items-center gap-2">
-                  <FileText className="w-5 h-5" />
-                  Concepto (Detalle del gasto)
+              <div className="sm:col-span-3">
+                <label className="block text-xs font-semibold text-slate-700 mb-1 flex items-center gap-1">
+                  <FileText className="w-3.5 h-3.5" />
+                  Concepto
                 </label>
                 <textarea
                   value={formData.concepto}
                   onChange={(e) => setFormData({ ...formData, concepto: e.target.value })}
-                  className="input-pos"
-                  rows={5}
-                  placeholder="Ej: Compra de insumos, pago de servicio… (sin repetir el número de documento)"
+                  className="input-pos text-sm min-h-[100px]"
+                  rows={4}
+                  placeholder="Qué se pagó (mín. 5 caracteres)"
                   minLength={5}
                   required
                 />
-                <p className="text-xs text-slate-500 mt-2">
-                  Mínimo 5 caracteres - Sé específico para la auditoría
-                </p>
               </div>
             </div>
 
-            {/* Vista Previa */}
-            {montoNumerico > 0 &&
-              formData.concepto.length >= 5 &&
-              formData.beneficiario.trim().length >= 2 &&
-              formData.beneficiario_tipo_identificacion.trim() &&
-              formData.beneficiario_numero_identificacion.trim().length >= 4 && (
-              <div className="mb-6 p-4 bg-slate-50 border border-slate-200 rounded-lg">
-                <p className="text-sm font-semibold text-slate-700 mb-2 flex items-center gap-2">
-                  <Eye className="w-5 h-5" />
-                  Vista Previa:
-                </p>
-                <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-3">
-                  <div className="space-y-1">
-                    <p className="text-sm text-slate-600">Beneficiario</p>
-                    <p className="font-semibold text-slate-900">{formData.beneficiario.trim()}</p>
-                    <p className="text-xs text-slate-500">
-                      {formData.beneficiario_tipo_identificacion}
-                      {formData.beneficiario_numero_identificacion.trim()
-                        ? ` · ${formData.beneficiario_numero_identificacion.trim()}`
-                        : ''}
-                    </p>
-                    <p className="text-sm text-slate-600 pt-1">Concepto</p>
-                    <p className="font-bold text-slate-900">{formData.concepto}</p>
-                  </div>
-                  <p className="text-2xl font-bold text-red-600 shrink-0">
-                    -${formatCurrency(montoNumerico)}
-                  </p>
-                </div>
+            {montoNumerico > 0 && formData.concepto.length >= 5 && proveedorDatosCompletos && (
+              <div className="mb-4 py-3 px-3 rounded-lg border border-slate-100 bg-white text-sm text-slate-700 flex flex-wrap items-baseline justify-between gap-2">
+                <span className="flex items-center gap-1.5 text-slate-500">
+                  <Eye className="w-4 h-4" />
+                  <span>
+                    <span className="font-medium text-slate-800">{formData.beneficiario.trim()}</span>
+                    {formData.beneficiario_numero_identificacion.trim()
+                      ? ` · ${formData.beneficiario_tipo_identificacion} ${formData.beneficiario_numero_identificacion.trim()}`
+                      : ''}
+                  </span>
+                </span>
+                <span className="font-bold text-red-600">-${formatCurrency(montoNumerico)}</span>
               </div>
             )}
 
-            {/* Botones */}
-            <div className="modal-footer-sticky -mx-6 px-6 flex gap-4">
+            <div className="modal-footer-sticky -mx-5 sm:-mx-6 px-5 sm:px-6 pt-3 flex gap-3 border-t border-slate-100">
               <button
                 type="button"
                 onClick={onClose}
-                className="flex-1 btn-pos btn-secondary"
+                className="flex-1 btn-pos btn-secondary py-2.5 text-sm"
                 disabled={registrarGastoMutation.isLoading}
               >
                 Cancelar
@@ -2021,18 +2163,16 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
                   registrarGastoMutation.isLoading ||
                   !formData.monto ||
                   formData.concepto.length < 5 ||
-                  formData.beneficiario.trim().length < 2 ||
-                  !formData.beneficiario_tipo_identificacion.trim() ||
-                  formData.beneficiario_numero_identificacion.trim().length < 4
+                  !proveedorDatosCompletos
                 }
-                className="flex-1 btn-pos btn-danger disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                className="flex-1 btn-pos btn-danger disabled:opacity-50 inline-flex items-center justify-center gap-2 py-2.5 text-sm font-semibold"
               >
                 {registrarGastoMutation.isLoading ? (
-                  'Registrando...'
+                  'Registrando…'
                 ) : (
                   <>
-                    <CheckCircle2 className="w-5 h-5" />
-                    Registrar Gasto
+                    <CheckCircle2 className="w-4 h-4" />
+                    Registrar gasto
                   </>
                 )}
               </button>
@@ -2051,6 +2191,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
   const [montoFisico, setMontoFisico] = useState<number | null>(null);
   const [observaciones, setObservaciones] = useState('');
   const [mostrarDetalleMetodos, setMostrarDetalleMetodos] = useState(false);
+  const [mostrarDetalleEgresos, setMostrarDetalleEgresos] = useState(false);
   
   // Estado del contador de denominaciones
   const [desglose, setDesglose] = useState({
@@ -2628,62 +2769,93 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
           </div>
         )}
 
-        {/* Detalle de Egresos (Gastos) */}
+        {/* Detalle de Egresos (expandible, mismo patrón que vehículos por método) */}
         {egresos.length > 0 && (
           <div className="mb-6">
-            <h4 className="text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
-              <ArrowRight className="w-5 h-5" />
-              Detalle de Egresos ({egresos.length} {egresos.length === 1 ? 'gasto' : 'gastos'})
-            </h4>
-            <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4">
-              <div className="space-y-3">
-                {egresos.map((egreso) => {
-                  const TipoIcono = egreso.tipo === 'gasto' ? ArrowRight : egreso.tipo === 'devolucion' ? CornerUpLeft : Scale;
-                  const hora = formatTime24(egreso.created_at);
-                  
-                  return (
-                    <div key={egreso.id} className="flex justify-between items-center p-3 bg-white rounded-lg border border-red-200">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-1">
-                          <TipoIcono className="w-5 h-5 text-gray-600" />
-                          <span className="text-xs text-gray-500">{hora}</span>
-                          <span className="px-2 py-0.5 bg-red-100 text-red-800 text-xs font-semibold rounded capitalize">
-                            {egreso.tipo}
-                          </span>
+            <button
+              type="button"
+              onClick={() => setMostrarDetalleEgresos(!mostrarDetalleEgresos)}
+              className="w-full flex justify-between items-center p-4 bg-gray-50 border-2 border-gray-300 rounded-lg hover:bg-gray-100 transition-colors text-left"
+            >
+              <div className="flex items-center gap-3 min-w-0">
+                <ArrowRight className="w-6 h-6 text-red-600 shrink-0" />
+                <div className="min-w-0">
+                  <h4 className="text-lg font-bold text-gray-900">Detalle de Egresos</h4>
+                  <p className="text-sm text-gray-600">
+                    {egresos.length} {egresos.length === 1 ? 'gasto' : 'gastos'} en el turno · Total: −$
+                    {formatCurrency(resumen.total_egresos)}
+                  </p>
+                  <p className="text-xs text-gray-500 mt-0.5">Desglose por movimiento (conciliación)</p>
+                </div>
+              </div>
+              <div className="text-gray-500 shrink-0">
+                {mostrarDetalleEgresos ? (
+                  <ChevronUp className="w-8 h-8" />
+                ) : (
+                  <ChevronDown className="w-8 h-8" />
+                )}
+              </div>
+            </button>
+
+            {mostrarDetalleEgresos && (
+              <div className="mt-4 border-2 border-gray-300 rounded-lg p-4 bg-red-50/40">
+                <div className="space-y-3">
+                  {egresos.map((egreso) => {
+                    const TipoIcono =
+                      egreso.tipo === 'gasto'
+                        ? ArrowRight
+                        : egreso.tipo === 'devolucion'
+                          ? CornerUpLeft
+                          : Scale;
+                    const hora = formatTime24(egreso.created_at);
+
+                    return (
+                      <div
+                        key={egreso.id}
+                        className="flex justify-between items-center p-3 bg-white rounded-lg border border-red-200"
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            <TipoIcono className="w-5 h-5 text-gray-600 shrink-0" />
+                            <span className="text-xs text-gray-500">{hora}</span>
+                            <span className="px-2 py-0.5 bg-red-100 text-red-800 text-xs font-semibold rounded capitalize">
+                              {egreso.tipo}
+                            </span>
+                          </div>
+                          {egreso.beneficiario ? (
+                            <>
+                              <p className="text-sm font-semibold text-gray-900">{egreso.beneficiario}</p>
+                              {egreso.beneficiario_tipo_identificacion ? (
+                                <p className="text-xs text-gray-500">
+                                  {egreso.beneficiario_tipo_identificacion}
+                                  {egreso.beneficiario_numero_identificacion
+                                    ? ` · ${egreso.beneficiario_numero_identificacion}`
+                                    : ''}
+                                </p>
+                              ) : egreso.beneficiario_numero_identificacion ? (
+                                <p className="text-xs text-gray-500">{egreso.beneficiario_numero_identificacion}</p>
+                              ) : null}
+                              <p className="text-sm font-medium text-gray-800 mt-0.5">{egreso.concepto}</p>
+                            </>
+                          ) : (
+                            <p className="text-sm font-medium text-gray-900">{egreso.concepto}</p>
+                          )}
                         </div>
-                        {egreso.beneficiario ? (
-                          <>
-                            <p className="text-sm font-semibold text-gray-900">{egreso.beneficiario}</p>
-                            {egreso.beneficiario_tipo_identificacion ? (
-                              <p className="text-xs text-gray-500">
-                                {egreso.beneficiario_tipo_identificacion}
-                                {egreso.beneficiario_numero_identificacion
-                                  ? ` · ${egreso.beneficiario_numero_identificacion}`
-                                  : ''}
-                              </p>
-                            ) : egreso.beneficiario_numero_identificacion ? (
-                              <p className="text-xs text-gray-500">{egreso.beneficiario_numero_identificacion}</p>
-                            ) : null}
-                            <p className="text-sm font-medium text-gray-800 mt-0.5">{egreso.concepto}</p>
-                          </>
-                        ) : (
-                          <p className="text-sm font-medium text-gray-900">{egreso.concepto}</p>
-                        )}
+                        <p className="text-xl font-bold text-red-600 ml-4 shrink-0">
+                          -${formatCurrency(Math.abs(egreso.monto))}
+                        </p>
                       </div>
-                      <p className="text-xl font-bold text-red-600 ml-4">
-                        -${formatCurrency(Math.abs(egreso.monto))}
-                      </p>
-                    </div>
-                  );
-                })}
+                    );
+                  })}
+                </div>
+                <div className="mt-4 pt-3 border-t-2 border-red-300 flex justify-between items-center">
+                  <span className="font-bold text-gray-900">Total egresos</span>
+                  <span className="text-2xl font-bold text-red-600">
+                    -${formatCurrency(resumen.total_egresos)}
+                  </span>
+                </div>
               </div>
-              <div className="mt-4 pt-3 border-t-2 border-red-300 flex justify-between items-center">
-                <span className="font-bold text-gray-900">Total Egresos:</span>
-                <span className="text-2xl font-bold text-red-600">
-                  -${formatCurrency(resumen.total_egresos)}
-                </span>
-              </div>
-            </div>
+            )}
           </div>
         )}
 

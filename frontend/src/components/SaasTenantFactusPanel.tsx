@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Landmark, ListOrdered, Loader2, Save, Wifi } from 'lucide-react';
 import { saasFactusApi } from '../api/saasFactus';
@@ -27,10 +27,15 @@ export default function SaasTenantFactusPanel({ tenantId }: Props) {
   const [prApiUser, setPrApiUser] = useState('');
   const [prApiPass, setPrApiPass] = useState('');
   const [rangeId, setRangeId] = useState<string>('');
+  const [supportRangeId, setSupportRangeId] = useState<string>('');
+  const [dsNotificarProveedor, setDsNotificarProveedor] = useState(true);
+  const [dsCorreoCda, setDsCorreoCda] = useState('');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error' | 'info'; message: string } | null>(
     null,
   );
   const [rangesPreview, setRangesPreview] = useState<FactusNumberingRangeItem[] | null>(null);
+  /** Qué campo se está eligiendo con la tabla (evita mezclar factura 01 con documento soporte 24). */
+  const [rangesPickerTarget, setRangesPickerTarget] = useState<'invoice' | 'support' | null>(null);
 
   useEffect(() => {
     if (!data) return;
@@ -45,6 +50,11 @@ export default function SaasTenantFactusPanel({ tenantId }: Props) {
     setPrApiUser(data.production.api_username ?? '');
     setPrApiPass('');
     setRangeId(data.default_numbering_range_id != null ? String(data.default_numbering_range_id) : '');
+    setSupportRangeId(
+      data.documento_soporte_numbering_range_id != null ? String(data.documento_soporte_numbering_range_id) : '',
+    );
+    setDsNotificarProveedor(data.documento_soporte_notificar_proveedor_factus !== false);
+    setDsCorreoCda(data.documento_soporte_correo_notificacion_cda ?? '');
   }, [data]);
 
   const saveMutation = useMutation({
@@ -72,15 +82,20 @@ export default function SaasTenantFactusPanel({ tenantId }: Props) {
   });
 
   const rangesMutation = useMutation({
-    mutationFn: () => saasFactusApi.listNumberingRanges(tenantId),
-    onSuccess: (rows) => {
+    mutationFn: async (target: 'invoice' | 'support') => {
+      const rows = await saasFactusApi.listNumberingRanges(tenantId);
+      return { rows, target };
+    },
+    onSuccess: ({ rows, target }) => {
+      setRangesPickerTarget(target);
       setRangesPreview(rows);
+      const docLabel = target === 'invoice' ? 'facturación (DIAN 01)' : 'documento soporte (DIAN 24)';
       setFeedback({
         type: 'info',
         message:
           rows.length === 0
             ? 'Factus no devolvió rangos activos. Verifica resoluciones en el panel Factus.'
-            : `Se encontraron ${rows.length} rango(s). Usa el id de «Factura de Venta» (factura electrónica, documento 01).`,
+            : `Lista para ${docLabel}: ${rows.length} rango(s). Pulse «Usar» en la fila correcta; solo se asignará a ese campo.`,
       });
     },
     onError: (e: unknown) => {
@@ -90,6 +105,21 @@ export default function SaasTenantFactusPanel({ tenantId }: Props) {
       setFeedback({ type: 'error', message: typeof msg === 'string' ? msg : 'Error al consultar rangos.' });
     },
   });
+
+  const { displayedRanges, showRangesFallbackToAll } = useMemo(() => {
+    if (!rangesPreview || !rangesPickerTarget) {
+      return { displayedRanges: [] as FactusNumberingRangeItem[], showRangesFallbackToAll: false };
+    }
+    const code = rangesPickerTarget === 'invoice' ? '01' : '24';
+    const filtered = rangesPreview.filter((r) => String(r.document ?? '').trim() === code);
+    if (filtered.length > 0) {
+      return { displayedRanges: filtered, showRangesFallbackToAll: false };
+    }
+    return {
+      displayedRanges: rangesPreview,
+      showRangesFallbackToAll: rangesPreview.length > 0,
+    };
+  }, [rangesPreview, rangesPickerTarget]);
 
   const testMutation = useMutation({
     mutationFn: () => saasFactusApi.testConnection(tenantId),
@@ -110,15 +140,23 @@ export default function SaasTenantFactusPanel({ tenantId }: Props) {
   const handleGuardar = () => {
     setFeedback(null);
     const rid = rangeId.trim();
+    const srid = supportRangeId.trim();
     const payload: FactusSettingsUpdatePayload = {
       modo,
       use_sandbox: useSandbox,
       api_username: sbApiUser.trim() || null,
       production_api_username: prApiUser.trim() || null,
       default_numbering_range_id: rid === '' ? null : parseInt(rid, 10),
+      documento_soporte_numbering_range_id: srid === '' ? null : parseInt(srid, 10),
+      documento_soporte_notificar_proveedor_factus: dsNotificarProveedor,
+      documento_soporte_correo_notificacion_cda: dsCorreoCda.trim() || null,
     };
     if (Number.isNaN(payload.default_numbering_range_id as number)) {
-      setFeedback({ type: 'error', message: 'ID de rango de numeración debe ser un número entero.' });
+      setFeedback({ type: 'error', message: 'ID de rango de facturación debe ser un número entero.' });
+      return;
+    }
+    if (Number.isNaN(payload.documento_soporte_numbering_range_id as number)) {
+      setFeedback({ type: 'error', message: 'ID de rango de documento soporte debe ser un número entero.' });
       return;
     }
     const sbc = sbClientId.trim();
@@ -377,7 +415,7 @@ export default function SaasTenantFactusPanel({ tenantId }: Props) {
 
           <div>
             <label className="block text-sm font-semibold text-slate-700 mb-1">
-              Rango Factus predeterminado del CDA (fallback)
+              Rango Factus — factura de venta (fallback, documento DIAN 01)
             </label>
             <div className="flex flex-wrap items-end gap-2">
               <input
@@ -391,7 +429,7 @@ export default function SaasTenantFactusPanel({ tenantId }: Props) {
                 disabled={rangesMutation.isLoading || saveMutation.isLoading}
                 onClick={() => {
                   setFeedback(null);
-                  rangesMutation.mutate();
+                  rangesMutation.mutate('invoice');
                 }}
                 className="btn-corporate-muted inline-flex items-center gap-2 shrink-0"
               >
@@ -406,11 +444,99 @@ export default function SaasTenantFactusPanel({ tenantId }: Props) {
             <p className="text-xs text-slate-500 mt-1">
               Se usa cuando una <strong>sede no tiene rango propio</strong> (Organización → editar sede). Cada ciudad /
               resolución DIAN suele tener su propio rango: configúrelo por sede y deje este valor como respaldo o para
-              un solo punto de venta. Mismo <strong>ambiente activo</strong> (pruebas o producción); documento 01 —
-              «Factura de Venta».
+              un solo punto de venta. Mismo <strong>ambiente activo</strong> (pruebas o producción); documento{' '}
+              <strong>01</strong> — «Factura de Venta». La tabla mostrará solo rangos 01 (si Factus los etiqueta así).
             </p>
-            {rangesPreview && rangesPreview.length > 0 && (
-              <div className="mt-3 rounded-lg border border-slate-200 bg-white overflow-x-auto max-h-56 overflow-y-auto text-xs">
+          </div>
+
+          <div>
+            <label className="block text-sm font-semibold text-slate-700 mb-1">
+              Rango Factus — documento soporte en adquisiciones (documento DIAN 24)
+            </label>
+            <div className="flex flex-wrap items-end gap-2">
+              <input
+                className="input w-full max-w-xs"
+                value={supportRangeId}
+                onChange={(e) => setSupportRangeId(e.target.value.replace(/\D/g, ''))}
+                placeholder="Ej. rango distinto al de factura"
+              />
+              <button
+                type="button"
+                disabled={rangesMutation.isLoading || saveMutation.isLoading}
+                onClick={() => {
+                  setFeedback(null);
+                  rangesMutation.mutate('support');
+                }}
+                className="btn-corporate-muted inline-flex items-center gap-2 shrink-0"
+              >
+                {rangesMutation.isLoading ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <ListOrdered className="w-4 h-4" />
+                )}
+                Consultar rangos en Factus
+              </button>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">
+              Obligatorio para emitir <strong>documento soporte</strong> desde Reportes (egresos). Debe ser la
+              resolución autorizada para el tipo <strong>24</strong> en Factus, no el mismo id que la factura 01. Si lo
+              deja vacío, el sistema intentará elegir un rango activo con documento 24 (menos fiable). Use este botón:
+              la tabla solo aplicará el id al campo de <strong>documento soporte</strong>.
+            </p>
+            <p className="text-xs text-amber-950 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5 mt-2">
+              <strong>Adquiriente en el PDF:</strong> el sistema envía <strong>establecimiento</strong> (razón social,
+              dirección, municipio, contacto) desde el tenant/sede, como en factura. El <strong>NIT</strong> del
+              adquiriente corresponde al <strong>contribuyente de la cuenta Factus</strong> (pruebas: suele ser{' '}
+              <strong>FACTUS SAS</strong>). En producción, credenciales y NIT en Factus deben ser los del CDA.
+            </p>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-slate-50/90 p-4 space-y-3">
+            <p className="text-sm font-semibold text-slate-800">Notificaciones — documento soporte</p>
+            <p className="text-xs text-slate-600">
+              Igual que la factura de venta usa <code className="text-xs">send_email</code> hacia el cliente, el
+              documento soporte puede pedir a Factus el envío al <strong>correo del proveedor</strong> registrado en
+              cada egreso. Opcionalmente indique un correo del CDA para recibir copia vía CDASOFT al validar.
+            </p>
+            <label className="flex items-center gap-2 text-sm text-slate-800 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={dsNotificarProveedor}
+                onChange={(e) => setDsNotificarProveedor(e.target.checked)}
+                className="rounded border-slate-300"
+              />
+              Solicitar a Factus enviar notificación al correo del proveedor al validar documento soporte
+            </label>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Correo interno del CDA (copia opcional vía SMTP CDASOFT)
+              </label>
+              <input
+                type="email"
+                className="input w-full max-w-md"
+                value={dsCorreoCda}
+                onChange={(e) => setDsCorreoCda(e.target.value)}
+                placeholder="contabilidad@su-cda.com"
+                autoComplete="off"
+              />
+            </div>
+          </div>
+
+          {rangesPickerTarget && rangesPreview && rangesPreview.length > 0 && displayedRanges.length > 0 && (
+            <div className="mt-3 space-y-2">
+              <p className="text-xs font-semibold text-slate-700">
+                {rangesPickerTarget === 'invoice'
+                  ? 'Asignar rango a facturación electrónica (documento 01)'
+                  : 'Asignar rango a documento soporte (documento 24)'}
+              </p>
+              {showRangesFallbackToAll ? (
+                <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-2 py-1.5">
+                  No se detectaron filas con código de documento {rangesPickerTarget === 'invoice' ? '01' : '24'} en
+                  Factus; se muestran todos los rangos. Elija la fila que corresponda y confirme en la columna
+                  «Documento».
+                </p>
+              ) : null}
+              <div className="rounded-lg border border-slate-200 bg-white overflow-x-auto max-h-56 overflow-y-auto text-xs">
                 <table className="min-w-full text-left">
                   <thead className="bg-slate-100 text-slate-600 sticky top-0">
                     <tr>
@@ -418,11 +544,13 @@ export default function SaasTenantFactusPanel({ tenantId }: Props) {
                       <th className="px-2 py-1.5">Documento</th>
                       <th className="px-2 py-1.5">Prefijo</th>
                       <th className="px-2 py-1.5">Resolución</th>
-                      <th className="px-2 py-1.5" />
+                      <th className="px-2 py-1.5">
+                        {rangesPickerTarget === 'invoice' ? 'Usar para facturación' : 'Usar para doc. soporte'}
+                      </th>
                     </tr>
                   </thead>
                   <tbody>
-                    {rangesPreview.map((r) => (
+                    {displayedRanges.map((r) => (
                       <tr key={r.id} className="border-t border-slate-100">
                         <td className="px-2 py-1.5 font-mono font-semibold">{r.id}</td>
                         <td className="px-2 py-1.5">{r.document ?? '—'}</td>
@@ -431,13 +559,25 @@ export default function SaasTenantFactusPanel({ tenantId }: Props) {
                         <td className="px-2 py-1.5">
                           <button
                             type="button"
-                            className="text-indigo-600 font-semibold hover:underline"
+                            className={
+                              rangesPickerTarget === 'invoice'
+                                ? 'text-indigo-600 font-semibold hover:underline'
+                                : 'text-emerald-700 font-semibold hover:underline'
+                            }
                             onClick={() => {
-                              setRangeId(String(r.id));
-                              setFeedback({
-                                type: 'info',
-                                message: `ID ${r.id} copiado al campo. Guarda la configuración para aplicar.`,
-                              });
+                              if (rangesPickerTarget === 'invoice') {
+                                setRangeId(String(r.id));
+                                setFeedback({
+                                  type: 'info',
+                                  message: `Rango ${r.id} asignado solo a facturación (01). Guarde la configuración.`,
+                                });
+                              } else {
+                                setSupportRangeId(String(r.id));
+                                setFeedback({
+                                  type: 'info',
+                                  message: `Rango ${r.id} asignado solo a documento soporte (24). Guarde la configuración.`,
+                                });
+                              }
                             }}
                           >
                             Usar
@@ -448,8 +588,8 @@ export default function SaasTenantFactusPanel({ tenantId }: Props) {
                   </tbody>
                 </table>
               </div>
-            )}
-          </div>
+            </div>
+          )}
 
           <button
             type="button"

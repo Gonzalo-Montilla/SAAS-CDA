@@ -95,6 +95,9 @@ def get_current_user(
     if tenant.plan_actual == "demo" and tenant.demo_ends_at and tenant.demo_ends_at < now_ts:
         tenant.subscription_status = "pending_plan"
         db.commit()
+        # commit() expira instancias en la sesión; refrescar evita 500 en el mismo request (/auth/me, etc.).
+        db.refresh(user)
+        db.refresh(tenant)
 
     request_method = request.method if request else "GET"
     is_write_operation = request_method.upper() in {"POST", "PUT", "PATCH", "DELETE"}
@@ -212,6 +215,16 @@ def get_cajero_or_admin(current_user: Usuario = Depends(get_current_user)) -> Us
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Solo cajeros o administradores pueden realizar esta acci?n"
+        )
+    return current_user
+
+
+def get_cajero_contador_or_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
+    """Cajeros, contadores o administradores (p. ej. catálogo municipios Factus en egresos)."""
+    if current_user.rol not in (RolEnum.CAJERO, RolEnum.CONTADOR, RolEnum.ADMINISTRADOR):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tiene permiso para consultar datos de facturación electrónica.",
         )
     return current_user
 

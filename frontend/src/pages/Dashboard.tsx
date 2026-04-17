@@ -20,6 +20,7 @@ import {
   MessageSquareHeart,
   CalendarClock,
   FileStack,
+  BookUser,
 } from 'lucide-react';
 const WIZARD_KEY = 'cdasoft_sedes_wizard_dismissed';
 
@@ -205,6 +206,19 @@ export default function Dashboard() {
                 <h3 className="text-xl font-bold text-slate-900 mb-2">Tarifas</h3>
                 <p className="text-slate-600 text-sm">
                   Gestionar tarifas RTM y comisiones SOAT
+                </p>
+              </button>
+
+              <button
+                onClick={() => navigate('/proveedores-catalogo')}
+                className="card-pos text-left group animate-fade-in animate-delay-200"
+              >
+                <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-teal-100 text-teal-700 mb-4 group-hover:bg-teal-600 group-hover:text-white transition-all duration-300">
+                  <BookUser className="w-8 h-8 icon-hover" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mb-2">Proveedores</h3>
+                <p className="text-slate-600 text-sm">
+                  Catálogo para egresos y documento soporte (RUT / Factus)
                 </p>
               </button>
 

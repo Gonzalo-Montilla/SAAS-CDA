@@ -29,13 +29,28 @@ class FactusSettingsOut(BaseModel):
     api_username: Optional[str] = None
     api_password_configured: bool
     default_numbering_range_id: Optional[int] = None
+    documento_soporte_numbering_range_id: Optional[int] = None
     base_url_effective: str
+    # Documento soporte: análogo a send_email en factura (proveedor) + copia interna CDA
+    documento_soporte_notificar_proveedor_factus: bool = True
+    documento_soporte_correo_notificacion_cda: Optional[str] = None
 
 
 class FactusModoPatch(BaseModel):
     """Solo conmutar manual ↔ factus (admin del tenant, sin backoffice SaaS)."""
 
     modo: Literal["manual", "factus"]
+
+
+class FactusDocumentoSoporteNotificacionesPatch(BaseModel):
+    """Preferencias de notificación documento soporte (admin tenant)."""
+
+    documento_soporte_notificar_proveedor_factus: bool = True
+    documento_soporte_correo_notificacion_cda: Optional[str] = Field(
+        default=None,
+        max_length=255,
+        description="Correo del CDA para recibir copia vía CDASOFT al validar documento soporte (opcional).",
+    )
 
 
 class FactusSettingsUpdate(BaseModel):
@@ -56,6 +71,9 @@ class FactusSettingsUpdate(BaseModel):
         None, description="Si se omite o vacío, no cambia la contraseña API de producción guardada."
     )
     default_numbering_range_id: Optional[int] = None
+    documento_soporte_numbering_range_id: Optional[int] = None
+    documento_soporte_notificar_proveedor_factus: Optional[bool] = None
+    documento_soporte_correo_notificacion_cda: Optional[str] = Field(default=None, max_length=255)
 
 
 class FactusTestConnectionResult(BaseModel):

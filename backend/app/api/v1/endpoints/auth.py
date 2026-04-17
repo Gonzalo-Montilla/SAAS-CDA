@@ -34,7 +34,7 @@ from app.models.tenant import Tenant
 from app.models.sucursal import Sucursal
 from app.models.password_reset_token import PasswordResetToken
 from app.schemas.auth import Token, UserRegister, PasswordChange, RefreshTokenRequest, SwitchSucursalRequest
-from app.schemas.usuario import UsuarioResponse, SucursalBasica
+from app.schemas.usuario import TenantBrandingResponse, UsuarioResponse, SucursalBasica
 from app.utils.email import enviar_email, generar_email_recuperacion_password
 from app.utils.audit import audit_login_success, audit_login_failed, create_audit_log
 from app.models.audit_log import AuditAction
@@ -257,7 +257,12 @@ def get_current_user_info(
     """
     Obtener información del usuario actual
     """
-    tenant = current_user.tenant
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    if tenant is None:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="No se encontró la organización asociada al usuario.",
+        )
     payload = getattr(request.state, "tenant_jwt_payload", None)
     if not isinstance(payload, dict):
         payload = {}
@@ -268,26 +273,47 @@ def get_current_user_info(
         .order_by(Sucursal.es_principal.desc(), Sucursal.nombre.asc())
         .all()
     )
-    return {
-        "id": current_user.id,
-        "tenant_id": current_user.tenant_id,
-        "tenant_slug": tenant.slug if tenant else None,
-        "email": current_user.email,
-        "nombre_completo": current_user.nombre_completo,
-        "rol": current_user.rol,
-        "activo": current_user.activo,
-        "created_at": current_user.created_at,
-        "sucursal_id": current_user.sucursal_id,
-        "active_sucursal_id": active_sid,
-        "sucursales": [SucursalBasica.model_validate(s) for s in sedes],
-        "tenant_sedes_totales": tenant.sedes_totales if tenant else None,
-        "tenant_branding": {
-            "nombre_comercial": tenant.nombre_comercial if tenant else settings.APP_NAME,
-            "logo_url": tenant.logo_url if tenant else None,
-            "color_primario": tenant.color_primario if tenant else "#2563eb",
-            "color_secundario": tenant.color_secundario if tenant else "#0f172a",
-        },
-    }
+    email_norm = (current_user.email or "").strip()
+    if not email_norm:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="El usuario no tiene correo válido en base de datos.",
+        )
+    rol_raw = current_user.rol
+    rol_str = rol_raw.value if hasattr(rol_raw, "value") else str(rol_raw)
+    sucursales_out: list[SucursalBasica] = []
+    for s in sedes:
+        sucursales_out.append(
+            SucursalBasica(
+                id=s.id,
+                nombre=(s.nombre or "").strip() or "Sede",
+                codigo=s.codigo,
+                activa=bool(s.activa),
+                es_principal=bool(s.es_principal),
+            )
+        )
+    branding = TenantBrandingResponse(
+        nombre_comercial=(tenant.nombre_comercial or tenant.nombre or settings.APP_NAME).strip()
+        or settings.APP_NAME,
+        logo_url=tenant.logo_url,
+        color_primario=(tenant.color_primario or "#2563eb").strip() or "#2563eb",
+        color_secundario=(tenant.color_secundario or "#0f172a").strip() or "#0f172a",
+    )
+    return UsuarioResponse(
+        id=current_user.id,
+        tenant_id=current_user.tenant_id,
+        tenant_slug=tenant.slug,
+        email=email_norm,
+        nombre_completo=(current_user.nombre_completo or "").strip(),
+        rol=rol_str,
+        activo=bool(current_user.activo),
+        created_at=current_user.created_at,
+        sucursal_id=current_user.sucursal_id,
+        active_sucursal_id=active_sid,
+        sucursales=sucursales_out,
+        tenant_sedes_totales=tenant.sedes_totales,
+        tenant_branding=branding,
+    )
 
 
 @router.post("/change-password")

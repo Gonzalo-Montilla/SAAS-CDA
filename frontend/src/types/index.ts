@@ -565,6 +565,11 @@ export interface MovimientoCaja {
   beneficiario?: string | null;
   beneficiario_tipo_identificacion?: string | null;
   beneficiario_numero_identificacion?: string | null;
+  beneficiario_direccion?: string | null;
+  beneficiario_email?: string | null;
+  beneficiario_telefono?: string | null;
+  beneficiario_factus_municipality_id?: number | null;
+  proveedor_catalogo_id?: string | null;
 }
 
 // Tarifas

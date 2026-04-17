@@ -12,6 +12,10 @@ type Props = {
   /** Backoffice SaaS: tenant objetivo; si no, usa sesión admin del CDA. */
   saasTenantId?: string;
   idInputClassName?: string;
+  /** Textos del bloque (p. ej. municipio del proveedor vs sede). */
+  searchLabel?: string;
+  idInputLabel?: string;
+  helperText?: string;
 };
 
 export default function FactusMunicipalitySearchField({
@@ -20,6 +24,9 @@ export default function FactusMunicipalitySearchField({
   disabled = false,
   saasTenantId,
   idInputClassName = 'input w-full text-sm',
+  searchLabel = '¿En qué ciudad factura esta sede?',
+  idInputLabel = 'Id municipio (por si lo pega a mano)',
+  helperText = 'Pulse un resultado y listo. (El número que guardamos es el id de Factus, no el código DIAN.)',
 }: Props) {
   const [q, setQ] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -42,7 +49,7 @@ export default function FactusMunicipalitySearchField({
   return (
     <div className="space-y-2">
       <div>
-        <label className="block text-xs font-semibold text-slate-700 mb-1">¿En qué ciudad factura esta sede?</label>
+        <label className="block text-xs font-semibold text-slate-700 mb-1">{searchLabel}</label>
         <input
           type="search"
           className="input w-full text-sm"
@@ -52,12 +59,10 @@ export default function FactusMunicipalitySearchField({
           disabled={disabled}
           autoComplete="off"
         />
-        <p className="text-xs text-slate-500 mt-1">
-          Pulse un resultado y listo. (El número que guardamos es el <strong>id</strong> de Factus, no el código DIAN.)
-        </p>
+        <p className="text-xs text-slate-500 mt-1">{helperText}</p>
       </div>
       <div>
-        <label className="block text-xs font-semibold text-slate-700 mb-1">Id municipio (por si lo pega a mano)</label>
+        <label className="block text-xs font-semibold text-slate-700 mb-1">{idInputLabel}</label>
         <input
           type="text"
           inputMode="numeric"
