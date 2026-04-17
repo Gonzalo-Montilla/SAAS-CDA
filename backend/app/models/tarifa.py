@@ -32,6 +32,11 @@ class Tarifa(Base):
     # Valores
     valor_rtm = Column(Numeric(10, 2), nullable=False)
     valor_terceros = Column(Numeric(10, 2), nullable=False)
+    # Desglose terceros (suma = valor_terceros; factura Factus sin IVA por ítem)
+    valor_terceros_runt = Column(Numeric(10, 2), nullable=False, default=0)
+    valor_terceros_sicov = Column(Numeric(10, 2), nullable=False, default=0)
+    valor_terceros_bancarizacion = Column(Numeric(10, 2), nullable=False, default=0)
+    valor_terceros_ansv = Column(Numeric(10, 2), nullable=False, default=0)
     valor_total = Column(Numeric(10, 2), nullable=False)
     
     # Estado

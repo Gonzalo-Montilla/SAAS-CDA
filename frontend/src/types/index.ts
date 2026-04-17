@@ -578,6 +578,10 @@ export interface Tarifa {
   antiguedad_max?: number;
   valor_rtm: number;
   valor_terceros: number;
+  valor_terceros_runt: number;
+  valor_terceros_sicov: number;
+  valor_terceros_bancarizacion: number;
+  valor_terceros_ansv: number;
   valor_total: number;
   activa: boolean;
   descripcion_antiguedad: string;

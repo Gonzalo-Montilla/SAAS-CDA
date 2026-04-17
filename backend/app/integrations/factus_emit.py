@@ -87,16 +87,60 @@ def _nombre_linea_rtm_con_desglose(bruto_con_iva: Decimal) -> str:
     return s[:200]
 
 
-def _nombre_linea_terceros_con_desglose(bruto_con_iva: Decimal) -> str:
-    """Ítem terceros en factura electrónica: mismo IVA que RTM; texto requerido por negocio en descripción DIAN."""
-    base = _base_gravable_desde_total_con_iva_incluido_dian(bruto_con_iva)
-    iva = _quantize_moneda(bruto_con_iva - base)
-    p = int(settings.FACTUS_IVA_PORCENTAJE_GENERAL)
-    s = (
-        f"Servicios de terceros (RUNT, SICOV, BANCARIZACION, ANSV) — "
-        f"Base {_fmt_cop_nota(base)} + IVA {p}% {_fmt_cop_nota(iva)}"
-    )
-    return s[:200]
+def _item_linea_tercero_sin_iva(
+    *,
+    placa: str,
+    sufijo_code: str,
+    titulo: str,
+    monto_sin_iva: Decimal,
+) -> dict[str, Any]:
+    """
+    Conceptos RUNT/SICOV/Bancarización/ANSV: valor fijo sin IVA (passthrough).
+    Factus: tasa 0 e ítem excluido de IVA según integración vigente.
+    """
+    return {
+        **_item_linea_comun(placa, sufijo_code),
+        "name": titulo[:200],
+        "note": "Concepto terceros sin IVA.",
+        "price": float(_quantize_moneda(monto_sin_iva)),
+        "tax_rate": "0.00",
+        "is_excluded": 1,
+        "tribute_id": 1,
+    }
+
+
+def _items_terceros_factura(placa: str, tarifa: Tarifa, ter_total: Decimal) -> list[dict[str, Any]]:
+    """Una línea por concepto con monto > 0; si no hay desglose persistido, una línea con el total."""
+    partes: list[tuple[str, str, Decimal]] = [
+        ("RUNT", "Terceros — RUNT", Decimal(tarifa.valor_terceros_runt or 0)),
+        ("SICO", "Terceros — SICOV", Decimal(tarifa.valor_terceros_sicov or 0)),
+        ("BANC", "Terceros — Bancarización", Decimal(tarifa.valor_terceros_bancarizacion or 0)),
+        ("ANSV", "Terceros — ANSV", Decimal(tarifa.valor_terceros_ansv or 0)),
+    ]
+    s = sum(p[2] for p in partes)
+    out: list[dict[str, Any]] = []
+    if s > 0 and abs(s - ter_total) <= Decimal("1"):
+        for suf, tit, m in partes:
+            if m > 0:
+                out.append(
+                    _item_linea_tercero_sin_iva(
+                        placa=placa,
+                        sufijo_code=suf,
+                        titulo=tit,
+                        monto_sin_iva=m,
+                    )
+                )
+        return out
+    if ter_total > 0:
+        out.append(
+            _item_linea_tercero_sin_iva(
+                placa=placa,
+                sufijo_code="TER",
+                titulo="Terceros (RUNT, SICOV, Bancarización, ANSV)",
+                monto_sin_iva=ter_total,
+            )
+        )
+    return out
 
 
 def _nombre_linea_servicio_unico_con_desglose(bruto_con_iva: Decimal) -> str:
@@ -283,18 +327,8 @@ def _items_factura_cobro(
                     "tribute_id": 1,
                 }
             )
-        if ter_bruto > 0:
-            items.append(
-                {
-                    **_item_linea_comun(vehiculo.placa, "TER"),
-                    "name": _nombre_linea_terceros_con_desglose(ter_bruto),
-                    "note": _nota_desglose_linea_gravada_iva(ter_bruto),
-                    "price": float(_quantize_moneda(ter_bruto)),
-                    "tax_rate": _iva_tax_rate_string_factus(),
-                    "is_excluded": 0,
-                    "tribute_id": 1,
-                }
-            )
+        terceros_items = _items_terceros_factura(vehiculo.placa, tarifa, ter_bruto)
+        items.extend(terceros_items)
         if not items:
             raise ValueError("Tarifa sin valores RTM/terceros para facturar")
         return items

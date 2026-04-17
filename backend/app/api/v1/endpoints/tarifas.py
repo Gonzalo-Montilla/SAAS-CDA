@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from datetime import date
+from decimal import Decimal
 from typing import List, Optional
 
 from app.core.deps import get_db, get_current_user, get_admin
@@ -21,6 +22,15 @@ from app.schemas.tarifa import (
 )
 
 router = APIRouter()
+
+
+def _suma_terceros_desglose(
+    runt: Decimal,
+    sicov: Decimal,
+    bancar: Decimal,
+    ansv: Decimal,
+) -> Decimal:
+    return Decimal(runt) + Decimal(sicov) + Decimal(bancar) + Decimal(ansv)
 
 
 def _ranges_overlap(min_a: int, max_a: Optional[int], min_b: int, max_b: Optional[int]) -> bool:
@@ -86,15 +96,18 @@ def crear_tarifa(
             detail="La antigüedad máxima no puede ser menor a la antigüedad mínima.",
         )
 
-    expected_total = tarifa_data.valor_rtm + tarifa_data.valor_terceros
-    if tarifa_data.valor_total != expected_total:
+    valor_terceros = _suma_terceros_desglose(
+        tarifa_data.valor_terceros_runt,
+        tarifa_data.valor_terceros_sicov,
+        tarifa_data.valor_terceros_bancarizacion,
+        tarifa_data.valor_terceros_ansv,
+    )
+    if valor_terceros <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Inconsistencia en valores de tarifa: el valor total debe ser igual a "
-                f"valor_rtm + valor_terceros ({expected_total})."
-            ),
+            detail="La suma de RUNT + SICOV + Bancarización + ANSV (terceros) debe ser mayor a cero.",
         )
+    valor_total = tarifa_data.valor_rtm + valor_terceros
 
     """
     Crear nueva tarifa (solo administrador)
@@ -147,8 +160,12 @@ def crear_tarifa(
         antiguedad_min=tarifa_data.antiguedad_min,
         antiguedad_max=tarifa_data.antiguedad_max,
         valor_rtm=tarifa_data.valor_rtm,
-        valor_terceros=tarifa_data.valor_terceros,
-        valor_total=tarifa_data.valor_total,
+        valor_terceros=valor_terceros,
+        valor_terceros_runt=tarifa_data.valor_terceros_runt,
+        valor_terceros_sicov=tarifa_data.valor_terceros_sicov,
+        valor_terceros_bancarizacion=tarifa_data.valor_terceros_bancarizacion,
+        valor_terceros_ansv=tarifa_data.valor_terceros_ansv,
+        valor_total=valor_total,
         activa=True,
         created_by=admin.id
     )
@@ -181,24 +198,46 @@ def actualizar_tarifa(
             detail="Tarifa no encontrada"
         )
     
-    # Calcular valores efectivos después del update para mantener coherencia.
-    valor_rtm_efectivo = tarifa_data.valor_rtm if tarifa_data.valor_rtm is not None else tarifa.valor_rtm
-    valor_terceros_efectivo = (
-        tarifa_data.valor_terceros if tarifa_data.valor_terceros is not None else tarifa.valor_terceros
+    runt = (
+        tarifa_data.valor_terceros_runt
+        if tarifa_data.valor_terceros_runt is not None
+        else tarifa.valor_terceros_runt
     )
-    total_calculado = valor_rtm_efectivo + valor_terceros_efectivo
-
-    if tarifa_data.valor_total is not None and tarifa_data.valor_total != total_calculado:
+    sicov = (
+        tarifa_data.valor_terceros_sicov
+        if tarifa_data.valor_terceros_sicov is not None
+        else tarifa.valor_terceros_sicov
+    )
+    bancar = (
+        tarifa_data.valor_terceros_bancarizacion
+        if tarifa_data.valor_terceros_bancarizacion is not None
+        else tarifa.valor_terceros_bancarizacion
+    )
+    ansv = (
+        tarifa_data.valor_terceros_ansv
+        if tarifa_data.valor_terceros_ansv is not None
+        else tarifa.valor_terceros_ansv
+    )
+    valor_terceros_efectivo = _suma_terceros_desglose(runt, sicov, bancar, ansv)
+    if valor_terceros_efectivo <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Inconsistencia en actualización: el valor total debe ser igual a "
-                f"valor_rtm + valor_terceros ({total_calculado})."
-            ),
+            detail="La suma de terceros (RUNT + SICOV + Bancarización + ANSV) debe ser mayor a cero.",
         )
 
-    # Actualizar campos base y normalizar total.
+    valor_rtm_efectivo = tarifa_data.valor_rtm if tarifa_data.valor_rtm is not None else tarifa.valor_rtm
+    if valor_rtm_efectivo <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El valor RTM debe ser mayor a cero.",
+        )
+    total_calculado = valor_rtm_efectivo + valor_terceros_efectivo
+
     tarifa.valor_rtm = valor_rtm_efectivo
+    tarifa.valor_terceros_runt = runt
+    tarifa.valor_terceros_sicov = sicov
+    tarifa.valor_terceros_bancarizacion = bancar
+    tarifa.valor_terceros_ansv = ansv
     tarifa.valor_terceros = valor_terceros_efectivo
     tarifa.valor_total = total_calculado
     if tarifa_data.activa is not None:

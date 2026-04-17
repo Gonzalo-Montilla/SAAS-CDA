@@ -23,6 +23,18 @@ import {
 } from 'lucide-react';
 import { formatCurrency, formatCOP } from '../utils/formatNumber';
 
+function parsePositiveInt(value: string): number {
+  const parsed = parseInt(value, 10);
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
+}
+
+/** Vacío en pantalla cuando es 0 para no tener que borrar el cero al escribir. */
+function parseTerceroInput(value: string): number {
+  const t = value.trim();
+  if (t === '') return 0;
+  return parsePositiveInt(t);
+}
+
 export default function TarifasPage() {
   const [vistaActual, setVistaActual] = useState<'tarifas' | 'comisiones'>('tarifas');
   const [anoSeleccionado, setAnoSeleccionado] = useState(new Date().getFullYear());
@@ -312,8 +324,10 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
     antiguedad_min: 0,
     antiguedad_max: 5,
     valor_rtm: 70000,
-    valor_terceros: 15000,
-    valor_total: 85000,
+    valor_terceros_runt: 0,
+    valor_terceros_sicov: 0,
+    valor_terceros_bancarizacion: 0,
+    valor_terceros_ansv: 0,
   });
 
   const crearMutation = useMutation({
@@ -324,13 +338,12 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
     },
   });
 
-  const totalEsperado = formData.valor_rtm + formData.valor_terceros;
-  const totalCoincide = formData.valor_total === totalEsperado;
-
-  const parsePositiveInt = (value: string): number => {
-    const parsed = parseInt(value, 10);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-  };
+  const sumaTerceros =
+    formData.valor_terceros_runt +
+    formData.valor_terceros_sicov +
+    formData.valor_terceros_bancarizacion +
+    formData.valor_terceros_ansv;
+  const totalCliente = formData.valor_rtm + sumaTerceros;
 
   const validateForm = (): string | null => {
     if (formData.antiguedad_max < formData.antiguedad_min) {
@@ -339,11 +352,8 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
     if (new Date(formData.vigencia_inicio) > new Date(formData.vigencia_fin)) {
       return 'La fecha de inicio de vigencia no puede ser mayor a la fecha fin.';
     }
-    if (formData.valor_rtm <= 0 || formData.valor_terceros <= 0 || formData.valor_total <= 0) {
-      return 'Los valores RTM, terceros y total deben ser mayores a cero.';
-    }
-    if (!totalCoincide) {
-      return `El valor total debe ser exactamente ${formatCurrency(totalEsperado)}.`;
+    if (formData.valor_rtm <= 0 || sumaTerceros <= 0) {
+      return 'El RTM y la suma de terceros (RUNT+SICOV+Bancarización+ANSV) deben ser mayores a cero.';
     }
     return null;
   };
@@ -356,13 +366,19 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
       setFormError(validationError);
       return;
     }
-    crearMutation.mutate(formData);
-  };
-
-  // Calcular total automáticamente
-  const calcularTotal = () => {
-    const total = formData.valor_rtm + formData.valor_terceros;
-    setFormData({ ...formData, valor_total: total });
+    crearMutation.mutate({
+      ano_vigencia: formData.ano_vigencia,
+      vigencia_inicio: formData.vigencia_inicio,
+      vigencia_fin: formData.vigencia_fin,
+      tipo_vehiculo: formData.tipo_vehiculo,
+      antiguedad_min: formData.antiguedad_min,
+      antiguedad_max: formData.antiguedad_max,
+      valor_rtm: formData.valor_rtm,
+      valor_terceros_runt: formData.valor_terceros_runt,
+      valor_terceros_sicov: formData.valor_terceros_sicov,
+      valor_terceros_bancarizacion: formData.valor_terceros_bancarizacion,
+      valor_terceros_ansv: formData.valor_terceros_ansv,
+    });
   };
 
   return (
@@ -533,7 +549,6 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
                     setFormError('');
                     setFormData({ ...formData, valor_rtm: parsePositiveInt(e.target.value) });
                   }}
-                  onBlur={calcularTotal}
                   className="input-pos"
                   required
                   step="any"
@@ -541,24 +556,39 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
                 />
               </div>
 
-              <div>
-                <label className="block text-sm font-bold text-gray-900 mb-2 flex items-center gap-2">
-                  <Landmark className="w-4 h-4" />
-                  Valor Terceros (Gobierno)
-                </label>
-                <input
-                  type="number"
-                  value={formData.valor_terceros}
-                  onChange={(e) => {
-                    setFormError('');
-                    setFormData({ ...formData, valor_terceros: parsePositiveInt(e.target.value) });
-                  }}
-                  onBlur={calcularTotal}
-                  className="input-pos"
-                  required
-                  step="any"
-                  min={0}
-                />
+              <div className="space-y-3">
+                <p className="text-xs font-semibold text-slate-700">
+                  Terceros (suma = valor global; en factura va discriminado por ítem, sin IVA)
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {(
+                    [
+                      ['valor_terceros_runt', 'RUNT'] as const,
+                      ['valor_terceros_sicov', 'SICOV'] as const,
+                      ['valor_terceros_bancarizacion', 'Bancarización'] as const,
+                      ['valor_terceros_ansv', 'ANSV'] as const,
+                    ] as const
+                  ).map(([key, label]) => (
+                    <div key={key}>
+                      <label className="block text-xs font-bold text-gray-800 mb-1">{label}</label>
+                      <input
+                        type="number"
+                        value={formData[key] === 0 ? '' : formData[key]}
+                        onChange={(e) => {
+                          setFormError('');
+                          setFormData({ ...formData, [key]: parseTerceroInput(e.target.value) });
+                        }}
+                        className="input-pos"
+                        step="any"
+                        min={0}
+                        placeholder="0"
+                      />
+                    </div>
+                  ))}
+                </div>
+                <p className="text-sm font-semibold text-slate-600">
+                  Total terceros: {formatCOP(sumaTerceros)}
+                </p>
               </div>
 
               <div className="pt-4 border-t-2 border-slate-300">
@@ -566,29 +596,16 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
                   <Banknote className="w-4 h-4" />
                   Valor Total (Cliente Paga)
                 </label>
-                <input
-                  type="number"
-                  value={formData.valor_total}
-                  onChange={(e) => {
-                    setFormError('');
-                    setFormData({ ...formData, valor_total: parsePositiveInt(e.target.value) });
-                  }}
-                  className="input-pos text-2xl font-bold"
-                  required
-                  step="any"
-                  min={0}
-                />
-                {totalCoincide ? (
-                  <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3" />
-                    Total coherente. Este es el precio que verá el cliente.
-                  </p>
-                ) : (
-                  <p className="text-xs text-amber-700 mt-1 flex items-center gap-1">
-                    <AlertTriangle className="w-3 h-3" />
-                    Total esperado: ${formatCurrency(totalEsperado)}.
-                  </p>
-                )}
+                <div
+                  className="input-pos text-2xl font-bold bg-slate-100 text-slate-900 cursor-default select-none"
+                  aria-readonly="true"
+                >
+                  {formatCurrency(totalCliente)}
+                </div>
+                <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
+                  <CheckCircle2 className="w-3 h-3" />
+                  RTM + terceros. Este es el precio que verá el cliente.
+                </p>
               </div>
             </div>
 
@@ -630,8 +647,10 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
   const [formError, setFormError] = useState('');
   const [formData, setFormData] = useState({
     valor_rtm: tarifa.valor_rtm,
-    valor_terceros: tarifa.valor_terceros,
-    valor_total: tarifa.valor_total,
+    valor_terceros_runt: tarifa.valor_terceros_runt ?? 0,
+    valor_terceros_sicov: tarifa.valor_terceros_sicov ?? 0,
+    valor_terceros_bancarizacion: tarifa.valor_terceros_bancarizacion ?? 0,
+    valor_terceros_ansv: tarifa.valor_terceros_ansv ?? 0,
     activa: tarifa.activa,
   });
 
@@ -643,20 +662,16 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
     },
   });
 
-  const totalEsperado = formData.valor_rtm + formData.valor_terceros;
-  const totalCoincide = formData.valor_total === totalEsperado;
-
-  const parsePositiveInt = (value: string): number => {
-    const parsed = parseInt(value, 10);
-    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0;
-  };
+  const sumaTerceros =
+    formData.valor_terceros_runt +
+    formData.valor_terceros_sicov +
+    formData.valor_terceros_bancarizacion +
+    formData.valor_terceros_ansv;
+  const totalCliente = formData.valor_rtm + sumaTerceros;
 
   const validateForm = (): string | null => {
-    if (formData.valor_rtm <= 0 || formData.valor_terceros <= 0 || formData.valor_total <= 0) {
-      return 'Los valores RTM, terceros y total deben ser mayores a cero.';
-    }
-    if (!totalCoincide) {
-      return `El valor total debe ser exactamente ${formatCurrency(totalEsperado)}.`;
+    if (formData.valor_rtm <= 0 || sumaTerceros <= 0) {
+      return 'El RTM y la suma de terceros deben ser mayores a cero.';
     }
     return null;
   };
@@ -669,12 +684,14 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
       setFormError(validationError);
       return;
     }
-    editarMutation.mutate(formData);
-  };
-
-  const calcularTotal = () => {
-    const total = formData.valor_rtm + formData.valor_terceros;
-    setFormData({ ...formData, valor_total: total });
+    editarMutation.mutate({
+      valor_rtm: formData.valor_rtm,
+      valor_terceros_runt: formData.valor_terceros_runt,
+      valor_terceros_sicov: formData.valor_terceros_sicov,
+      valor_terceros_bancarizacion: formData.valor_terceros_bancarizacion,
+      valor_terceros_ansv: formData.valor_terceros_ansv,
+      activa: formData.activa,
+    });
   };
 
   return (
@@ -726,59 +743,60 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
                     setFormError('');
                     setFormData({ ...formData, valor_rtm: parsePositiveInt(e.target.value) });
                   }}
-                onBlur={calcularTotal}
                 className="input-pos"
                 step="any"
                 required
               />
             </div>
 
-            <div>
-              <label className="block text-sm font-bold text-gray-900 mb-2 flex items-center gap-2">
-                <Landmark className="w-4 h-4" />
-                Valor Terceros
-              </label>
-              <input
-                type="number"
-                value={formData.valor_terceros}
-                  onChange={(e) => {
-                    setFormError('');
-                    setFormData({ ...formData, valor_terceros: parsePositiveInt(e.target.value) });
-                  }}
-                onBlur={calcularTotal}
-                className="input-pos"
-                step="any"
-                required
-              />
+            <div className="space-y-3">
+              <p className="text-xs font-semibold text-slate-700">
+                Terceros (sin IVA en factura; suma = total terceros)
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {(
+                  [
+                    ['valor_terceros_runt', 'RUNT'] as const,
+                    ['valor_terceros_sicov', 'SICOV'] as const,
+                    ['valor_terceros_bancarizacion', 'Bancarización'] as const,
+                    ['valor_terceros_ansv', 'ANSV'] as const,
+                  ] as const
+                ).map(([key, label]) => (
+                  <div key={key}>
+                    <label className="block text-xs font-bold text-gray-800 mb-1">{label}</label>
+                    <input
+                      type="number"
+                      value={formData[key] === 0 ? '' : formData[key]}
+                      onChange={(e) => {
+                        setFormError('');
+                        setFormData({ ...formData, [key]: parseTerceroInput(e.target.value) });
+                      }}
+                      className="input-pos"
+                      step="any"
+                      min={0}
+                      placeholder="0"
+                    />
+                  </div>
+                ))}
+              </div>
+              <p className="text-sm text-slate-600">Total terceros: {formatCOP(sumaTerceros)}</p>
             </div>
 
             <div className="pt-4 border-t-2 border-slate-300">
               <label className="block text-sm font-bold text-gray-900 mb-2 flex items-center gap-2">
                 <Banknote className="w-4 h-4" />
-                Valor Total
+                Valor Total (Cliente Paga)
               </label>
-              <input
-                type="number"
-                value={formData.valor_total}
-                  onChange={(e) => {
-                    setFormError('');
-                    setFormData({ ...formData, valor_total: parsePositiveInt(e.target.value) });
-                  }}
-                className="input-pos text-xl font-bold"
-                step="any"
-                required
-              />
-                {totalCoincide ? (
-                  <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
-                    <CheckCircle2 className="w-3 h-3" />
-                    Total coherente.
-                  </p>
-                ) : (
-                  <p className="text-xs text-amber-700 mt-1 flex items-center gap-1">
-                    <AlertTriangle className="w-3 h-3" />
-                    Total esperado: ${formatCurrency(totalEsperado)}.
-                  </p>
-                )}
+              <div
+                className="input-pos text-xl font-bold bg-slate-100 text-slate-900 cursor-default select-none"
+                aria-readonly="true"
+              >
+                {formatCurrency(totalCliente)}
+              </div>
+              <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
+                <CheckCircle2 className="w-3 h-3" />
+                RTM + terceros. Precio que verá el cliente.
+              </p>
             </div>
 
             <div>

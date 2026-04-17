@@ -248,6 +248,39 @@ def ensure_tenant_domain_schema(db):
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS cliente_email VARCHAR(255)"))
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS cliente_direccion VARCHAR(300)"))
     db.execute(text("ALTER TABLE tarifas ADD COLUMN IF NOT EXISTS tenant_id UUID"))
+    db.execute(
+        text(
+            "ALTER TABLE tarifas ADD COLUMN IF NOT EXISTS valor_terceros_runt NUMERIC(10, 2) NOT NULL DEFAULT 0"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE tarifas ADD COLUMN IF NOT EXISTS valor_terceros_sicov NUMERIC(10, 2) NOT NULL DEFAULT 0"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE tarifas ADD COLUMN IF NOT EXISTS valor_terceros_bancarizacion NUMERIC(10, 2) NOT NULL DEFAULT 0"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE tarifas ADD COLUMN IF NOT EXISTS valor_terceros_ansv NUMERIC(10, 2) NOT NULL DEFAULT 0"
+        )
+    )
+    # Fila legada: todo el monto de terceros en RUNT para poder facturar desglosado sin reingreso manual.
+    db.execute(
+        text(
+            """
+            UPDATE tarifas SET valor_terceros_runt = valor_terceros
+            WHERE valor_terceros > 0
+              AND COALESCE(valor_terceros_runt, 0) = 0
+              AND COALESCE(valor_terceros_sicov, 0) = 0
+              AND COALESCE(valor_terceros_bancarizacion, 0) = 0
+              AND COALESCE(valor_terceros_ansv, 0) = 0
+            """
+        )
+    )
     db.execute(text("ALTER TABLE comisiones_soat ADD COLUMN IF NOT EXISTS tenant_id UUID"))
     db.execute(text("ALTER TABLE movimientos_tesoreria ADD COLUMN IF NOT EXISTS tenant_id UUID"))
     db.execute(text("ALTER TABLE desglose_efectivo_tesoreria ADD COLUMN IF NOT EXISTS tenant_id UUID"))
@@ -1269,6 +1302,10 @@ def init_db():
                     antiguedad_max=2,
                     valor_rtm=181596,
                     valor_terceros=24056,
+                    valor_terceros_runt=24056,
+                    valor_terceros_sicov=0,
+                    valor_terceros_bancarizacion=0,
+                    valor_terceros_ansv=0,
                     valor_total=205652,
                     activa=True,
                     created_by=admin.id
@@ -1284,6 +1321,10 @@ def init_db():
                     antiguedad_max=7,
                     valor_rtm=181896,
                     valor_terceros=24056,
+                    valor_terceros_runt=24056,
+                    valor_terceros_sicov=0,
+                    valor_terceros_bancarizacion=0,
+                    valor_terceros_ansv=0,
                     valor_total=205952,
                     activa=True,
                     created_by=admin.id
@@ -1299,6 +1340,10 @@ def init_db():
                     antiguedad_max=16,
                     valor_rtm=182196,
                     valor_terceros=24056,
+                    valor_terceros_runt=24056,
+                    valor_terceros_sicov=0,
+                    valor_terceros_bancarizacion=0,
+                    valor_terceros_ansv=0,
                     valor_total=206252,
                     activa=True,
                     created_by=admin.id
@@ -1314,6 +1359,10 @@ def init_db():
                     antiguedad_max=None,
                     valor_rtm=181896,
                     valor_terceros=24056,
+                    valor_terceros_runt=24056,
+                    valor_terceros_sicov=0,
+                    valor_terceros_bancarizacion=0,
+                    valor_terceros_ansv=0,
                     valor_total=205952,
                     activa=True,
                     created_by=admin.id
