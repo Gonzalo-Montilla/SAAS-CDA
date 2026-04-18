@@ -51,7 +51,8 @@ class UsuarioResponse(BaseModel):
     """Respuesta de usuario"""
     id: UUID
     tenant_id: UUID
-    email: EmailStr
+    # str (no EmailStr): emails legacy en BD pueden no pasar validación RFC y romper /auth/me con 500.
+    email: str = Field(max_length=255)
     nombre_completo: str
     rol: str
     activo: bool

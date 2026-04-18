@@ -71,6 +71,12 @@ class Settings(BaseSettings):
     # Directorio de perfil headless (UserInstallation). Vacío en Linux = junto al almacén documental
     # (p. ej. private_uploads/.libreoffice-profile) para que systemd ReadWritePaths lo permita.
     DOCUMENTOS_LIBREOFFICE_USER_PROFILE: str = Field(default="", env="DOCUMENTOS_LIBREOFFICE_USER_PROFILE")
+    # PDF del RUT (certificación DIAN) en catálogo de proveedores — no confundir con cédula escaneada
+    PROVEEDORES_RUT_STORAGE_DIR: str = Field(
+        default="private_uploads/proveedores_rut",
+        env="PROVEEDORES_RUT_STORAGE_DIR",
+    )
+    PROVEEDORES_RUT_MAX_MB: int = Field(default=5, ge=1, le=25, env="PROVEEDORES_RUT_MAX_MB")
     ONBOARDING_EMAIL_VERIFICATION_REQUIRED: bool = True
     ONBOARDING_EMAIL_CODE_TTL_MINUTES: int = 15
     ONBOARDING_EMAIL_CODE_MAX_ATTEMPTS: int = 5

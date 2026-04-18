@@ -68,6 +68,27 @@ def digito_verificacion_nit_colombia_serie_37(nit_sin_dv: str) -> int:
     return r if r < 2 else 11 - r
 
 
+def normalizar_numero_identificacion_proveedor(raw: str | None) -> str:
+    """
+    Unifica captura «como en el RUT»: quita espacios y puntos de miles; si hay guion, deja base+DV.
+    Ej.: 900.123.456-8 → 900123456-8; 14.698.115-3 → 14698115-3; sin guion solo dígitos (p. ej. cédula sin DV).
+    """
+    s = (raw or "").strip()
+    if not s:
+        return ""
+    s = s.replace(" ", "")
+    if "-" in s:
+        left, _, right = s.rpartition("-")
+        left_digits = solo_digitos(left)
+        right_digits = solo_digitos(right)
+        if not left_digits:
+            return solo_digitos(s)
+        if right_digits:
+            return f"{left_digits}-{right_digits[:2]}"
+        return left_digits
+    return solo_digitos(s.replace(".", ""))
+
+
 def email_valido_factus(email_raw: str | None) -> bool:
     s = (email_raw or "").strip().lower()
     if not s or "@" not in s:

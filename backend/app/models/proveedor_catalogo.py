@@ -29,6 +29,8 @@ class ProveedorCatalogo(Base):
     email = Column(String(255), nullable=False)
     telefono = Column(String(30), nullable=False)
     factus_municipality_id = Column(Integer, nullable=False)
+    # Ruta relativa bajo PROVEEDORES_RUT_STORAGE_DIR (PDF certificación RUT DIAN); no es cédula escaneada
+    rut_pdf_relpath = Column(String(500), nullable=True)
 
     activo = Column(Boolean, nullable=False, default=True)
 
@@ -36,3 +38,7 @@ class ProveedorCatalogo(Base):
     updated_at = Column(DateTime, onupdate=lambda: datetime.now(timezone.utc))
 
     tenant = relationship("Tenant", backref="proveedores_catalogo")
+
+    @property
+    def tiene_documento_rut(self) -> bool:
+        return bool((self.rut_pdf_relpath or "").strip())

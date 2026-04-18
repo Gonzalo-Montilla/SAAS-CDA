@@ -5,7 +5,7 @@ from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from app.schemas.tesoreria import BENEFICIARIO_TIPOS_IDENTIFICACION_TESORERIA
 
@@ -52,8 +52,15 @@ class ProveedorCatalogoResponse(BaseModel):
     activo: bool
     created_at: datetime
     updated_at: Optional[datetime]
+    # Ruta interna; no se expone en JSON (solo sirve para calcular tiene_documento_rut).
+    rut_pdf_relpath: Optional[str] = Field(default=None, exclude=True)
 
     model_config = ConfigDict(from_attributes=True)
+
+    @computed_field
+    @property
+    def tiene_documento_rut(self) -> bool:
+        return bool((self.rut_pdf_relpath or "").strip())
 
 
 def validar_tipo_identificacion_proveedor(tipo: str) -> str:

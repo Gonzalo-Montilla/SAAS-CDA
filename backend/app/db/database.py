@@ -782,7 +782,17 @@ def ensure_movimiento_proveedor_contacto_documento_soporte(db):
 def ensure_proveedores_catalogo_schema(db):
     """Catálogo de proveedores por tenant y vínculo opcional en egresos."""
     bind = db.get_bind()
-    if bind.dialect.name != "postgresql":
+    dialect = bind.dialect.name
+    if dialect == "sqlite":
+        # En dev con SQLite el bloque PostgreSQL no corre; la columna del PDF RUT debe existir igual.
+        try:
+            db.execute(
+                text("ALTER TABLE proveedores_catalogo ADD COLUMN rut_pdf_relpath VARCHAR(500)")
+            )
+        except Exception:
+            pass
+        return
+    if dialect != "postgresql":
         return
     db.execute(
         text(
@@ -853,6 +863,11 @@ def ensure_proveedores_catalogo_schema(db):
             CREATE INDEX IF NOT EXISTS ix_mov_tes_proveedor_cat
             ON movimientos_tesoreria(proveedor_catalogo_id)
             """
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE proveedores_catalogo ADD COLUMN IF NOT EXISTS rut_pdf_relpath VARCHAR(500)"
         )
     )
 
@@ -1333,6 +1348,9 @@ def get_db():
     db = SessionLocal()
     try:
         yield db
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 

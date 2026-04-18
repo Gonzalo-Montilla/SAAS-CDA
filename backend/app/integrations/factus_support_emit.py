@@ -740,6 +740,8 @@ def emitir_documento_soporte_desde_movimiento(
     cuds = str(doc.get("cuds") or doc.get("cufe") or "").strip()
     public_url = _resolver_public_url_documento_soporte(resp, doc)
     factus_id = doc.get("id")
+    if factus_id is None and isinstance(resp.get("data"), dict):
+        factus_id = resp["data"].get("id")
 
     row = DocumentoSoporteElectronico(
         id=uuid.uuid4(),

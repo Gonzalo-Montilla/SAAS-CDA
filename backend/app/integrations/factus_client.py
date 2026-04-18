@@ -357,7 +357,7 @@ def validate_support_document(
 ) -> dict[str, Any]:
     """
     POST /v1/support-documents/validate — documento soporte en adquisiciones (DIAN).
-    Documentación: https://developers.factus.com.co/v1/documentos-soporte/crear-documento-soporte/
+    Documentación: https://developers.factus.com.co/documentos-soporte/crear-validar/
     """
     url = f"{base_url.rstrip('/')}/v1/support-documents/validate"
     headers = {
