@@ -3,6 +3,7 @@ Construcción de payload y emisión de factura Factus para un cobro de vehículo
 """
 from __future__ import annotations
 
+import logging
 import uuid
 from decimal import Decimal
 from typing import Any, Optional
@@ -12,7 +13,13 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.factus_crypto import decrypt_secret
-from app.integrations.factus_client import FactusAPIError, factus_base_url, obtain_token, validate_invoice
+from app.integrations.factus_client import (
+    FactusAPIError,
+    download_bill_pdf_resolved,
+    factus_base_url,
+    obtain_token,
+    validate_invoice,
+)
 from app.models.factus import FacturaElectronica, TenantFactusSettings
 from app.services.factus_tenant_settings import active_auth_encrypted
 from app.utils.factus_validators import email_valido_factus as _email_valido_factus
@@ -21,6 +28,9 @@ from app.models.sucursal import Sucursal
 from app.models.tarifa import Tarifa
 from app.models.tenant import Tenant
 from app.models.vehiculo import VehiculoProceso
+from app.utils.archivo_fiscal_pdf import guardar_pdf_archivo_fiscal
+
+_log_fe = logging.getLogger(__name__)
 
 
 def _iva_tax_rate_string_factus() -> str:
@@ -423,6 +433,7 @@ def emitir_y_persistir_factura_cobro(
     active_sucursal_id: UUID,
     metodo_pago: str,
     tarifa: Optional[Tarifa] = None,
+    emitido_por_usuario_id: Optional[UUID] = None,
 ) -> tuple[str, Optional[str], Optional[str]]:
     """
     Obtiene token, valida factura en Factus, persiste FacturaElectronica.
@@ -490,8 +501,28 @@ def emitir_y_persistir_factura_cobro(
         numero_documento=str(numero)[:80] if numero else None,
         cufe=str(cufe)[:200] if cufe else None,
         public_url=str(public_url)[:800] if public_url else None,
+        emitido_por_usuario_id=emitido_por_usuario_id,
     )
     db.add(fe)
+    db.flush()
+    try:
+        pdf_bytes = download_bill_pdf_resolved(
+            base_url=base,
+            access_token=access,
+            numero_documento=fe.numero_documento,
+            factus_bill_id=fe.factus_bill_id,
+        )
+        rel, sha = guardar_pdf_archivo_fiscal(
+            tenant_id=vehiculo.tenant_id,
+            prefijo="fe",
+            entity_id=fe.id,
+            pdf_bytes=pdf_bytes,
+        )
+        fe.pdf_storage_relpath = rel
+        fe.pdf_sha256_hex = sha
+        db.flush()
+    except Exception as exc:
+        _log_fe.warning("factura electrónica: no se archivó PDF local (%s)", exc)
 
     display = str(numero) if numero else ref_code
     return (display, str(cufe) if cufe else None, str(public_url) if public_url else None)

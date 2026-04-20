@@ -31,6 +31,8 @@ class ProveedorCatalogo(Base):
     factus_municipality_id = Column(Integer, nullable=False)
     # Ruta relativa bajo PROVEEDORES_RUT_STORAGE_DIR (PDF certificación RUT DIAN); no es cédula escaneada
     rut_pdf_relpath = Column(String(500), nullable=True)
+    # Concepto de retención por defecto para documento soporte (compras/servicios/arrendamiento/honorarios)
+    concepto_retencion_dse = Column(String(32), nullable=False, default="servicios")
 
     activo = Column(Boolean, nullable=False, default=True)
 

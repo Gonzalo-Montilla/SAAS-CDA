@@ -80,6 +80,8 @@ class Settings(BaseSettings):
         env="PROVEEDORES_RUT_STORAGE_DIR",
     )
     PROVEEDORES_RUT_MAX_MB: int = Field(default=5, ge=1, le=25, env="PROVEEDORES_RUT_MAX_MB")
+    # Copias PDF archivadas en disco (documento soporte / factura) para trazabilidad y conservación.
+    ARCHIVOS_FISCALES_DIR: str = Field(default="private_uploads/archivos_fiscales", env="ARCHIVOS_FISCALES_DIR")
     ONBOARDING_EMAIL_VERIFICATION_REQUIRED: bool = True
     ONBOARDING_EMAIL_CODE_TTL_MINUTES: int = 15
     ONBOARDING_EMAIL_CODE_MAX_ATTEMPTS: int = 5

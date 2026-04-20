@@ -38,6 +38,11 @@ class TenantFactusSettings(Base):
     # Notificaciones documento soporte (análogo a send_email en factura: proveedor vía Factus + copia CDA vía SMTP)
     documento_soporte_notificar_proveedor_factus = Column(Boolean, nullable=False, default=True)
     documento_soporte_correo_notificacion_cda = Column(String(255), nullable=True)
+    # Entorno retenciones DSE (fase 1): qué conceptos usa el CDA; el motor usará este subconjunto.
+    dse_retencion_usar_compras = Column(Boolean, nullable=False, default=True)
+    dse_retencion_usar_servicios = Column(Boolean, nullable=False, default=True)
+    dse_retencion_usar_arrendamiento = Column(Boolean, nullable=False, default=True)
+    dse_retencion_usar_honorarios = Column(Boolean, nullable=False, default=True)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
@@ -57,6 +62,9 @@ class FacturaElectronica(Base):
     numero_documento = Column(String(80), nullable=True)
     cufe = Column(String(200), nullable=True)
     public_url = Column(String(800), nullable=True)
+    emitido_por_usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="SET NULL"), nullable=True)
+    pdf_storage_relpath = Column(String(512), nullable=True)
+    pdf_sha256_hex = Column(String(64), nullable=True)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
@@ -76,5 +84,10 @@ class DocumentoSoporteElectronico(Base):
     numero_documento = Column(String(80), nullable=True)
     cuds = Column(String(200), nullable=True)
     public_url = Column(String(800), nullable=True)
+    emitido_por_usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="SET NULL"), nullable=True)
+    pdf_storage_relpath = Column(String(512), nullable=True)
+    pdf_sha256_hex = Column(String(64), nullable=True)
+    # Instantánea del concepto de retención del proveedor de catálogo al emitir (fase 2: montos / payload Factus).
+    concepto_retencion_dse = Column(String(32), nullable=True)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)

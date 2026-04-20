@@ -784,10 +784,18 @@ def ensure_proveedores_catalogo_schema(db):
     bind = db.get_bind()
     dialect = bind.dialect.name
     if dialect == "sqlite":
-        # En dev con SQLite el bloque PostgreSQL no corre; la columna del PDF RUT debe existir igual.
+        # En dev con SQLite el bloque PostgreSQL no corre; columnas extra deben existir igual.
         try:
             db.execute(
                 text("ALTER TABLE proveedores_catalogo ADD COLUMN rut_pdf_relpath VARCHAR(500)")
+            )
+        except Exception:
+            pass
+        try:
+            db.execute(
+                text(
+                    "ALTER TABLE proveedores_catalogo ADD COLUMN concepto_retencion_dse VARCHAR(32) NOT NULL DEFAULT 'servicios'"
+                )
             )
         except Exception:
             pass
@@ -868,6 +876,11 @@ def ensure_proveedores_catalogo_schema(db):
     db.execute(
         text(
             "ALTER TABLE proveedores_catalogo ADD COLUMN IF NOT EXISTS rut_pdf_relpath VARCHAR(500)"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE proveedores_catalogo ADD COLUMN IF NOT EXISTS concepto_retencion_dse VARCHAR(32) NOT NULL DEFAULT 'servicios'"
         )
     )
 
@@ -1068,6 +1081,45 @@ def ensure_factus_schema(db):
         text(
             "CREATE INDEX IF NOT EXISTS ix_documentos_soporte_tenant_ref "
             "ON documentos_soporte_electronicos(tenant_id, reference_code)"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE facturas_electronicas ADD COLUMN IF NOT EXISTS emitido_por_usuario_id UUID REFERENCES usuarios(id) ON DELETE SET NULL"
+        )
+    )
+    db.execute(text("ALTER TABLE facturas_electronicas ADD COLUMN IF NOT EXISTS pdf_storage_relpath VARCHAR(512)"))
+    db.execute(text("ALTER TABLE facturas_electronicas ADD COLUMN IF NOT EXISTS pdf_sha256_hex VARCHAR(64)"))
+    db.execute(
+        text(
+            "ALTER TABLE documentos_soporte_electronicos ADD COLUMN IF NOT EXISTS emitido_por_usuario_id UUID REFERENCES usuarios(id) ON DELETE SET NULL"
+        )
+    )
+    db.execute(text("ALTER TABLE documentos_soporte_electronicos ADD COLUMN IF NOT EXISTS pdf_storage_relpath VARCHAR(512)"))
+    db.execute(text("ALTER TABLE documentos_soporte_electronicos ADD COLUMN IF NOT EXISTS pdf_sha256_hex VARCHAR(64)"))
+    db.execute(
+        text(
+            "ALTER TABLE documentos_soporte_electronicos ADD COLUMN IF NOT EXISTS concepto_retencion_dse VARCHAR(32)"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE tenant_factus_settings ADD COLUMN IF NOT EXISTS dse_retencion_usar_compras BOOLEAN NOT NULL DEFAULT TRUE"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE tenant_factus_settings ADD COLUMN IF NOT EXISTS dse_retencion_usar_servicios BOOLEAN NOT NULL DEFAULT TRUE"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE tenant_factus_settings ADD COLUMN IF NOT EXISTS dse_retencion_usar_arrendamiento BOOLEAN NOT NULL DEFAULT TRUE"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE tenant_factus_settings ADD COLUMN IF NOT EXISTS dse_retencion_usar_honorarios BOOLEAN NOT NULL DEFAULT TRUE"
         )
     )
 
@@ -1375,6 +1427,7 @@ def init_db():
     from app.models.documento_tenant import TenantDocumento  # noqa: F401 — register model
     from app.models.documento_auditoria import TenantDocumentoAuditoria  # noqa: F401 — register model
     from app.models.proveedor_catalogo import ProveedorCatalogo  # noqa: F401 — register model
+    from app.models.dse_retencion_motor import DseRetencionTasaConcepto, DseUvtPorAnio  # noqa: F401
     from app.core.security import get_password_hash
     from datetime import date
     

@@ -22,6 +22,7 @@ from app.api.v1.endpoints import (
     factus,
     documentos,
     proveedores_catalogo,
+    dse_retencion_motor,
 )
 
 api_router = APIRouter()
@@ -46,4 +47,7 @@ api_router.include_router(factus.router, prefix="/factus", tags=["factus"])
 api_router.include_router(documentos.router, prefix="/documentos", tags=["documentos"])
 api_router.include_router(
     proveedores_catalogo.router, prefix="/proveedores-catalogo", tags=["proveedores-catalogo"]
+)
+api_router.include_router(
+    dse_retencion_motor.router, prefix="/dse-retencion", tags=["dse-retencion"]
 )

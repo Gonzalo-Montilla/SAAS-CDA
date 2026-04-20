@@ -7,11 +7,79 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import FactusMunicipalitySearchField from '../components/FactusMunicipalitySearchField';
 import {
   proveedoresCatalogoApi,
+  type ConceptoRetencionDse,
   type ProveedorCatalogo,
   type ProveedorCatalogoCreate,
 } from '../api/proveedoresCatalogo';
-import { factusApi } from '../api/factus';
-import { BookUser, Plus, Pencil, X, FileText, Eye, Trash2 } from 'lucide-react';
+import { factusApi, type FactusSettings } from '../api/factus';
+import {
+  dseRetencionApi,
+  type DseRetencionParametrosPut,
+  type DseRetencionPreviewOut,
+} from '../api/dseRetencion';
+import { useAuth } from '../contexts/AuthContext';
+import {
+  BookUser,
+  Plus,
+  Pencil,
+  X,
+  FileText,
+  Eye,
+  Trash2,
+  SlidersHorizontal,
+  Percent,
+  ChevronDown,
+  ChevronRight,
+} from 'lucide-react';
+
+const LS_DSE_ENTORNO_ABIERTO = 'proveedores-catalogo:dse-entorno-retencion-abierto';
+const LS_DSE_MOTOR_ABIERTO = 'proveedores-catalogo:dse-motor-retencion-abierto';
+
+function readCollapsedPref(key: string): boolean {
+  try {
+    const v = localStorage.getItem(key);
+    if (v === '1') return true;
+    if (v === '0') return false;
+  } catch {
+    /* private mode / SSR */
+  }
+  return false;
+}
+
+/** Evita 2.5000 / 11.0000 al cargar desde API; el usuario sigue pudiendo editar a mano. */
+function formatearTasaDesdeApi(n: number): string {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return '';
+  return String(parseFloat(x.toFixed(6)));
+}
+
+/** UVT en pesos: sin ceros de más (52374 en vez de 52374.00). */
+function formatearUvtDesdeApi(n: number): string {
+  const x = Number(n);
+  if (!Number.isFinite(x)) return '';
+  return String(parseFloat(x.toFixed(2)));
+}
+
+const LABEL_CONCEPTO_DSE: Record<ConceptoRetencionDse, string> = {
+  compras: 'Compras',
+  servicios: 'Servicios',
+  arrendamiento: 'Arrendamiento',
+  honorarios: 'Honorarios',
+};
+
+const CONCEPTOS_DSE_ORDER: ConceptoRetencionDse[] = ['compras', 'servicios', 'arrendamiento', 'honorarios'];
+
+function conceptosDisponiblesParaFormulario(cfg: FactusSettings | undefined): { value: ConceptoRetencionDse; label: string }[] {
+  if (!cfg) {
+    return CONCEPTOS_DSE_ORDER.map((value) => ({ value, label: LABEL_CONCEPTO_DSE[value] }));
+  }
+  return CONCEPTOS_DSE_ORDER.filter((c) => {
+    if (c === 'compras') return cfg.dse_retencion_usar_compras !== false;
+    if (c === 'servicios') return cfg.dse_retencion_usar_servicios !== false;
+    if (c === 'arrendamiento') return cfg.dse_retencion_usar_arrendamiento !== false;
+    return cfg.dse_retencion_usar_honorarios !== false;
+  }).map((value) => ({ value, label: LABEL_CONCEPTO_DSE[value] }));
+}
 
 function proveedorToForm(p: ProveedorCatalogo): ProveedorCatalogoCreate {
   return {
@@ -24,6 +92,7 @@ function proveedorToForm(p: ProveedorCatalogo): ProveedorCatalogoCreate {
     telefono: p.telefono,
     factus_municipality_id: p.factus_municipality_id,
     activo: p.activo,
+    concepto_retencion_dse: p.concepto_retencion_dse ?? 'servicios',
   };
 }
 
@@ -39,10 +108,37 @@ const emptyForm: ProveedorCatalogoCreate = {
   telefono: '',
   factus_municipality_id: 1,
   activo: true,
+  concepto_retencion_dse: 'servicios',
 };
 
 export default function ProveedoresCatalogoPage() {
   const qc = useQueryClient();
+  const { user } = useAuth();
+  const esAdmin = user?.rol === 'administrador';
+  const puedeVistaPreviaMotor = user?.rol === 'administrador' || user?.rol === 'contador';
+
+  const [entornoRetencionAbierto, setEntornoRetencionAbierto] = useState(() =>
+    readCollapsedPref(LS_DSE_ENTORNO_ABIERTO),
+  );
+  const [motorRetencionAbierto, setMotorRetencionAbierto] = useState(() =>
+    readCollapsedPref(LS_DSE_MOTOR_ABIERTO),
+  );
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_DSE_ENTORNO_ABIERTO, entornoRetencionAbierto ? '1' : '0');
+    } catch {
+      /* noop */
+    }
+  }, [entornoRetencionAbierto]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(LS_DSE_MOTOR_ABIERTO, motorRetencionAbierto ? '1' : '0');
+    } catch {
+      /* noop */
+    }
+  }, [motorRetencionAbierto]);
   const { data: factusCfg } = useQuery({
     queryKey: ['factus-settings'],
     queryFn: () => factusApi.getSettings(),
@@ -186,6 +282,122 @@ export default function ProveedoresCatalogoPage() {
     },
   });
 
+  const patchEntornoRetenciones = useMutation({
+    mutationFn: factusApi.patchDocumentoSoporteEntornoRetenciones,
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['factus-settings'] });
+    },
+    onError: (err: unknown) => {
+      window.alert(extractApiErrorMessage(err, 'No se pudo guardar el entorno de retenciones.'));
+    },
+  });
+
+  const [anioMotor, setAnioMotor] = useState(() => new Date().getFullYear());
+  const { data: motorParams, isLoading: motorLoading } = useQuery({
+    queryKey: ['dse-retencion-parametros', anioMotor],
+    queryFn: () => dseRetencionApi.getParametros(anioMotor),
+    enabled: esAdmin,
+    staleTime: 30_000,
+  });
+  const [uvtDraft, setUvtDraft] = useState('');
+  const [tasasDraft, setTasasDraft] = useState<Partial<Record<ConceptoRetencionDse, string>>>({});
+
+  useEffect(() => {
+    if (!motorParams) return;
+    setUvtDraft(
+      motorParams.valor_uvt_cop != null && motorParams.valor_uvt_cop !== undefined
+        ? formatearUvtDesdeApi(Number(motorParams.valor_uvt_cop))
+        : '',
+    );
+    const t: Partial<Record<ConceptoRetencionDse, string>> = {};
+    for (const c of CONCEPTOS_DSE_ORDER) {
+      const v = motorParams.tasas[c];
+      t[c] = v != null && v !== undefined ? formatearTasaDesdeApi(Number(v)) : '';
+    }
+    setTasasDraft(t);
+  }, [motorParams]);
+
+  const guardarMotorParams = useMutation({
+    mutationFn: async () => {
+      const rawUvt = uvtDraft.trim();
+      let valorUvt: number | null;
+      if (rawUvt === '') {
+        valorUvt = null;
+      } else {
+        const u = parseFloat(rawUvt.replace(',', '.'));
+        if (Number.isNaN(u) || u < 0) {
+          window.alert('Indique un valor de UVT válido (pesos) o déjelo vacío para borrarlo.');
+          throw new Error('uvt');
+        }
+        valorUvt = u;
+      }
+      const habilitados = conceptosDisponiblesParaFormulario(factusCfg).map((x) => x.value);
+      const tasas: NonNullable<DseRetencionParametrosPut['tasas']> = {};
+      for (const c of habilitados) {
+        const raw = (tasasDraft[c] ?? '').trim();
+        if (raw === '') {
+          tasas[c] = null;
+        } else {
+          const p = parseFloat(raw.replace(',', '.'));
+          if (Number.isNaN(p) || p < 0 || p > 100) {
+            window.alert(
+              `La tasa de ${LABEL_CONCEPTO_DSE[c]} debe ser un número entre 0 y 100, o vacío para borrarla.`,
+            );
+            throw new Error('tasa');
+          }
+          tasas[c] = p;
+        }
+      }
+      return dseRetencionApi.putParametros(anioMotor, { valor_uvt_cop: valorUvt, tasas });
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['dse-retencion-parametros', anioMotor] });
+    },
+    onError: (err: unknown) => {
+      if ((err as Error)?.message === 'uvt' || (err as Error)?.message === 'tasa') return;
+      window.alert(extractApiErrorMessage(err, 'No se pudieron guardar los parámetros del motor.'));
+    },
+  });
+
+  const [previewMonto, setPreviewMonto] = useState('');
+  const [previewConcepto, setPreviewConcepto] = useState<ConceptoRetencionDse>('servicios');
+  const [previewResult, setPreviewResult] = useState<DseRetencionPreviewOut | null>(null);
+
+  const previewMotor = useMutation({
+    mutationFn: () => {
+      const m = parseFloat(previewMonto.replace(',', '.'));
+      if (Number.isNaN(m) || m <= 0) {
+        window.alert('Indique un monto de pago mayor a cero.');
+        return Promise.reject(new Error('monto'));
+      }
+      return dseRetencionApi.postPreview({ monto: m, concepto: previewConcepto, anio: anioMotor });
+    },
+    onSuccess: (data) => setPreviewResult(data),
+    onError: (err: unknown) => {
+      if ((err as Error)?.message === 'monto') return;
+      window.alert(extractApiErrorMessage(err, 'No se pudo calcular la vista previa.'));
+      setPreviewResult(null);
+    },
+  });
+
+  const aplicarToggleEntorno = (
+    campo:
+      | 'dse_retencion_usar_compras'
+      | 'dse_retencion_usar_servicios'
+      | 'dse_retencion_usar_arrendamiento'
+      | 'dse_retencion_usar_honorarios',
+    valor: boolean,
+  ) => {
+    if (!factusCfg) return;
+    patchEntornoRetenciones.mutate({
+      dse_retencion_usar_compras: factusCfg.dse_retencion_usar_compras ?? true,
+      dse_retencion_usar_servicios: factusCfg.dse_retencion_usar_servicios ?? true,
+      dse_retencion_usar_arrendamiento: factusCfg.dse_retencion_usar_arrendamiento ?? true,
+      dse_retencion_usar_honorarios: factusCfg.dse_retencion_usar_honorarios ?? true,
+      [campo]: valor,
+    });
+  };
+
   const abrirCrear = () => {
     setForm({ ...emptyForm, tipo_identificacion: 'NIT', factus_municipality_id: 1 });
     setEditId(null);
@@ -220,6 +432,7 @@ export default function ProveedoresCatalogoPage() {
       telefono: form.telefono.trim(),
       factus_municipality_id: mid,
       activo: form.activo !== false,
+      concepto_retencion_dse: form.concepto_retencion_dse ?? 'servicios',
     };
     if (modal === 'crear') {
       crear.mutate(payload);
@@ -274,6 +487,258 @@ export default function ProveedoresCatalogoPage() {
         </p>
       </section>
 
+      {esAdmin && (
+        <section className="card-pos mb-6">
+          <button
+            type="button"
+            className="w-full flex items-start gap-2 sm:gap-3 text-left rounded-xl -m-1 p-1 hover:bg-slate-50/90 transition-colors"
+            onClick={() => setEntornoRetencionAbierto((v) => !v)}
+            aria-expanded={entornoRetencionAbierto}
+            aria-controls="panel-dse-entorno"
+            id="heading-dse-entorno"
+          >
+            <span className="shrink-0 mt-1 text-slate-500" aria-hidden>
+              {entornoRetencionAbierto ? (
+                <ChevronDown className="w-5 h-5" />
+              ) : (
+                <ChevronRight className="w-5 h-5" />
+              )}
+            </span>
+            <SlidersHorizontal className="w-5 h-5 text-primary-600 shrink-0 mt-0.5" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <h2 className="text-lg font-semibold text-slate-900">Entorno retención (documento soporte)</h2>
+              {entornoRetencionAbierto ? (
+                <p className="text-sm text-slate-500 mt-0.5 max-w-3xl">
+                  Indique qué conceptos de retención en la fuente aplican en su organización. Luego asigne a cada
+                  proveedor un concepto por defecto (solo entre los habilitados aquí). Abajo puede cargar UVT y tasas por
+                  año; el uso automático en egresos y el envío a Factus se conectará después.
+                </p>
+              ) : (
+                <p className="text-xs text-slate-400 mt-1">Pulsa para expandir y configurar conceptos habilitados.</p>
+              )}
+            </div>
+          </button>
+          {entornoRetencionAbierto && (
+            <div className="mt-4 pt-2 border-t border-slate-100" id="panel-dse-entorno">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {(
+                  [
+                    ['dse_retencion_usar_compras', 'Compras'] as const,
+                    ['dse_retencion_usar_servicios', 'Servicios'] as const,
+                    ['dse_retencion_usar_arrendamiento', 'Arrendamiento'] as const,
+                    ['dse_retencion_usar_honorarios', 'Honorarios'] as const,
+                  ] as const
+                ).map(([campo, etiqueta]) => (
+                  <label key={campo} className="flex items-center gap-2 text-sm text-slate-800">
+                    <input
+                      type="checkbox"
+                      checked={factusCfg?.[campo] !== false}
+                      disabled={!factusCfg || patchEntornoRetenciones.isPending}
+                      onChange={(e) => aplicarToggleEntorno(campo, e.target.checked)}
+                    />
+                    {etiqueta}
+                  </label>
+                ))}
+              </div>
+              {patchEntornoRetenciones.isPending && (
+                <p className="text-xs text-slate-500 mt-3">Guardando entorno…</p>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {esAdmin && (
+        <section className="card-pos mb-6">
+          <button
+            type="button"
+            className="w-full flex items-start gap-2 sm:gap-3 text-left rounded-xl -m-1 p-1 hover:bg-slate-50/90 transition-colors"
+            onClick={() => setMotorRetencionAbierto((v) => !v)}
+            aria-expanded={motorRetencionAbierto}
+            aria-controls="panel-dse-motor"
+            id="heading-dse-motor"
+          >
+            <span className="shrink-0 mt-1 text-slate-500" aria-hidden>
+              {motorRetencionAbierto ? (
+                <ChevronDown className="w-5 h-5" />
+              ) : (
+                <ChevronRight className="w-5 h-5" />
+              )}
+            </span>
+            <Percent className="w-5 h-5 text-primary-600 shrink-0 mt-0.5" aria-hidden />
+            <div className="min-w-0 flex-1">
+              <h2 className="text-lg font-semibold text-slate-900">Parámetros motor retención (por año)</h2>
+              {motorRetencionAbierto ? (
+                <p className="text-sm text-slate-500 mt-0.5 max-w-3xl">
+                  Valor de 1 UVT en pesos (referencia DIAN para el año) y tasas de retención % por concepto habilitado en
+                  el entorno. Deje un campo vacío y guarde para borrarlo. Solo administrador.
+                </p>
+              ) : (
+                <p className="text-xs text-slate-400 mt-1">Pulsa para expandir UVT y tasas por año fiscal.</p>
+              )}
+            </div>
+          </button>
+          {motorRetencionAbierto && (
+            <div className="mt-4 pt-2 border-t border-slate-100" id="panel-dse-motor">
+              <div className="flex flex-wrap items-end gap-3 mb-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Año fiscal</label>
+                  <input
+                    type="number"
+                    className="input-pos w-28 tabular-nums"
+                    min={2000}
+                    max={2100}
+                    value={anioMotor}
+                    onChange={(e) => {
+                      const n = parseInt(e.target.value, 10);
+                      if (!Number.isNaN(n)) setAnioMotor(Math.max(2000, Math.min(2100, n)));
+                    }}
+                  />
+                </div>
+              </div>
+              {motorLoading ? (
+                <LoadingSpinner message="Cargando parámetros…" />
+              ) : (
+                <>
+                  <div className="mb-4">
+                    <label className="block text-xs font-semibold text-slate-700 mb-1">
+                      Valor 1 UVT (COP)
+                    </label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="input-pos max-w-xs"
+                      placeholder="Ej. 51500"
+                      value={uvtDraft}
+                      onChange={(e) => setUvtDraft(e.target.value)}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <p className="text-xs text-slate-500 mb-2">
+                    Vacío = no hay tasa guardada para ese concepto (no es 0%). El rango válido al escribir es 0–100.
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-4">
+                    {conceptosDisponiblesParaFormulario(factusCfg).map(({ value: c, label }) => (
+                      <div key={c}>
+                        <label className="block text-xs font-semibold text-slate-700 mb-1">
+                          Tasa {label} (%)
+                        </label>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          className="input-pos w-full tabular-nums"
+                          placeholder="Ej. 4"
+                          title="Porcentaje entre 0 y 100. Dejar vacío y guardar borra la tasa."
+                          value={tasasDraft[c] ?? ''}
+                          onChange={(e) =>
+                            setTasasDraft((prev) => ({
+                              ...prev,
+                              [c]: e.target.value,
+                            }))
+                          }
+                          autoComplete="off"
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  <button
+                    type="button"
+                    className="btn-pos btn-primary"
+                    disabled={guardarMotorParams.isPending}
+                    onClick={() => guardarMotorParams.mutate()}
+                  >
+                    {guardarMotorParams.isPending ? 'Guardando…' : 'Guardar parámetros del año'}
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
+      {puedeVistaPreviaMotor && (
+        <section className="card-pos mb-6 border border-dashed border-slate-200 bg-slate-50/60">
+          <h2 className="text-lg font-semibold text-slate-900 mb-1">Vista previa del motor (simulación)</h2>
+          <p className="text-sm text-slate-500 mb-4 max-w-3xl">
+            Usa el UVT, la tasa del año <span className="font-mono tabular-nums">{anioMotor}</span> y los umbrales UVT por
+            concepto (referencia tipo tabla DIAN). No guarda nada; sirve para validar parámetros.
+          </p>
+          <div className="flex flex-wrap items-end gap-3 mb-3">
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Monto del pago (COP)</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                className="input-pos w-40 tabular-nums"
+                placeholder="Ej. 1500000"
+                value={previewMonto}
+                onChange={(e) => setPreviewMonto(e.target.value)}
+                autoComplete="off"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">Concepto</label>
+              <select
+                className="input-pos min-w-[200px]"
+                value={previewConcepto}
+                onChange={(e) => setPreviewConcepto(e.target.value as ConceptoRetencionDse)}
+              >
+                {conceptosDisponiblesParaFormulario(factusCfg).map(({ value: c, label }) => (
+                  <option key={c} value={c}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="button"
+              className="btn-pos btn-secondary"
+              disabled={previewMotor.isPending}
+              onClick={() => previewMotor.mutate()}
+            >
+              {previewMotor.isPending ? 'Calculando…' : 'Calcular'}
+            </button>
+          </div>
+          {previewResult && (
+            <div className="text-sm rounded-xl border border-slate-200 bg-white px-3 py-2.5 space-y-1">
+              <p>
+                <span className="font-medium text-slate-700">Retención sugerida:</span>{' '}
+                {previewResult.retencion_cop != null ? (
+                  <span className="font-semibold text-slate-900">
+                    ${Number(previewResult.retencion_cop).toLocaleString('es-CO', { maximumFractionDigits: 2 })}
+                  </span>
+                ) : (
+                  <span className="text-slate-500">—</span>
+                )}
+              </p>
+              {previewResult.base_minima_cop != null && (
+                <p className="text-slate-600">
+                  Base mínima (pesos):{' '}
+                  <span className="tabular-nums">
+                    ${Number(previewResult.base_minima_cop).toLocaleString('es-CO', { maximumFractionDigits: 2 })}
+                  </span>{' '}
+                  (umbral {previewResult.umbral_uvt} UVT)
+                </p>
+              )}
+              <p className="text-xs text-slate-500">
+                UVT año: {previewResult.valor_uvt_cop ?? '—'} · Tasa: {previewResult.tasa_porcentaje ?? '—'}%
+              </p>
+              {previewResult.motivo_sin_calculo && previewResult.motivo_sin_calculo !== 'monto_cero' && (
+                <p className="text-xs text-amber-800">
+                  {previewResult.motivo_sin_calculo === 'falta_valor_uvt' &&
+                    'Configure el valor UVT del año en parámetros (administrador).'}
+                  {previewResult.motivo_sin_calculo === 'monto_bajo_base_minima' &&
+                    'El monto no alcanza la base mínima en pesos para aplicar retención.'}
+                  {previewResult.motivo_sin_calculo === 'sin_tasa_configurada' &&
+                    'No hay tasa % configurada para ese concepto y año.'}
+                  {previewResult.motivo_sin_calculo === 'tasa_invalida' && 'Tasa en base de datos inválida.'}
+                </p>
+              )}
+            </div>
+          )}
+        </section>
+      )}
+
       {isLoading ? (
         <div className="card-pos flex justify-center py-16">
           <LoadingSpinner message="Cargando catálogo de proveedores…" />
@@ -303,6 +768,7 @@ export default function ProveedoresCatalogoPage() {
                   <th>Correo</th>
                   <th>Mcp. Factus</th>
                   <th>Activo</th>
+                  <th>Retención</th>
                   <th>RUT (PDF)</th>
                   <th className="table-enterprise-col-actions">Acciones</th>
                 </tr>
@@ -310,7 +776,7 @@ export default function ProveedoresCatalogoPage() {
               <tbody>
                 {items?.length === 0 ? (
                   <tr>
-                    <td colSpan={8} className="text-sm text-slate-600 text-center py-10">
+                    <td colSpan={9} className="text-sm text-slate-600 text-center py-10">
                       No hay proveedores. Cree el primero con «Nuevo proveedor».
                     </td>
                   </tr>
@@ -325,6 +791,9 @@ export default function ProveedoresCatalogoPage() {
                       <td className="text-slate-600">{p.email}</td>
                       <td className="text-slate-600 tabular-nums">{p.factus_municipality_id}</td>
                       <td>{p.activo ? 'Sí' : 'No'}</td>
+                      <td className="text-slate-600 text-sm">
+                        {LABEL_CONCEPTO_DSE[p.concepto_retencion_dse] ?? p.concepto_retencion_dse ?? '—'}
+                      </td>
                       <td>
                         <button
                           type="button"
@@ -479,6 +948,37 @@ export default function ProveedoresCatalogoPage() {
                 idInputLabel="Id municipio Factus"
                 helperText="Mismo catálogo que en Organización."
               />
+              <div>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Concepto de retención (documento soporte)
+                </label>
+                <select
+                  className="input-pos w-full max-w-md"
+                  value={form.concepto_retencion_dse ?? 'servicios'}
+                  onChange={(e) =>
+                    setForm((f) => ({
+                      ...f,
+                      concepto_retencion_dse: e.target.value as ConceptoRetencionDse,
+                    }))
+                  }
+                >
+                  {conceptosDisponiblesParaFormulario(factusCfg).map(({ value, label }) => (
+                    <option key={value} value={value}>
+                      {label}
+                    </option>
+                  ))}
+                  {form.concepto_retencion_dse &&
+                    !conceptosDisponiblesParaFormulario(factusCfg).some((o) => o.value === form.concepto_retencion_dse) && (
+                      <option value={form.concepto_retencion_dse}>
+                        {LABEL_CONCEPTO_DSE[form.concepto_retencion_dse] ?? form.concepto_retencion_dse} (desactivado en
+                        entorno; cambie el entorno o elija otro concepto)
+                      </option>
+                    )}
+                </select>
+                <p className="text-xs text-slate-500 mt-1">
+                  Debe coincidir con un concepto habilitado arriba (solo administrador). Por defecto suele ser servicios.
+                </p>
+              </div>
               <label className="flex items-center gap-2 text-sm">
                 <input
                   type="checkbox"

@@ -228,12 +228,21 @@ def _email_cta_button(href: str, text: str) -> str:
 
 def generar_email_copia_cda_documento_soporte(
     nombre_organizacion: str,
+    nombre_proveedor: str,
+    concepto_egreso: str,
+    monto_egreso_texto: str,
     numero_documento: str,
     reference_code: str,
     public_url: str | None,
 ) -> str:
     """HTML de copia interna (CDA) cuando Factus emite un documento soporte electrónico."""
     safe_org = html.escape((nombre_organizacion or "").strip() or "CDA")
+    safe_prov = html.escape((nombre_proveedor or "").strip() or "—")
+    raw_concepto = (concepto_egreso or "").strip()
+    if len(raw_concepto) > 140:
+        raw_concepto = raw_concepto[:137].rstrip() + "…"
+    safe_concepto = html.escape(raw_concepto) if raw_concepto else "—"
+    safe_monto = html.escape((monto_egreso_texto or "").strip() or "—")
     safe_num = html.escape((numero_documento or "").strip() or "—")
     safe_ref = html.escape((reference_code or "").strip())
     url = (public_url or "").strip()
@@ -252,9 +261,12 @@ def generar_email_copia_cda_documento_soporte(
         )
 
     body_html = f"""
-    <p>Se emitió y validó un <strong>documento soporte electrónico</strong> para su organización.</p>
+    <p>Se emitió y validó un <strong>documento soporte electrónico</strong> a favor del proveedor indicado.</p>
     <div class="highlight">
         <strong>Organización:</strong> {safe_org}<br/>
+        <strong>Proveedor:</strong> {safe_prov}<br/>
+        <strong>Concepto:</strong> {safe_concepto}<br/>
+        <strong>Valor del egreso:</strong> {safe_monto}<br/>
         <strong>Número:</strong> {safe_num}<br/>
         <strong>Referencia interna:</strong> {safe_ref}
     </div>

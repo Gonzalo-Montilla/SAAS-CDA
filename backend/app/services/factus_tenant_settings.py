@@ -120,6 +120,10 @@ def row_to_out(row: TenantFactusSettings) -> FactusSettingsOut:
         documento_soporte_correo_notificacion_cda=getattr(
             row, "documento_soporte_correo_notificacion_cda", None
         ),
+        dse_retencion_usar_compras=getattr(row, "dse_retencion_usar_compras", True),
+        dse_retencion_usar_servicios=getattr(row, "dse_retencion_usar_servicios", True),
+        dse_retencion_usar_arrendamiento=getattr(row, "dse_retencion_usar_arrendamiento", True),
+        dse_retencion_usar_honorarios=getattr(row, "dse_retencion_usar_honorarios", True),
     )
 
 

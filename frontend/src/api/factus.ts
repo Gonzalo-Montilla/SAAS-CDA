@@ -27,6 +27,11 @@ export interface FactusSettings {
   documento_soporte_notificar_proveedor_factus: boolean;
   /** Copia interna al correo del CDA (SMTP CDASOFT) tras emitir documento soporte. */
   documento_soporte_correo_notificacion_cda: string | null;
+  /** Conceptos de retención que el CDA usa en documento soporte (subconjunto del motor futuro). */
+  dse_retencion_usar_compras: boolean;
+  dse_retencion_usar_servicios: boolean;
+  dse_retencion_usar_arrendamiento: boolean;
+  dse_retencion_usar_honorarios: boolean;
 }
 
 /** PATCH /factus/settings/modo — solo admin del tenant. */
@@ -55,6 +60,14 @@ export interface FactusSettingsUpdatePayload {
 export interface FactusDocumentoSoporteNotificacionesPatch {
   documento_soporte_notificar_proveedor_factus: boolean;
   documento_soporte_correo_notificacion_cda?: string | null;
+}
+
+/** PATCH /factus/settings/documento-soporte-entorno-retenciones — solo admin. */
+export interface FactusDseEntornoRetencionesPatch {
+  dse_retencion_usar_compras: boolean;
+  dse_retencion_usar_servicios: boolean;
+  dse_retencion_usar_arrendamiento: boolean;
+  dse_retencion_usar_honorarios: boolean;
 }
 
 export interface FactusTestConnectionResult {
@@ -104,6 +117,16 @@ export const factusApi = {
   ): Promise<FactusSettings> => {
     const response = await apiClient.patch<FactusSettings>(
       '/factus/settings/documento-soporte-notificaciones',
+      payload,
+    );
+    return response.data;
+  },
+
+  patchDocumentoSoporteEntornoRetenciones: async (
+    payload: FactusDseEntornoRetencionesPatch,
+  ): Promise<FactusSettings> => {
+    const response = await apiClient.patch<FactusSettings>(
+      '/factus/settings/documento-soporte-entorno-retenciones',
       payload,
     );
     return response.data;

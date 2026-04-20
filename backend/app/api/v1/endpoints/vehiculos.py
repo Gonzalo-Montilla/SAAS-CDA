@@ -842,6 +842,7 @@ def cobrar_vehiculo(
                     active_sucursal_id=active_sucursal_id,
                     metodo_pago=metodo_pago,
                     tarifa=tarifa_emit,
+                    emitido_por_usuario_id=current_user.id,
                 )
                 vehiculo.numero_factura_dian = num_fe
             except FactusAPIError as e:

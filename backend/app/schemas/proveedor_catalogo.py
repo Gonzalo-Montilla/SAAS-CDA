@@ -6,8 +6,11 @@ from typing import Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
+from typing import Literal
 
 from app.schemas.tesoreria import BENEFICIARIO_TIPOS_IDENTIFICACION_TESORERIA
+
+ConceptoRetencionDse = Literal["compras", "servicios", "arrendamiento", "honorarios"]
 
 
 class ProveedorCatalogoBase(BaseModel):
@@ -20,6 +23,10 @@ class ProveedorCatalogoBase(BaseModel):
     telefono: str = Field(max_length=30)
     factus_municipality_id: int = Field(ge=1)
     activo: bool = True
+    concepto_retencion_dse: ConceptoRetencionDse = Field(
+        default="servicios",
+        description="Concepto de retención en la fuente aplicable a pagos/documento soporte para este proveedor.",
+    )
 
 
 class ProveedorCatalogoCreate(ProveedorCatalogoBase):
@@ -36,6 +43,7 @@ class ProveedorCatalogoUpdate(BaseModel):
     telefono: Optional[str] = Field(default=None, max_length=30)
     factus_municipality_id: Optional[int] = Field(default=None, ge=1)
     activo: Optional[bool] = None
+    concepto_retencion_dse: Optional[ConceptoRetencionDse] = None
 
 
 class ProveedorCatalogoResponse(BaseModel):
@@ -50,6 +58,7 @@ class ProveedorCatalogoResponse(BaseModel):
     telefono: str
     factus_municipality_id: int
     activo: bool
+    concepto_retencion_dse: str
     created_at: datetime
     updated_at: Optional[datetime]
     # Ruta interna; no se expone en JSON (solo sirve para calcular tiene_documento_rut).

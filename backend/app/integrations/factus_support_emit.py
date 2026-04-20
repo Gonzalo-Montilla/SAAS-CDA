@@ -39,6 +39,7 @@ from app.utils.email import enviar_email, generar_email_copia_cda_documento_sopo
 from app.utils.egreso_proveedor_dian import normalizar_y_validar_contacto_proveedor_documento_soporte
 from app.models.caja import MovimientoCaja
 from app.models.factus import DocumentoSoporteElectronico, TenantFactusSettings
+from app.models.proveedor_catalogo import ProveedorCatalogo
 from app.models.sucursal import Sucursal
 from app.models.tenant import Tenant
 from app.models.tesoreria import MetodoPagoTesoreria, MovimientoTesoreria, TipoMovimientoTesoreria
@@ -551,10 +552,32 @@ def _sede_documento_soporte(
     )
 
 
+def _monto_texto_cop_email(m: Decimal) -> str:
+    q = m.quantize(Decimal("0.01"))
+    return f"${float(q):,.2f}"
+
+
+def _asunto_correo_copia_cda_documento_soporte(
+    nombre_proveedor: str,
+    numero_documento: str,
+) -> str:
+    prov = (nombre_proveedor or "").strip() or "—"
+    num = (numero_documento or "").strip() or "—"
+    if len(prov) > 55:
+        prov = prov[:52].rstrip() + "..."
+    s = f"Documento soporte — {prov} — {num}"
+    if len(s) > 220:
+        s = s[:217] + "..."
+    return s
+
+
 def _enviar_correo_copia_cda_documento_soporte(
     *,
     destinatario: str,
     tenant: Tenant,
+    nombre_proveedor: str,
+    concepto_egreso: str,
+    monto_egreso: Decimal,
     numero_documento: str,
     public_url: str,
     reference_code: str,
@@ -563,11 +586,43 @@ def _enviar_correo_copia_cda_documento_soporte(
     nombre_org = (tenant.nombre_comercial or tenant.nombre or "CDA").strip()
     cuerpo = generar_email_copia_cda_documento_soporte(
         nombre_organizacion=nombre_org,
+        nombre_proveedor=nombre_proveedor,
+        concepto_egreso=concepto_egreso,
+        monto_egreso_texto=_monto_texto_cop_email(monto_egreso),
         numero_documento=numero_documento,
         reference_code=reference_code,
         public_url=public_url or None,
     )
-    enviar_email(destinatario.strip().lower(), f"Documento soporte emitido — {nombre_org}", cuerpo)
+    asunto = _asunto_correo_copia_cda_documento_soporte(nombre_proveedor, numero_documento)
+    enviar_email(destinatario.strip().lower(), asunto, cuerpo)
+
+
+def _try_archivar_pdf_documento_soporte_local(
+    *,
+    row: DocumentoSoporteElectronico,
+    base: str,
+    access_token: str,
+) -> None:
+    from app.integrations.factus_client import download_support_document_pdf_resolved
+    from app.utils.archivo_fiscal_pdf import guardar_pdf_archivo_fiscal
+    from app.utils.factus_support_pdf_payload import support_pdf_bytes_from_factus_download
+
+    raw_out = download_support_document_pdf_resolved(
+        base_url=base,
+        access_token=access_token,
+        numero_documento=(row.numero_documento or "").strip() or None,
+        factus_document_id=row.factus_document_id,
+        cuds=(row.cuds or "").strip() or None,
+    )
+    pdf_bytes = support_pdf_bytes_from_factus_download(raw_out)
+    rel, sha = guardar_pdf_archivo_fiscal(
+        tenant_id=row.tenant_id,
+        prefijo="ds",
+        entity_id=row.id,
+        pdf_bytes=pdf_bytes,
+    )
+    row.pdf_storage_relpath = rel
+    row.pdf_sha256_hex = sha
 
 
 def emitir_documento_soporte_desde_movimiento(
@@ -577,6 +632,7 @@ def emitir_documento_soporte_desde_movimiento(
     fs: TenantFactusSettings,
     modulo: Literal["caja", "tesoreria"],
     movimiento_id: UUID,
+    emitido_por_usuario_id: UUID | None = None,
 ) -> DocumentoSoporteElectronico:
     if fs.modo != "factus":
         raise FactusAPIError(
@@ -738,6 +794,20 @@ def emitir_documento_soporte_desde_movimiento(
     if factus_id is None and isinstance(resp.get("data"), dict):
         factus_id = resp["data"].get("id")
 
+    concepto_ret_snap: str | None = None
+    pc_id = getattr(mov, "proveedor_catalogo_id", None)
+    if pc_id:
+        prov = (
+            db.query(ProveedorCatalogo)
+            .filter(
+                ProveedorCatalogo.id == pc_id,
+                ProveedorCatalogo.tenant_id == tenant.id,
+            )
+            .first()
+        )
+        if prov and (prov.concepto_retencion_dse or "").strip():
+            concepto_ret_snap = (prov.concepto_retencion_dse or "").strip()[:32]
+
     row = DocumentoSoporteElectronico(
         id=uuid.uuid4(),
         tenant_id=tenant.id,
@@ -748,8 +818,16 @@ def emitir_documento_soporte_desde_movimiento(
         numero_documento=numero[:80] if numero else None,
         cuds=cuds[:200] if cuds else None,
         public_url=public_url[:800] if public_url else None,
+        emitido_por_usuario_id=emitido_por_usuario_id,
+        concepto_retencion_dse=concepto_ret_snap,
     )
     db.add(row)
+    db.flush()
+    try:
+        _try_archivar_pdf_documento_soporte_local(row=row, base=base, access_token=access)
+        db.flush()
+    except Exception as exc:
+        _log_ds.warning("documento_soporte: no se archivó PDF local (%s)", exc)
     db.commit()
     db.refresh(row)
 
@@ -759,6 +837,9 @@ def emitir_documento_soporte_desde_movimiento(
             _enviar_correo_copia_cda_documento_soporte(
                 destinatario=copy_cda,
                 tenant=tenant,
+                nombre_proveedor=beneficiario,
+                concepto_egreso=concepto,
+                monto_egreso=monto,
                 numero_documento=numero[:80] if numero else "",
                 public_url=public_url[:800] if public_url else "",
                 reference_code=ref[:120],

@@ -10,6 +10,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
+from app.core.dse_retencion_conceptos import normalizar_concepto_retencion_dse, validar_concepto_para_tenant
 from app.core.deps import get_admin, get_cajero_or_admin, get_db
 from app.models.proveedor_catalogo import ProveedorCatalogo
 from app.models.usuario import Usuario
@@ -19,6 +20,7 @@ from app.schemas.proveedor_catalogo import (
     ProveedorCatalogoUpdate,
     validar_tipo_identificacion_proveedor,
 )
+from app.services.factus_tenant_settings import get_or_create_settings_row
 from app.services.proveedor_catalogo import (
     eliminar_archivo_rut_pdf_si_existe,
     proveedores_rut_abs_path,
@@ -218,6 +220,13 @@ def crear_proveedor_catalogo(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
 
+    settings_row = get_or_create_settings_row(db, admin.tenant_id)
+    try:
+        concepto = normalizar_concepto_retencion_dse(body.concepto_retencion_dse)
+        validar_concepto_para_tenant(settings_row, concepto)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
     row = ProveedorCatalogo(
         tenant_id=admin.tenant_id,
         alias=(body.alias or "").strip()[:120] or None,
@@ -228,6 +237,7 @@ def crear_proveedor_catalogo(
         email=mail,
         telefono=phone,
         factus_municipality_id=mid,
+        concepto_retencion_dse=concepto,
         activo=body.activo,
     )
     db.add(row)
@@ -255,6 +265,15 @@ def actualizar_proveedor_catalogo(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Proveedor no encontrado.")
 
     data = body.model_dump(exclude_unset=True)
+    settings_row = get_or_create_settings_row(db, admin.tenant_id)
+    if "concepto_retencion_dse" in data and data["concepto_retencion_dse"] is not None:
+        try:
+            cnorm = normalizar_concepto_retencion_dse(data["concepto_retencion_dse"])
+            validar_concepto_para_tenant(settings_row, cnorm)
+            data["concepto_retencion_dse"] = cnorm
+        except ValueError as e:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e)) from e
+
     if "tipo_identificacion" in data and data["tipo_identificacion"] is not None:
         try:
             data["tipo_identificacion"] = validar_tipo_identificacion_proveedor(data["tipo_identificacion"])
@@ -275,6 +294,7 @@ def actualizar_proveedor_catalogo(
         "telefono",
         "factus_municipality_id",
         "activo",
+        "concepto_retencion_dse",
     }
     _nullable_json = {"alias"}  # única que admite NULL explícito en BD
     for k, v in data.items():

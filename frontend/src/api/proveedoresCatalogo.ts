@@ -1,5 +1,7 @@
 import apiClient from './client';
 
+export type ConceptoRetencionDse = 'compras' | 'servicios' | 'arrendamiento' | 'honorarios';
+
 export interface ProveedorCatalogo {
   id: string;
   tenant_id: string;
@@ -12,6 +14,7 @@ export interface ProveedorCatalogo {
   telefono: string;
   factus_municipality_id: number;
   activo: boolean;
+  concepto_retencion_dse: ConceptoRetencionDse;
   tiene_documento_rut: boolean;
   created_at: string;
   updated_at: string | null;
@@ -27,6 +30,8 @@ export type ProveedorCatalogoCreate = {
   telefono: string;
   factus_municipality_id: number;
   activo?: boolean;
+  /** Debe estar entre los conceptos habilitados en Factus para el tenant. */
+  concepto_retencion_dse?: ConceptoRetencionDse;
 };
 
 export type ProveedorCatalogoUpdate = Partial<ProveedorCatalogoCreate>;

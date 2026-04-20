@@ -45,6 +45,7 @@ from app.integrations.factus_support_emit import (
     resolver_y_guardar_public_url_documento_soporte,
 )
 from app.models.factus import DocumentoSoporteElectronico
+from app.models.proveedor_catalogo import ProveedorCatalogo
 from app.models.tenant import Tenant
 from app.models.usuario import Usuario
 
@@ -52,6 +53,7 @@ from app.core.factus_crypto import decrypt_secret
 
 from app.schemas.factus import (
     FactusDocumentoSoporteNotificacionesPatch,
+    FactusDseEntornoRetencionesPatch,
     FactusModoPatch,
     FactusMunicipalityItem,
     FactusNumberingRangeItem,
@@ -116,6 +118,63 @@ def patch_factus_documento_soporte_notificaciones(
                 detail="El correo de notificación interna no es válido.",
             )
         row.documento_soporte_correo_notificacion_cda = ce[:255]
+    db.commit()
+    db.refresh(row)
+    return row_to_out(row)
+
+
+@router.patch("/settings/documento-soporte-entorno-retenciones", response_model=FactusSettingsOut)
+def patch_factus_dse_entorno_retenciones(
+    body: FactusDseEntornoRetencionesPatch,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_admin),
+):
+    """
+    Conceptos de retención que el CDA usará en documento soporte (subconjunto del motor).
+    No se puede desactivar un concepto si algún proveedor del catálogo lo tiene asignado.
+    """
+    from app.core.dse_retencion_conceptos import (
+        LABEL_CONCEPTO_RETENCION_DSE,
+        conceptos_habilitados_desde_tenant,
+    )
+
+    row = get_or_create_settings_row(db, current_user.tenant_id)
+    antes = conceptos_habilitados_desde_tenant(row)
+    despues: set[str] = set()
+    if body.dse_retencion_usar_compras:
+        despues.add("compras")
+    if body.dse_retencion_usar_servicios:
+        despues.add("servicios")
+    if body.dse_retencion_usar_arrendamiento:
+        despues.add("arrendamiento")
+    if body.dse_retencion_usar_honorarios:
+        despues.add("honorarios")
+    if len(despues) < 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Debe habilitar al menos un concepto de retención para documento soporte.",
+        )
+    for c in antes - despues:
+        n = (
+            db.query(ProveedorCatalogo)
+            .filter(
+                ProveedorCatalogo.tenant_id == current_user.tenant_id,
+                ProveedorCatalogo.concepto_retencion_dse == c,
+            )
+            .count()
+        )
+        if n > 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    f"No puede desactivar «{LABEL_CONCEPTO_RETENCION_DSE.get(c, c)}»: hay {n} proveedor(es) "
+                    "con ese concepto. Cambie primero el concepto en el catálogo de proveedores."
+                ),
+            )
+    row.dse_retencion_usar_compras = bool(body.dse_retencion_usar_compras)
+    row.dse_retencion_usar_servicios = bool(body.dse_retencion_usar_servicios)
+    row.dse_retencion_usar_arrendamiento = bool(body.dse_retencion_usar_arrendamiento)
+    row.dse_retencion_usar_honorarios = bool(body.dse_retencion_usar_honorarios)
     db.commit()
     db.refresh(row)
     return row_to_out(row)
@@ -320,6 +379,7 @@ class DocumentoSoporteEmitirOut(BaseModel):
     numero_documento: Optional[str] = None
     public_url: Optional[str] = None
     reference_code: str
+    concepto_retencion_dse: Optional[str] = None
 
 
 class DocumentoSoporteEnlaceOut(BaseModel):
@@ -431,6 +491,7 @@ def post_documento_soporte_emitir(
             fs=row_settings,
             modulo=body.modulo,
             movimiento_id=body.movimiento_id,
+            emitido_por_usuario_id=current_user.id,
         )
     except FactusAPIError as e:
         code = e.status_code if e.status_code and 100 <= e.status_code < 600 else status.HTTP_502_BAD_GATEWAY
@@ -439,6 +500,7 @@ def post_documento_soporte_emitir(
         numero_documento=doc_row.numero_documento,
         public_url=doc_row.public_url,
         reference_code=doc_row.reference_code,
+        concepto_retencion_dse=getattr(doc_row, "concepto_retencion_dse", None),
     )
 
 
@@ -514,6 +576,20 @@ def get_documento_soporte_pdf(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No hay documento soporte emitido para este movimiento.",
         )
+    if (ds.pdf_storage_relpath or "").strip():
+        from app.utils.archivo_fiscal_pdf import leer_pdf_archivo_fiscal
+
+        archived = leer_pdf_archivo_fiscal(ds.pdf_storage_relpath.strip())
+        if archived:
+            safe_name = f"documento_soporte_{movimiento_id.hex[:8]}.pdf"
+            return Response(
+                content=archived,
+                media_type="application/pdf",
+                headers={
+                    "Content-Disposition": f'inline; filename="{safe_name}"',
+                    "X-Archivo-Fiscal": "local",
+                },
+            )
     tiene_ref = bool(
         (ds.numero_documento or "").strip()
         or ds.factus_document_id is not None

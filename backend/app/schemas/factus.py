@@ -34,6 +34,20 @@ class FactusSettingsOut(BaseModel):
     # Documento soporte: análogo a send_email en factura (proveedor) + copia interna CDA
     documento_soporte_notificar_proveedor_factus: bool = True
     documento_soporte_correo_notificacion_cda: Optional[str] = None
+    # Qué conceptos de retención DSE habilita el CDA (subconjunto del motor; fase 1).
+    dse_retencion_usar_compras: bool = True
+    dse_retencion_usar_servicios: bool = True
+    dse_retencion_usar_arrendamiento: bool = True
+    dse_retencion_usar_honorarios: bool = True
+
+
+class FactusDseEntornoRetencionesPatch(BaseModel):
+    """Admin tenant: qué conceptos de retención aplican en documento soporte para esta organización."""
+
+    dse_retencion_usar_compras: bool = True
+    dse_retencion_usar_servicios: bool = True
+    dse_retencion_usar_arrendamiento: bool = True
+    dse_retencion_usar_honorarios: bool = True
 
 
 class FactusModoPatch(BaseModel):

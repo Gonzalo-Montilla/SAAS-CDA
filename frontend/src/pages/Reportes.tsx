@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { BarChart3, TrendingUp, TrendingDown, Wallet, Building2, FileText, Download, DollarSign, ArrowUpCircle, ArrowDownCircle, CalendarDays, TimerReset, AlertTriangle, GaugeCircle, Receipt, Landmark, X, Lock, Printer, FileCheck, Eye } from 'lucide-react';
+import { BarChart3, TrendingUp, TrendingDown, Wallet, Building2, FileText, Download, DollarSign, ArrowUpCircle, ArrowDownCircle, CalendarDays, TimerReset, AlertTriangle, GaugeCircle, Receipt, Landmark, X, Lock, Printer, FileCheck, Eye, Info } from 'lucide-react';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import apiClient from '../api/client';
@@ -101,6 +101,14 @@ interface Movimiento {
   anulado?: boolean;
   documento_soporte_numero?: string | null;
   documento_soporte_public_url?: string | null;
+  documento_soporte_emitido_por?: string | null;
+  documento_soporte_emitido_en?: string | null;
+  documento_soporte_pdf_archivado?: boolean;
+  /** Concepto de retención del catálogo, instantánea al emitir DSE (si hubo proveedor de catálogo). */
+  documento_soporte_concepto_retencion?: string | null;
+  factura_emitida_por?: string | null;
+  factura_emitida_en?: string | null;
+  factura_pdf_archivado?: boolean;
 }
 
 interface Tramite {
@@ -1704,6 +1712,33 @@ export default function ReportesPage() {
 
         {reportesSeccion === 'detalle' && (
         <>
+        <details className="card-pos mb-4 open:bg-slate-50/80">
+          <summary className="cursor-pointer list-none flex items-start gap-3 p-4 text-left">
+            <Info className="w-5 h-5 text-primary-600 shrink-0 mt-0.5" />
+            <div>
+              <span className="font-semibold text-slate-900">Alcance de facturación y documento soporte (DIAN / Factus)</span>
+              <p className="text-sm text-slate-600 mt-1">
+                Pulse para ver reglas de uso, trazabilidad y archivo de PDF en CDASOFT.
+              </p>
+            </div>
+          </summary>
+          <div className="px-4 pb-4 pt-0 text-sm text-slate-700 space-y-3 border-t border-slate-100">
+            <p>
+              La <strong>factura electrónica de venta</strong> (RTM) y el <strong>documento soporte</strong> (egresos a
+              proveedores) se emiten vía <strong>Factus</strong> con los datos registrados en el movimiento. Cada emisión
+              queda asociada al <strong>usuario</strong> que la generó y a la fecha/hora del sistema.
+            </p>
+            <p>
+              Tras una emisión exitosa, el sistema intenta <strong>guardar una copia PDF</strong> en almacenamiento
+              privado del CDA (con huella SHA-256) para conservación y consulta. La descarga desde la columna Docs usa esa
+              copia cuando existe; si no, se obtiene el PDF desde Factus.
+            </p>
+            <p className="text-slate-600">
+              Las <strong>retenciones</strong> y otros tributos no incluidos en el flujo actual deben validarse con su
+              contador. El XML firmado permanece en Factus/DIAN según su contrato con el proveedor tecnológico.
+            </p>
+          </div>
+        </details>
         <div className="card-pos">
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-xl font-bold text-slate-900 flex items-center gap-2">
@@ -1848,6 +1883,50 @@ export default function ReportesPage() {
                         </>
                       ) : (
                         m.concepto
+                      )}
+                      {(m.factura_emitida_por ||
+                        m.documento_soporte_emitido_por ||
+                        m.documento_soporte_concepto_retencion) && (
+                        <div className="mt-2 text-xs text-slate-500 space-y-1 border-t border-slate-100 pt-1.5">
+                          {m.factura_emitida_por ? (
+                            <p>
+                              <span className="font-medium text-slate-600">Factura electrónica:</span>{' '}
+                              {m.factura_emitida_por}
+                              {m.factura_emitida_en
+                                ? ` · ${new Date(m.factura_emitida_en).toLocaleString('es-CO', {
+                                    dateStyle: 'short',
+                                    timeStyle: 'short',
+                                  })}`
+                                : ''}
+                              {m.factura_pdf_archivado ? (
+                                <span className="text-emerald-700 font-medium"> · PDF archivado</span>
+                              ) : null}
+                            </p>
+                          ) : null}
+                          {m.documento_soporte_emitido_por ? (
+                            <p>
+                              <span className="font-medium text-slate-600">Documento soporte:</span>{' '}
+                              {m.documento_soporte_emitido_por}
+                              {m.documento_soporte_emitido_en
+                                ? ` · ${new Date(m.documento_soporte_emitido_en).toLocaleString('es-CO', {
+                                    dateStyle: 'short',
+                                    timeStyle: 'short',
+                                  })}`
+                                : ''}
+                              {m.documento_soporte_pdf_archivado ? (
+                                <span className="text-emerald-700 font-medium"> · PDF archivado</span>
+                              ) : null}
+                            </p>
+                          ) : null}
+                          {m.documento_soporte_concepto_retencion ? (
+                            <p className="text-slate-600">
+                              <span className="font-medium text-slate-600">Retención (catálogo):</span>{' '}
+                              <span className="capitalize">
+                                {m.documento_soporte_concepto_retencion.replace(/_/g, ' ')}
+                              </span>
+                            </p>
+                          ) : null}
+                        </div>
                       )}
                     </td>
                     <td className="px-3 py-2">{m.categoria}</td>

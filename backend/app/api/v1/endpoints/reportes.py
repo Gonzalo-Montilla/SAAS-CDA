@@ -604,6 +604,20 @@ def obtener_movimientos_detallados(
         ):
             ds_map[(r.source_module, r.movimiento_id)] = r
 
+    uids_emit: set = set()
+    for r in ds_map.values():
+        uid = getattr(r, "emitido_por_usuario_id", None)
+        if uid is not None:
+            uids_emit.add(uid)
+    for fe in fe_by_vid.values():
+        uid = getattr(fe, "emitido_por_usuario_id", None)
+        if uid is not None:
+            uids_emit.add(uid)
+    unames: dict = {}
+    if uids_emit:
+        for u in db.query(Usuario).filter(Usuario.id.in_(uids_emit)).all():
+            unames[u.id] = u.nombre_completo
+
     lista_caja = []
     for mov in movimientos_caja:
         # Obtener nombre de usuario
@@ -629,6 +643,7 @@ def obtener_movimientos_detallados(
             fe = fe_by_vid.get(vid)
             doc_factura_url = fe.public_url if fe else None
         ds_row_caja = ds_map.get(("caja", mov.id))
+        fe_v = fe_by_vid.get(vid) if vid else None
         lista_caja.append({
             "id": str(mov.id),
             "hora": mov.created_at.strftime("%H:%M:%S"),
@@ -647,6 +662,13 @@ def obtener_movimientos_detallados(
             "vehiculo_id": doc_vehiculo_id,
             "numero_factura_dian": doc_numero_factura,
             "factura_public_url": doc_factura_url,
+            "factura_emitida_por": (
+                unames.get(fe_v.emitido_por_usuario_id)
+                if fe_v and fe_v.emitido_por_usuario_id
+                else None
+            ),
+            "factura_emitida_en": fe_v.created_at.isoformat() if fe_v else None,
+            "factura_pdf_archivado": bool(fe_v and (fe_v.pdf_storage_relpath or "").strip()),
             "beneficiario": getattr(mov, "beneficiario", None),
             "beneficiario_tipo_identificacion": getattr(mov, "beneficiario_tipo_identificacion", None),
             "beneficiario_numero_identificacion": getattr(mov, "beneficiario_numero_identificacion", None),
@@ -656,6 +678,20 @@ def obtener_movimientos_detallados(
             "beneficiario_factus_municipality_id": getattr(mov, "beneficiario_factus_municipality_id", None),
             "documento_soporte_numero": ds_row_caja.numero_documento if ds_row_caja else None,
             "documento_soporte_public_url": ds_row_caja.public_url if ds_row_caja else None,
+            "documento_soporte_emitido_por": (
+                unames.get(ds_row_caja.emitido_por_usuario_id)
+                if ds_row_caja and ds_row_caja.emitido_por_usuario_id
+                else None
+            ),
+            "documento_soporte_emitido_en": (
+                ds_row_caja.created_at.isoformat() if ds_row_caja else None
+            ),
+            "documento_soporte_pdf_archivado": bool(
+                ds_row_caja and (ds_row_caja.pdf_storage_relpath or "").strip()
+            ),
+            "documento_soporte_concepto_retencion": (
+                getattr(ds_row_caja, "concepto_retencion_dse", None) if ds_row_caja else None
+            ),
         })
     
     # ==================== MOVIMIENTOS DE TESORERÍA ====================
@@ -696,6 +732,9 @@ def obtener_movimientos_detallados(
             "vehiculo_id": None,
             "numero_factura_dian": None,
             "factura_public_url": None,
+            "factura_emitida_por": None,
+            "factura_emitida_en": None,
+            "factura_pdf_archivado": False,
             "beneficiario": getattr(mov, "beneficiario", None),
             "beneficiario_tipo_identificacion": getattr(mov, "beneficiario_tipo_identificacion", None),
             "beneficiario_numero_identificacion": getattr(mov, "beneficiario_numero_identificacion", None),
@@ -705,6 +744,20 @@ def obtener_movimientos_detallados(
             "beneficiario_factus_municipality_id": getattr(mov, "beneficiario_factus_municipality_id", None),
             "documento_soporte_numero": ds_row_tes.numero_documento if ds_row_tes else None,
             "documento_soporte_public_url": ds_row_tes.public_url if ds_row_tes else None,
+            "documento_soporte_emitido_por": (
+                unames.get(ds_row_tes.emitido_por_usuario_id)
+                if ds_row_tes and ds_row_tes.emitido_por_usuario_id
+                else None
+            ),
+            "documento_soporte_emitido_en": (
+                ds_row_tes.created_at.isoformat() if ds_row_tes else None
+            ),
+            "documento_soporte_pdf_archivado": bool(
+                ds_row_tes and (ds_row_tes.pdf_storage_relpath or "").strip()
+            ),
+            "documento_soporte_concepto_retencion": (
+                getattr(ds_row_tes, "concepto_retencion_dse", None) if ds_row_tes else None
+            ),
         })
     
     # Combinar y ordenar por hora

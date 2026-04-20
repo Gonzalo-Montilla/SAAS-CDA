@@ -4,6 +4,7 @@ Documentación: https://developers.factus.com.co/
 """
 from __future__ import annotations
 
+import base64
 import json
 import time
 from typing import Any, Optional, Union
@@ -345,6 +346,140 @@ def get_bill_show(
             body=data,
         )
     return data if isinstance(data, dict) else {"raw": data}
+
+
+def download_bill_pdf(
+    *,
+    base_url: str,
+    access_token: str,
+    number: str,
+    timeout: float = 120.0,
+) -> Union[dict[str, Any], bytes]:
+    """
+    Descarga PDF de factura. Factus documenta v1/v2; puede responder PDF binario o JSON con base64.
+    https://developers.factus.com.co/facturas/descargar-pdf/
+    """
+    n = quote((number or "").strip(), safe="")
+    urls = [
+        f"{base_url.rstrip('/')}/v1/bills/download-pdf/{n}",
+        f"{base_url.rstrip('/')}/v2/bills/{n}/download-pdf",
+    ]
+    last_err: Optional[FactusAPIError] = None
+    for url in urls:
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                r = client.get(
+                    url,
+                    headers={
+                        "Accept": "application/pdf, application/json, */*",
+                        "Authorization": f"Bearer {access_token}",
+                    },
+                )
+            raw = r.content
+            if r.status_code >= 400:
+                data = _safe_json(r)
+                last_err = FactusAPIError(
+                    "No se pudo descargar el PDF de la factura en Factus",
+                    status_code=r.status_code,
+                    body=data,
+                )
+                continue
+            if raw[:4] == b"%PDF":
+                return raw
+            data = _safe_json(r)
+            if isinstance(data, dict):
+                return data
+        except httpx.HTTPError as exc:
+            last_err = FactusAPIError(
+                f"Red o error HTTP al descargar PDF de factura ({exc!s})",
+                status_code=502,
+                body=None,
+            )
+    if last_err:
+        raise last_err
+    raise FactusAPIError(
+        "No se pudo descargar el PDF de la factura en Factus",
+        status_code=502,
+        body=None,
+    )
+
+
+def _bill_pdf_bytes_from_json_payload(payload: dict[str, Any]) -> bytes:
+    inner = payload.get("data") if isinstance(payload.get("data"), dict) else payload
+    if not isinstance(inner, dict):
+        inner = {}
+    b64 = (
+        inner.get("pdf_base_64_encoded")
+        or inner.get("pdf_base64")
+        or inner.get("file")
+        or inner.get("base64_document")
+    )
+    if not b64 and isinstance(payload.get("data"), dict):
+        b64 = payload["data"].get("pdf_base_64_encoded") or payload["data"].get("pdf_base64")
+    if not b64:
+        raise ValueError("La respuesta JSON de Factus no incluye PDF en base64.")
+    return base64.b64decode(b64)
+
+
+def download_bill_pdf_resolved(
+    *,
+    base_url: str,
+    access_token: str,
+    numero_documento: Optional[str],
+    factus_bill_id: Optional[int],
+    timeout: float = 120.0,
+) -> bytes:
+    """Intenta número de factura y id Factus; opcionalmente consulta show para obtener número canónico."""
+    candidates: list[str] = []
+    for x in (
+        (numero_documento or "").strip() or None,
+        str(factus_bill_id) if factus_bill_id is not None else None,
+    ):
+        if x and x not in candidates:
+            candidates.append(x)
+    if not candidates:
+        raise FactusAPIError(
+            "No hay número ni id Factus para descargar el PDF de la factura.",
+            status_code=404,
+            body=None,
+        )
+    last_err: Optional[Exception] = None
+    for cand in candidates:
+        try:
+            out = download_bill_pdf(
+                base_url=base_url, access_token=access_token, number=cand, timeout=timeout
+            )
+            if isinstance(out, (bytes, bytearray)):
+                return bytes(out)
+            if isinstance(out, dict):
+                return _bill_pdf_bytes_from_json_payload(out)
+        except (FactusAPIError, ValueError) as e:
+            last_err = e
+    for cand in candidates:
+        try:
+            show = get_bill_show(base_url=base_url, access_token=access_token, number=cand, timeout=timeout)
+            inner = show.get("data") if isinstance(show.get("data"), dict) else show
+            block = inner if isinstance(inner, dict) else {}
+            num = block.get("number") or block.get("document_number") or block.get("consecutive")
+            if num is None:
+                continue
+            ns = str(num).strip()
+            if not ns or ns in candidates:
+                continue
+            out = download_bill_pdf(
+                base_url=base_url, access_token=access_token, number=ns, timeout=timeout
+            )
+            if isinstance(out, (bytes, bytearray)):
+                return bytes(out)
+            if isinstance(out, dict):
+                return _bill_pdf_bytes_from_json_payload(out)
+        except (FactusAPIError, ValueError) as e:
+            last_err = e
+    raise FactusAPIError(
+        "No se pudo obtener el PDF de la factura con los identificadores guardados.",
+        status_code=getattr(last_err, "status_code", None) or 502,
+        body=getattr(last_err, "body", None) if isinstance(last_err, FactusAPIError) else None,
+    ) from last_err
 
 
 def validate_support_document(
