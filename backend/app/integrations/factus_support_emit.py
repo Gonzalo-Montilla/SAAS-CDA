@@ -3,7 +3,6 @@ Emisión de documento soporte Factus vinculada a egresos de caja o tesorería.
 """
 from __future__ import annotations
 
-import html
 import logging
 import uuid
 from decimal import Decimal
@@ -36,7 +35,7 @@ from app.utils.factus_validators import (
     parse_nit_colombiano_identificacion_y_dv,
     solo_digitos,
 )
-from app.utils.email import enviar_email
+from app.utils.email import enviar_email, generar_email_copia_cda_documento_soporte
 from app.utils.egreso_proveedor_dian import normalizar_y_validar_contacto_proveedor_documento_soporte
 from app.models.caja import MovimientoCaja
 from app.models.factus import DocumentoSoporteElectronico, TenantFactusSettings
@@ -561,18 +560,14 @@ def _enviar_correo_copia_cda_documento_soporte(
     reference_code: str,
 ) -> None:
     """Copia interna vía SMTP del CDA (no sustituye el envío Factus al proveedor)."""
-    nombre = html.escape((tenant.nombre_comercial or tenant.nombre or "CDA").strip())
-    num = html.escape((numero_documento or "").strip() or "—")
-    ref = html.escape((reference_code or "").strip())
-    url = (public_url or "").strip()
-    link = f'<p><a href="{html.escape(url)}">Abrir documento en el visor DIAN / Factus</a></p>' if url else ""
-    cuerpo = f"""<p>Se emitió y validó un <strong>documento soporte electrónico</strong> para su organización.</p>
-<p><strong>Organización:</strong> {nombre}<br/>
-<strong>Número:</strong> {num}<br/>
-<strong>Referencia interna:</strong> {ref}</p>
-{link}
-<p>Este mensaje se envía porque configuró un correo de notificación en Factus (documento soporte).</p>"""
-    enviar_email(destinatario.strip().lower(), f"Documento soporte emitido — {nombre}", cuerpo)
+    nombre_org = (tenant.nombre_comercial or tenant.nombre or "CDA").strip()
+    cuerpo = generar_email_copia_cda_documento_soporte(
+        nombre_organizacion=nombre_org,
+        numero_documento=numero_documento,
+        reference_code=reference_code,
+        public_url=public_url or None,
+    )
+    enviar_email(destinatario.strip().lower(), f"Documento soporte emitido — {nombre_org}", cuerpo)
 
 
 def emitir_documento_soporte_desde_movimiento(

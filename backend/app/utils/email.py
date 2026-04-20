@@ -226,6 +226,51 @@ def _email_cta_button(href: str, text: str) -> str:
     )
 
 
+def generar_email_copia_cda_documento_soporte(
+    nombre_organizacion: str,
+    numero_documento: str,
+    reference_code: str,
+    public_url: str | None,
+) -> str:
+    """HTML de copia interna (CDA) cuando Factus emite un documento soporte electrónico."""
+    safe_org = html.escape((nombre_organizacion or "").strip() or "CDA")
+    safe_num = html.escape((numero_documento or "").strip() or "—")
+    safe_ref = html.escape((reference_code or "").strip())
+    url = (public_url or "").strip()
+
+    if url:
+        cta = _email_cta_button(url, "Abrir documento en el visor DIAN / Factus")
+        link_fallback = f"""
+    <p class="muted">Si el botón no funciona, copie y pegue este enlace:</p>
+    <p class="muted" style="word-break:break-all;">{html.escape(url)}</p>
+    """
+    else:
+        cta = ""
+        link_fallback = (
+            '<p class="muted">No hay enlace público disponible en esta notificación; '
+            "consulte el documento en Factus o en los reportes del sistema.</p>"
+        )
+
+    body_html = f"""
+    <p>Se emitió y validó un <strong>documento soporte electrónico</strong> para su organización.</p>
+    <div class="highlight">
+        <strong>Organización:</strong> {safe_org}<br/>
+        <strong>Número:</strong> {safe_num}<br/>
+        <strong>Referencia interna:</strong> {safe_ref}
+    </div>
+    {cta}
+    {link_fallback}
+    <p class="muted" style="font-size:13px;margin-top:18px;">
+        Este mensaje se envía porque configuró un correo de notificación en Factus (documento soporte).
+    </p>
+    """
+    return _render_email_corporativo(
+        title=f"Documento soporte emitido — {safe_org}",
+        body_html=body_html,
+        label=f"Factus / DIAN — {safe_org}",
+    )
+
+
 def generar_email_recuperacion_password(
     nombre: str,
     enlace_reset: str,
