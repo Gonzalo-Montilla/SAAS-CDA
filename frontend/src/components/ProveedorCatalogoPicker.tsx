@@ -83,7 +83,7 @@ export default function ProveedorCatalogoPicker({
   if (seleccionado) {
     return (
       <div className="space-y-2">
-        <div className="flex flex-wrap items-center gap-2 rounded-lg border border-indigo-200 bg-white px-3 py-2 text-sm">
+        <div className="flex flex-wrap items-center gap-2 rounded-xl border border-primary-200/80 bg-white px-3 py-2 text-sm shadow-sm">
           <span className="font-medium text-slate-900 flex-1 min-w-0">{etiquetaSeleccion(seleccionado)}</span>
           <button
             type="button"
@@ -144,7 +144,7 @@ export default function ProveedorCatalogoPicker({
                 <li key={p.id}>
                   <button
                     type="button"
-                    className="w-full text-left px-3 py-2 text-sm hover:bg-indigo-50"
+                    className="w-full text-left px-3 py-2 text-sm hover:bg-primary-50/80 transition-colors"
                     onClick={() => {
                       onSelect(p);
                       setQ('');

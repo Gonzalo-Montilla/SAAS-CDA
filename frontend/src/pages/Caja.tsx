@@ -1648,6 +1648,11 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
   const [nombreArchivoPDF, setNombreArchivoPDF] = useState('');
 
   const usarCatalogoProveedor = formData.proveedor_catalogo_id.trim().length > 0;
+  const midManualOk = (() => {
+    const s = formData.beneficiario_factus_municipality_id.trim();
+    const n = s ? parseInt(s, 10) : NaN;
+    return Boolean(s) && Number.isFinite(n) && n >= 1;
+  })();
   const proveedorDatosCompletos =
     usarCatalogoProveedor ||
     (formData.beneficiario.trim().length >= 2 &&
@@ -1655,7 +1660,8 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
       formData.beneficiario_numero_identificacion.trim().length >= 4 &&
       formData.beneficiario_direccion.trim().length >= 8 &&
       formData.beneficiario_email.trim().includes('@') &&
-      formData.beneficiario_telefono.replace(/\D/g, '').length >= 7);
+      formData.beneficiario_telefono.replace(/\D/g, '').length >= 7 &&
+      midManualOk);
 
   const registrarGastoMutation = useMutation({
     mutationFn: cajasApi.crearMovimiento,
@@ -1729,6 +1735,12 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
         window.alert('Indique celular o teléfono del proveedor (mínimo 7 dígitos).');
         return;
       }
+      const midStr = formData.beneficiario_factus_municipality_id.trim();
+      const midParsed = midStr ? parseInt(midStr, 10) : NaN;
+      if (!midStr || Number.isNaN(midParsed) || midParsed < 1) {
+        window.alert('Seleccione o indique el id de municipio Factus del proveedor (requerido para documento soporte DIAN).');
+        return;
+      }
     }
 
     // Confirmación para gastos grandes (>$50,000)
@@ -1777,10 +1789,8 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
       beneficiario_direccion: dir,
       beneficiario_email: em,
       beneficiario_telefono: formData.beneficiario_telefono.trim(),
+      beneficiario_factus_municipality_id: midParsed,
     };
-    if (Number.isFinite(midParsed) && midParsed >= 1) {
-      payloadManual.beneficiario_factus_municipality_id = midParsed;
-    }
 
     registrarGastoMutation.mutate(payloadManual);
   };

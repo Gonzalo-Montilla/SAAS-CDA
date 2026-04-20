@@ -443,7 +443,8 @@ def crear_movimiento(
                         email=movimiento_data.beneficiario_email,
                         telefono=movimiento_data.beneficiario_telefono,
                         factus_municipality_id=movimiento_data.beneficiario_factus_municipality_id,
-                        requiere_municipio_factus=False,
+                        # Misma regla que tesorería y emisión documento soporte Factus.
+                        requiere_municipio_factus=True,
                     )
                 )
             except ValueError as e:

@@ -19,6 +19,25 @@ from app.utils.tenant_logo_remote import fetch_remote_tenant_logo
 router = APIRouter()
 
 
+class TurnstilePublicOut(BaseModel):
+    """Configuración pública del widget (evita site key fija en VITE_* del build)."""
+
+    enabled: bool = Field(description="True si el backend exige captcha y hay site key + secret configurados.")
+    site_key: str = Field(default="", description="Clave pública del widget Turnstile; vacía si está desactivado.")
+
+
+@router.get("/turnstile-public", response_model=TurnstilePublicOut)
+def obtener_turnstile_publico():
+    """
+    Sin autenticación. Expone la site key pública solo cuando Turnstile está realmente activo
+    (mismas variables que usa el servidor al verificar el token).
+    """
+    sk = (settings.TURNSTILE_SITE_KEY or "").strip()
+    secret_ok = bool((settings.TURNSTILE_SECRET_KEY or "").strip())
+    enabled = bool(settings.TURNSTILE_ENABLED and sk and secret_ok)
+    return TurnstilePublicOut(enabled=enabled, site_key=sk if enabled else "")
+
+
 def _resolve_tenant_logo_bytes(logo_url: str | None) -> tuple[bytes, str] | None:
     if not logo_url:
         return None

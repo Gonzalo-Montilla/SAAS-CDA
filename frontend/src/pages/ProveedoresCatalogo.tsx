@@ -264,7 +264,7 @@ export default function ProveedoresCatalogoPage() {
     <Layout title="Catálogo de proveedores">
       <section className="module-hero">
         <p className="module-hero-title flex items-center gap-2">
-          <BookUser className="w-5 h-5 text-primary-600" />
+          <BookUser className="w-5 h-5 text-primary-600 shrink-0" />
           Catálogo de proveedores (documento soporte DIAN)
         </p>
         <p className="module-hero-subtitle max-w-3xl">
@@ -274,100 +274,118 @@ export default function ProveedoresCatalogoPage() {
         </p>
       </section>
 
-      <div className="flex justify-end mb-4">
-        <button type="button" onClick={abrirCrear} className="btn-pos btn-primary inline-flex items-center gap-2">
-          <Plus className="w-5 h-5" />
-          Nuevo proveedor
-        </button>
-      </div>
-
       {isLoading ? (
-        <LoadingSpinner />
+        <div className="card-pos flex justify-center py-16">
+          <LoadingSpinner message="Cargando catálogo de proveedores…" />
+        </div>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm">
-          <table className="min-w-full text-sm">
-            <thead className="bg-slate-50 text-left text-slate-600">
-              <tr>
-                <th className="px-3 py-2 font-semibold">Alias</th>
-                <th className="px-3 py-2 font-semibold">Razón social / nombre RUT</th>
-                <th className="px-3 py-2 font-semibold">Doc.</th>
-                <th className="px-3 py-2 font-semibold">Correo</th>
-                <th className="px-3 py-2 font-semibold">Mcp. Factus</th>
-                <th className="px-3 py-2 font-semibold">Activo</th>
-                <th className="px-3 py-2 font-semibold">RUT (PDF)</th>
-                <th className="px-3 py-2 font-semibold w-28" />
-              </tr>
-            </thead>
-            <tbody>
-              {(items ?? []).map((p) => (
-                <tr key={p.id} className="border-t border-slate-100 hover:bg-slate-50/80">
-                  <td className="px-3 py-2 text-slate-700">{p.alias || '—'}</td>
-                  <td className="px-3 py-2 font-medium text-slate-900">{p.razon_social_rut}</td>
-                  <td className="px-3 py-2 text-slate-600 whitespace-nowrap">
-                    {p.tipo_identificacion} {p.numero_identificacion}
-                  </td>
-                  <td className="px-3 py-2 text-slate-600">{p.email}</td>
-                  <td className="px-3 py-2 text-slate-600">{p.factus_municipality_id}</td>
-                  <td className="px-3 py-2">{p.activo ? 'Sí' : 'No'}</td>
-                  <td className="px-3 py-2">
-                    <button
-                      type="button"
-                      disabled={previewLoadingId === p.id}
-                      title="Abrir o comprobar el PDF del RUT (certificación DIAN)"
-                      onClick={() => void abrirPreviewPdf(p.id, p.razon_social_rut)}
-                      className="text-primary-600 hover:underline inline-flex items-center gap-1 text-left cursor-pointer"
-                    >
-                      <Eye className="w-4 h-4 shrink-0" />
-                      {previewLoadingId === p.id ? 'Abriendo…' : 'Vista previa'}
-                    </button>
-                  </td>
-                  <td className="px-3 py-2">
-                    <button
-                      type="button"
-                      onClick={() => abrirEditar(p)}
-                      className="text-primary-600 hover:underline inline-flex items-center gap-1"
-                    >
-                      <Pencil className="w-4 h-4" />
-                      Editar
-                    </button>
-                  </td>
+        <div className="card-pos">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 pb-4 border-b border-slate-100">
+            <div>
+              <h2 className="text-lg font-semibold text-slate-900">Proveedores registrados</h2>
+              <p className="text-sm text-slate-500 mt-0.5">
+                Datos usados en egresos de caja y tesorería y en documento soporte Factus.
+              </p>
+            </div>
+            <button type="button" onClick={abrirCrear} className="btn-pos btn-primary inline-flex items-center gap-2 shrink-0">
+              <Plus className="w-5 h-5" />
+              Nuevo proveedor
+            </button>
+          </div>
+
+          <div className="table-shell">
+            <table className="table-enterprise">
+              <thead>
+                <tr>
+                  <th>Alias</th>
+                  <th>Razón social / nombre RUT</th>
+                  <th>Doc.</th>
+                  <th>Correo</th>
+                  <th>Mcp. Factus</th>
+                  <th>Activo</th>
+                  <th>RUT (PDF)</th>
+                  <th className="table-enterprise-col-actions">Acciones</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-          {items?.length === 0 && (
-            <p className="p-6 text-center text-slate-600">No hay proveedores. Cree el primero con «Nuevo proveedor».</p>
-          )}
+              </thead>
+              <tbody>
+                {items?.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="text-sm text-slate-600 text-center py-10">
+                      No hay proveedores. Cree el primero con «Nuevo proveedor».
+                    </td>
+                  </tr>
+                ) : (
+                  (items ?? []).map((p) => (
+                    <tr key={p.id}>
+                      <td className="text-slate-700">{p.alias || '—'}</td>
+                      <td className="font-medium text-slate-900">{p.razon_social_rut}</td>
+                      <td className="text-slate-600 whitespace-nowrap">
+                        {p.tipo_identificacion} {p.numero_identificacion}
+                      </td>
+                      <td className="text-slate-600">{p.email}</td>
+                      <td className="text-slate-600 tabular-nums">{p.factus_municipality_id}</td>
+                      <td>{p.activo ? 'Sí' : 'No'}</td>
+                      <td>
+                        <button
+                          type="button"
+                          disabled={previewLoadingId === p.id}
+                          title="Abrir o comprobar el PDF del RUT (certificación DIAN)"
+                          onClick={() => void abrirPreviewPdf(p.id, p.razon_social_rut)}
+                          className="text-primary-600 hover:text-primary-700 hover:underline inline-flex items-center gap-1.5 text-left"
+                        >
+                          <Eye className="w-4 h-4 shrink-0" />
+                          {previewLoadingId === p.id ? 'Abriendo…' : 'Vista previa'}
+                        </button>
+                      </td>
+                      <td className="table-enterprise-col-actions">
+                        <button
+                          type="button"
+                          onClick={() => abrirEditar(p)}
+                          className="text-primary-600 hover:text-primary-700 hover:underline inline-flex items-center gap-1.5 font-medium"
+                        >
+                          <Pencil className="w-4 h-4" />
+                          Editar
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
       )}
 
       {modal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/50">
-          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto p-6 relative">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm">
+          <div className="modal-panel max-w-2xl w-full max-h-[92vh] overflow-y-auto relative p-5 sm:p-6">
             <button
               type="button"
-              className="absolute top-3 right-3 text-slate-500 hover:text-slate-800"
+              className="modal-close-btn absolute top-3 right-3"
               onClick={cerrarModal}
               aria-label="Cerrar"
             >
-              <X className="w-6 h-6" />
+              <X className="w-5 h-5 mx-auto" />
             </button>
-            <h3 className="text-lg font-bold text-slate-900 mb-4">
+            <h3 className="text-xl font-bold text-slate-900 mb-1 pr-12">
               {modal === 'crear' ? 'Nuevo proveedor' : 'Editar proveedor'}
             </h3>
+            <p className="text-sm text-slate-500 mb-4">
+              Los mismos datos se reutilizan al registrar egresos y al emitir documento soporte.
+            </p>
             {errMsg && (
-              <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-2">
+              <div className="mb-3 text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5">
                 {typeof errMsg === 'string' ? errMsg : JSON.stringify(errMsg)}
               </div>
             )}
             {errRut && (
-              <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-2">
+              <div className="mb-3 text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5">
                 {typeof errRut === 'string' ? errRut : JSON.stringify(errRut)}
               </div>
             )}
             <form onSubmit={guardar} className="space-y-3">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Alias (opcional)</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Alias (opcional)</label>
                 <input
                   className="input-pos w-full"
                   value={form.alias ?? ''}
@@ -376,7 +394,7 @@ export default function ProveedoresCatalogoPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Nombre o razón social (RUT)</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Nombre o razón social (RUT)</label>
                 <input
                   className="input-pos w-full"
                   value={form.razon_social_rut}
@@ -386,7 +404,7 @@ export default function ProveedoresCatalogoPage() {
                 />
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Tipo de identificación</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Tipo de identificación</label>
                 <select
                   className="input-pos w-full max-w-xs"
                   value={form.tipo_identificacion}
@@ -400,7 +418,7 @@ export default function ProveedoresCatalogoPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
                   Número de identificación (como en el RUT / registro DIAN)
                 </label>
                 <input
@@ -418,7 +436,7 @@ export default function ProveedoresCatalogoPage() {
                 </p>
               </div>
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">Dirección</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">Dirección</label>
                 <textarea
                   className="input-pos w-full min-h-[72px]"
                   value={form.direccion}
@@ -429,7 +447,7 @@ export default function ProveedoresCatalogoPage() {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Correo</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Correo</label>
                   <input
                     type="email"
                     className="input-pos w-full"
@@ -439,7 +457,7 @@ export default function ProveedoresCatalogoPage() {
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">Teléfono</label>
+                  <label className="block text-xs font-semibold text-slate-700 mb-1">Teléfono</label>
                   <input
                     className="input-pos w-full"
                     value={form.telefono}
@@ -471,12 +489,12 @@ export default function ProveedoresCatalogoPage() {
               </label>
 
               {editId && (
-                <div className="border border-slate-200 rounded-lg p-3 space-y-3 bg-slate-50/80">
+                <div className="rounded-xl border border-slate-200 p-4 space-y-3 bg-slate-50/90">
                   <div className="flex items-start gap-2">
-                    <FileText className="w-5 h-5 text-slate-600 shrink-0 mt-0.5" />
+                    <FileText className="w-5 h-5 text-primary-600 shrink-0 mt-0.5" />
                     <div>
-                      <p className="text-xs font-bold text-slate-800">Certificación RUT (PDF)</p>
-                      <p className="text-xs text-slate-600 mt-0.5">
+                      <p className="text-xs font-bold text-slate-800 uppercase tracking-wide">Certificación RUT (PDF)</p>
+                      <p className="text-xs text-slate-600 mt-1 leading-relaxed">
                         Solo el PDF oficial del RUT (DIAN). No use cédula escaneada ni otros documentos.
                       </p>
                     </div>
@@ -547,23 +565,23 @@ export default function ProveedoresCatalogoPage() {
 
       {previewUrl && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60"
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
           role="dialog"
           aria-modal="true"
           aria-label="Vista previa PDF"
         >
-          <div className="bg-white rounded-xl shadow-xl w-full max-w-5xl h-[min(90vh,900px)] flex flex-col overflow-hidden">
-            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-200 shrink-0">
-              <p className="text-sm font-semibold text-slate-900 truncate" title={previewTitulo}>
+          <div className="w-full max-w-5xl h-[min(90vh,900px)] flex flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-[0_20px_50px_-30px_rgba(15,23,42,0.45)]">
+            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-200 shrink-0 rounded-t-2xl bg-white">
+              <p className="text-sm font-semibold text-slate-900 truncate pr-2" title={previewTitulo}>
                 {previewTitulo || 'Certificación RUT'}
               </p>
               <button
                 type="button"
-                className="text-slate-500 hover:text-slate-800 p-1"
+                className="modal-close-btn shrink-0"
                 aria-label="Cerrar vista previa"
                 onClick={revocarPreviewBlob}
               >
-                <X className="w-6 h-6" />
+                <X className="w-5 h-5 mx-auto" />
               </button>
             </div>
             <iframe title="Vista previa" src={previewUrl} className="flex-1 w-full min-h-0 border-0 bg-slate-100" />

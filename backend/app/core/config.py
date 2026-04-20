@@ -58,7 +58,10 @@ class Settings(BaseSettings):
     ONBOARDING_RATE_LIMIT_MAX_ATTEMPTS_IP: int = 5
     ONBOARDING_RATE_LIMIT_MAX_ATTEMPTS_EMAIL: int = 3
     TURNSTILE_ENABLED: bool = False
+    # Secreto (solo servidor) y site key pública del mismo widget en Cloudflare Turnstile.
+    # La site key también puede leerse en GET /config/turnstile-public para no depender del build del front.
     TURNSTILE_SECRET_KEY: str = Field(default="", env="TURNSTILE_SECRET_KEY")
+    TURNSTILE_SITE_KEY: str = Field(default="", env="TURNSTILE_SITE_KEY")
     TURNSTILE_VERIFY_URL: str = "https://challenges.cloudflare.com/turnstile/v0/siteverify"
     BACKEND_PUBLIC_BASE_URL: str = Field(default="http://localhost:8000", env="BACKEND_PUBLIC_BASE_URL")
     TENANT_LOGO_UPLOAD_DIR: str = Field(default="uploads/tenant-logos", env="TENANT_LOGO_UPLOAD_DIR")

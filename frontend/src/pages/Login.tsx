@@ -1,12 +1,13 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useLocation, useNavigate, useParams } from 'react-router-dom';
-import { useMutation } from '@tanstack/react-query';
+import { useMutation, useQuery } from '@tanstack/react-query';
 import { useAuth } from '../contexts/AuthContext';
 import { useBrand } from '../contexts/BrandContext';
 import { apiClient } from '../api/client';
 import type { AuthScope, TenantSelfRegisterRequest } from '../types';
 import { PasswordInput } from '../components/PasswordInput';
 import { extractApiErrorMessage } from '../utils/apiError';
+import { apiBaseUrl } from '../api/client';
 import loginWatermarkIcon from '../assets/icono-marca-agua.png';
 
 function normalizeNitInput(value: string): string {
@@ -28,9 +29,10 @@ function isValidColombianCell(value: string): boolean {
 export default function Login() {
   const { tenantSlug } = useParams<{ tenantSlug?: string }>();
   const location = useLocation();
-  const turnstileSiteKey = String(import.meta.env.VITE_TURNSTILE_SITE_KEY ?? '').trim();
-  const turnstileEnvFlag = String(import.meta.env.VITE_TURNSTILE_ENABLED ?? '').toLowerCase();
-  const turnstileEnabled = turnstileEnvFlag === 'true' && turnstileSiteKey.length > 0;
+  /** Compatibilidad: solo si el API público falla (red) o en builds muy antiguos. */
+  const viteTurnstileSiteKey = String(import.meta.env.VITE_TURNSTILE_SITE_KEY ?? '').trim();
+  const viteTurnstileEnvFlag = String(import.meta.env.VITE_TURNSTILE_ENABLED ?? '').toLowerCase();
+  const legacyTurnstileOk = viteTurnstileEnvFlag === 'true' && viteTurnstileSiteKey.length > 0;
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -70,6 +72,40 @@ export default function Login() {
   const turnstileWidgetIdRef = useRef<string | null>(null);
   const turnstileScriptLoadedRef = useRef(false);
   const isMountedRef = useRef(true);
+
+  const turnstilePublicQuery = useQuery({
+    queryKey: ['config', 'turnstile-public'],
+    queryFn: async () => {
+      const r = await fetch(`${apiBaseUrl}/config/turnstile-public`);
+      if (!r.ok) {
+        throw new Error(`turnstile-public ${r.status}`);
+      }
+      return r.json() as Promise<{ enabled: boolean; site_key: string }>;
+    },
+    enabled: mostrarRegistroTenant,
+    staleTime: 60_000,
+    retry: 1,
+  });
+
+  /** Prioridad: API (backend .env) → si falla la petición, variables VITE_* heredadas. */
+  const { turnstileEnabled, turnstileSiteKey } = (() => {
+    const q = turnstilePublicQuery;
+    if (!mostrarRegistroTenant) {
+      return { turnstileEnabled: false, turnstileSiteKey: '' };
+    }
+    if (q.status === 'success' && q.data) {
+      const en = q.data.enabled && (q.data.site_key || '').length > 0;
+      return { turnstileEnabled: en, turnstileSiteKey: en ? q.data.site_key : '' };
+    }
+    if (q.status === 'error') {
+      return {
+        turnstileEnabled: legacyTurnstileOk,
+        turnstileSiteKey: legacyTurnstileOk ? viteTurnstileSiteKey : '',
+      };
+    }
+    return { turnstileEnabled: false, turnstileSiteKey: '' };
+  })();
+
   const { login } = useAuth();
   const brand = useBrand();
   const navigate = useNavigate();
@@ -876,11 +912,18 @@ export default function Login() {
                 />
               )}
 
+              {mostrarRegistroTenant && turnstilePublicQuery.isLoading && (
+                <p className="text-xs text-slate-500">Comprobando configuración de seguridad…</p>
+              )}
+
               {turnstileEnabled && (
                 <div className="pt-1">
                   {!turnstileSiteKey ? (
                     <div className="p-3 rounded-lg text-sm bg-amber-50 border border-amber-200 text-amber-800">
-                      Configura `VITE_TURNSTILE_SITE_KEY` para habilitar captcha.
+                      El servidor indicó captcha activo pero falta la clave pública. En el backend configure{' '}
+                      <code className="text-[11px] bg-amber-100/80 px-1 rounded">TURNSTILE_SITE_KEY</code> (misma que en
+                      Cloudflare Turnstile), <code className="text-[11px] bg-amber-100/80 px-1 rounded">TURNSTILE_SECRET_KEY</code>{' '}
+                      y reinicie el servicio.
                     </div>
                   ) : (
                     <div id="turnstile-container" className="min-h-[65px]" />
