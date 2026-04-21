@@ -380,6 +380,8 @@ class DocumentoSoporteEmitirOut(BaseModel):
     public_url: Optional[str] = None
     reference_code: str
     concepto_retencion_dse: Optional[str] = None
+    retencion_calculada_cop: Optional[str] = None
+    retencion_calculo_anio: Optional[int] = None
 
 
 class DocumentoSoporteEnlaceOut(BaseModel):
@@ -496,11 +498,14 @@ def post_documento_soporte_emitir(
     except FactusAPIError as e:
         code = e.status_code if e.status_code and 100 <= e.status_code < 600 else status.HTTP_502_BAD_GATEWAY
         raise HTTPException(status_code=code, detail=format_factus_error_for_user(e)) from e
+    rcc = getattr(doc_row, "retencion_calculada_cop", None)
     return DocumentoSoporteEmitirOut(
         numero_documento=doc_row.numero_documento,
         public_url=doc_row.public_url,
         reference_code=doc_row.reference_code,
         concepto_retencion_dse=getattr(doc_row, "concepto_retencion_dse", None),
+        retencion_calculada_cop=str(rcc) if rcc is not None else None,
+        retencion_calculo_anio=getattr(doc_row, "retencion_calculo_anio", None),
     )
 
 

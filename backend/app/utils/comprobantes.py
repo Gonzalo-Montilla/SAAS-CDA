@@ -4,7 +4,7 @@ Utilidad para generar comprobantes de egreso en PDF
 from reportlab.lib.pagesizes import letter
 from reportlab.lib import colors
 from reportlab.lib.units import inch
-from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image
+from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image, KeepTogether
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
 from io import BytesIO
@@ -38,6 +38,8 @@ def generar_comprobante_egreso(
     beneficiario_email: Optional[str] = None,
     beneficiario_telefono: Optional[str] = None,
     beneficiario_factus_municipality_id: Optional[int] = None,
+    retencion_motor_cop: Optional[Decimal] = None,
+    retencion_motor_anio: Optional[int] = None,
 ) -> BytesIO:
     """
     Genera un comprobante de egreso en PDF
@@ -61,7 +63,14 @@ def generar_comprobante_egreso(
         BytesIO con el PDF generado
     """
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        topMargin=0.42 * inch,
+        bottomMargin=0.4 * inch,
+        leftMargin=0.55 * inch,
+        rightMargin=0.55 * inch,
+    )
     
     # Estilos
     styles = getSampleStyleSheet()
@@ -69,20 +78,37 @@ def generar_comprobante_egreso(
     titulo_style = ParagraphStyle(
         'TituloComprobante',
         parent=styles['Heading1'],
-        fontSize=18,
+        fontSize=17,
         textColor=colors.HexColor('#0a1d3d'),  # Azul marino
         alignment=TA_CENTER,
-        spaceAfter=12,
+        spaceAfter=8,
         fontName='Helvetica-Bold'
     )
     
     subtitulo_style = ParagraphStyle(
         'SubtituloComprobante',
         parent=styles['Normal'],
-        fontSize=12,
+        fontSize=11,
         textColor=colors.HexColor('#0a1d3d'),
         alignment=TA_CENTER,
-        spaceAfter=20
+        spaceAfter=10
+    )
+
+    detalle_valor_para = ParagraphStyle(
+        'DetalleValorPara',
+        parent=styles['Normal'],
+        fontSize=10,
+        leading=12,
+        textColor=colors.black,
+    )
+
+    detalle_label_para = ParagraphStyle(
+        'DetalleLabelPara',
+        parent=styles['Normal'],
+        fontSize=9,
+        leading=11,
+        textColor=colors.HexColor('#0a1d3d'),
+        fontName='Helvetica-Bold',
     )
     
     label_style = ParagraphStyle(
@@ -117,16 +143,16 @@ def generar_comprobante_egreso(
         logo_source = fallback_logo_path
 
     if logo_source:
-        logo = Image(logo_source, width=1.5 * inch, height=1.1 * inch, kind='proportional')
+        logo = Image(logo_source, width=1.35 * inch, height=0.95 * inch, kind='proportional')
         logo.hAlign = 'CENTER'
         elementos.append(logo)
-        elementos.append(Spacer(1, 0.1 * inch))
+        elementos.append(Spacer(1, 0.06 * inch))
 
     # Encabezado
     elementos.append(Paragraph("COMPROBANTE DE EGRESO", titulo_style))
     subtitulo_texto = (nombre_comercial_cda or "").strip() or "CDASOFT"
     elementos.append(Paragraph(_safe_text(subtitulo_texto), subtitulo_style))
-    elementos.append(Spacer(1, 0.2*inch))
+    elementos.append(Spacer(1, 0.1 * inch))
     
     # Información del comprobante
     info_data = [
@@ -145,11 +171,11 @@ def generar_comprobante_egreso(
         ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
         ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#cccccc')),
-        ('TOPPADDING', (0, 0), (-1, -1), 8),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
     ]))
     elementos.append(info_table)
-    elementos.append(Spacer(1, 0.3*inch))
+    elementos.append(Spacer(1, 0.14 * inch))
     
     # Detalles del egreso
     categorias_map = {
@@ -172,49 +198,53 @@ def generar_comprobante_egreso(
     
     tipo_id_label = (beneficiario_tipo_identificacion or "—").strip() or "—"
     num_id_label = (beneficiario_numero_identificacion or "—").strip() or "—"
+
+    def _pl(txt: str) -> Paragraph:
+        return Paragraph(_safe_text(txt), detalle_label_para)
+
+    def _pv(txt: str) -> Paragraph:
+        return Paragraph(_safe_text(txt), detalle_valor_para)
+
     detalles_data = [
-        ["Pagado a:", _safe_text(beneficiario)],
-        ["Tipo identificación:", _safe_text(tipo_id_label)],
-        ["No. identificación:", _safe_text(num_id_label)],
+        [_pl("Pagado a:"), _pv(beneficiario)],
+        [_pl("Tipo identificación:"), _pv(tipo_id_label)],
+        [_pl("No. identificación:"), _pv(num_id_label)],
     ]
     if (beneficiario_direccion or "").strip():
-        detalles_data.append(["Dirección proveedor:", _safe_text((beneficiario_direccion or "").strip())])
+        detalles_data.append([_pl("Dirección proveedor:"), _pv((beneficiario_direccion or "").strip())])
     if (beneficiario_email or "").strip():
-        detalles_data.append(["Correo proveedor:", _safe_text((beneficiario_email or "").strip())])
+        detalles_data.append([_pl("Correo proveedor:"), _pv((beneficiario_email or "").strip())])
     if (beneficiario_telefono or "").strip():
-        detalles_data.append(["Teléfono / celular:", _safe_text((beneficiario_telefono or "").strip())])
+        detalles_data.append([_pl("Teléfono / celular:"), _pv((beneficiario_telefono or "").strip())])
     if beneficiario_factus_municipality_id is not None:
         detalles_data.append(
-            ["Municipio proveedor (id Factus):", _safe_text(str(beneficiario_factus_municipality_id))]
+            [_pl("Municipio proveedor (id Factus):"), _pv(str(beneficiario_factus_municipality_id))]
         )
     detalles_data.extend(
         [
-            ["Categoría:", categorias_map.get(categoria, categoria)],
-            ["Concepto:", _safe_text(concepto)],
-            ["Método de pago:", metodos_map.get(metodo_pago, metodo_pago)],
+            [_pl("Categoría:"), _pv(str(categorias_map.get(categoria, categoria)))],
+            [_pl("Concepto:"), _pv(concepto)],
+            [_pl("Método de pago:"), _pv(metodos_map.get(metodo_pago, metodo_pago))],
         ]
     )
     
-    detalles_table = Table(detalles_data, colWidths=[2*inch, 4.5*inch])
+    detalles_table = Table(detalles_data, colWidths=[2.2 * inch, 4.3 * inch])
     detalles_table.setStyle(TableStyle([
-        ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('TEXTCOLOR', (0, 0), (0, -1), colors.HexColor('#0a1d3d')),
         ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f0f4f8')),
         ('ALIGN', (0, 0), (0, -1), 'LEFT'),
         ('ALIGN', (1, 0), (1, -1), 'LEFT'),
-        ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
         ('GRID', (0, 0), (-1, -1), 1, colors.HexColor('#cccccc')),
-        ('TOPPADDING', (0, 0), (-1, -1), 10),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+        ('TOPPADDING', (0, 0), (-1, -1), 5),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 5),
     ]))
     elementos.append(detalles_table)
-    elementos.append(Spacer(1, 0.3*inch))
+    elementos.append(Spacer(1, 0.12 * inch))
     
     # Desglose de efectivo (si aplica)
     if metodo_pago == 'efectivo' and desglose_efectivo:
         elementos.append(Paragraph("<b>Desglose de Efectivo:</b>", label_style))
-        elementos.append(Spacer(1, 0.1*inch))
+        elementos.append(Spacer(1, 0.06 * inch))
         
         desglose_items = []
         denominaciones = [
@@ -247,12 +277,31 @@ def generar_comprobante_egreso(
                 ('ALIGN', (2, 0), (2, -1), 'RIGHT'),
                 ('GRID', (0, 0), (-1, -1), 0.5, colors.HexColor('#e0e0e0')),
                 ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor('#fffbeb')),
-                ('TOPPADDING', (0, 0), (-1, -1), 6),
-                ('BOTTOMPADDING', (0, 0), (-1, -1), 6),
+                ('TOPPADDING', (0, 0), (-1, -1), 4),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 4),
             ]))
             elementos.append(desglose_table)
-            elementos.append(Spacer(1, 0.2*inch))
-    
+            elementos.append(Spacer(1, 0.1 * inch))
+
+    rete_ref_rows: list = []
+    if retencion_motor_cop is not None and retencion_motor_cop > 0:
+        rete_ref_style = ParagraphStyle(
+            "ReteRefTesoreria",
+            parent=styles["Normal"],
+            fontSize=9,
+            leading=12,
+            textColor=colors.HexColor("#5b21b6"),
+        )
+        anio_r = str(retencion_motor_anio) if retencion_motor_anio else "—"
+        rete_text = (
+            f"Retención en la fuente (referencia documento soporte; no descontada del efectivo de este comprobante): "
+            f"${float(retencion_motor_cop):,.0f} · parámetros año {anio_r}."
+        )
+        rete_ref_rows = [
+            Paragraph(_safe_text(rete_text), rete_ref_style),
+            Spacer(1, 0.07 * inch),
+        ]
+
     # Monto total (destacado)
     monto_data = [
         ["TOTAL EGRESO:", f"${float(monto):,.0f}"]
@@ -267,45 +316,57 @@ def generar_comprobante_egreso(
         ('ALIGN', (0, 0), (0, -1), 'LEFT'),
         ('ALIGN', (1, 0), (1, -1), 'RIGHT'),
         ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
-        ('TOPPADDING', (0, 0), (-1, -1), 12),
-        ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
-        ('LEFTPADDING', (0, 0), (-1, -1), 15),
-        ('RIGHTPADDING', (0, 0), (-1, -1), 15),
+        ('TOPPADDING', (0, 0), (-1, -1), 8),
+        ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+        ('LEFTPADDING', (0, 0), (-1, -1), 12),
+        ('RIGHTPADDING', (0, 0), (-1, -1), 12),
     ]))
-    elementos.append(monto_table)
-    elementos.append(Spacer(1, 0.5*inch))
-    
+
     # Firmas
     firmas_data = [
         ["_________________________", "_________________________"],
         ["Autorizado por:", "Recibido por:"],
-        [autorizado_por, beneficiario]
+        [autorizado_por, beneficiario],
     ]
-    
-    firmas_table = Table(firmas_data, colWidths=[3.25*inch, 3.25*inch])
-    firmas_table.setStyle(TableStyle([
-        ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
-        ('FONTSIZE', (0, 0), (-1, -1), 10),
-        ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
-        ('VALIGN', (0, 0), (-1, -1), 'TOP'),
-        ('TOPPADDING', (0, 0), (-1, 0), 0),
-        ('BOTTOMPADDING', (0, 0), (-1, 0), 5),
-        ('TOPPADDING', (0, 1), (-1, -1), 8),
-    ]))
-    elementos.append(firmas_table)
-    elementos.append(Spacer(1, 0.3*inch))
-    
-    # Pie de página
+
+    firmas_table = Table(firmas_data, colWidths=[3.25 * inch, 3.25 * inch])
+    firmas_table.setStyle(
+        TableStyle(
+            [
+                ('FONTNAME', (0, 1), (-1, 1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('VALIGN', (0, 0), (-1, -1), 'TOP'),
+                ('TOPPADDING', (0, 0), (-1, 0), 0),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 4),
+                ('TOPPADDING', (0, 1), (-1, -1), 6),
+            ]
+        )
+    )
+
     fecha_generacion = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     pie_style = ParagraphStyle(
         'Pie',
         parent=styles['Normal'],
         fontSize=8,
         textColor=colors.gray,
-        alignment=TA_CENTER
+        alignment=TA_CENTER,
     )
-    elementos.append(Paragraph(f"Documento generado el {fecha_generacion}", pie_style))
-    
+    pie_para = Paragraph(f"Documento generado el {fecha_generacion}", pie_style)
+
+    # Total + firmas + pie en un solo flujo para no dejar la franja roja sola al final de página.
+    bloque_pie: list = list(rete_ref_rows)
+    bloque_pie.extend(
+        [
+            monto_table,
+            Spacer(1, 0.1 * inch),
+            firmas_table,
+            Spacer(1, 0.08 * inch),
+            pie_para,
+        ]
+    )
+    elementos.append(KeepTogether(bloque_pie))
+
     # Construir PDF
     doc.build(elementos)
     buffer.seek(0)
@@ -338,27 +399,34 @@ def generar_comprobante_egreso_caja(
     Coherente con el comprobante generado en el cliente, persistiendo datos en servidor.
     """
     buffer = BytesIO()
-    doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5 * inch, bottomMargin=0.5 * inch)
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=letter,
+        topMargin=0.42 * inch,
+        bottomMargin=0.4 * inch,
+        leftMargin=0.55 * inch,
+        rightMargin=0.55 * inch,
+    )
 
     styles = getSampleStyleSheet()
 
     titulo_style = ParagraphStyle(
         "TituloComprobanteCaja",
         parent=styles["Heading1"],
-        fontSize=18,
+        fontSize=17,
         textColor=colors.HexColor("#0a1d3d"),
         alignment=TA_CENTER,
-        spaceAfter=12,
+        spaceAfter=8,
         fontName="Helvetica-Bold",
     )
 
     subtitulo_style = ParagraphStyle(
         "SubtituloComprobanteCaja",
         parent=styles["Normal"],
-        fontSize=12,
+        fontSize=11,
         textColor=colors.HexColor("#0a1d3d"),
         alignment=TA_CENTER,
-        spaceAfter=20,
+        spaceAfter=10,
     )
 
     label_style = ParagraphStyle(
@@ -366,6 +434,23 @@ def generar_comprobante_egreso_caja(
         parent=styles["Normal"],
         fontSize=10,
         textColor=colors.gray,
+        fontName="Helvetica-Bold",
+    )
+
+    detalle_valor_para_caja = ParagraphStyle(
+        "DetalleValorParaCaja",
+        parent=styles["Normal"],
+        fontSize=10,
+        leading=12,
+        textColor=colors.black,
+    )
+
+    detalle_label_para_caja = ParagraphStyle(
+        "DetalleLabelParaCaja",
+        parent=styles["Normal"],
+        fontSize=9,
+        leading=11,
+        textColor=colors.HexColor("#0a1d3d"),
         fontName="Helvetica-Bold",
     )
 
@@ -384,15 +469,15 @@ def generar_comprobante_egreso_caja(
         logo_source = fallback_logo_path
 
     if logo_source:
-        logo = Image(logo_source, width=1.5 * inch, height=1.1 * inch, kind="proportional")
+        logo = Image(logo_source, width=1.35 * inch, height=0.95 * inch, kind="proportional")
         logo.hAlign = "CENTER"
         elementos.append(logo)
-        elementos.append(Spacer(1, 0.1 * inch))
+        elementos.append(Spacer(1, 0.06 * inch))
 
     elementos.append(Paragraph("COMPROBANTE DE EGRESO DE CAJA", titulo_style))
     subtitulo_texto = (nombre_comercial_cda or "").strip() or "CDASOFT"
     elementos.append(Paragraph(_safe_text(subtitulo_texto), subtitulo_style))
-    elementos.append(Spacer(1, 0.2 * inch))
+    elementos.append(Spacer(1, 0.1 * inch))
 
     info_data = [
         ["Comprobante N°:", numero_comprobante, "Fecha:", fecha.strftime("%d/%m/%Y %H:%M")],
@@ -412,62 +497,74 @@ def generar_comprobante_egreso_caja(
                 ("ALIGN", (0, 0), (-1, -1), "LEFT"),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
                 ("GRID", (0, 0), (-1, -1), 1, colors.HexColor("#cccccc")),
-                ("TOPPADDING", (0, 0), (-1, -1), 8),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
             ]
         )
     )
     elementos.append(info_table)
-    elementos.append(Spacer(1, 0.3 * inch))
+    elementos.append(Spacer(1, 0.14 * inch))
 
     ben_l = (beneficiario or "").strip() or "—"
     tid_l = (beneficiario_tipo_identificacion or "").strip() or "—"
     num_l = (beneficiario_numero_identificacion or "").strip() or "—"
 
+    def _pl_caja(txt: str) -> Paragraph:
+        return Paragraph(_safe_text(txt), detalle_label_para_caja)
+
+    def _pv_caja(txt: str) -> Paragraph:
+        return Paragraph(_safe_text(txt), detalle_valor_para_caja)
+
     detalles_data = [
-        ["Tipo de movimiento:", _safe_text(tipo_movimiento_label)],
-        ["Turno:", _safe_text(turno)],
-        ["Pagado a:", _safe_text(ben_l)],
-        ["Tipo identificación:", _safe_text(tid_l)],
-        ["No. identificación:", _safe_text(num_l)],
+        [_pl_caja("Tipo de movimiento:"), _pv_caja(tipo_movimiento_label)],
+        [_pl_caja("Turno:"), _pv_caja(turno)],
+        [_pl_caja("Pagado a:"), _pv_caja(ben_l)],
+        [_pl_caja("Tipo identificación:"), _pv_caja(tid_l)],
+        [_pl_caja("No. identificación:"), _pv_caja(num_l)],
     ]
     if (beneficiario_direccion or "").strip():
-        detalles_data.append(["Dirección proveedor:", _safe_text((beneficiario_direccion or "").strip())])
+        detalles_data.append(
+            [_pl_caja("Dirección proveedor:"), _pv_caja((beneficiario_direccion or "").strip())]
+        )
     if (beneficiario_email or "").strip():
-        detalles_data.append(["Correo proveedor:", _safe_text((beneficiario_email or "").strip())])
+        detalles_data.append(
+            [_pl_caja("Correo proveedor:"), _pv_caja((beneficiario_email or "").strip())]
+        )
     if (beneficiario_telefono or "").strip():
-        detalles_data.append(["Teléfono / celular:", _safe_text((beneficiario_telefono or "").strip())])
+        detalles_data.append(
+            [_pl_caja("Teléfono / celular:"), _pv_caja((beneficiario_telefono or "").strip())]
+        )
     if beneficiario_factus_municipality_id is not None:
         detalles_data.append(
-            ["Municipio proveedor (id Factus):", _safe_text(str(beneficiario_factus_municipality_id))]
+            [
+                _pl_caja("Municipio proveedor (id Factus):"),
+                _pv_caja(str(beneficiario_factus_municipality_id)),
+            ]
         )
     detalles_data.extend(
         [
-            ["Concepto:", _safe_text(concepto)],
-            ["Método de pago:", _safe_text(metodo_pago or "N/A")],
-            ["Cajero(a) que registra:", _safe_text(nombre_cajero)],
+            [_pl_caja("Concepto:"), _pv_caja(concepto)],
+            [_pl_caja("Método de pago:"), _pv_caja(metodo_pago or "N/A")],
+            [_pl_caja("Cajero(a) que registra:"), _pv_caja(nombre_cajero)],
         ]
     )
 
-    detalles_table = Table(detalles_data, colWidths=[2 * inch, 4.5 * inch])
+    detalles_table = Table(detalles_data, colWidths=[2.2 * inch, 4.3 * inch])
     detalles_table.setStyle(
         TableStyle(
             [
-                ("FONTNAME", (0, 0), (0, -1), "Helvetica-Bold"),
-                ("FONTSIZE", (0, 0), (-1, -1), 10),
-                ("TEXTCOLOR", (0, 0), (0, -1), colors.HexColor("#0a1d3d")),
                 ("BACKGROUND", (0, 0), (0, -1), colors.HexColor("#f0f4f8")),
                 ("ALIGN", (0, 0), (0, -1), "LEFT"),
                 ("ALIGN", (1, 0), (1, -1), "LEFT"),
-                ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("GRID", (0, 0), (-1, -1), 1, colors.HexColor("#cccccc")),
-                ("TOPPADDING", (0, 0), (-1, -1), 10),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+                ("TOPPADDING", (0, 0), (-1, -1), 5),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 5),
             ]
         )
     )
     elementos.append(detalles_table)
-    elementos.append(Spacer(1, 0.3 * inch))
+    elementos.append(Spacer(1, 0.12 * inch))
 
     monto_data = [["TOTAL EGRESO:", f"${float(monto):,.0f}"]]
 
@@ -482,18 +579,13 @@ def generar_comprobante_egreso_caja(
                 ("ALIGN", (0, 0), (0, -1), "LEFT"),
                 ("ALIGN", (1, 0), (1, -1), "RIGHT"),
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("TOPPADDING", (0, 0), (-1, -1), 12),
-                ("BOTTOMPADDING", (0, 0), (-1, -1), 12),
-                ("LEFTPADDING", (0, 0), (-1, -1), 15),
-                ("RIGHTPADDING", (0, 0), (-1, -1), 15),
+                ("TOPPADDING", (0, 0), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+                ("LEFTPADDING", (0, 0), (-1, -1), 12),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 12),
             ]
         )
     )
-    elementos.append(monto_table)
-    elementos.append(Spacer(1, 0.4 * inch))
-
-    elementos.append(Paragraph("<b>IMPORTANTE:</b> Comprobante para firma de quien recibe el dinero.", label_style))
-    elementos.append(Spacer(1, 0.25 * inch))
 
     firmas_data = [
         ["_________________________", "_________________________"],
@@ -510,13 +602,11 @@ def generar_comprobante_egreso_caja(
                 ("ALIGN", (0, 0), (-1, -1), "CENTER"),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
                 ("TOPPADDING", (0, 0), (-1, 0), 0),
-                ("BOTTOMPADDING", (0, 0), (-1, 0), 5),
-                ("TOPPADDING", (0, 1), (-1, -1), 8),
+                ("BOTTOMPADDING", (0, 0), (-1, 0), 4),
+                ("TOPPADDING", (0, 1), (-1, -1), 6),
             ]
         )
     )
-    elementos.append(firmas_table)
-    elementos.append(Spacer(1, 0.3 * inch))
 
     fecha_generacion = datetime.now().strftime("%d/%m/%Y %H:%M:%S")
     pie_style = ParagraphStyle(
@@ -526,7 +616,25 @@ def generar_comprobante_egreso_caja(
         textColor=colors.gray,
         alignment=TA_CENTER,
     )
-    elementos.append(Paragraph(f"Documento generado el {fecha_generacion}", pie_style))
+    pie_para_caja = Paragraph(f"Documento generado el {fecha_generacion}", pie_style)
+    nota_importante = Paragraph(
+        "<b>IMPORTANTE:</b> Comprobante para firma de quien recibe el dinero.",
+        label_style,
+    )
+
+    elementos.append(
+        KeepTogether(
+            [
+                monto_table,
+                Spacer(1, 0.08 * inch),
+                nota_importante,
+                Spacer(1, 0.1 * inch),
+                firmas_table,
+                Spacer(1, 0.08 * inch),
+                pie_para_caja,
+            ]
+        )
+    )
 
     doc.build(elementos)
     buffer.seek(0)

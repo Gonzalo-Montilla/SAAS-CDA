@@ -36,6 +36,11 @@ from app.schemas.tesoreria import (
 from app.utils.comprobantes import generar_comprobante_egreso
 from app.utils.egreso_proveedor_dian import normalizar_y_validar_contacto_proveedor_documento_soporte
 from app.services.proveedor_catalogo import cargar_beneficiario_desde_proveedor_catalogo
+from app.models.proveedor_catalogo import ProveedorCatalogo
+from app.services.dse_retencion_motor_calculo import (
+    calcular_retencion_desde_parametros,
+    cargar_uvt_y_tasa,
+)
 
 router = APIRouter()
 
@@ -1009,6 +1014,32 @@ async def descargar_comprobante_egreso(
         else (movimiento.concepto or "")
     )
 
+    retencion_motor_cop: Optional[Decimal] = None
+    retencion_motor_anio: Optional[int] = None
+    pid = getattr(movimiento, "proveedor_catalogo_id", None)
+    if pid:
+        prov = (
+            db.query(ProveedorCatalogo)
+            .filter(
+                ProveedorCatalogo.id == pid,
+                ProveedorCatalogo.tenant_id == current_user.tenant_id,
+            )
+            .first()
+        )
+        if prov and (prov.concepto_retencion_dse or "").strip():
+            con = (prov.concepto_retencion_dse or "").strip()[:32]
+            anio_r = movimiento.fecha_movimiento.year if movimiento.fecha_movimiento else datetime.now().year
+            vu, ta = cargar_uvt_y_tasa(db, current_user.tenant_id, anio_r, con)
+            rret = calcular_retencion_desde_parametros(
+                abs(movimiento.monto),
+                concepto=con,
+                valor_uvt_cop=vu,
+                tasa_porcentaje=ta,
+            )
+            if rret.aplica and rret.retencion_cop is not None and rret.retencion_cop > 0:
+                retencion_motor_cop = rret.retencion_cop
+                retencion_motor_anio = anio_r
+
     pdf_buffer = generar_comprobante_egreso(
         numero_comprobante=numero_comprobante,
         fecha=movimiento.fecha_movimiento,
@@ -1027,6 +1058,8 @@ async def descargar_comprobante_egreso(
         beneficiario_email=movimiento.beneficiario_email,
         beneficiario_telefono=movimiento.beneficiario_telefono,
         beneficiario_factus_municipality_id=movimiento.beneficiario_factus_municipality_id,
+        retencion_motor_cop=retencion_motor_cop,
+        retencion_motor_anio=retencion_motor_anio,
     )
     
     # Nombre del archivo

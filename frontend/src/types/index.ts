@@ -34,6 +34,13 @@ export interface TenantFacturacionUbicacion {
   direccion_facturacion: string | null;
 }
 
+export interface TenantBillingInfo {
+  gate: 'ok' | 'trial' | 'soft' | 'hard';
+  subscription_status: string;
+  demo_ends_at?: string | null;
+  soft_grace_ends_at?: string | null;
+}
+
 export interface Usuario {
   id: string;
   tenant_id: string;
@@ -50,6 +57,8 @@ export interface Usuario {
   sucursales?: SucursalBasica[];
   /** Límite de sedes del plan (registro inicial del tenant). */
   tenant_sedes_totales?: number | null;
+  /** Demo / gracia / bloqueo (modales de suscripción). */
+  tenant_billing?: TenantBillingInfo | null;
 }
 
 export interface SaaSUser {
@@ -200,6 +209,26 @@ export interface SaaSPaymentHistoryItem {
   receipt_download_url: string;
   actor_email?: string | null;
   notes?: string | null;
+}
+
+/** Checkouts ePayco (suscripción) y emisión FE licencia (PROMETHEUS), backoffice SaaS. */
+export interface SaaSCheckoutSessionItem {
+  session_id: string;
+  tenant_id: string;
+  tenant_slug: string;
+  tenant_nombre: string;
+  plan_code: string;
+  sedes_totales: number;
+  total_cop: number;
+  status: string;
+  created_at: string;
+  completed_at?: string | null;
+  epayco_ref?: string | null;
+  saas_fe_status?: string | null;
+  saas_fe_error?: string | null;
+  numero_documento?: string | null;
+  cufe?: string | null;
+  public_url?: string | null;
 }
 
 export interface SaaSAuditLogItem {

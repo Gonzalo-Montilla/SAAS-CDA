@@ -17,12 +17,13 @@ Contexto para retomar sin perder el hilo. Última actualización: alineado con e
 - `PATCH /factus/settings/documento-soporte-entorno-retenciones` — no desactivar concepto si hay proveedores con ese concepto.
 - CRUD proveedores valida concepto contra entorno.
 - `documentos_soporte_electronicos.concepto_retencion_dse` — instantánea al emitir DSE si el egreso lleva `proveedor_catalogo_id`.
+- Mismos registros: `retencion_calculada_cop`, `retencion_calculo_anio` — resultado del motor (UVT + tasas del año del movimiento) al emitir; puede ser `null` si no hubo cálculo.
 - Tablas motor: `dse_uvt_por_anio`, `dse_retencion_tasas` (UVT año + % por concepto).
 - `GET/PUT /dse-retencion/parametros/{anio}` (solo admin).
-- `POST /dse-retencion/preview` — cálculo sugerido (admin o contador).
+- `POST /dse-retencion/preview` — cálculo sugerido (cajero, contador o administrador; lectura).
 - `app/core/dse_retencion_umbral_uvt.py` — umbrales UVT por concepto (10/2/10/0 compras/servicios/arrendamiento/honorarios); **revisar con contadora** frente a tabla DIAN completa (subtipos, declarante, etc.).
 - `app/services/dse_retencion_motor_calculo.py` — base mínima en pesos, retención = monto × tasa si aplica.
-- Reportes detalle: campo `documento_soporte_concepto_retencion`.
+- Reportes detalle: `documento_soporte_concepto_retencion`, `documento_soporte_retencion_calculada`, `documento_soporte_retencion_anio`.
 
 ### Frontend
 
@@ -37,8 +38,8 @@ Contexto para retomar sin perder el hilo. Última actualización: alineado con e
 ## Próximos pasos sugeridos
 
 1. Validar con contadora: umbrales UVT por subconcepto, declarante/no declarante, ReteIVA, etc.
-2. Opcional: persistir `retencion_calculada_cop` en DSE o en movimiento al emitir.
-3. Integrar preview o cálculo en flujo caja/tesorería y, cuando toque, campos Factus.
+2. ~~Persistir retención calculada al emitir DSE~~ — hecho (`retencion_calculada_cop` / `retencion_calculo_anio` en `documentos_soporte_electronicos`).
+3. ~~Integrar en pantalla caja/tesorería (estimación al egreso con proveedor de catálogo)~~ — hecho (`RetencionEstimadaMotorInline`, debounce + `POST /dse-retencion/preview`). Pendiente si aplica: campos Factus para retención en payload.
 
 ## Rutas API útiles
 

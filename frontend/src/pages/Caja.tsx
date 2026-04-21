@@ -9,6 +9,7 @@ import { configApi } from '../api/config';
 import { factusApi } from '../api/factus';
 import { proveedoresCatalogoApi } from '../api/proveedoresCatalogo';
 import ProveedorCatalogoPicker from '../components/ProveedorCatalogoPicker';
+import { RetencionEstimadaMotorInline } from '../components/RetencionEstimadaMotorCallout';
 import { useAuth } from '../contexts/AuthContext';
 import { useBrand } from '../contexts/BrandContext';
 import { useToast } from '../contexts/ToastContext';
@@ -2142,6 +2143,17 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
                 />
               </div>
             </div>
+
+            {usarCatalogoProveedor && montoNumerico > 0 && (
+              <RetencionEstimadaMotorInline
+                enabled
+                montoPositivo={montoNumerico}
+                conceptoRetencionDse={
+                  proveedoresCatalogo.find((p) => p.id === formData.proveedor_catalogo_id)
+                    ?.concepto_retencion_dse
+                }
+              />
+            )}
 
             {montoNumerico > 0 && formData.concepto.length >= 5 && proveedorDatosCompletos && (
               <div className="mb-4 py-3 px-3 rounded-lg border border-slate-100 bg-white text-sm text-slate-700 flex flex-wrap items-baseline justify-between gap-2">

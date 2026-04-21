@@ -14,6 +14,15 @@ class TenantBrandingResponse(BaseModel):
     color_secundario: str
 
 
+class TenantBillingInfoResponse(BaseModel):
+    """Estado de acceso por suscripción demo / pago (modales en app tenant)."""
+
+    gate: str = Field(description="ok | trial | soft | hard")
+    subscription_status: str = ""
+    demo_ends_at: Optional[datetime] = None
+    soft_grace_ends_at: Optional[datetime] = None
+
+
 class UsuarioBase(BaseModel):
     """Base de usuario"""
     email: EmailStr
@@ -65,6 +74,10 @@ class UsuarioResponse(BaseModel):
     tenant_sedes_totales: Optional[int] = Field(
         default=None,
         description="Límite de sedes contratado en el plan del tenant (p. ej. registro inicial).",
+    )
+    tenant_billing: Optional[TenantBillingInfoResponse] = Field(
+        default=None,
+        description="Gate de facturación demo (modales) y fechas de gracia.",
     )
 
     model_config = ConfigDict(from_attributes=True)

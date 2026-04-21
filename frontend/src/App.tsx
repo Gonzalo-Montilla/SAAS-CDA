@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { BrandProvider } from './contexts/BrandContext';
 import { ToastProvider } from './contexts/ToastContext';
 import ErrorBoundary from './components/ErrorBoundary';
+import TenantBillingOverlays from './components/TenantBillingOverlays';
 import type { AuthScope } from './types';
 
 type TenantRole = 'administrador' | 'cajero' | 'recepcionista' | 'contador' | 'comercial';
@@ -26,6 +27,7 @@ const Agendamiento = lazy(() => import('./pages/Agendamiento'));
 const AgendarPublico = lazy(() => import('./pages/AgendarPublico'));
 const ResetPassword = lazy(() => import('./pages/ResetPassword'));
 const SaaSBackoffice = lazy(() => import('./pages/SaaSBackoffice'));
+const Suscripcion = lazy(() => import('./pages/Suscripcion'));
 
 const queryClient = new QueryClient();
 
@@ -96,6 +98,7 @@ function App() {
         <BrowserRouter>
           <AuthProvider>
             <BrandProvider>
+              <TenantBillingOverlays />
               <ErrorBoundary>
                 <Suspense fallback={<RouteLoadingFallback />}>
                   <Routes>
@@ -180,6 +183,14 @@ function App() {
               element={
                 <ProtectedRoute requiredScope="tenant">
                   <Soporte />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/suscripcion"
+              element={
+                <ProtectedRoute requiredScope="tenant">
+                  <Suscripcion />
                 </ProtectedRoute>
               }
             />

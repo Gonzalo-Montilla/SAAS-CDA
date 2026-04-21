@@ -10,6 +10,7 @@ import { tesoreriaApi } from '../api/tesoreria';
 import { factusApi } from '../api/factus';
 import { proveedoresCatalogoApi } from '../api/proveedoresCatalogo';
 import ProveedorCatalogoPicker from '../components/ProveedorCatalogoPicker';
+import { RetencionEstimadaMotorInline } from '../components/RetencionEstimadaMotorCallout';
 import { formatCurrency } from '../utils/formatNumber';
 import {
   Vault,
@@ -523,6 +524,7 @@ function RegistrarMovimiento() {
   });
 
   const usarCatalogoProveedor = formData.proveedor_catalogo_id.trim().length > 0;
+  const montoNumericoTesoreria = parseFloat(formData.monto) || 0;
   const proveedorDatosCompletos =
     tipoMovimiento !== 'egreso' ||
     usarCatalogoProveedor ||
@@ -1034,6 +1036,16 @@ function RegistrarMovimiento() {
                   Busque por nombre, alias o documento. Sin proveedor del catálogo, use la captura manual del RUT.
                 </p>
               </div>
+              {usarCatalogoProveedor && montoNumericoTesoreria > 0 && (
+                <RetencionEstimadaMotorInline
+                  enabled
+                  montoPositivo={montoNumericoTesoreria}
+                  conceptoRetencionDse={
+                    proveedoresCatalogo.find((p) => p.id === formData.proveedor_catalogo_id)
+                      ?.concepto_retencion_dse
+                  }
+                />
+              )}
               <div className="mb-6">
                 <label className="block text-lg font-bold text-slate-900 mb-3">
                   Beneficiario / Pagado a

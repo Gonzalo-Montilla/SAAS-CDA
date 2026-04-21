@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
@@ -43,11 +44,46 @@ from app.models.proveedor_catalogo import ProveedorCatalogo
 from app.models.sucursal import Sucursal
 from app.models.tenant import Tenant
 from app.models.tesoreria import MetodoPagoTesoreria, MovimientoTesoreria, TipoMovimientoTesoreria
+from app.services.dse_retencion_motor_calculo import (
+    ResultadoRetencionDse,
+    calcular_retencion_desde_parametros,
+    cargar_uvt_y_tasa,
+)
 from app.services.factus_tenant_settings import active_auth_encrypted
 
 MODULO_CAJA = "caja"
 MODULO_TESORERIA = "tesoreria"
 _log_ds = logging.getLogger(__name__)
+
+# Rete fuente sobre el ítem — código en Factus (tabla Tributos de productos; ej. doc. API documento soporte).
+# https://developers.factus.com.co/documentos-soporte/crear-validar/
+_FACTUS_ITEM_RETE_FUENTE_CODE = "06"
+
+
+def _withholding_taxes_payload_factus(res: ResultadoRetencionDse | None) -> list[dict[str, Any]]:
+    """
+    Llena `items[].withholding_taxes` para POST /support-documents/validate.
+    Incluye tasa, monto calculado e hipónimo `withhoding_tax_rate` (typo en doc. antigua Factus)
+    para maximizar compatibilidad con su validación/DIAN.
+    """
+    if res is None or not res.aplica:
+        return []
+    if res.retencion_cop is None or res.retencion_cop <= 0:
+        return []
+    if res.tasa_porcentaje is None or res.tasa_porcentaje < 0:
+        return []
+    tq = res.tasa_porcentaje.quantize(Decimal("0.01"))
+    rv = res.retencion_cop.quantize(Decimal("0.01"))
+    rate_s = f"{float(tq):.2f}"
+    val_s = f"{float(rv):.2f}"
+    return [
+        {
+            "code": _FACTUS_ITEM_RETE_FUENTE_CODE,
+            "withholding_tax_rate": rate_s,
+            "value": val_s,
+            "withhoding_tax_rate": rate_s,
+        }
+    ]
 
 
 def _url_descartar_como_no_visor_documento(url: str) -> bool:
@@ -502,9 +538,20 @@ def _metodo_pago_codigo_tesoreria(metodo: MetodoPagoTesoreria) -> str:
 
 
 def _items_documento_soporte(
-    *, ref_code: str, concepto: str, monto: Decimal, beneficiario: str
+    *,
+    ref_code: str,
+    concepto: str,
+    monto: Decimal,
+    beneficiario: str,
+    withholding_taxes: list[dict[str, Any]] | None = None,
+    line_note: str | None = None,
 ) -> list[dict[str, Any]]:
     ref = f"{ref_code[:12]}-ds"[:20]
+    w: list[dict[str, Any]] = list(withholding_taxes) if withholding_taxes else []
+    base_note = f"Egreso. Proveedor: {(beneficiario or '')[:180]}"
+    if line_note and line_note.strip():
+        extra = f" | {line_note.strip()}"
+        base_note = (base_note + extra)[:500]
     return [
         {
             "code_reference": ref,
@@ -512,9 +559,9 @@ def _items_documento_soporte(
             "discount_rate": 0,
             "unit_measure_id": 70,
             "standard_code_id": 1,
-            "withholding_taxes": [],
+            "withholding_taxes": w,
             "name": (concepto or "Compra / servicio documento soporte")[:200],
-            "note": f"Egreso. Proveedor: {(beneficiario or '')[:200]}",
+            "note": base_note,
             "price": float(monto.quantize(Decimal("0.01"))),
             "tax_rate": "0.00",
             "is_excluded": 1,
@@ -728,14 +775,60 @@ def emitir_documento_soporte_desde_movimiento(
     except ValueError as e:
         raise FactusAPIError(str(e), status_code=400) from e
 
+    concepto_ret_snap: str | None = None
+    anio_motor: int | None = None
+    res_retencion: ResultadoRetencionDse | None = None
+    pc_id = getattr(mov, "proveedor_catalogo_id", None)
+    if pc_id:
+        prov = (
+            db.query(ProveedorCatalogo)
+            .filter(
+                ProveedorCatalogo.id == pc_id,
+                ProveedorCatalogo.tenant_id == tenant.id,
+            )
+            .first()
+        )
+        if prov and (prov.concepto_retencion_dse or "").strip():
+            concepto_ret_snap = (prov.concepto_retencion_dse or "").strip()[:32]
+            if modulo == MODULO_CAJA:
+                dt = getattr(mov, "created_at", None)
+            else:
+                dt = getattr(mov, "fecha_movimiento", None) or getattr(mov, "created_at", None)
+            anio_motor = dt.year if dt else datetime.now(timezone.utc).year
+            vu, ta = cargar_uvt_y_tasa(db, tenant.id, anio_motor, concepto_ret_snap)
+            res_retencion = calcular_retencion_desde_parametros(
+                monto,
+                concepto=concepto_ret_snap,
+                valor_uvt_cop=vu,
+                tasa_porcentaje=ta,
+            )
+
     ref = build_reference_code_documento_soporte(modulo, movimiento_id)
+    wtax = _withholding_taxes_payload_factus(res_retencion)
+    line_note_dse: str | None = None
+    if (
+        wtax
+        and res_retencion
+        and res_retencion.aplica
+        and res_retencion.retencion_cop is not None
+        and res_retencion.retencion_cop > 0
+        and res_retencion.tasa_porcentaje is not None
+    ):
+        tr = res_retencion.tasa_porcentaje.quantize(Decimal("0.01"))
+        line_note_dse = (
+            f"Rete fuente ref. {float(res_retencion.retencion_cop):,.0f} COP ({float(tr):.2f}%)"
+        )
     items = _items_documento_soporte(
         ref_code=ref,
         concepto=concepto,
         monto=monto,
         beneficiario=beneficiario,
+        withholding_taxes=wtax,
+        line_note=line_note_dse,
     )
-    observation = f"{concepto[:180]} | Ref interna {modulo} {movimiento_id.hex[:8]}"
+    observation = f"{concepto[:160]} | Ref {modulo} {movimiento_id.hex[:8]}"
+    if line_note_dse:
+        observation = (observation + f" | {line_note_dse}")[:250]
 
     cid, sec_enc, user, pwd_enc = active_auth_encrypted(fs)
     secret = decrypt_secret(sec_enc) if sec_enc else None
@@ -794,19 +887,9 @@ def emitir_documento_soporte_desde_movimiento(
     if factus_id is None and isinstance(resp.get("data"), dict):
         factus_id = resp["data"].get("id")
 
-    concepto_ret_snap: str | None = None
-    pc_id = getattr(mov, "proveedor_catalogo_id", None)
-    if pc_id:
-        prov = (
-            db.query(ProveedorCatalogo)
-            .filter(
-                ProveedorCatalogo.id == pc_id,
-                ProveedorCatalogo.tenant_id == tenant.id,
-            )
-            .first()
-        )
-        if prov and (prov.concepto_retencion_dse or "").strip():
-            concepto_ret_snap = (prov.concepto_retencion_dse or "").strip()[:32]
+    retencion_cop_snap: Decimal | None = (
+        res_retencion.retencion_cop if res_retencion is not None else None
+    )
 
     row = DocumentoSoporteElectronico(
         id=uuid.uuid4(),
@@ -820,6 +903,8 @@ def emitir_documento_soporte_desde_movimiento(
         public_url=public_url[:800] if public_url else None,
         emitido_por_usuario_id=emitido_por_usuario_id,
         concepto_retencion_dse=concepto_ret_snap,
+        retencion_calculada_cop=retencion_cop_snap,
+        retencion_calculo_anio=anio_motor if concepto_ret_snap else None,
     )
     db.add(row)
     db.flush()

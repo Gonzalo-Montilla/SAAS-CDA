@@ -106,6 +106,9 @@ interface Movimiento {
   documento_soporte_pdf_archivado?: boolean;
   /** Concepto de retención del catálogo, instantánea al emitir DSE (si hubo proveedor de catálogo). */
   documento_soporte_concepto_retencion?: string | null;
+  /** Monto sugerido por el motor (UVT + tasas en BD) al emitir DSE; puede ser 0. */
+  documento_soporte_retencion_calculada?: number | null;
+  documento_soporte_retencion_anio?: number | null;
   factura_emitida_por?: string | null;
   factura_emitida_en?: string | null;
   factura_pdf_archivado?: boolean;
@@ -1886,7 +1889,8 @@ export default function ReportesPage() {
                       )}
                       {(m.factura_emitida_por ||
                         m.documento_soporte_emitido_por ||
-                        m.documento_soporte_concepto_retencion) && (
+                        m.documento_soporte_concepto_retencion ||
+                        m.documento_soporte_retencion_calculada != null) && (
                         <div className="mt-2 text-xs text-slate-500 space-y-1 border-t border-slate-100 pt-1.5">
                           {m.factura_emitida_por ? (
                             <p>
@@ -1924,6 +1928,20 @@ export default function ReportesPage() {
                               <span className="capitalize">
                                 {m.documento_soporte_concepto_retencion.replace(/_/g, ' ')}
                               </span>
+                            </p>
+                          ) : null}
+                          {m.documento_soporte_retencion_calculada != null &&
+                          m.documento_soporte_retencion_calculada !== undefined ? (
+                            <p className="text-slate-600">
+                              <span className="font-medium text-slate-600">Retención calculada (motor):</span>{' '}
+                              {formatCOP(m.documento_soporte_retencion_calculada)}
+                              {m.documento_soporte_retencion_anio != null &&
+                              m.documento_soporte_retencion_anio !== undefined ? (
+                                <span className="text-slate-500">
+                                  {' '}
+                                  · parámetros año {m.documento_soporte_retencion_anio}
+                                </span>
+                              ) : null}
                             </p>
                           ) : null}
                         </div>

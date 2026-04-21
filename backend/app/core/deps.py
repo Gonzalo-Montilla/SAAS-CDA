@@ -14,6 +14,7 @@ from app.core.sucursal_scope import resolve_active_sucursal_id
 from app.models.usuario import Usuario, RolEnum
 from app.models.saas_user import SaaSUser
 from app.models.tenant import Tenant
+from app.services.tenant_billing_state import refresh_tenant_billing_state
 
 # OAuth2 scheme
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -91,22 +92,19 @@ def get_current_user(
             headers={"WWW-Authenticate": "Bearer"},
         )
 
-    now_ts = datetime.now(timezone.utc).replace(tzinfo=None)
-    if tenant.plan_actual == "demo" and tenant.demo_ends_at and tenant.demo_ends_at < now_ts:
-        tenant.subscription_status = "pending_plan"
-        db.commit()
-        # commit() expira instancias en la sesión; refrescar evita 500 en el mismo request (/auth/me, etc.).
-        db.refresh(user)
-        db.refresh(tenant)
+    refresh_tenant_billing_state(db, tenant)
+    db.refresh(user)
+    db.refresh(tenant)
 
     request_method = request.method if request else "GET"
     is_write_operation = request_method.upper() in {"POST", "PUT", "PATCH", "DELETE"}
-    if tenant.subscription_status == "pending_plan" and is_write_operation:
+    # Tras el periodo de gracia suave (5 días post-demo), bloqueo de escritura hasta contratar plan.
+    if tenant.subscription_status in {"locked", "pending_plan"} and is_write_operation:
         raise HTTPException(
             status_code=status.HTTP_402_PAYMENT_REQUIRED,
             detail=(
-                "El tenant est? en estado pendiente_de_plan. "
-                "La operaci?n de escritura est? bloqueada hasta asignar un plan de pago."
+                "La suscripción demo finalizó y se requiere contratar un plan. "
+                "La operación de escritura está bloqueada hasta completar el pago o contactar a soporte."
             ),
         )
     
@@ -175,7 +173,9 @@ def require_role(allowed_roles: list[str]):
     Dependency para verificar rol de usuario
     """
     def role_checker(current_user: Usuario = Depends(get_current_user)) -> Usuario:
-        if current_user.rol not in allowed_roles:
+        raw = current_user.rol
+        rol_s = raw.value if hasattr(raw, "value") else str(raw)
+        if rol_s not in allowed_roles:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Permiso denegado. Roles permitidos: {', '.join(allowed_roles)}",

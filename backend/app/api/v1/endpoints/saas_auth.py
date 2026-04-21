@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session, aliased
 from uuid import UUID
 
@@ -33,6 +33,8 @@ from app.models.saas_user import SaaSUser
 from app.models.support_ticket import SaaSSupportTicket
 from app.models.sucursal import Sucursal
 from app.models.tenant import Tenant
+from app.models.tenant_billing_checkout import TenantBillingCheckoutSession
+from app.models.factus import FacturaElectronica
 from app.models.usuario import Usuario
 from app.schemas.auth import Token, RefreshTokenRequest
 from app.schemas.factus import (
@@ -54,6 +56,15 @@ from app.services.factus_tenant_settings import (
 from app.utils.email import enviar_email_con_adjuntos, generar_email_recibo_pago_saas
 from app.utils.saas_billing_receipts import build_saas_payment_receipt_pdf
 from app.utils.tenant_logo import normalize_external_logo_url, save_tenant_logo_upload
+from app.services.saas_billing_plans import (
+    IVA_RATE,
+    PLAN_DEFINITIONS,
+    calculate_chargeable_branches_for_tenant,
+    calculate_plan_quote,
+)
+from app.services.tenant_billing_state import refresh_tenant_billing_state
+from app.integrations.saas_factus_billing import try_emit_saas_billing_electronic_invoice
+from app.api.v1.endpoints.tenant_billing import TenantSaasFeLatestOut
 
 router = APIRouter()
 
@@ -82,43 +93,6 @@ GLOBAL_ROLE_PERMISSIONS = {
 MFA_REQUIRED_ROLES = {"owner", "finanzas"}
 SUPPORT_PRIORITIES = {"baja", "media", "alta", "critica"}
 SUPPORT_STATUSES = {"abierto", "en_progreso", "resuelto", "cerrado"}
-IVA_RATE = 0.19
-PLAN_DEFINITIONS = {
-    "demo": {
-        "label": "DEMO",
-        "duration_days": 15,
-        "base_price": 0.0,
-        "additional_branch_price": 0.0,
-        "included_branches": 1,  # 1 sede principal + 1 sucursal incluida
-        "is_prepay": False,
-    },
-    "basico": {
-        "label": "BÁSICO",
-        "duration_days": 90,
-        "base_price": 450000.0,
-        "additional_branch_price": 250000.0,
-        "included_branches": 1,
-        "is_prepay": True,
-    },
-    "emprendedor": {
-        "label": "EMPRENDEDOR",
-        "duration_days": 180,
-        "base_price": 850000.0,
-        "additional_branch_price": 450000.0,
-        "included_branches": 1,
-        "is_prepay": True,
-    },
-    "empresa": {
-        "label": "EMPRESA",
-        "duration_days": 365,
-        "base_price": 1500000.0,
-        "additional_branch_price": 650000.0,
-        "included_branches": 1,
-        "is_prepay": True,
-    },
-}
-
-
 class SaaSTenantSummary(BaseModel):
     id: str
     slug: str
@@ -368,6 +342,43 @@ class SaaSPaymentHistoryItem(BaseModel):
     notes: str | None = None
 
 
+class SaaSCheckoutSessionItem(BaseModel):
+    """Suscripción: sesión ePayco / init-payment y estado de FE (emisor PROMETHEUS), no el Factus del CDA."""
+
+    session_id: str
+    tenant_id: str
+    tenant_slug: str
+    tenant_nombre: str
+    plan_code: str
+    sedes_totales: int
+    total_cop: float
+    status: str
+    created_at: datetime
+    completed_at: datetime | None
+    epayco_ref: str | None
+    saas_fe_status: str | None
+    saas_fe_error: str | None
+    numero_documento: str | None = None
+    cufe: str | None = None
+    public_url: str | None = None
+
+
+def _checkout_row_to_tenant_saas_fe_out(
+    row: TenantBillingCheckoutSession, fe: FacturaElectronica | None
+) -> TenantSaasFeLatestOut:
+    total = float(row.total_cop) if row.total_cop is not None else None
+    return TenantSaasFeLatestOut(
+        session_id=str(row.id),
+        plan_code=row.plan_code,
+        total_cop=total,
+        saas_fe_status=row.saas_fe_status,
+        saas_fe_error=(row.saas_fe_error[:2000] if row.saas_fe_error else None),
+        numero_documento=fe.numero_documento if fe else None,
+        cufe=fe.cufe if fe else None,
+        public_url=fe.public_url if fe else None,
+    )
+
+
 def validate_saas_password(password: str):
     try:
         validate_password_strength(password, min_length=10)
@@ -375,45 +386,13 @@ def validate_saas_password(password: str):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
 
-def calculate_plan_quote(plan_code: str, sedes_totales: int) -> tuple[dict, int, float, float, float]:
-    normalized_code = plan_code.strip().lower()
-    if normalized_code not in PLAN_DEFINITIONS:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan inválido")
-    if sedes_totales < 1:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="sedes_totales debe ser mayor o igual a 1")
-
-    plan = PLAN_DEFINITIONS[normalized_code]
-    # 1 sede principal + 1 sucursal incluida. Cobro desde la 3ra sede total.
-    chargeable_additional = max(sedes_totales - (1 + plan["included_branches"]), 0)
-    subtotal = plan["base_price"] + (chargeable_additional * plan["additional_branch_price"])
-    iva = round(subtotal * IVA_RATE, 2)
-    total = round(subtotal + iva, 2)
-    return plan, chargeable_additional, round(subtotal, 2), iva, total
-
-
-def calculate_chargeable_branches_for_tenant(plan_code: str, sedes_totales: int) -> tuple[int, int]:
-    normalized_code = (plan_code or "demo").strip().lower()
-    plan = PLAN_DEFINITIONS.get(normalized_code, PLAN_DEFINITIONS["demo"])
-    included_branches = int(plan["included_branches"])
-    chargeable_additional = max(int(sedes_totales) - (1 + included_branches), 0)
-    return chargeable_additional, included_branches
-
-
 def sync_expired_demo_tenants(db: Session) -> None:
-    now_ts = datetime.now(timezone.utc).replace(tzinfo=None)
-    expired_demo_tenants = (
-        db.query(Tenant)
-        .filter(Tenant.plan_actual == "demo")
-        .filter(Tenant.subscription_status == "trial")
-        .filter(Tenant.demo_ends_at.isnot(None))
-        .filter(Tenant.demo_ends_at < now_ts)
-        .all()
-    )
-    if not expired_demo_tenants:
-        return
-    for tenant in expired_demo_tenants:
-        tenant.subscription_status = "pending_plan"
+    """Alinea estados de tenants en plan demo (trial / soft / locked) y marca past_due en planes de pago."""
+    demo_tenants = db.query(Tenant).filter(Tenant.plan_actual == "demo").all()
+    for tenant in demo_tenants:
+        refresh_tenant_billing_state(db, tenant)
 
+    now_ts = datetime.now(timezone.utc).replace(tzinfo=None)
     overdue_paid_tenants = (
         db.query(Tenant)
         .filter(Tenant.plan_actual != "demo")
@@ -428,8 +407,10 @@ def sync_expired_demo_tenants(db: Session) -> None:
 
 
 def get_cobro_status(subscription_status: str, next_billing_at: datetime | None) -> str:
-    if subscription_status in {"pending_plan", "canceled"}:
+    if subscription_status in {"locked", "pending_plan", "canceled"}:
         return "bloqueado"
+    if subscription_status == "soft_grace":
+        return "en_gracia"
     if subscription_status == "trial":
         return "trial"
     if not next_billing_at:
@@ -1677,6 +1658,142 @@ def list_tenant_payment_history(
             break
 
     return items
+
+
+@router.get("/billing/checkout-sessions", response_model=list[SaaSCheckoutSessionItem])
+def list_billing_checkout_sessions(
+    limit: int = 50,
+    tenant_id: str | None = None,
+    status: str | None = None,
+    fe_status: str | None = Query(
+        default=None,
+        description="Filtrar por saas_fe_status: ok | error | skipped | pending (aún sin estado o vacío)",
+    ),
+    db: Session = Depends(get_db),
+    _: SaaSUser = Depends(require_saas_role(["owner", "finanzas", "comercial", "soporte"])),
+):
+    """Sesiones de pago de suscripción (ePayco) y estado de factura electrónica de licencia (Factus SaaS / PROMETHEUS)."""
+    safe_limit = min(max(limit, 1), 200)
+    q = (
+        db.query(
+            TenantBillingCheckoutSession,
+            Tenant.slug,
+            Tenant.nombre_comercial,
+            FacturaElectronica,
+        )
+        .join(Tenant, Tenant.id == TenantBillingCheckoutSession.tenant_id)
+        .outerjoin(
+            FacturaElectronica,
+            FacturaElectronica.billing_checkout_session_id == TenantBillingCheckoutSession.id,
+        )
+    )
+    if tenant_id:
+        try:
+            t_uuid = UUID(tenant_id.strip())
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="tenant_id inválido")
+        q = q.filter(TenantBillingCheckoutSession.tenant_id == t_uuid)
+    st = (status or "").strip()
+    if st:
+        q = q.filter(TenantBillingCheckoutSession.status == st)
+
+    fe_f = (fe_status or "").strip().lower()
+    if fe_f == "pending":
+        q = q.filter(
+            or_(
+                TenantBillingCheckoutSession.saas_fe_status.is_(None),
+                TenantBillingCheckoutSession.saas_fe_status == "",
+            )
+        )
+    elif fe_f in ("ok", "error", "skipped"):
+        q = q.filter(TenantBillingCheckoutSession.saas_fe_status == fe_f)
+    elif fe_f:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="fe_status inválido: use ok, error, skipped o pending",
+        )
+
+    rows = q.order_by(TenantBillingCheckoutSession.created_at.desc()).limit(safe_limit).all()
+    out: list[SaaSCheckoutSessionItem] = []
+    for s, slug, nombre, fe in rows:
+        out.append(
+            SaaSCheckoutSessionItem(
+                session_id=str(s.id),
+                tenant_id=str(s.tenant_id),
+                tenant_slug=slug,
+                tenant_nombre=nombre,
+                plan_code=s.plan_code,
+                sedes_totales=s.sedes_totales,
+                total_cop=float(s.total_cop) if s.total_cop is not None else 0.0,
+                status=s.status,
+                created_at=s.created_at,
+                completed_at=s.completed_at,
+                epayco_ref=s.epayco_ref,
+                saas_fe_status=s.saas_fe_status,
+                saas_fe_error=(s.saas_fe_error[:2000] if s.saas_fe_error else None),
+                numero_documento=fe.numero_documento if fe else None,
+                cufe=fe.cufe if fe else None,
+                public_url=fe.public_url if fe else None,
+            )
+        )
+    return out
+
+
+@router.post(
+    "/billing/checkout-sessions/{session_id}/retry-saas-factus",
+    response_model=TenantSaasFeLatestOut,
+)
+def saas_retry_checkout_session_saas_factus(
+    session_id: str,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: SaaSUser = Depends(require_saas_role(["owner", "finanzas"])),
+):
+    """
+    Reintenta emisión FE (licencia) para un checkout ya pagado. No re-cobra.
+    Misma lógica que el tenant, pero con alcance backoffice.
+    """
+    try:
+        sid = UUID(session_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID de sesión inválido")
+
+    row = db.query(TenantBillingCheckoutSession).filter(TenantBillingCheckoutSession.id == sid).first()
+    if not row or row.status != "paid":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sesión no encontrada o el pago no está confirmado",
+        )
+    fe0 = (
+        db.query(FacturaElectronica)
+        .filter(FacturaElectronica.billing_checkout_session_id == row.id)
+        .first()
+    )
+    if row.saas_fe_status == "ok" and fe0 is not None:
+        return _checkout_row_to_tenant_saas_fe_out(row, fe0)
+    tenant = db.query(Tenant).filter(Tenant.id == row.tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado")
+    try_emit_saas_billing_electronic_invoice(db, tenant=tenant, checkout=row)
+    db.refresh(row)
+    fe = (
+        db.query(FacturaElectronica)
+        .filter(FacturaElectronica.billing_checkout_session_id == row.id)
+        .first()
+    )
+    create_saas_audit_log(
+        db=db,
+        action="saas_retry_checkout_factus",
+        description=f"Reintento emisión FE licencia, sesión {row.id} tenant {tenant.slug}",
+        actor=current_user,
+        request=request,
+        metadata={
+            "session_id": str(row.id),
+            "tenant_id": str(tenant.id),
+            "saas_fe_status": row.saas_fe_status,
+        },
+    )
+    return _checkout_row_to_tenant_saas_fe_out(row, fe)
 
 
 @router.get("/support/tickets", response_model=list[SaaSSupportTicketItem])

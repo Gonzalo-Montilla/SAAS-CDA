@@ -19,6 +19,8 @@ import {
   UserPlus,
   Landmark,
   MapPin,
+  FileText,
+  Download,
 } from 'lucide-react';
 import { BackofficeSectionHeading } from '../components/BackofficeSectionHeading';
 import FactusMunicipalitySearchField from '../components/FactusMunicipalitySearchField';
@@ -41,9 +43,18 @@ import type {
   SaaSTenantSummary,
   SaaSUser,
   SaaSUserSecurityItem,
+  SaaSCheckoutSessionItem,
 } from '../types';
 import logoCdaSoft from '../assets/LOGO_CDA_SOFT-SIN FONDO.png';
 import SaasTenantFactusPanel from '../components/SaasTenantFactusPanel';
+
+function escapeCsvField(value: string): string {
+  const s = value.replace(/\r?\n/g, ' ').replace(/"/g, '""');
+  if (/[",;\n]/.test(s)) {
+    return `"${s}"`;
+  }
+  return s;
+}
 
 interface SaaSPermissionsResponse {
   role: 'owner' | 'finanzas' | 'comercial' | 'soporte';
@@ -88,6 +99,9 @@ export default function SaaSBackoffice() {
   const [supportActionSuccess, setSupportActionSuccess] = useState('');
   const [supportReplyTicketId, setSupportReplyTicketId] = useState<string | null>(null);
   const [supportReplyMessage, setSupportReplyMessage] = useState('');
+  const [checkoutSessionStatusFilter, setCheckoutSessionStatusFilter] = useState('');
+  const [checkoutSessionTenantId, setCheckoutSessionTenantId] = useState('');
+  const [checkoutSessionFeFilter, setCheckoutSessionFeFilter] = useState('');
   const [sedeUbicacionEdit, setSedeUbicacionEdit] = useState<{
     id: string;
     nombre: string;
@@ -114,6 +128,8 @@ export default function SaaSBackoffice() {
       active: 'Activa',
       trial: 'Demo',
       past_due: 'Vencida',
+      soft_grace: 'Gracia (post-demo)',
+      locked: 'Bloqueado (sin plan)',
       pending_plan: 'Pendiente de plan',
       canceled: 'Cancelada',
     };
@@ -130,6 +146,18 @@ export default function SaaSBackoffice() {
     return labels[status] || status;
   };
 
+  const feLicenciaStatusLabel = (s: string | null | undefined): string => {
+    if (s == null || s === '') {
+      return 'Pendiente';
+    }
+    const labels: Record<string, string> = {
+      ok: 'Emitida',
+      error: 'Error',
+      skipped: 'Omitida',
+    };
+    return labels[s] || s;
+  };
+
   const statusBadgeClass = (status: string): string => {
     if (status === 'active' || status === 'al_dia' || status === 'success') {
       return 'badge badge-success';
@@ -137,14 +165,26 @@ export default function SaaSBackoffice() {
     if (status === 'trial' || status === 'demo' || status === 'por_vencer') {
       return 'badge badge-info';
     }
-    if (status === 'past_due' || status === 'pending_plan' || status === 'vencido') {
+    if (status === 'past_due' || status === 'pending_plan' || status === 'soft_grace' || status === 'vencido') {
       return 'badge badge-warning';
+    }
+    if (status === 'locked') {
+      return 'badge badge-danger';
     }
     if (status === 'failed' || status === 'canceled' || status === 'cancelada') {
       return 'badge badge-danger';
     }
-    if (status === 'abierto' || status === 'en_progreso') {
+    if (status === 'pending' || status === 'abierto' || status === 'en_progreso') {
       return 'badge badge-info';
+    }
+    if (status === 'paid') {
+      return 'badge badge-success';
+    }
+    if (status === 'ok') {
+      return 'badge badge-success';
+    }
+    if (status === 'error' || status === 'skipped') {
+      return 'badge badge-warning';
     }
     if (status === 'resuelto' || status === 'cerrado') {
       return 'badge badge-success';
@@ -190,6 +230,7 @@ export default function SaaSBackoffice() {
   const currentSaaSRole = permissionsQuery.data?.role;
   const canReadSupport = currentSaaSRole === 'owner' || currentSaaSRole === 'soporte' || currentSaaSRole === 'comercial';
   const canManageSupport = currentSaaSRole === 'owner' || currentSaaSRole === 'soporte';
+  const canRetrySaaSFe = currentSaaSRole === 'owner' || currentSaaSRole === 'finanzas';
 
   const tenantsQuery = useQuery({
     queryKey: ['saas-tenants-list'],
@@ -329,6 +370,84 @@ export default function SaaSBackoffice() {
     },
     enabled: activeModule === 'facturacion',
   });
+
+  const checkoutSessionsQuery = useQuery({
+    queryKey: [
+      'saas-billing-checkout-sessions',
+      checkoutSessionStatusFilter,
+      checkoutSessionTenantId,
+      checkoutSessionFeFilter,
+    ],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      params.set('limit', '100');
+      if (checkoutSessionStatusFilter) {
+        params.set('status', checkoutSessionStatusFilter);
+      }
+      if (checkoutSessionTenantId) {
+        params.set('tenant_id', checkoutSessionTenantId);
+      }
+      if (checkoutSessionFeFilter) {
+        params.set('fe_status', checkoutSessionFeFilter);
+      }
+      const response = await apiClient.get<SaaSCheckoutSessionItem[]>(
+        `/saas/auth/billing/checkout-sessions?${params.toString()}`,
+      );
+      return response.data;
+    },
+    enabled: activeModule === 'facturacion',
+  });
+
+  const downloadCheckoutSessionsCsv = () => {
+    const rows = checkoutSessionsQuery.data;
+    if (!rows?.length) {
+      return;
+    }
+    const header = [
+      'created_at',
+      'tenant_slug',
+      'tenant_nombre',
+      'plan_code',
+      'total_cop',
+      'session_id',
+      'status_pago',
+      'saas_fe_status',
+      'saas_fe_error',
+      'numero_documento',
+      'cufe',
+      'public_url',
+      'epayco_ref',
+    ];
+    const lines = [header.join(',')];
+    for (const r of rows) {
+      lines.push(
+        [
+          escapeCsvField(new Date(r.created_at).toISOString()),
+          escapeCsvField(r.tenant_slug),
+          escapeCsvField(r.tenant_nombre),
+          escapeCsvField(r.plan_code),
+          escapeCsvField(String(r.total_cop)),
+          escapeCsvField(r.session_id),
+          escapeCsvField(r.status),
+          escapeCsvField(r.saas_fe_status ?? ''),
+          escapeCsvField(r.saas_fe_error ?? ''),
+          escapeCsvField(r.numero_documento ?? ''),
+          escapeCsvField(r.cufe ?? ''),
+          escapeCsvField(r.public_url ?? ''),
+          escapeCsvField(r.epayco_ref ?? ''),
+        ].join(','),
+      );
+    }
+    const blob = new Blob([`\uFEFF${lines.join('\n')}`], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `checkout_sesiones_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
 
   const tenantPaymentsQuery = useQuery({
     queryKey: ['saas-tenant-payments', selectedTenantId],
@@ -519,6 +638,7 @@ export default function SaaSBackoffice() {
       queryClient.invalidateQueries({ queryKey: ['saas-billing-quote'] });
       queryClient.invalidateQueries({ queryKey: ['saas-billing-overview'] });
       queryClient.invalidateQueries({ queryKey: ['saas-tenant-payments'] });
+      queryClient.invalidateQueries({ queryKey: ['saas-billing-checkout-sessions'] });
     },
     onError: (err: any) => {
       setBillingActionSuccess('');
@@ -550,6 +670,7 @@ export default function SaaSBackoffice() {
       queryClient.invalidateQueries({ queryKey: ['saas-billing-quote'] });
       queryClient.invalidateQueries({ queryKey: ['saas-billing-overview'] });
       queryClient.invalidateQueries({ queryKey: ['saas-tenant-payments'] });
+      queryClient.invalidateQueries({ queryKey: ['saas-billing-checkout-sessions'] });
     },
     onError: (err: any) => {
       setBillingActionSuccess('');
@@ -573,6 +694,24 @@ export default function SaaSBackoffice() {
     onError: (err: any) => {
       setBillingActionSuccess('');
       setBillingActionError(err?.response?.data?.detail || 'No fue posible reenviar el recibo. Intenta nuevamente.');
+    },
+  });
+
+  const retrySaaSCheckoutFeMutation = useMutation({
+    mutationFn: async (sessionId: string) => {
+      const response = await apiClient.post(
+        `/saas/auth/billing/checkout-sessions/${encodeURIComponent(sessionId)}/retry-saas-factus`,
+      );
+      return response.data;
+    },
+    onSuccess: () => {
+      setBillingActionError('');
+      setBillingActionSuccess('Factura electrónica (licencia) reintentada. Verifique el estado en la tabla.');
+      queryClient.invalidateQueries({ queryKey: ['saas-billing-checkout-sessions'] });
+    },
+    onError: (err: any) => {
+      setBillingActionSuccess('');
+      setBillingActionError(err?.response?.data?.detail || 'No se pudo reintentar la emisión DIAN (licencia).');
     },
   });
 
@@ -929,6 +1068,169 @@ export default function SaaSBackoffice() {
     if (activeModule === 'facturacion') {
       return (
         <div className="space-y-6">
+          {billingActionError && (
+            <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">{billingActionError}</p>
+          )}
+          {billingActionSuccess && (
+            <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-3">
+              {billingActionSuccess}
+            </p>
+          )}
+
+          <div className="section-card p-6 ring-1 ring-violet-200/80 bg-violet-50/30">
+            <BackofficeSectionHeading
+              className="mb-4"
+              icon={FileText}
+              title="Pagos en línea (suscripción) y factura de licencia"
+              description="Sesiones ePayco desde el CDA; emisión DIAN vía el emisor SaaS (PROMETHEUS). Distinto al Factus que el CDA usa en operación."
+            />
+            <p className="text-xs text-slate-500 mb-3">
+              Filtre por tenant, estado del pago (ePayco) o estado de la factura de licencia (DIAN / Factus SaaS). El CSV
+              refleja la vista actual (hasta 100 filas con los mismos filtros).
+            </p>
+            <div className="flex flex-col gap-3 mb-4 lg:flex-row lg:items-end lg:justify-between">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 flex-1">
+                <select
+                  className="input-corporate"
+                  value={checkoutSessionTenantId}
+                  onChange={(e) => setCheckoutSessionTenantId(e.target.value)}
+                >
+                  <option value="">Todos los tenants</option>
+                  {(tenantsQuery.data || []).map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.nombre_comercial} (/{t.slug})
+                    </option>
+                  ))}
+                </select>
+                <select
+                  className="input-corporate"
+                  value={checkoutSessionStatusFilter}
+                  onChange={(e) => setCheckoutSessionStatusFilter(e.target.value)}
+                >
+                  <option value="">Cualquier estado de pago</option>
+                  <option value="pending">pending (sin pagar)</option>
+                  <option value="paid">paid (pagada)</option>
+                </select>
+                <select
+                  className="input-corporate"
+                  value={checkoutSessionFeFilter}
+                  onChange={(e) => setCheckoutSessionFeFilter(e.target.value)}
+                >
+                  <option value="">Cualquier estado FE licencia</option>
+                  <option value="pending">Pendiente (sin estado o aún no emitida)</option>
+                  <option value="ok">Emitida (ok)</option>
+                  <option value="error">Error de emisión</option>
+                  <option value="skipped">Omitida (sin Factus, etc.)</option>
+                </select>
+              </div>
+              <button
+                type="button"
+                onClick={downloadCheckoutSessionsCsv}
+                disabled={!checkoutSessionsQuery.data?.length}
+                className="btn-chip flex items-center justify-center gap-2 self-start lg:self-auto whitespace-nowrap"
+              >
+                <Download className="w-4 h-4" />
+                Descargar CSV
+              </button>
+            </div>
+            {checkoutSessionsQuery.isLoading && <LoadingBlock lines={4} />}
+            {checkoutSessionsQuery.isError && (
+              <p className="text-sm text-red-600">No fue posible cargar las sesiones de checkout.</p>
+            )}
+            {checkoutSessionsQuery.data &&
+              (checkoutSessionsQuery.data.length === 0 ? (
+                <EmptyState message="No hay sesiones de pago de suscripción registradas." />
+              ) : (
+                <div className="table-shell">
+                  <table className="table-enterprise text-sm">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Tenant</th>
+                        <th>Plan</th>
+                        <th>Total</th>
+                        <th>Sesión</th>
+                        <th>Estado pago</th>
+                        <th>FE licencia</th>
+                        <th>Comprobante</th>
+                        <th className="table-enterprise-col-actions">Acciones</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {checkoutSessionsQuery.data.map((row) => {
+                        const feSt = row.saas_fe_status || '';
+                        const feComplete = row.saas_fe_status === 'ok' && Boolean(row.numero_documento);
+                        const showRetry = canRetrySaaSFe && row.status === 'paid' && !feComplete;
+                        return (
+                          <tr key={row.session_id}>
+                            <td>{new Date(row.created_at).toLocaleString()}</td>
+                            <td className="font-medium text-slate-900">{row.tenant_nombre}</td>
+                            <td>{row.plan_code}</td>
+                            <td>{formatCurrency(row.total_cop)}</td>
+                            <td
+                              className="text-xs text-slate-500 font-mono max-w-[128px] truncate"
+                              title={row.session_id}
+                            >
+                              {row.session_id}
+                            </td>
+                            <td>
+                              <span className={statusBadgeClass(row.status)}>{row.status}</span>
+                            </td>
+                            <td>
+                              <span
+                                className={statusBadgeClass(feSt || 'pending')}
+                                title={row.saas_fe_error || undefined}
+                              >
+                                {feLicenciaStatusLabel(row.saas_fe_status)}
+                              </span>
+                            </td>
+                            <td>
+                              {row.public_url ? (
+                                <a
+                                  href={row.public_url}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="text-blue-600 hover:underline text-xs"
+                                >
+                                  Abrir
+                                </a>
+                              ) : (
+                                <span className="text-xs text-slate-600">{row.numero_documento || '—'}</span>
+                              )}
+                            </td>
+                            <td className="table-enterprise-col-actions">
+                              {showRetry && (
+                                <button
+                                  type="button"
+                                  className="btn-chip"
+                                  disabled={retrySaaSCheckoutFeMutation.isLoading}
+                                  onClick={() => {
+                                    setBillingActionError('');
+                                    setBillingActionSuccess('');
+                                    retrySaaSCheckoutFeMutation.mutate(row.session_id);
+                                  }}
+                                >
+                                  {retrySaaSCheckoutFeMutation.isLoading &&
+                                  retrySaaSCheckoutFeMutation.variables === row.session_id
+                                    ? 'Reintentando…'
+                                    : 'Reintentar FE'}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              ))}
+            {!canRetrySaaSFe && (
+              <p className="text-xs text-slate-500 mt-3">
+                Solo roles owner y finanzas pueden reintentar la emisión de la factura de licencia.
+              </p>
+            )}
+          </div>
+
           <div className="section-card p-6">
             <BackofficeSectionHeading
               className="mb-4"
@@ -942,64 +1244,69 @@ export default function SaaSBackoffice() {
               billingOverviewQuery.data.length === 0 ? (
                 <EmptyState message="No hay registros de facturación para mostrar todavía." />
               ) : (
-              <div className="table-shell">
-                <table className="table-enterprise">
-                  <thead>
-                    <tr>
-                      <th>Tenant</th>
-                      <th>Plan</th>
-                      <th>Sucursales</th>
-                      <th>Estado cobro</th>
-                      <th>Próx. cobro</th>
-                      <th>Último pago</th>
-                      <th>Recibo</th>
-                      <th className="table-enterprise-col-actions">Acciones</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {billingOverviewQuery.data.map((item) => {
-                      const tenant = (tenantsQuery.data || []).find((t) => t.id === item.tenant_id);
-                      return (
-                      <tr key={item.tenant_id}>
-                        <td className="font-semibold text-slate-900">{item.tenant_nombre}</td>
-                        <td>{item.plan_label}</td>
-                        <td>{item.sedes_totales} / {item.sucursales_facturables} fact.</td>
-                        <td>
-                          <span className={statusBadgeClass(item.cobro_status)}>
-                            {cobroStatusLabel(item.cobro_status)}
-                          </span>
-                        </td>
-                        <td>{item.next_billing_at ? new Date(item.next_billing_at).toLocaleDateString() : '-'}</td>
-                        <td>
-                          {item.last_payment_amount != null ? `${formatCurrency(item.last_payment_amount)} (${item.last_payment_at ? new Date(item.last_payment_at).toLocaleDateString() : '-'})` : '-'}
-                        </td>
-                        <td>{item.last_receipt_reference || '-'}</td>
-                        <td className="table-enterprise-col-actions">
-                          <div className="flex flex-wrap items-center justify-end gap-2">
-                            <button
-                              type="button"
-                              onClick={() => tenant && openTenantSheet(tenant)}
-                              className="btn-chip"
-                            >
-                              Abrir gestión
-                            </button>
-                            <button
-                              type="button"
-                              disabled={!item.last_payment_log_id || resendReceiptMutation.isLoading}
-                              onClick={() => item.last_payment_log_id && resendReceiptMutation.mutate(item.last_payment_log_id)}
-                              className="btn-chip"
-                            >
-                              {item.last_payment_log_id && item.last_payment_log_id === resentPaymentLogId
-                                ? 'Enviado'
-                                : 'Reenviar recibo'}
-                            </button>
-                          </div>
-                        </td>
+                <div className="table-shell">
+                  <table className="table-enterprise">
+                    <thead>
+                      <tr>
+                        <th>Tenant</th>
+                        <th>Plan</th>
+                        <th>Sucursales</th>
+                        <th>Estado cobro</th>
+                        <th>Próx. cobro</th>
+                        <th>Último pago</th>
+                        <th>Recibo</th>
+                        <th className="table-enterprise-col-actions">Acciones</th>
                       </tr>
-                    )})}
-                  </tbody>
-                </table>
-              </div>
+                    </thead>
+                    <tbody>
+                      {billingOverviewQuery.data.map((item) => {
+                        const tenant = (tenantsQuery.data || []).find((t) => t.id === item.tenant_id);
+                        return (
+                          <tr key={item.tenant_id}>
+                            <td className="font-semibold text-slate-900">{item.tenant_nombre}</td>
+                            <td>{item.plan_label}</td>
+                            <td>
+                              {item.sedes_totales} / {item.sucursales_facturables} fact.
+                            </td>
+                            <td>
+                              <span className={statusBadgeClass(item.cobro_status)}>{cobroStatusLabel(item.cobro_status)}</span>
+                            </td>
+                            <td>{item.next_billing_at ? new Date(item.next_billing_at).toLocaleDateString() : '-'}</td>
+                            <td>
+                              {item.last_payment_amount != null
+                                ? `${formatCurrency(item.last_payment_amount)} (${
+                                    item.last_payment_at ? new Date(item.last_payment_at).toLocaleDateString() : '-'
+                                  })`
+                                : '-'}
+                            </td>
+                            <td>{item.last_receipt_reference || '-'}</td>
+                            <td className="table-enterprise-col-actions">
+                              <div className="flex flex-wrap items-center justify-end gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => tenant && openTenantSheet(tenant)}
+                                  className="btn-chip"
+                                >
+                                  Abrir gestión
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!item.last_payment_log_id || resendReceiptMutation.isLoading}
+                                  onClick={() => item.last_payment_log_id && resendReceiptMutation.mutate(item.last_payment_log_id)}
+                                  className="btn-chip"
+                                >
+                                  {item.last_payment_log_id && item.last_payment_log_id === resentPaymentLogId
+                                    ? 'Enviado'
+                                    : 'Reenviar recibo'}
+                                </button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
               )
             )}
           </div>

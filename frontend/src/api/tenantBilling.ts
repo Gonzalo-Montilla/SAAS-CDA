@@ -1,0 +1,114 @@
+import apiClient from './client';
+import type { TenantBillingInfo } from '../types';
+
+export type TenantPlanItem = {
+  code: string;
+  label: string;
+  duration_days: number;
+  base_price: number;
+  additional_branch_price: number;
+  included_branches: number;
+  iva_rate: number;
+  is_prepay: boolean;
+};
+
+export type TenantQuote = {
+  plan_code: string;
+  plan_label: string;
+  sedes_totales: number;
+  included_branches: number;
+  chargeable_additional_branches: number;
+  subtotal: number;
+  iva: number;
+  total: number;
+  period_days: number;
+};
+
+export type InitPaymentOut = {
+  session_id: string;
+  total_cop: number;
+  mode: 'smart_checkout' | 'redirect' | 'unconfigured' | 'mock';
+  redirect_url?: string | null;
+  /** Smart Checkout v2 (Apify): abrir con checkout-v2.js */
+  epayco_session_id?: string | null;
+  epayco_public_key?: string | null;
+  epayco_checkout_test?: boolean;
+  message?: string | null;
+};
+
+export async function fetchTenantBillingGate(): Promise<TenantBillingInfo> {
+  const { data } = await apiClient.get<TenantBillingInfo>('/tenant/billing/gate');
+  return data;
+}
+
+export async function listTenantPlans(): Promise<TenantPlanItem[]> {
+  const { data } = await apiClient.get<TenantPlanItem[]>('/tenant/billing/plans');
+  return data;
+}
+
+export async function quoteTenantPlan(planCode: string, sedesTotales: number): Promise<TenantQuote> {
+  const { data } = await apiClient.post<TenantQuote>('/tenant/billing/quote', {
+    plan_code: planCode,
+    sedes_totales: sedesTotales,
+  });
+  return data;
+}
+
+export async function initTenantPayment(
+  planCode: string,
+  sedesTotales: number
+): Promise<InitPaymentOut> {
+  const { data } = await apiClient.post<InitPaymentOut>('/tenant/billing/init-payment', {
+    plan_code: planCode,
+    sedes_totales: sedesTotales,
+  });
+  return data;
+}
+
+export type ConfirmCheckoutReturnResult = {
+  ok: boolean;
+  duplicate?: boolean;
+  reason?: string;
+};
+
+/** Tras el redirect ePayco: reenvía los parámetros de la query (o el webhook ya marcó pago). */
+export async function confirmTenantCheckoutReturn(body: {
+  session_id: string;
+  ref_payco?: string;
+  cod_response?: string;
+  x_response?: string;
+  x_signature?: string;
+  x_transaction_id?: string;
+  x_amount?: string;
+  x_currency_code?: string;
+}): Promise<ConfirmCheckoutReturnResult> {
+  const { data } = await apiClient.post<ConfirmCheckoutReturnResult>('/tenant/billing/confirm-return', body);
+  return data;
+}
+
+export async function completeTenantCheckoutMock(sessionId: string): Promise<void> {
+  await apiClient.post('/tenant/billing/complete-mock', {}, { params: { session_id: sessionId } });
+}
+
+export type SaasFeLatest = {
+  session_id: string | null;
+  plan_code: string | null;
+  total_cop: number | null;
+  saas_fe_status: string | null;
+  saas_fe_error: string | null;
+  numero_documento: string | null;
+  cufe: string | null;
+  public_url: string | null;
+};
+
+export async function fetchLatestSaasFe(): Promise<SaasFeLatest> {
+  const { data } = await apiClient.get<SaasFeLatest>('/tenant/billing/saas-fe/latest');
+  return data;
+}
+
+export async function retrySaasFactusEmission(sessionId: string): Promise<SaasFeLatest> {
+  const { data } = await apiClient.post<SaasFeLatest>(
+    `/tenant/billing/sessions/${encodeURIComponent(sessionId)}/retry-saas-factus`
+  );
+  return data;
+}

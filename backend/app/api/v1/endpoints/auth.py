@@ -34,7 +34,16 @@ from app.models.tenant import Tenant
 from app.models.sucursal import Sucursal
 from app.models.password_reset_token import PasswordResetToken
 from app.schemas.auth import Token, UserRegister, PasswordChange, RefreshTokenRequest, SwitchSucursalRequest
-from app.schemas.usuario import TenantBrandingResponse, UsuarioResponse, SucursalBasica
+from app.schemas.usuario import (
+    TenantBillingInfoResponse,
+    TenantBrandingResponse,
+    UsuarioResponse,
+    SucursalBasica,
+)
+from app.services.tenant_billing_state import (
+    billing_gate_for_demo_tenant,
+    soft_grace_ends_at,
+)
 from app.utils.email import enviar_email, generar_email_recuperacion_password
 from app.utils.audit import audit_login_success, audit_login_failed, create_audit_log
 from app.models.audit_log import AuditAction
@@ -263,6 +272,13 @@ def get_current_user_info(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="No se encontró la organización asociada al usuario.",
         )
+    soft_end = soft_grace_ends_at(tenant.demo_ends_at) if tenant.demo_ends_at else None
+    tb = TenantBillingInfoResponse(
+        gate=billing_gate_for_demo_tenant(tenant),
+        subscription_status=(tenant.subscription_status or "").strip(),
+        demo_ends_at=tenant.demo_ends_at,
+        soft_grace_ends_at=soft_end,
+    )
     payload = getattr(request.state, "tenant_jwt_payload", None)
     if not isinstance(payload, dict):
         payload = {}
@@ -313,6 +329,7 @@ def get_current_user_info(
         sucursales=sucursales_out,
         tenant_sedes_totales=tenant.sedes_totales,
         tenant_branding=branding,
+        tenant_billing=tb,
     )
 
 

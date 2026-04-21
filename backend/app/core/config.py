@@ -126,6 +126,39 @@ class Settings(BaseSettings):
     # Localización Colombia
     TIMEZONE: str = "America/Bogota"
     LOCALE: str = "es_CO"
+
+    # ePayco (pasarela) — pago de suscripción tenant; dejar vacío hasta onboarding comercio
+    EPAYCO_PUBLIC_KEY: str = Field(default="", env="EPAYCO_PUBLIC_KEY")
+    EPAYCO_PRIVATE_KEY: str = Field(default="", env="EPAYCO_PRIVATE_KEY")
+    EPAYCO_CLIENT_ID: str = Field(default="", env="EPAYCO_CLIENT_ID")
+    # Clave fija de integración (diferente a private) si la exige su API
+    EPAYCO_P_KEY: str = Field(default="", env="EPAYCO_P_KEY")
+    EPAYCO_TEST_MODE: bool = Field(default=True, env="EPAYCO_TEST_MODE")
+    # Desarrollo: simular aprobación sin webhook real (nunca en producción)
+    EPAYCO_DEV_MOCK_ENABLE: bool = Field(default=False, env="EPAYCO_DEV_MOCK_ENABLE")
+
+    # Factus — factura de **licencia/suscripción** (emisión: PROMETHEUS; adquirente: tenant). Distinto
+    # de `tenant_factus_settings`, que es lo que el CDA usa para su propio comercio. Se cargan al
+    # tener el plan de facturación / credenciales del emisor (no reutilizan el Factus del CDA).
+    SAAS_BILLING_FACTUS_ENABLED: bool = Field(default=False, env="SAAS_BILLING_FACTUS_ENABLED")
+    SAAS_BILLING_FACTUS_USE_SANDBOX: bool = Field(default=True, env="SAAS_BILLING_FACTUS_USE_SANDBOX")
+    SAAS_BILLING_FACTUS_NUMBERING_RANGE_ID: Optional[int] = Field(
+        default=None, env="SAAS_BILLING_FACTUS_NUMBERING_RANGE_ID"
+    )
+    SAAS_BILLING_FACTUS_CLIENT_ID: str = Field(default="", env="SAAS_BILLING_FACTUS_CLIENT_ID")
+    SAAS_BILLING_FACTUS_CLIENT_SECRET: str = Field(default="", env="SAAS_BILLING_FACTUS_CLIENT_SECRET")
+    SAAS_BILLING_FACTUS_API_USERNAME: str = Field(default="", env="SAAS_BILLING_FACTUS_API_USERNAME")
+    SAAS_BILLING_FACTUS_API_PASSWORD: str = Field(default="", env="SAAS_BILLING_FACTUS_API_PASSWORD")
+    # Datos de establecimiento emisor (deben alinearse con el RUT en Factus)
+    SAAS_BILLING_ISSUER_NAME: str = Field(default="PROMETHEUS TECH S.A.S", env="SAAS_BILLING_ISSUER_NAME")
+    SAAS_BILLING_ISSUER_ADDRESS: str = Field(
+        default="CL 5A 31 30 SENDEROS DE LA ITALIA", env="SAAS_BILLING_ISSUER_ADDRESS"
+    )
+    SAAS_BILLING_ISSUER_PHONE: str = Field(default="3235492939", env="SAAS_BILLING_ISSUER_PHONE")
+    SAAS_BILLING_ISSUER_EMAIL: str = Field(
+        default="gerencia@prometheustech.com.co", env="SAAS_BILLING_ISSUER_EMAIL"
+    )
+    SAAS_BILLING_ISSUER_MUNICIPALITY_ID: int = Field(default=520, env="SAAS_BILLING_ISSUER_MUNICIPALITY_ID")
     
     # Paginación
     DEFAULT_PAGE_SIZE: int = 50

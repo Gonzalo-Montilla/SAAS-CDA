@@ -33,7 +33,7 @@ export const dseRetencionApi = {
     return data;
   },
 
-  /** POST /dse-retencion/preview — admin o contador. */
+  /** POST /dse-retencion/preview — cajero, contador o administrador (solo lectura). */
   postPreview: async (body: {
     monto: number;
     concepto: string;

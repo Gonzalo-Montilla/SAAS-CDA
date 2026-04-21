@@ -410,6 +410,75 @@ def ensure_tenant_domain_schema(db):
     db.execute(text("UPDATE notificaciones_cierre_caja SET tenant_id = :tenant_id WHERE tenant_id IS NULL"), {"tenant_id": settings.SAAS_DEFAULT_TENANT_ID})
 
 
+def ensure_saas_billing_factus_columns(db):
+    """
+    FE de suscripción SaaS: vínculo opcional facturas_electronicas ↔ checkout; columnas de error en checkout.
+    """
+    db.execute(text("ALTER TABLE tenant_billing_checkout_sessions ADD COLUMN IF NOT EXISTS saas_fe_status VARCHAR(20)"))
+    db.execute(text("ALTER TABLE tenant_billing_checkout_sessions ADD COLUMN IF NOT EXISTS saas_fe_error TEXT"))
+    db.execute(
+        text(
+            """
+            ALTER TABLE facturas_electronicas
+            ADD COLUMN IF NOT EXISTS billing_checkout_session_id UUID
+            REFERENCES tenant_billing_checkout_sessions(id) ON DELETE SET NULL
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS ux_fe_billing_checkout_session
+            ON facturas_electronicas(billing_checkout_session_id)
+            WHERE billing_checkout_session_id IS NOT NULL
+            """
+        )
+    )
+
+
+def ensure_tenant_billing_checkout_schema(db):
+    """
+    Intenciones de pago (pasarela) por tenant: plan, sedes, monto.
+    """
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS tenant_billing_checkout_sessions (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                plan_code VARCHAR(30) NOT NULL,
+                sedes_totales INTEGER NOT NULL,
+                subtotal_cop NUMERIC(14, 2) NOT NULL,
+                iva_cop NUMERIC(14, 2) NOT NULL,
+                total_cop NUMERIC(14, 2) NOT NULL,
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                epayco_ref VARCHAR(120),
+                idempotency_key VARCHAR(100) UNIQUE,
+                last_webhook_payload JSONB,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                completed_at TIMESTAMP WITHOUT TIME ZONE
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_tb_checkout_tenant
+            ON tenant_billing_checkout_sessions(tenant_id, created_at DESC)
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_tb_checkout_status
+            ON tenant_billing_checkout_sessions(status)
+            """
+        )
+    )
+
+
 def ensure_onboarding_security_schema(db):
     """
     Asegura tabla para rate limiting del onboarding público.
@@ -1104,6 +1173,16 @@ def ensure_factus_schema(db):
     )
     db.execute(
         text(
+            "ALTER TABLE documentos_soporte_electronicos ADD COLUMN IF NOT EXISTS retencion_calculada_cop NUMERIC(14,2)"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE documentos_soporte_electronicos ADD COLUMN IF NOT EXISTS retencion_calculo_anio INTEGER"
+        )
+    )
+    db.execute(
+        text(
             "ALTER TABLE tenant_factus_settings ADD COLUMN IF NOT EXISTS dse_retencion_usar_compras BOOLEAN NOT NULL DEFAULT TRUE"
         )
     )
@@ -1413,6 +1492,7 @@ def init_db():
     """
     from app.models.usuario import Usuario
     from app.models.tenant import Tenant
+    from app.models.tenant_billing_checkout import TenantBillingCheckoutSession  # noqa: F401 — FK desde facturas_electronicas
     from app.models.tarifa import Tarifa, ComisionSOAT
     from app.models.caja import Caja, MovimientoCaja
     from app.models.vehiculo import VehiculoProceso
@@ -1443,6 +1523,8 @@ def init_db():
         # db.query(Tenant): el modelo ORM incluye todas las columnas mapeadas y fallaría
         # con UndefinedColumn si la BD aún no las tiene (y el except más abajo ocultaría el error).
         ensure_tenant_domain_schema(db)
+        ensure_tenant_billing_checkout_schema(db)
+        ensure_saas_billing_factus_columns(db)
         ensure_onboarding_security_schema(db)
         ensure_support_schema(db)
         ensure_usuario_roles_schema(db)

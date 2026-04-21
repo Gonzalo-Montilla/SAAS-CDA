@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.core.dse_retencion_conceptos import CONCEPTOS_RETENCION_DSE, normalizar_concepto_retencion_dse
-from app.core.deps import get_admin, get_contador_or_admin, get_db
+from app.core.deps import get_admin, get_contador_or_admin, get_cajero_contador_or_admin, get_db
 from app.models.dse_retencion_motor import DseRetencionTasaConcepto, DseUvtPorAnio
 from app.models.usuario import Usuario
 from app.schemas.dse_retencion_motor import (
@@ -32,11 +32,11 @@ router = APIRouter()
 def post_dse_retencion_preview(
     body: DseRetencionPreviewIn,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_contador_or_admin),
+    current_user: Usuario = Depends(get_cajero_contador_or_admin),
 ):
     """
     Vista previa del motor: usa UVT y tasa del año en BD y umbrales UVT por concepto (referencia DIAN).
-    No persiste; sirve para validar parámetros antes de acoplar a egresos / Factus.
+    No persiste; lectura para caja/tesorería al armar egresos y para contador/admin al validar parámetros.
     """
     try:
         c = normalizar_concepto_retencion_dse(body.concepto)

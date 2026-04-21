@@ -306,8 +306,8 @@ export default function Dashboard() {
           </button>
         </div>
 
-        {/* Info rápida */}
-        <div className="mt-8 grid grid-cols-1 md:grid-cols-2 gap-4 animate-fade-in">
+        {/* Info rápida: mismo destino /suscripcion que los avisos al terminar el demo o la gracia */}
+        <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4 animate-fade-in">
           <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200 rounded-2xl p-5 flex items-center gap-4">
             <div className="w-12 h-12 rounded-xl bg-emerald-600 flex items-center justify-center">
               <CheckCircle2 className="w-6 h-6 text-white" />
@@ -326,6 +326,23 @@ export default function Dashboard() {
               <p className="text-xl font-bold text-blue-900 capitalize">{user?.rol}</p>
             </div>
           </div>
+          <button
+            type="button"
+            onClick={() => navigate('/suscripcion')}
+            className="text-left bg-gradient-to-br from-violet-50 to-violet-100 border border-violet-200 rounded-2xl p-5 flex items-center gap-4 hover:from-violet-100 hover:to-violet-200 hover:border-violet-300 transition-colors shadow-sm"
+          >
+            <div className="w-12 h-12 rounded-xl bg-violet-600 flex items-center justify-center shrink-0">
+              <Wallet className="w-6 h-6 text-white" />
+            </div>
+            <div className="min-w-0">
+              <p className="text-sm text-violet-800 font-medium">Planes y licencia</p>
+              <p className="text-lg font-bold text-violet-950 leading-snug">Conoce nuestros planes</p>
+              <p className="text-xs text-violet-700/90 mt-1">
+                Misma pantalla al pagar o al avisarte cuando termine el periodo de prueba. Las sedes se toman de tu
+                registro.
+              </p>
+            </div>
+          </button>
         </div>
       </main>
     </div>

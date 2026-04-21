@@ -533,14 +533,14 @@ export default function ProveedoresCatalogoPage() {
                     <input
                       type="checkbox"
                       checked={factusCfg?.[campo] !== false}
-                      disabled={!factusCfg || patchEntornoRetenciones.isPending}
+                      disabled={!factusCfg || patchEntornoRetenciones.isLoading}
                       onChange={(e) => aplicarToggleEntorno(campo, e.target.checked)}
                     />
                     {etiqueta}
                   </label>
                 ))}
               </div>
-              {patchEntornoRetenciones.isPending && (
+              {patchEntornoRetenciones.isLoading && (
                 <p className="text-xs text-slate-500 mt-3">Guardando entorno…</p>
               )}
             </div>
@@ -644,10 +644,10 @@ export default function ProveedoresCatalogoPage() {
                   <button
                     type="button"
                     className="btn-pos btn-primary"
-                    disabled={guardarMotorParams.isPending}
+                    disabled={guardarMotorParams.isLoading}
                     onClick={() => guardarMotorParams.mutate()}
                   >
-                    {guardarMotorParams.isPending ? 'Guardando…' : 'Guardar parámetros del año'}
+                    {guardarMotorParams.isLoading ? 'Guardando…' : 'Guardar parámetros del año'}
                   </button>
                 </>
               )}
@@ -693,10 +693,10 @@ export default function ProveedoresCatalogoPage() {
             <button
               type="button"
               className="btn-pos btn-secondary"
-              disabled={previewMotor.isPending}
+              disabled={previewMotor.isLoading}
               onClick={() => previewMotor.mutate()}
             >
-              {previewMotor.isPending ? 'Calculando…' : 'Calcular'}
+              {previewMotor.isLoading ? 'Calculando…' : 'Calcular'}
             </button>
           </div>
           {previewResult && (

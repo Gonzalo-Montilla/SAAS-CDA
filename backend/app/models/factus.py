@@ -6,14 +6,18 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.db.database import Base
 
 
 class TenantFactusSettings(Base):
-    """Credenciales y modo de facturación electrónica (Factus) por organización."""
+    """Factus del CDA (tenant) para su operación (cobros a ciudadanos, terceros, DSE, etc.).
+
+    No almacena la cuenta de P. ej. PROMETHEUS; la factura de suscripción al SaaS usa
+    `SAAS_BILLING_FACTUS_*` en la app (otro comercio emisor y otro juego de credenciales en Factus).
+    """
 
     __tablename__ = "tenant_factus_settings"
 
@@ -56,6 +60,13 @@ class FacturaElectronica(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
     vehiculo_proceso_id = Column(UUID(as_uuid=True), ForeignKey("vehiculos_proceso.id", ondelete="SET NULL"), nullable=True, index=True)
+    billing_checkout_session_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("tenant_billing_checkout_sessions.id", ondelete="SET NULL"),
+        nullable=True,
+        unique=True,
+        index=True,
+    )
 
     reference_code = Column(String(120), nullable=False, index=True)
     factus_bill_id = Column(Integer, nullable=True)
@@ -89,5 +100,8 @@ class DocumentoSoporteElectronico(Base):
     pdf_sha256_hex = Column(String(64), nullable=True)
     # Instantánea del concepto de retención del proveedor de catálogo al emitir (fase 2: montos / payload Factus).
     concepto_retencion_dse = Column(String(32), nullable=True)
+    # Motor parametrizable (UVT + tasas por año); null si no hubo cálculo (sin concepto/tasa/UVT).
+    retencion_calculada_cop = Column(Numeric(14, 2), nullable=True)
+    retencion_calculo_anio = Column(Integer, nullable=True)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)

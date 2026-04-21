@@ -1,0 +1,59 @@
+# Regresión backend: pruebas unitarias (pytest) en push/PR que toquen el API.
+name: Backend CI
+
+on:
+  push:
+    branches: [main, master, develop]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+  pull_request:
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend-ci.yml"
+
+defaults:
+  run:
+    working-directory: backend
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci
+          POSTGRES_DB: citest
+        options: >-
+          --health-cmd "pg_isready -U ci -d citest"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 8
+        ports:
+          - 5432:5432
+
+    env:
+      # Obligatorias para `app.core.config` al importar módulos bajo prueba
+      DATABASE_URL: postgresql://ci:ci@localhost:5432/citest
+      SECRET_KEY: ci-pytest-secret-not-for-production-min-32-chars-ok
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Pytest
+        run: python -m pytest tests/ -v --tb=short

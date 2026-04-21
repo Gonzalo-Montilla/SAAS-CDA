@@ -692,6 +692,15 @@ def obtener_movimientos_detallados(
             "documento_soporte_concepto_retencion": (
                 getattr(ds_row_caja, "concepto_retencion_dse", None) if ds_row_caja else None
             ),
+            "documento_soporte_retencion_calculada": (
+                float(ds_row_caja.retencion_calculada_cop)
+                if ds_row_caja is not None
+                and getattr(ds_row_caja, "retencion_calculada_cop", None) is not None
+                else None
+            ),
+            "documento_soporte_retencion_anio": (
+                getattr(ds_row_caja, "retencion_calculo_anio", None) if ds_row_caja else None
+            ),
         })
     
     # ==================== MOVIMIENTOS DE TESORERÍA ====================
@@ -757,6 +766,15 @@ def obtener_movimientos_detallados(
             ),
             "documento_soporte_concepto_retencion": (
                 getattr(ds_row_tes, "concepto_retencion_dse", None) if ds_row_tes else None
+            ),
+            "documento_soporte_retencion_calculada": (
+                float(ds_row_tes.retencion_calculada_cop)
+                if ds_row_tes is not None
+                and getattr(ds_row_tes, "retencion_calculada_cop", None) is not None
+                else None
+            ),
+            "documento_soporte_retencion_anio": (
+                getattr(ds_row_tes, "retencion_calculo_anio", None) if ds_row_tes else None
             ),
         })
     
