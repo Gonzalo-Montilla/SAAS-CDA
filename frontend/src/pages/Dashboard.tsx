@@ -47,6 +47,55 @@ export default function Dashboard() {
     navigate(redirectPath);
   };
 
+  const formatDate = (iso?: string | null): string => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return d.toLocaleDateString('es-CO');
+  };
+
+  const planLabel = (code?: string | null): string => {
+    const c = (code || '').trim().toLowerCase();
+    if (c === 'demo') return 'Plan demo';
+    if (c === 'basico') return 'Plan básico';
+    if (c === 'emprendedor') return 'Plan emprendedor';
+    if (c === 'empresa') return 'Plan Empresa';
+    return c ? `Plan ${c}` : 'Plan activo';
+  };
+
+  const platformCardTitle = (): string => {
+    const tb = tenantUser?.tenant_billing;
+    if (!tb) return 'Operativo';
+    const st = (tb.subscription_status || '').trim().toLowerCase();
+    if (st === 'trial' || (tb.plan_actual || '').toLowerCase() === 'demo') {
+      const end = formatDate(tb.demo_ends_at);
+      return end ? `Plan demo · vence ${end}` : 'Plan demo activo';
+    }
+    if (st === 'soft_grace') {
+      const end = formatDate(tb.soft_grace_ends_at);
+      return end ? `En gracia · hasta ${end}` : 'En gracia temporal';
+    }
+    if (st === 'active') {
+      const name = planLabel(tb.plan_actual);
+      const end = formatDate(tb.plan_ends_at);
+      return end ? `${name} · activo hasta ${end}` : `${name} activo`;
+    }
+    if (st === 'past_due') return 'Pago vencido';
+    if (st === 'locked' || st === 'pending_plan') return 'Sin plan activo';
+    return 'Operativo';
+  };
+
+  const platformCardSubtitle = (): string => {
+    const tb = tenantUser?.tenant_billing;
+    if (!tb) return 'Estado de la plataforma';
+    const st = (tb.subscription_status || '').trim().toLowerCase();
+    if (st === 'trial' || (tb.plan_actual || '').toLowerCase() === 'demo') return 'Estado del plan';
+    if (st === 'active') return 'Licencia vigente';
+    if (st === 'soft_grace') return 'Periodo de gracia';
+    if (st === 'past_due' || st === 'locked' || st === 'pending_plan') return 'Acción requerida';
+    return 'Estado del plan';
+  };
+
   return (
     <div className="app-shell">
       <BranchGateModal />
@@ -313,8 +362,8 @@ export default function Dashboard() {
               <CheckCircle2 className="w-6 h-6 text-white" />
             </div>
             <div>
-              <p className="text-sm text-emerald-700 font-medium">Estado de la plataforma</p>
-              <p className="text-xl font-bold text-emerald-900">Operativo</p>
+              <p className="text-sm text-emerald-700 font-medium">{platformCardSubtitle()}</p>
+              <p className="text-xl font-bold text-emerald-900">{platformCardTitle()}</p>
             </div>
           </div>
           <div className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-2xl p-5 flex items-center gap-4">
@@ -336,10 +385,9 @@ export default function Dashboard() {
             </div>
             <div className="min-w-0">
               <p className="text-sm text-violet-800 font-medium">Planes y licencia</p>
-              <p className="text-lg font-bold text-violet-950 leading-snug">Conoce nuestros planes</p>
+              <p className="text-lg font-bold text-violet-950 leading-snug">Gestionar plan</p>
               <p className="text-xs text-violet-700/90 mt-1">
-                Misma pantalla al pagar o al avisarte cuando termine el periodo de prueba. Las sedes se toman de tu
-                registro.
+                Revisa planes, calcula tu valor por sedes y paga en línea de forma segura.
               </p>
             </div>
           </button>

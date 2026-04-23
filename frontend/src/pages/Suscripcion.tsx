@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { useSearchParams, Link } from 'react-router-dom';
+import { BadgeCheck, Building2, Calculator, ShieldCheck } from 'lucide-react';
 import {
   listTenantPlans,
   quoteTenantPlan,
@@ -7,11 +8,11 @@ import {
   completeTenantCheckoutMock,
   confirmTenantCheckoutReturn,
   fetchLatestSaasFe,
-  retrySaasFactusEmission,
   type SaasFeLatest,
   type TenantPlanItem,
 } from '../api/tenantBilling';
 import { useAuth } from '../contexts/AuthContext';
+import { useBrand } from '../contexts/BrandContext';
 import type { Usuario } from '../types';
 
 function fmtCop(n: number) {
@@ -54,6 +55,60 @@ function planMarketing(code: string) {
     blurb: 'Licencia de uso del software CDASOFT según condiciones comerciales.',
     bullets: ['Cotización con sedes reales; pago con pasarela segura ePayco'],
   };
+}
+
+const PLAN_VISUAL: Record<
+  string,
+  {
+    topBar: string;
+    badgeClass: string;
+    bulletDotClass: string;
+    selectedRingClass: string;
+    selectedGlowClass: string;
+    ctaClass: string;
+  }
+> = {
+  basico: {
+    topBar: 'from-sky-400 via-blue-500 to-indigo-500',
+    badgeClass: 'border border-sky-200 bg-sky-50 text-sky-800',
+    bulletDotClass: 'text-sky-600',
+    selectedRingClass: 'ring-sky-300',
+    selectedGlowClass: 'shadow-sky-100/80',
+    ctaClass: 'border-sky-200 bg-sky-50 text-sky-800',
+  },
+  emprendedor: {
+    topBar: 'from-violet-400 via-indigo-500 to-blue-500',
+    badgeClass: 'border border-violet-200 bg-violet-50 text-violet-800',
+    bulletDotClass: 'text-violet-600',
+    selectedRingClass: 'ring-violet-300',
+    selectedGlowClass: 'shadow-violet-100/80',
+    ctaClass: 'border-violet-200 bg-violet-50 text-violet-800',
+  },
+  empresa: {
+    topBar: 'from-emerald-400 via-teal-500 to-cyan-500',
+    badgeClass: 'border border-emerald-200 bg-emerald-50 text-emerald-800',
+    bulletDotClass: 'text-emerald-600',
+    selectedRingClass: 'ring-emerald-300',
+    selectedGlowClass: 'shadow-emerald-100/80',
+    ctaClass: 'border-emerald-200 bg-emerald-50 text-emerald-800',
+  },
+};
+
+function isPendingDianFactusError(msg: string | null | undefined): boolean {
+  const s = (msg || '').toLowerCase();
+  return s.includes('pendiente') && s.includes('dian');
+}
+
+function saasFeStatusLabel(status: string | null | undefined, err: string | null | undefined): string {
+  if ((status || '') === 'error' && isPendingDianFactusError(err)) {
+    return 'En proceso de validación DIAN';
+  }
+  const s = (status || '').trim().toLowerCase();
+  if (!s) return '—';
+  if (s === 'ok') return 'Emitida';
+  if (s === 'error') return 'Error';
+  if (s === 'skipped') return 'Omitida';
+  return status || '—';
 }
 
 const EPAYCO_CHECKOUT_V2 = 'https://checkout.epayco.co/checkout-v2.js';
@@ -165,6 +220,7 @@ function openEpaycoSmartCheckout(
 
 export default function Suscripcion() {
   const { user, refreshTenantUser, authScope } = useAuth();
+  const brand = useBrand();
   const u = user as Usuario | null;
   const [searchParams] = useSearchParams();
   const sessionFromUrl = searchParams.get('session');
@@ -177,7 +233,8 @@ export default function Suscripcion() {
   const [loading, setLoading] = useState(false);
   const [initResult, setInitResult] = useState<string | null>(null);
   const [saasFe, setSaasFe] = useState<SaasFeLatest | null>(null);
-  const [feBusy, setFeBusy] = useState(false);
+  const [isPaying, setIsPaying] = useState(false);
+  const [quotePulse, setQuotePulse] = useState(false);
   /** Retorno ePayco con parámetros en la URL: confirmación al API en curso. */
   const [epaycoReturnBusy, setEpaycoReturnBusy] = useState(false);
 
@@ -272,26 +329,59 @@ export default function Suscripcion() {
       .finally(() => setLoading(false));
   }, [planCode, sedes]);
 
+  useEffect(() => {
+    if (!quote) return;
+    setQuotePulse(true);
+    const timer = window.setTimeout(() => setQuotePulse(false), 1200);
+    return () => window.clearTimeout(timer);
+  }, [quote?.total, quote?.subtotal, quote?.iva, quote?.sedes_totales, quote?.chargeable_additional_branches]);
+
   const isAdmin = u?.rol === 'administrador';
 
   return (
     <div className="corporate-shell">
       <div className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6 lg:px-8">
-        <div className="section-card p-5 sm:p-6 mb-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Planes y pago</h1>
-            <p className="mt-2 text-sm text-slate-600 max-w-2xl leading-relaxed">
-              Elija el periodo de su licencia, indique cuántas sedes tendrá (principal + anexas) y pague con la pasarela. El
-              precio base cubre <strong>2 sedes</strong> (matriz y 1 anexa); a partir de la <strong>3.ª</strong> se aplica
-              la tarifa de sucursal adicional de cada plan.
-            </p>
+        <div className="section-card p-6 sm:p-7 mb-6 border-brand-200 bg-gradient-to-r from-white via-brand-50/50 to-indigo-50/50 shadow-sm">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex items-center gap-4 sm:gap-5">
+              <img
+                src={brand.logoSrc}
+                alt={brand.nombreComercial}
+                className="h-20 w-20 sm:h-24 sm:w-24 rounded-2xl border border-slate-200 bg-white object-contain p-2.5 shadow-sm"
+              />
+              <div>
+                <h1 className="text-2xl sm:text-[2rem] font-bold text-slate-900 tracking-tight">
+                  Planes y pago
+                  <span className="ml-2 inline-block h-1.5 w-1.5 rounded-full bg-brand-500 align-middle" aria-hidden />
+                </h1>
+                <p className="mt-2 text-sm text-slate-700 max-w-2xl leading-relaxed">
+                  Elija el periodo de su licencia, indique cuántas sedes tendrá (principal + anexas) y pague con la
+                  pasarela. El precio base cubre <strong>2 sedes</strong> (matriz y 1 anexa); a partir de la{' '}
+                  <strong>3.ª</strong> se aplica la tarifa de sucursal adicional de cada plan.
+                </p>
+              </div>
+            </div>
+            <Link
+              to="/dashboard"
+              className="btn-chip shrink-0 border-slate-300 bg-white text-slate-700 shadow-sm hover:border-slate-400 hover:text-slate-900"
+            >
+              Volver al panel
+            </Link>
           </div>
-          <Link
-            to="/dashboard"
-            className="text-sm font-medium text-brand-600 hover:text-brand-800 hover:underline shrink-0"
-          >
-            Volver al panel
-          </Link>
+          <div className="mt-5 flex flex-wrap items-center gap-2 text-xs">
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">
+              <ShieldCheck className="h-3.5 w-3.5" />
+              Pago seguro con ePayco
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 font-medium text-indigo-800">
+              <BadgeCheck className="h-3.5 w-3.5" />
+              Factura electrónica de licencia
+            </span>
+            <span className="inline-flex items-center gap-1.5 rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-medium text-sky-800">
+              <Building2 className="h-3.5 w-3.5" />
+              Cálculo por sedes con IVA incluido en total
+            </span>
+          </div>
         </div>
 
         {authScope !== 'tenant' && (
@@ -302,15 +392,15 @@ export default function Suscripcion() {
 
         {authScope === 'tenant' && saasFe?.session_id && (
           <div className="section-card p-4 sm:p-5 mb-6 text-sm text-slate-800">
-            <h2 className="text-base font-semibold text-slate-900">Factura de licencia (emisor PROMETHEUS)</h2>
-            <p className="mt-1 text-xs text-slate-500">
-              Distinta a la conexión Factus que configura su CDA para facturar a terceros.
-            </p>
+            <h2 className="text-base font-semibold text-slate-900">
+              Factura de licencia
+              <span className="block text-sm font-medium text-slate-700">(emisor PROMETHEUS TECH SAS NIT 902.057.790-8)</span>
+            </h2>
             {saasFe.plan_code && <p className="mt-2">Plan: {saasFe.plan_code}</p>}
             {typeof saasFe.total_cop === 'number' && <p>Total abonado: {fmtCop(saasFe.total_cop)}</p>}
             <p className="mt-2">
               <span className="font-medium">Estado DIAN (Factus licencia):</span>{' '}
-              {saasFe.saas_fe_status ?? '—'}
+              {saasFeStatusLabel(saasFe.saas_fe_status, saasFe.saas_fe_error)}
             </p>
             {saasFe.numero_documento && (
               <p className="mt-1">
@@ -328,35 +418,18 @@ export default function Suscripcion() {
                 Abrir comprobante (Factus)
               </a>
             )}
-            {saasFe.saas_fe_error && (
-              <p className="mt-2 rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-950 whitespace-pre-wrap">
-                {saasFe.saas_fe_error}
+            {isPendingDianFactusError(saasFe.saas_fe_error) ? (
+              <p className="mt-2 rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-950">
+                Estamos validando tu factura electrónica. Este proceso puede tardar unos minutos. La factura electrónica
+                llegará al correo de su CDA.
               </p>
+            ) : (
+              saasFe.saas_fe_error && (
+                <p className="mt-2 rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-950 whitespace-pre-wrap">
+                  {saasFe.saas_fe_error}
+                </p>
+              )
             )}
-            {isAdmin &&
-              (saasFe.saas_fe_status === 'error' || saasFe.saas_fe_status === 'skipped') &&
-              saasFe.session_id && (
-                <button
-                  type="button"
-                  disabled={feBusy}
-                  onClick={async () => {
-                    setFeBusy(true);
-                    setErr(null);
-                    try {
-                      const o = await retrySaasFactusEmission(saasFe.session_id!);
-                      setSaasFe(o);
-                    } catch (e: unknown) {
-                      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-                      setErr(typeof d === 'string' ? d : 'No se pudo reintentar la emisión');
-                    } finally {
-                      setFeBusy(false);
-                    }
-                  }}
-                  className="mt-3 btn-corporate-muted text-xs"
-                >
-                  {feBusy ? 'Reintentando…' : 'Reintentar factura electrónica'}
-                </button>
-              )}
           </div>
         )}
 
@@ -376,7 +449,7 @@ export default function Suscripcion() {
         )}
 
         {authScope === 'tenant' && plans.length > 0 && (
-          <div className="mb-6 rounded-xl border border-sky-200 bg-sky-50/80 p-4 text-sm text-slate-800">
+          <div className="mb-6 rounded-xl border border-sky-200 bg-sky-50/80 p-4 text-sm text-slate-800 shadow-sm">
             <p className="font-medium text-sky-950">Cómo se calculan las sedes</p>
             <ul className="mt-2 list-inside list-disc space-y-1 text-sky-900/90">
               <li>El <strong>precio base</strong> incluye <strong>2 sedes</strong>: la principal y <strong>1 anexa</strong>.</li>
@@ -389,6 +462,8 @@ export default function Suscripcion() {
         <div className="grid gap-4 lg:grid-cols-3">
           {plans.map((p) => {
             const m = planMarketing(p.code);
+            const v = PLAN_VISUAL[p.code] ?? PLAN_VISUAL.basico;
+            const isSelected = planCode === p.code;
             return (
               <button
                 type="button"
@@ -397,25 +472,26 @@ export default function Suscripcion() {
                   setPlanCode(p.code);
                   setErr(null);
                 }}
-                className={`section-card flex h-full flex-col p-4 sm:p-5 text-left transition ${
-                  planCode === p.code
-                    ? 'ring-2 ring-brand-500 border-brand-200 shadow-panel'
-                    : 'hover:shadow-md'
+                className={`section-card group relative flex h-full flex-col overflow-hidden p-4 sm:p-5 text-left transition-all duration-200 ${
+                  isSelected
+                    ? `border-white ring-2 ${v.selectedRingClass} ${v.selectedGlowClass} shadow-xl -translate-y-1 scale-[1.02] bg-white`
+                    : 'hover:shadow-xl hover:-translate-y-1 hover:scale-[1.01] bg-white'
                 }`}
               >
+                <div className={`pointer-events-none absolute inset-x-0 top-0 h-1 bg-gradient-to-r ${v.topBar}`} />
                 <div className="flex items-start justify-between gap-2">
                   <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">{p.label}</div>
                   {m.badge && (
-                    <span className="shrink-0 rounded-full bg-brand-50 px-2 py-0.5 text-[10px] font-semibold text-brand-800">
+                    <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-[10px] font-semibold ${v.badgeClass}`}>
                       {m.badge}
                     </span>
                   )}
                 </div>
-                <p className="mt-2 text-sm leading-snug text-slate-700">{m.blurb}</p>
+                <p className="mt-3 text-sm leading-snug text-slate-700">{m.blurb}</p>
                 <ul className="mt-3 flex-1 space-y-1.5 text-xs text-slate-600">
                   {m.bullets.map((b, i) => (
                     <li key={`${p.code}-${i}`} className="flex gap-1.5">
-                      <span className="mt-0.5 shrink-0 text-brand-500" aria-hidden>
+                      <span className={`mt-0.5 shrink-0 ${v.bulletDotClass}`} aria-hidden>
                         ·
                       </span>
                       <span>{b}</span>
@@ -433,106 +509,158 @@ export default function Suscripcion() {
                   {p.is_prepay && (
                     <p className="mt-1 text-[11px] font-semibold text-brand-800">Prepago del periodo completo</p>
                   )}
+                  <div className="mt-3">
+                    <span
+                      className={`inline-flex rounded-full border px-2.5 py-1 text-[11px] font-semibold ${
+                        isSelected ? v.ctaClass : 'border-slate-200 bg-slate-50 text-slate-700'
+                      }`}
+                    >
+                      {isSelected ? 'Plan seleccionado' : 'Elegir este plan'}
+                    </span>
+                  </div>
                 </div>
               </button>
             );
           })}
         </div>
 
-        <div className="mt-6 rounded-xl border border-slate-200 bg-white p-4">
-          <label className="text-sm font-medium text-slate-800">Sedes totales a contratar (incluye la sede principal)</label>
-          <p className="mt-0.5 text-xs text-slate-500">
-            El número que registró al dar de alta el CDA se sugiere solo; cámbielo si va a operar con más o menos sedes en este
-            periodo.
-          </p>
-          <input
-            type="number"
-            min={1}
-            max={100}
-            className="mt-2 w-32 rounded border border-slate-300 px-2 py-1"
-            value={sedes}
-            onChange={(e) => setSedes(Math.max(1, parseInt(e.target.value, 10) || 1))}
-            disabled={!isAdmin}
-          />
-          {quote && (
-            <div className="mt-4 space-y-2 text-sm text-slate-800">
-              <p className="rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
-                El precio base cubre <strong>2 sedes</strong> (matriz + 1 anexa). Usted indica <strong>{quote.sedes_totales}</strong>{' '}
-                sede(s) en total, así que <strong>{quote.chargeable_additional_branches}</strong> sede(s) se suman a la tarifa
-                de sucursal adicional (la 3.ª, 4.ª, etc., según corresponda).
+        <div className="mt-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="grid gap-4 md:grid-cols-[1.3fr,1fr] md:items-start">
+            <div>
+              <p className="inline-flex items-center gap-2 rounded-full border border-brand-100 bg-brand-50 px-3 py-1 text-xs font-semibold text-brand-800">
+                <Calculator className="h-3.5 w-3.5" />
+                Configuración del periodo
               </p>
-              <p>
-                <strong>Subtotal:</strong> {fmtCop(quote.subtotal)} &nbsp; <strong>IVA:</strong> {fmtCop(quote.iva)} &nbsp;{' '}
-                <strong>Total aprox.:</strong> {fmtCop(quote.total)}
+              <label className="mt-3 block text-sm font-semibold text-slate-800">
+                Sedes totales a contratar (incluye la sede principal)
+              </label>
+              <p className="mt-1 text-xs text-slate-500">
+                El número registrado al crear el CDA se usa como referencia; cámbielo si va a operar con más o menos sedes en este
+                periodo.
               </p>
+              <input
+                type="number"
+                min={1}
+                max={100}
+                className="mt-3 w-32 rounded-lg border border-slate-300 bg-white px-3 py-2 text-base font-semibold text-slate-900 shadow-sm outline-none transition focus:border-brand-400 focus:ring-2 focus:ring-brand-100"
+                value={sedes}
+                onChange={(e) => setSedes(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                disabled={!isAdmin}
+              />
             </div>
+            <div className="space-y-3">
+              {quote && (
+                <div
+                  className={`rounded-xl border border-brand-100 bg-gradient-to-br from-brand-50/60 to-indigo-50/40 p-4 transition-all duration-300 ${
+                    quotePulse ? 'scale-[1.01] ring-2 ring-brand-200 shadow-md' : ''
+                  }`}
+                >
+                  <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Resumen estimado</p>
+                  <div className="mt-2 grid gap-2 text-sm">
+                    <p className="flex items-baseline justify-between rounded-lg bg-white/80 px-3 py-2">
+                      <span className="font-medium text-slate-600">Subtotal</span>
+                      <span className="font-semibold text-slate-900">{fmtCop(quote.subtotal)}</span>
+                    </p>
+                    <p className="flex items-baseline justify-between rounded-lg bg-white/80 px-3 py-2">
+                      <span className="font-medium text-slate-600">IVA</span>
+                      <span className="font-semibold text-slate-900">{fmtCop(quote.iva)}</span>
+                    </p>
+                    <p className="flex items-baseline justify-between rounded-lg border border-brand-200 bg-white px-3 py-2.5">
+                      <span className="font-semibold text-slate-700">Total aprox.</span>
+                      <span
+                        className={`text-lg font-bold text-brand-800 transition-all duration-300 ${quotePulse ? 'scale-105' : ''}`}
+                      >
+                        {fmtCop(quote.total)}
+                      </span>
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {isAdmin && (
+                <div className="rounded-xl border border-slate-200 bg-white p-3">
+                  <button
+                    type="button"
+                    disabled={loading || isPaying || !quote}
+                    onClick={async () => {
+                      setErr(null);
+                      setInitResult(null);
+                      setIsPaying(true);
+                      try {
+                        const r = await initTenantPayment(planCode, sedes);
+                        if (r.mode === 'smart_checkout' && r.epayco_session_id) {
+                          await loadEpaycoCheckoutV2Script();
+                          openEpaycoSmartCheckout(r.epayco_session_id, r.epayco_checkout_test ?? true, () => {
+                            void refreshTenantUser();
+                            loadSaasFe();
+                          });
+                          return;
+                        }
+                        if (r.mode === 'redirect' && r.redirect_url) {
+                          window.location.assign(r.redirect_url);
+                          return;
+                        }
+                        if (r.mode === 'mock') {
+                          setInitResult(r.message ?? 'Modo mock: complete el pago con el botón de abajo.');
+                          return;
+                        }
+                        setInitResult(r.message ?? 'Configure EPAYCO_PUBLIC_KEY o use backoffice para registrar pago.');
+                      } catch (e: unknown) {
+                        const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+                        setErr(typeof d === 'string' ? d : 'No se pudo iniciar el pago');
+                      } finally {
+                        setIsPaying(false);
+                      }
+                    }}
+                    className={`btn-corporate-primary w-full px-8 py-3 shadow-md shadow-brand-900/10 transition-all duration-300 hover:shadow-lg ${
+                      quote && quotePulse
+                        ? 'animate-pulse ring-4 ring-brand-200/80 shadow-2xl shadow-brand-400/35 scale-[1.03] -translate-y-0.5'
+                        : ''
+                    } hover:-translate-y-0.5 hover:scale-[1.02] hover:brightness-110 hover:shadow-2xl hover:shadow-brand-500/30 active:translate-y-0 active:scale-[1.01]`}
+                  >
+                    {isPaying ? 'Abriendo pasarela…' : loading ? 'Calculando total…' : 'Continuar a pago seguro'}
+                  </button>
+                  <p className="mt-2 text-center text-[11px] text-slate-500">Pago procesado por ePayco · Conexión segura.</p>
+                  {initResult && <p className="mt-2 text-sm text-slate-600">{initResult}</p>}
+                  {searchParams.get('session') && (
+                    <div className="mt-3">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          setErr(null);
+                          try {
+                            await completeTenantCheckoutMock(searchParams.get('session')!);
+                            await refreshTenantUser();
+                            loadSaasFe();
+                            setInitResult(
+                              'Pago simulado correctamente. Puede ver el estado de la factura de licencia arriba. Redirigiendo al panel…'
+                            );
+                            setTimeout(() => {
+                              window.location.href = '/dashboard';
+                            }, 2000);
+                          } catch (e: unknown) {
+                            const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+                            setErr(typeof d === 'string' ? d : 'Error al completar (mock)');
+                          }
+                        }}
+                        className="btn-corporate-muted w-full border-amber-200 bg-amber-50 text-amber-950 hover:bg-amber-100/80"
+                      >
+                        Completar pago (solo desarrollo)
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+          {quote && (
+            <p className="mt-4 rounded-lg bg-slate-50 p-3 text-xs text-slate-700">
+              El precio base cubre <strong>2 sedes</strong> (matriz + 1 anexa). Usted indica <strong>{quote.sedes_totales}</strong>{' '}
+              sede(s) en total, así que <strong>{quote.chargeable_additional_branches}</strong> sede(s) se suman a la tarifa de
+              sucursal adicional (la 3.ª, 4.ª, etc., según corresponda).
+            </p>
           )}
         </div>
-
-        {isAdmin && (
-          <div className="mt-8">
-            <button
-              type="button"
-              disabled={loading}
-              onClick={async () => {
-                setErr(null);
-                setInitResult(null);
-                try {
-                  const r = await initTenantPayment(planCode, sedes);
-                  if (r.mode === 'smart_checkout' && r.epayco_session_id) {
-                    await loadEpaycoCheckoutV2Script();
-                    openEpaycoSmartCheckout(r.epayco_session_id, r.epayco_checkout_test ?? true, () => {
-                      void refreshTenantUser();
-                      loadSaasFe();
-                    });
-                    return;
-                  }
-                  if (r.mode === 'redirect' && r.redirect_url) {
-                    window.location.assign(r.redirect_url);
-                    return;
-                  }
-                  if (r.mode === 'mock') {
-                    setInitResult(r.message ?? 'Modo mock: complete el pago con el botón de abajo.');
-                    return;
-                  }
-                  setInitResult(r.message ?? 'Configure EPAYCO_PUBLIC_KEY o use backoffice para registrar pago.');
-                } catch (e: unknown) {
-                  const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-                  setErr(typeof d === 'string' ? d : 'No se pudo iniciar el pago');
-                }
-              }}
-              className="px-8 btn-corporate-primary"
-            >
-              {loading ? 'Cargando…' : 'Ir a pasarela de pago'}
-            </button>
-            {initResult && <p className="mt-2 text-sm text-slate-600">{initResult}</p>}
-            {searchParams.get('session') && (
-              <div className="mt-3">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    setErr(null);
-                    try {
-                      await completeTenantCheckoutMock(searchParams.get('session')!);
-                      await refreshTenantUser();
-                      loadSaasFe();
-                      setInitResult('Pago simulado correctamente. Puede ver el estado de la factura de licencia arriba. Redirigiendo al panel…');
-                      setTimeout(() => {
-                        window.location.href = '/dashboard';
-                      }, 2000);
-                    } catch (e: unknown) {
-                      const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
-                      setErr(typeof d === 'string' ? d : 'Error al completar (mock)');
-                    }
-                  }}
-                  className="btn-corporate-muted border-amber-200 bg-amber-50 text-amber-950 hover:bg-amber-100/80"
-                >
-                  Completar pago (solo desarrollo)
-                </button>
-              </div>
-            )}
-          </div>
-        )}
 
         {!isAdmin && (
           <p className="mt-4 text-sm text-slate-600">Solo el administrador del CDA puede iniciar el pago en línea.</p>

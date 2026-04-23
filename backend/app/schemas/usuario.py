@@ -19,6 +19,8 @@ class TenantBillingInfoResponse(BaseModel):
 
     gate: str = Field(description="ok | trial | soft | hard")
     subscription_status: str = ""
+    plan_actual: Optional[str] = None
+    plan_ends_at: Optional[datetime] = None
     demo_ends_at: Optional[datetime] = None
     soft_grace_ends_at: Optional[datetime] = None
 

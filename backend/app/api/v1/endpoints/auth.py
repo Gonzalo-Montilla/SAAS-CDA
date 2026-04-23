@@ -276,6 +276,8 @@ def get_current_user_info(
     tb = TenantBillingInfoResponse(
         gate=billing_gate_for_demo_tenant(tenant),
         subscription_status=(tenant.subscription_status or "").strip(),
+        plan_actual=(tenant.plan_actual or "").strip() or None,
+        plan_ends_at=tenant.plan_ends_at,
         demo_ends_at=tenant.demo_ends_at,
         soft_grace_ends_at=soft_end,
     )

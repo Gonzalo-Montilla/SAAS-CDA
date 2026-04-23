@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import func, or_
+from sqlalchemy import String, func, or_
 from sqlalchemy.orm import Session, aliased
 from uuid import UUID
 
@@ -64,7 +64,15 @@ from app.services.saas_billing_plans import (
 )
 from app.services.tenant_billing_state import refresh_tenant_billing_state
 from app.integrations.saas_factus_billing import try_emit_saas_billing_electronic_invoice
+from app.integrations.factus_client import (
+    FactusAPIError,
+    factus_base_url,
+    format_factus_error_detail,
+    get_numbering_ranges,
+    obtain_token,
+)
 from app.api.v1.endpoints.tenant_billing import TenantSaasFeLatestOut
+from app.utils.factus_validators import normalizar_numero_identificacion_proveedor
 
 router = APIRouter()
 
@@ -168,6 +176,15 @@ class SaaSTenantLogoUpdateResponse(BaseModel):
     logo_url: str | None = None
 
 
+class SaaSTenantCoreDataPatch(BaseModel):
+    nombre: str | None = Field(default=None, max_length=200)
+    nombre_comercial: str | None = Field(default=None, max_length=200)
+    nit_cda: str | None = Field(default=None, max_length=30)
+    correo_electronico: str | None = Field(default=None, max_length=255)
+    nombre_representante: str | None = Field(default=None, max_length=200)
+    celular: str | None = Field(default=None, max_length=30)
+
+
 class SaaSAuditLogItem(BaseModel):
     id: str
     action: str
@@ -178,6 +195,14 @@ class SaaSAuditLogItem(BaseModel):
     ip_address: str | None = None
     tenant_slug: str | None = None
     created_at: datetime
+
+
+class SaaSAuditLogListOut(BaseModel):
+    items: list[SaaSAuditLogItem]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
 
 
 class SaaSSecuritySummary(BaseModel):
@@ -224,6 +249,14 @@ class SaaSSupportTicketItem(BaseModel):
     resolved_at: datetime | None = None
     created_at: datetime
     updated_at: datetime | None = None
+
+
+class SaaSSupportTicketListOut(BaseModel):
+    items: list[SaaSSupportTicketItem]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
 
 
 class SaaSSupportTicketCreateRequest(BaseModel):
@@ -363,6 +396,45 @@ class SaaSCheckoutSessionItem(BaseModel):
     public_url: str | None = None
 
 
+class SaaSCheckoutSessionCountsOut(BaseModel):
+    all: int
+    pending: int
+    paid: int
+    fe_issue: int
+
+
+class SaaSCheckoutSessionListOut(BaseModel):
+    items: list[SaaSCheckoutSessionItem]
+    total: int
+    page: int
+    page_size: int
+    total_pages: int
+    counts: SaaSCheckoutSessionCountsOut
+
+
+class SaaSFactusIssuerConfigOut(BaseModel):
+    """Estado de configuración Factus para FE de licencia (emisor SaaS PROMETHEUS)."""
+
+    enabled: bool
+    use_sandbox: bool
+    environment: str
+    base_url: str
+    configured: bool
+    missing_fields: list[str]
+    numbering_range_id: int | None = None
+    client_id_hint: str | None = None
+    api_username_hint: str | None = None
+    issuer_name: str
+    issuer_email: str
+
+
+class SaaSFactusIssuerTestOut(BaseModel):
+    ok: bool
+    environment: str
+    message: str
+    numbering_ranges_found: int | None = None
+
+
 def _checkout_row_to_tenant_saas_fe_out(
     row: TenantBillingCheckoutSession, fe: FacturaElectronica | None
 ) -> TenantSaasFeLatestOut:
@@ -377,6 +449,32 @@ def _checkout_row_to_tenant_saas_fe_out(
         cufe=fe.cufe if fe else None,
         public_url=fe.public_url if fe else None,
     )
+
+
+def _masked_hint(value: str, *, keep: int = 4) -> str | None:
+    s = (value or "").strip()
+    if not s:
+        return None
+    if len(s) <= keep:
+        return "*" * len(s)
+    return f"{'*' * (len(s) - keep)}{s[-keep:]}"
+
+
+def _saas_factus_missing_fields() -> list[str]:
+    missing: list[str] = []
+    if not settings.SAAS_BILLING_FACTUS_ENABLED:
+        missing.append("SAAS_BILLING_FACTUS_ENABLED")
+    if (settings.SAAS_BILLING_FACTUS_NUMBERING_RANGE_ID or 0) <= 0:
+        missing.append("SAAS_BILLING_FACTUS_NUMBERING_RANGE_ID")
+    if not (settings.SAAS_BILLING_FACTUS_CLIENT_ID or "").strip():
+        missing.append("SAAS_BILLING_FACTUS_CLIENT_ID")
+    if not (settings.SAAS_BILLING_FACTUS_CLIENT_SECRET or "").strip():
+        missing.append("SAAS_BILLING_FACTUS_CLIENT_SECRET")
+    if not (settings.SAAS_BILLING_FACTUS_API_USERNAME or "").strip():
+        missing.append("SAAS_BILLING_FACTUS_API_USERNAME")
+    if not (settings.SAAS_BILLING_FACTUS_API_PASSWORD or "").strip():
+        missing.append("SAAS_BILLING_FACTUS_API_PASSWORD")
+    return missing
 
 
 def validate_saas_password(password: str):
@@ -897,6 +995,69 @@ def patch_saas_tenant_logo(
     db.refresh(tenant)
 
     return SaaSTenantLogoUpdateResponse(logo_url=tenant.logo_url)
+
+
+@router.patch("/tenants/{tenant_id}/core-data", response_model=SaaSTenantProfile)
+def patch_saas_tenant_core_data(
+    tenant_id: str,
+    body: SaaSTenantCoreDataPatch,
+    db: Session = Depends(get_db),
+    _: SaaSUser = Depends(require_saas_role(["owner", "comercial", "soporte"])),
+):
+    try:
+        tenant_uuid = UUID(tenant_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ID de tenant inválido",
+        )
+    tenant = db.query(Tenant).filter(Tenant.id == tenant_uuid).first()
+    if not tenant:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant no encontrado",
+        )
+
+    data = body.model_dump(exclude_unset=True)
+    if not data:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se enviaron cambios para actualizar",
+        )
+
+    if "nombre" in data:
+        tenant.nombre = ((data["nombre"] or "").strip() or tenant.nombre)[:200]
+    if "nombre_comercial" in data:
+        tenant.nombre_comercial = ((data["nombre_comercial"] or "").strip() or tenant.nombre_comercial)[:200]
+    if "nit_cda" in data:
+        raw_nit = (data["nit_cda"] or "").strip()
+        if raw_nit:
+            normalized_nit = normalizar_numero_identificacion_proveedor(raw_nit)[:30]
+            existing = (
+                db.query(Tenant)
+                .filter(Tenant.nit_cda == normalized_nit, Tenant.id != tenant.id)
+                .first()
+            )
+            if existing:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El NIT del CDA ya está registrado en otro tenant.",
+                )
+            tenant.nit_cda = normalized_nit
+        else:
+            tenant.nit_cda = None
+    if "correo_electronico" in data:
+        mail = (data["correo_electronico"] or "").strip().lower()
+        tenant.correo_electronico = mail or None
+    if "nombre_representante" in data:
+        rep = (data["nombre_representante"] or "").strip()
+        tenant.nombre_representante = rep or None
+    if "celular" in data:
+        phone = (data["celular"] or "").strip()
+        tenant.celular = phone or None
+
+    db.commit()
+    return get_saas_tenant_profile(tenant_id=tenant_id, db=db)
 
 
 @router.patch(
@@ -1660,11 +1821,84 @@ def list_tenant_payment_history(
     return items
 
 
-@router.get("/billing/checkout-sessions", response_model=list[SaaSCheckoutSessionItem])
+@router.get("/billing/saas-factus/config", response_model=SaaSFactusIssuerConfigOut)
+def get_saas_factus_issuer_config(
+    _: SaaSUser = Depends(require_saas_role(["owner", "finanzas", "comercial", "soporte"])),
+):
+    use_sandbox = bool(settings.SAAS_BILLING_FACTUS_USE_SANDBOX)
+    env_name = "sandbox" if use_sandbox else "production"
+    missing = _saas_factus_missing_fields()
+    return SaaSFactusIssuerConfigOut(
+        enabled=bool(settings.SAAS_BILLING_FACTUS_ENABLED),
+        use_sandbox=use_sandbox,
+        environment=env_name,
+        base_url=factus_base_url(use_sandbox=use_sandbox),
+        configured=len(missing) == 0,
+        missing_fields=missing,
+        numbering_range_id=(
+            int(settings.SAAS_BILLING_FACTUS_NUMBERING_RANGE_ID)
+            if (settings.SAAS_BILLING_FACTUS_NUMBERING_RANGE_ID or 0) > 0
+            else None
+        ),
+        client_id_hint=_masked_hint(settings.SAAS_BILLING_FACTUS_CLIENT_ID),
+        api_username_hint=_masked_hint(settings.SAAS_BILLING_FACTUS_API_USERNAME, keep=3),
+        issuer_name=(settings.SAAS_BILLING_ISSUER_NAME or "PROMETHEUS TECH S.A.S"),
+        issuer_email=(settings.SAAS_BILLING_ISSUER_EMAIL or "").strip(),
+    )
+
+
+@router.post("/billing/saas-factus/test-connection", response_model=SaaSFactusIssuerTestOut)
+def post_saas_factus_issuer_test_connection(
+    _: SaaSUser = Depends(require_saas_role(["owner", "finanzas"])),
+):
+    missing = _saas_factus_missing_fields()
+    use_sandbox = bool(settings.SAAS_BILLING_FACTUS_USE_SANDBOX)
+    env_name = "sandbox" if use_sandbox else "production"
+    if missing:
+        return SaaSFactusIssuerTestOut(
+            ok=False,
+            environment=env_name,
+            message="Faltan variables requeridas en .env para el emisor SaaS: " + ", ".join(missing),
+            numbering_ranges_found=None,
+        )
+    base = factus_base_url(use_sandbox=use_sandbox)
+    try:
+        token = obtain_token(
+            base_url=base,
+            client_id=settings.SAAS_BILLING_FACTUS_CLIENT_ID.strip(),
+            client_secret=settings.SAAS_BILLING_FACTUS_CLIENT_SECRET.strip(),
+            username=settings.SAAS_BILLING_FACTUS_API_USERNAME.strip(),
+            password=settings.SAAS_BILLING_FACTUS_API_PASSWORD.strip(),
+        )
+        access = token.get("access_token")
+        if not access:
+            raise HTTPException(status_code=502, detail="Factus respondió sin access_token")
+        ranges = get_numbering_ranges(base_url=base, access_token=str(access), is_active=1)
+        return SaaSFactusIssuerTestOut(
+            ok=True,
+            environment=env_name,
+            message="Conexión Factus SaaS OK. Token obtenido y rangos consultados.",
+            numbering_ranges_found=len(ranges),
+        )
+    except FactusAPIError as exc:
+        return SaaSFactusIssuerTestOut(
+            ok=False,
+            environment=env_name,
+            message=format_factus_error_detail(exc)[:500],
+            numbering_ranges_found=None,
+        )
+
+
+@router.get("/billing/checkout-sessions", response_model=SaaSCheckoutSessionListOut)
 def list_billing_checkout_sessions(
-    limit: int = 50,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
     tenant_id: str | None = None,
-    status: str | None = None,
+    status_filter: str | None = Query(default=None, alias="status"),
+    q: str | None = Query(default=None, description="Búsqueda por tenant, sesión, ref ePayco o documento FE"),
+    view_tab: str = Query(default="all", description="Vista: all | pending | paid | fe_issue"),
+    sort_by: str = Query(default="created_at", description="Orden: created_at | total_cop | status | tenant"),
+    sort_dir: str = Query(default="desc", description="Dirección: asc | desc"),
     fe_status: str | None = Query(
         default=None,
         description="Filtrar por saas_fe_status: ok | error | skipped | pending (aún sin estado o vacío)",
@@ -1673,8 +1907,7 @@ def list_billing_checkout_sessions(
     _: SaaSUser = Depends(require_saas_role(["owner", "finanzas", "comercial", "soporte"])),
 ):
     """Sesiones de pago de suscripción (ePayco) y estado de factura electrónica de licencia (Factus SaaS / PROMETHEUS)."""
-    safe_limit = min(max(limit, 1), 200)
-    q = (
+    base_q = (
         db.query(
             TenantBillingCheckoutSession,
             Tenant.slug,
@@ -1692,28 +1925,102 @@ def list_billing_checkout_sessions(
             t_uuid = UUID(tenant_id.strip())
         except ValueError:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="tenant_id inválido")
-        q = q.filter(TenantBillingCheckoutSession.tenant_id == t_uuid)
-    st = (status or "").strip()
+        base_q = base_q.filter(TenantBillingCheckoutSession.tenant_id == t_uuid)
+    st = (status_filter or "").strip()
     if st:
-        q = q.filter(TenantBillingCheckoutSession.status == st)
+        base_q = base_q.filter(TenantBillingCheckoutSession.status == st)
 
     fe_f = (fe_status or "").strip().lower()
     if fe_f == "pending":
-        q = q.filter(
+        base_q = base_q.filter(
             or_(
                 TenantBillingCheckoutSession.saas_fe_status.is_(None),
                 TenantBillingCheckoutSession.saas_fe_status == "",
             )
         )
     elif fe_f in ("ok", "error", "skipped"):
-        q = q.filter(TenantBillingCheckoutSession.saas_fe_status == fe_f)
+        base_q = base_q.filter(TenantBillingCheckoutSession.saas_fe_status == fe_f)
     elif fe_f:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="fe_status inválido: use ok, error, skipped o pending",
         )
 
-    rows = q.order_by(TenantBillingCheckoutSession.created_at.desc()).limit(safe_limit).all()
+    search = (q or "").strip()
+    if search:
+        pattern = f"%{search}%"
+        base_q = base_q.filter(
+            or_(
+                Tenant.nombre_comercial.ilike(pattern),
+                Tenant.slug.ilike(pattern),
+                func.cast(TenantBillingCheckoutSession.id, String).ilike(pattern),
+                TenantBillingCheckoutSession.epayco_ref.ilike(pattern),
+                FacturaElectronica.numero_documento.ilike(pattern),
+            )
+        )
+
+    tab = (view_tab or "all").strip().lower()
+    if tab not in {"all", "pending", "paid", "fe_issue"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="view_tab inválido: use all, pending, paid o fe_issue")
+
+    def _count_distinct(query):
+        return int(
+            query.with_entities(func.count(func.distinct(TenantBillingCheckoutSession.id)))
+            .order_by(None)
+            .scalar()
+            or 0
+        )
+
+    count_all = _count_distinct(base_q)
+    count_pending = _count_distinct(base_q.filter(TenantBillingCheckoutSession.status != "paid"))
+    count_paid = _count_distinct(base_q.filter(TenantBillingCheckoutSession.status == "paid"))
+    count_fe_issue = _count_distinct(
+        base_q.filter(
+            TenantBillingCheckoutSession.status == "paid",
+            or_(
+                TenantBillingCheckoutSession.saas_fe_status.is_(None),
+                TenantBillingCheckoutSession.saas_fe_status != "ok",
+            ),
+        )
+    )
+
+    q_rows = base_q
+    if tab == "pending":
+        q_rows = q_rows.filter(TenantBillingCheckoutSession.status != "paid")
+    elif tab == "paid":
+        q_rows = q_rows.filter(TenantBillingCheckoutSession.status == "paid")
+    elif tab == "fe_issue":
+        q_rows = q_rows.filter(
+            TenantBillingCheckoutSession.status == "paid",
+            or_(
+                TenantBillingCheckoutSession.saas_fe_status.is_(None),
+                TenantBillingCheckoutSession.saas_fe_status != "ok",
+            ),
+        )
+
+    dir_desc = (sort_dir or "desc").strip().lower() != "asc"
+    sort_key = (sort_by or "created_at").strip().lower()
+    if sort_key == "total_cop":
+        sort_col = TenantBillingCheckoutSession.total_cop
+    elif sort_key == "status":
+        sort_col = TenantBillingCheckoutSession.status
+    elif sort_key == "tenant":
+        sort_col = Tenant.nombre_comercial
+    else:
+        sort_col = TenantBillingCheckoutSession.created_at
+
+    order_primary = sort_col.desc() if dir_desc else sort_col.asc()
+    total = _count_distinct(q_rows)
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    safe_page = min(page, total_pages)
+    offset = (safe_page - 1) * page_size
+
+    rows = (
+        q_rows.order_by(order_primary, TenantBillingCheckoutSession.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+        .all()
+    )
     out: list[SaaSCheckoutSessionItem] = []
     for s, slug, nombre, fe in rows:
         out.append(
@@ -1736,7 +2043,171 @@ def list_billing_checkout_sessions(
                 public_url=fe.public_url if fe else None,
             )
         )
-    return out
+    return SaaSCheckoutSessionListOut(
+        items=out,
+        total=total,
+        page=safe_page,
+        page_size=page_size,
+        total_pages=total_pages,
+        counts=SaaSCheckoutSessionCountsOut(
+            all=count_all,
+            pending=count_pending,
+            paid=count_paid,
+            fe_issue=count_fe_issue,
+        ),
+    )
+
+
+@router.get("/billing/checkout-sessions/export")
+def export_billing_checkout_sessions_csv(
+    tenant_id: str | None = None,
+    status_filter: str | None = Query(default=None, alias="status"),
+    q: str | None = Query(default=None, description="Búsqueda por tenant, sesión, ref ePayco o documento FE"),
+    view_tab: str = Query(default="all", description="Vista: all | pending | paid | fe_issue"),
+    sort_by: str = Query(default="created_at", description="Orden: created_at | total_cop | status | tenant"),
+    sort_dir: str = Query(default="desc", description="Dirección: asc | desc"),
+    fe_status: str | None = Query(
+        default=None,
+        description="Filtrar por saas_fe_status: ok | error | skipped | pending (aún sin estado o vacío)",
+    ),
+    max_rows: int = Query(default=5000, ge=1, le=20000),
+    db: Session = Depends(get_db),
+    _: SaaSUser = Depends(require_saas_role(["owner", "finanzas", "comercial", "soporte"])),
+):
+    base_q = (
+        db.query(
+            TenantBillingCheckoutSession,
+            Tenant.slug,
+            Tenant.nombre_comercial,
+            FacturaElectronica,
+        )
+        .join(Tenant, Tenant.id == TenantBillingCheckoutSession.tenant_id)
+        .outerjoin(
+            FacturaElectronica,
+            FacturaElectronica.billing_checkout_session_id == TenantBillingCheckoutSession.id,
+        )
+    )
+    if tenant_id:
+        try:
+            t_uuid = UUID(tenant_id.strip())
+        except ValueError:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="tenant_id inválido")
+        base_q = base_q.filter(TenantBillingCheckoutSession.tenant_id == t_uuid)
+
+    st = (status_filter or "").strip()
+    if st:
+        base_q = base_q.filter(TenantBillingCheckoutSession.status == st)
+
+    fe_f = (fe_status or "").strip().lower()
+    if fe_f == "pending":
+        base_q = base_q.filter(
+            or_(
+                TenantBillingCheckoutSession.saas_fe_status.is_(None),
+                TenantBillingCheckoutSession.saas_fe_status == "",
+            )
+        )
+    elif fe_f in ("ok", "error", "skipped"):
+        base_q = base_q.filter(TenantBillingCheckoutSession.saas_fe_status == fe_f)
+    elif fe_f:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="fe_status inválido: use ok, error, skipped o pending",
+        )
+
+    search = (q or "").strip()
+    if search:
+        pattern = f"%{search}%"
+        base_q = base_q.filter(
+            or_(
+                Tenant.nombre_comercial.ilike(pattern),
+                Tenant.slug.ilike(pattern),
+                func.cast(TenantBillingCheckoutSession.id, String).ilike(pattern),
+                TenantBillingCheckoutSession.epayco_ref.ilike(pattern),
+                FacturaElectronica.numero_documento.ilike(pattern),
+            )
+        )
+
+    tab = (view_tab or "all").strip().lower()
+    if tab not in {"all", "pending", "paid", "fe_issue"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="view_tab inválido: use all, pending, paid o fe_issue")
+
+    q_rows = base_q
+    if tab == "pending":
+        q_rows = q_rows.filter(TenantBillingCheckoutSession.status != "paid")
+    elif tab == "paid":
+        q_rows = q_rows.filter(TenantBillingCheckoutSession.status == "paid")
+    elif tab == "fe_issue":
+        q_rows = q_rows.filter(
+            TenantBillingCheckoutSession.status == "paid",
+            or_(
+                TenantBillingCheckoutSession.saas_fe_status.is_(None),
+                TenantBillingCheckoutSession.saas_fe_status != "ok",
+            ),
+        )
+
+    dir_desc = (sort_dir or "desc").strip().lower() != "asc"
+    sort_key = (sort_by or "created_at").strip().lower()
+    if sort_key == "total_cop":
+        sort_col = TenantBillingCheckoutSession.total_cop
+    elif sort_key == "status":
+        sort_col = TenantBillingCheckoutSession.status
+    elif sort_key == "tenant":
+        sort_col = Tenant.nombre_comercial
+    else:
+        sort_col = TenantBillingCheckoutSession.created_at
+    order_primary = sort_col.desc() if dir_desc else sort_col.asc()
+
+    rows = (
+        q_rows.order_by(order_primary, TenantBillingCheckoutSession.created_at.desc())
+        .limit(max_rows)
+        .all()
+    )
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "created_at",
+            "tenant_slug",
+            "tenant_nombre",
+            "plan_code",
+            "total_cop",
+            "session_id",
+            "status_pago",
+            "saas_fe_status",
+            "saas_fe_error",
+            "numero_documento",
+            "cufe",
+            "public_url",
+            "epayco_ref",
+        ]
+    )
+    for s, slug, nombre, fe in rows:
+        writer.writerow(
+            [
+                s.created_at.isoformat() if s.created_at else "",
+                slug or "",
+                nombre or "",
+                s.plan_code or "",
+                float(s.total_cop) if s.total_cop is not None else 0.0,
+                str(s.id),
+                s.status or "",
+                s.saas_fe_status or "",
+                (s.saas_fe_error or "")[:2000],
+                fe.numero_documento if fe else "",
+                fe.cufe if fe else "",
+                fe.public_url if fe else "",
+                s.epayco_ref or "",
+            ]
+        )
+
+    output.seek(0)
+    filename = f"checkout_sesiones_filtradas_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post(
@@ -1796,16 +2267,19 @@ def saas_retry_checkout_session_saas_factus(
     return _checkout_row_to_tenant_saas_fe_out(row, fe)
 
 
-@router.get("/support/tickets", response_model=list[SaaSSupportTicketItem])
+@router.get("/support/tickets", response_model=SaaSSupportTicketListOut)
 def list_support_tickets(
     tenant_slug: str | None = None,
     status_filter: str | None = None,
     priority: str | None = None,
-    limit: int = 100,
+    q: str | None = Query(default=None, description="Búsqueda por tenant, asunto, descripción o usuario"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=15, ge=1, le=200),
+    sort_by: str = Query(default="created_at", description="Orden: created_at | priority | status | tenant"),
+    sort_dir: str = Query(default="desc", description="Dirección: asc | desc"),
     db: Session = Depends(get_db),
     _: SaaSUser = Depends(require_saas_role(["owner", "soporte", "comercial"])),
 ):
-    safe_limit = min(max(limit, 1), 200)
     assigned_user = aliased(SaaSUser)
     created_user = aliased(SaaSUser)
     query = (
@@ -1826,9 +2300,50 @@ def list_support_tickets(
         query = query.filter(SaaSSupportTicket.status == validate_support_status(status_filter))
     if priority:
         query = query.filter(SaaSSupportTicket.priority == validate_support_priority(priority))
+    search = (q or "").strip()
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(
+            or_(
+                Tenant.nombre_comercial.ilike(pattern),
+                Tenant.slug.ilike(pattern),
+                SaaSSupportTicket.title.ilike(pattern),
+                SaaSSupportTicket.description.ilike(pattern),
+                SaaSSupportTicket.status.ilike(pattern),
+                SaaSSupportTicket.priority.ilike(pattern),
+                assigned_user.email.ilike(pattern),
+                created_user.email.ilike(pattern),
+            )
+        )
 
-    rows = query.order_by(SaaSSupportTicket.created_at.desc()).limit(safe_limit).all()
-    return [
+    dir_desc = (sort_dir or "desc").strip().lower() != "asc"
+    sort_key = (sort_by or "created_at").strip().lower()
+    if sort_key == "priority":
+        sort_col = SaaSSupportTicket.priority
+    elif sort_key == "status":
+        sort_col = SaaSSupportTicket.status
+    elif sort_key == "tenant":
+        sort_col = Tenant.nombre_comercial
+    else:
+        sort_col = SaaSSupportTicket.created_at
+
+    order_primary = sort_col.desc() if dir_desc else sort_col.asc()
+    total = int(
+        query.with_entities(func.count(func.distinct(SaaSSupportTicket.id)))
+        .order_by(None)
+        .scalar()
+        or 0
+    )
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    safe_page = min(page, total_pages)
+    offset = (safe_page - 1) * page_size
+    rows = (
+        query.order_by(order_primary, SaaSSupportTicket.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+        .all()
+    )
+    items = [
         map_support_ticket_row(
             ticket=ticket,
             tenant_slug=t_slug,
@@ -1838,6 +2353,13 @@ def list_support_tickets(
         )
         for ticket, t_slug, t_name, assigned_email, created_email in rows
     ]
+    return SaaSSupportTicketListOut(
+        items=items,
+        total=total,
+        page=safe_page,
+        page_size=page_size,
+        total_pages=total_pages,
+    )
 
 
 @router.get("/support/summary", response_model=SaaSSupportSummary)
@@ -2018,18 +2540,21 @@ def list_saas_users(
     return db.query(SaaSUser).order_by(SaaSUser.created_at.desc()).all()
 
 
-@router.get("/audit-logs", response_model=list[SaaSAuditLogItem])
+@router.get("/audit-logs", response_model=SaaSAuditLogListOut)
 def list_saas_audit_logs(
     action: str | None = None,
     actor_email: str | None = None,
     tenant_slug: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
-    limit: int = 100,
+    q: str | None = Query(default=None, description="Búsqueda por acción, descripción, actor, tenant o IP"),
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=20, ge=1, le=200),
+    sort_by: str = Query(default="created_at", description="Orden: created_at | action | success | tenant | actor"),
+    sort_dir: str = Query(default="desc", description="Dirección: asc | desc"),
     db: Session = Depends(get_db),
     _: SaaSUser = Depends(require_saas_role(["owner", "finanzas", "soporte"])),
 ):
-    safe_limit = min(max(limit, 1), 200)
     query = (
         db.query(AuditLog, Tenant.slug.label("tenant_slug"))
         .outerjoin(Usuario, AuditLog.usuario_id == Usuario.id)
@@ -2056,8 +2581,52 @@ def list_saas_audit_logs(
         except ValueError:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="date_to inválido, usa formato ISO")
 
-    rows = query.order_by(AuditLog.created_at.desc()).limit(safe_limit).all()
-    return [
+    search = (q or "").strip()
+    if search:
+        pattern = f"%{search}%"
+        query = query.filter(
+            or_(
+                AuditLog.action.ilike(pattern),
+                AuditLog.description.ilike(pattern),
+                AuditLog.usuario_email.ilike(pattern),
+                AuditLog.usuario_nombre.ilike(pattern),
+                AuditLog.ip_address.ilike(pattern),
+                AuditLog.success.ilike(pattern),
+                Tenant.slug.ilike(pattern),
+            )
+        )
+
+    dir_desc = (sort_dir or "desc").strip().lower() != "asc"
+    sort_key = (sort_by or "created_at").strip().lower()
+    if sort_key == "action":
+        sort_col = AuditLog.action
+    elif sort_key == "success":
+        sort_col = AuditLog.success
+    elif sort_key == "tenant":
+        sort_col = Tenant.slug
+    elif sort_key == "actor":
+        sort_col = AuditLog.usuario_email
+    else:
+        sort_col = AuditLog.created_at
+
+    order_primary = sort_col.desc() if dir_desc else sort_col.asc()
+    total = int(
+        query.with_entities(func.count(func.distinct(AuditLog.id)))
+        .order_by(None)
+        .scalar()
+        or 0
+    )
+    total_pages = max(1, (total + page_size - 1) // page_size)
+    safe_page = min(page, total_pages)
+    offset = (safe_page - 1) * page_size
+
+    rows = (
+        query.order_by(order_primary, AuditLog.created_at.desc())
+        .offset(offset)
+        .limit(page_size)
+        .all()
+    )
+    items = [
         SaaSAuditLogItem(
             id=str(log.id),
             action=log.action,
@@ -2071,6 +2640,13 @@ def list_saas_audit_logs(
         )
         for log, slug in rows
     ]
+    return SaaSAuditLogListOut(
+        items=items,
+        total=total,
+        page=safe_page,
+        page_size=page_size,
+        total_pages=total_pages,
+    )
 
 
 @router.get("/audit-logs/export")
@@ -2080,20 +2656,28 @@ def export_saas_audit_logs_csv(
     tenant_slug: str | None = None,
     date_from: str | None = None,
     date_to: str | None = None,
-    limit: int = 200,
+    q: str | None = None,
+    sort_by: str = "created_at",
+    sort_dir: str = "desc",
+    max_rows: int = 5000,
     db: Session = Depends(get_db),
     _: SaaSUser = Depends(require_saas_role(["owner", "finanzas", "soporte"])),
 ):
-    rows = list_saas_audit_logs(
+    result = list_saas_audit_logs(
         action=action,
         actor_email=actor_email,
         tenant_slug=tenant_slug,
         date_from=date_from,
         date_to=date_to,
-        limit=limit,
+        q=q,
+        page=1,
+        page_size=max_rows,
+        sort_by=sort_by,
+        sort_dir=sort_dir,
         db=db,
         _=_,
     )
+    rows = result.items
 
     output = io.StringIO()
     writer = csv.writer(output)

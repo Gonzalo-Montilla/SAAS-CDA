@@ -11,7 +11,18 @@ import { apiBaseUrl } from '../api/client';
 import loginWatermarkIcon from '../assets/icono-marca-agua.png';
 
 function normalizeNitInput(value: string): string {
-  return value.toUpperCase().replace(/[^0-9A-Z-]/g, '');
+  const cleaned = value.replace(/[^\d-]/g, '');
+  const hasHyphen = cleaned.includes('-');
+  const [leftRaw, rightRaw = ''] = cleaned.split('-', 2);
+  const left = leftRaw.replace(/\D/g, '').slice(0, 20);
+  const right = rightRaw.replace(/\D/g, '').slice(0, 1);
+  if (!left) {
+    return '';
+  }
+  if (hasHyphen && !right) {
+    return `${left}-`;
+  }
+  return right ? `${left}-${right}` : left;
 }
 
 function normalizePhoneInput(value: string): string {
@@ -19,7 +30,7 @@ function normalizePhoneInput(value: string): string {
 }
 
 function isValidNit(value: string): boolean {
-  return /^[0-9]{5,15}(-[0-9A-Z])?$/.test(value);
+  return /^\d{5,20}-\d$/.test(value);
 }
 
 function isValidColombianCell(value: string): boolean {
@@ -297,7 +308,7 @@ export default function Login() {
     setRegisterValidationError('');
 
     if (!isValidNit(registerNitCda)) {
-      setRegisterValidationError('El NIT no tiene un formato válido (ej: 901234567-8).');
+      setRegisterValidationError('El NIT debe ir en formato NIT-DV (ej: 901234567-8).');
       return;
     }
 
@@ -756,7 +767,9 @@ export default function Login() {
                 value={registerNitCda}
                 onChange={(e) => setRegisterNitCda(normalizeNitInput(e.target.value))}
                 className="input-corporate"
-                placeholder="NIT del CDA"
+                placeholder="NIT del CDA (ej: 901234567-8)"
+                inputMode="numeric"
+                maxLength={22}
                 required
               />
               <input

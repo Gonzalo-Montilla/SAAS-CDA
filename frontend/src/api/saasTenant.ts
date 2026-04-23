@@ -1,5 +1,5 @@
 import { apiClient } from './client';
-import type { SaaSSucursalResumen } from '../types';
+import type { SaaSSucursalResumen, SaaSTenantProfile } from '../types';
 
 export interface SaaSTenantLogoUpdateResponse {
   logo_url: string | null;
@@ -31,6 +31,24 @@ export async function patchSaasSucursalUbicacion(
 ): Promise<SaaSSucursalResumen> {
   const r = await apiClient.patch<SaaSSucursalResumen>(
     `/saas/auth/tenants/${tenantId}/sucursales/${sucursalId}`,
+    body,
+  );
+  return r.data;
+}
+
+export async function patchSaasTenantCoreData(
+  tenantId: string,
+  body: {
+    nombre?: string | null;
+    nombre_comercial?: string | null;
+    nit_cda?: string | null;
+    correo_electronico?: string | null;
+    nombre_representante?: string | null;
+    celular?: string | null;
+  },
+): Promise<SaaSTenantProfile> {
+  const r = await apiClient.patch<SaaSTenantProfile>(
+    `/saas/auth/tenants/${tenantId}/core-data`,
     body,
   );
   return r.data;

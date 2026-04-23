@@ -134,6 +134,9 @@ class Settings(BaseSettings):
     # Clave fija de integración (diferente a private) si la exige su API
     EPAYCO_P_KEY: str = Field(default="", env="EPAYCO_P_KEY")
     EPAYCO_TEST_MODE: bool = Field(default=True, env="EPAYCO_TEST_MODE")
+    # Solo pruebas locales/no productivas: forzar monto de cobro ePayco (COP).
+    # 0 = desactivado. Útil cuando la cuenta test de ePayco limita rango (p. ej. 5.000–200.000).
+    EPAYCO_TEST_OVERRIDE_AMOUNT_COP: float = Field(default=0, env="EPAYCO_TEST_OVERRIDE_AMOUNT_COP")
     # Desarrollo: simular aprobación sin webhook real (nunca en producción)
     EPAYCO_DEV_MOCK_ENABLE: bool = Field(default=False, env="EPAYCO_DEV_MOCK_ENABLE")
 

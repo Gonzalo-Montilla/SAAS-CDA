@@ -41,6 +41,7 @@ from app.services.saas_billing_plans import PLAN_DEFINITIONS, calculate_chargeab
 from app.utils.archivo_fiscal_pdf import guardar_pdf_archivo_fiscal
 from app.utils.factus_validators import (
     digito_verificacion_nit_colombia,
+    digito_verificacion_nit_colombia_serie_37,
     email_valido_factus,
     parse_nit_colombiano_identificacion_y_dv,
     solo_digitos,
@@ -82,22 +83,56 @@ def _issuer_establishment_payload() -> dict[str, Any]:
     }
 
 
+def _resolve_tenant_nit_and_dv(nit_raw: str) -> tuple[str, int]:
+    """
+    Resuelve NIT base + DV para el receptor (tenant) con reglas robustas:
+    - Acepta formato con guion (900123456-8).
+    - Si llega sin guion pero parece incluir DV al final, lo detecta.
+    - Si no hay forma inequívoca de DV, exige capturarlo explícitamente.
+    """
+    s = (nit_raw or "").strip()
+    ident, dv_parse = parse_nit_colombiano_identificacion_y_dv(s)
+    if len(ident) < 6:
+        raise ValueError("NIT del CDA insuficiente para Factus.")
+
+    digits = solo_digitos(s)
+    if "-" not in s and dv_parse is None and len(digits) >= 7:
+        base_guess = digits[:-1]
+        dv_guess = int(digits[-1])
+        d71_guess = digito_verificacion_nit_colombia(base_guess)
+        d37_guess = digito_verificacion_nit_colombia_serie_37(base_guess)
+        if dv_guess == d71_guess or dv_guess == d37_guess:
+            ident = base_guess
+            dv_parse = dv_guess
+
+    if dv_parse is not None:
+        d71 = digito_verificacion_nit_colombia(ident)
+        d37 = digito_verificacion_nit_colombia_serie_37(ident)
+        if d71 == d37 and d71 != dv_parse:
+            raise ValueError(
+                "El DV no coincide con el NIT del CDA. Verifique en el RUT y regístrelo como 900123456-8."
+            )
+        return ident, int(dv_parse)
+
+    d71 = digito_verificacion_nit_colombia(ident)
+    d37 = digito_verificacion_nit_colombia_serie_37(ident)
+    if d71 != d37:
+        raise ValueError(
+            "No fue posible inferir un DV único para el NIT del CDA. Registre el NIT con guion y DV oficial del RUT (ej: 900123456-8)."
+        )
+    return ident, int(d71)
+
+
 def _customer_tenant_cda_nit(tenant: Tenant) -> dict[str, Any]:
     nit_raw = (tenant.nit_cda or "").strip()
     if len(solo_digitos(nit_raw)) < 5:
         raise ValueError("Registre NIT del CDA (receptor) para la factura electrónica de suscripción.")
-    ident, dv_parse = parse_nit_colombiano_identificacion_y_dv(nit_raw)
-    if len(ident) < 6:
-        raise ValueError("NIT del CDA insuficiente para Factus.")
-    dv_final: int | None
-    if dv_parse is not None:
-        dv_final = dv_parse
-    else:
-        d71 = digito_verificacion_nit_colombia(ident)
-        dv_final = d71
-    name = (tenant.nombre or tenant.nombre_comercial or "Cliente CDA").strip()[:200]
+    ident, dv_final = _resolve_tenant_nit_and_dv(nit_raw)
+    legal_name = (tenant.nombre or "").strip()
+    trade_name = (tenant.nombre_comercial or legal_name).strip()
+    name = (legal_name or trade_name or "Cliente CDA").strip()[:200]
     if len(name) < 2:
-        raise ValueError("Razón social o nombre comercial del CDA requerido para facturar.")
+        raise ValueError("Razón social del CDA requerida para facturar (debe coincidir con el RUT).")
     if not (tenant.direccion_facturacion or "").strip():
         raise ValueError("Registre dirección de facturación (matriz) del CDA para la FE de suscripción.")
     em = (tenant.correo_electronico or "").strip().lower()
@@ -112,7 +147,7 @@ def _customer_tenant_cda_nit(tenant: Tenant) -> dict[str, Any]:
         "identification": ident[:20],
         "dv": str(dv_final),
         "company": name,
-        "trade_name": (tenant.nombre_comercial or tenant.nombre or name)[:200],
+        "trade_name": (trade_name or name)[:200],
         "names": name,
         "address": (tenant.direccion_facturacion or "").strip()[:200],
         "email": em[:200],
@@ -174,6 +209,15 @@ def _build_items_saas(*, plan_code: str, sedes: int, total_with_iva: Decimal) ->
     ]
 
 
+def _saas_checkout_reference_code(checkout_id: uuid.UUID) -> str:
+    """
+    Código de referencia determinístico por sesión de checkout para:
+    - facilitar soporte en Factus (borrado/reintento por API/Postman),
+    - evitar perder trazabilidad cuando hay reintentos.
+    """
+    return f"saas-sub-{checkout_id.hex}"[:50]
+
+
 def try_emit_saas_billing_electronic_invoice(
     db: Session, *, tenant: Tenant, checkout: TenantBillingCheckoutSession
 ) -> None:
@@ -203,11 +247,11 @@ def try_emit_saas_billing_electronic_invoice(
         db.commit()
         return
     try:
+        ref = _saas_checkout_reference_code(checkout.id)
         total_d = _quantize_moneda(Decimal(str(checkout.total_cop)))
         items = _build_items_saas(
             plan_code=checkout.plan_code, sedes=int(checkout.sedes_totales or 1), total_with_iva=total_d
         )
-        ref = f"saas-sub-{checkout.id.hex[:8]}-{uuid.uuid4().hex[:8]}"[:50]
         body: dict[str, Any] = {
             "document": "01",
             "numbering_range_id": int(settings.SAAS_BILLING_FACTUS_NUMBERING_RANGE_ID or 0),
@@ -281,6 +325,11 @@ def try_emit_saas_billing_electronic_invoice(
         err_txt = str(exc)
         if isinstance(exc, FactusAPIError):
             err_txt = format_factus_error_detail(exc)[:4000]
+        try:
+            ref_ctx = _saas_checkout_reference_code(checkout.id)
+            err_txt = f"{err_txt} | ref:{ref_ctx}"
+        except Exception:
+            pass
         checkout.saas_fe_status = "error"
         checkout.saas_fe_error = err_txt[:2000]
         db.add(checkout)

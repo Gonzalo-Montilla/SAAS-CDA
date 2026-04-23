@@ -5,9 +5,11 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from urllib.parse import urlencode
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
@@ -19,8 +21,8 @@ from app.integrations.epayco import (
     epayco_amount_matches_total,
     epayco_configured,
     epayco_return_signature_bundle_status,
-    epayco_transaction_approved,
     epayco_webhook_signature_configured,
+    parse_epayco_approval,
     validate_epayco_webhook_signature,
 )
 from app.integrations.epayco_apify import (
@@ -52,6 +54,68 @@ _log = logging.getLogger(__name__)
 
 def utcnow_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _epayco_public_response_url(session_id: UUID) -> str:
+    """
+    ePayco Apify exige response URL pública/valida.
+    Si FRONTEND_URL es localhost, usar bridge público en backend y redirigir al front local.
+    """
+    front = settings.FRONTEND_URL.rstrip("/")
+    low = front.lower()
+    if low.startswith("http://localhost") or low.startswith("https://localhost") or "127.0.0.1" in low:
+        base_back = settings.BACKEND_PUBLIC_BASE_URL.rstrip("/")
+        return f"{base_back}/api/v1/tenant/billing/response-bridge?session={session_id}"
+    return f"{front}/suscripcion?session={session_id}"
+
+
+def _epayco_body_has_amount_range_error(body: object) -> bool:
+    if not isinstance(body, dict):
+        return False
+    data = body.get("data")
+    if not isinstance(data, dict):
+        return False
+    errors = data.get("errors")
+    if not isinstance(errors, list):
+        return False
+    for e in errors:
+        if not isinstance(e, dict):
+            continue
+        msg = str(e.get("errorMessage") or "").lower()
+        if "amount must be between 5000 and 200000" in msg:
+            return True
+    return False
+
+
+def _epayco_is_hard_approved(form: dict) -> bool:
+    """
+    Evita falsos positivos por estados intermedios (p. ej. pre-procesada en PSE).
+    Aprobado real: x_cod_response/cod_respuesta == 1.
+    """
+    cod = form.get("x_cod_response") or form.get("cod_respuesta")
+    if parse_epayco_approval(str(cod) if cod is not None else None, None):
+        x_state = str(form.get("x_cod_transaction_state") or "").strip()
+        # Si ePayco envía estado de transacción explícito y no es "1", aún no está aprobada.
+        if x_state and x_state != "1":
+            return False
+        return True
+    return False
+
+
+def _effective_epayco_test_amount_cop() -> float | None:
+    """
+    En no-producción, permite forzar monto de pago ePayco para cuentas test con límites.
+    Devuelve None si no aplica.
+    """
+    if str(settings.ENVIRONMENT).lower() == "production":
+        return None
+    if not bool(settings.EPAYCO_TEST_MODE):
+        return None
+    raw = float(settings.EPAYCO_TEST_OVERRIDE_AMOUNT_COP or 0)
+    if raw <= 0:
+        return None
+    # ePayco test observado en esta cuenta: 5.000 - 200.000 COP
+    return float(max(5000.0, min(200000.0, raw)))
 
 
 class TenantBillingPlanItem(BaseModel):
@@ -213,6 +277,17 @@ def init_tenant_checkout(
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
     _plan, _ch, sub, iva, total = calculate_plan_quote(body.plan_code, body.sedes_totales)
+    forced_amount = _effective_epayco_test_amount_cop()
+    if forced_amount is not None:
+        # Pruebas: conservar coherencia de la sesión de cobro con el valor realmente enviado a ePayco.
+        sub = float(forced_amount)
+        iva = 0.0
+        total = float(forced_amount)
+        _log.warning(
+            "tenant_billing epayco test override amount session_preview plan=%s forced_total=%s",
+            body.plan_code,
+            total,
+        )
     session_row = TenantBillingCheckoutSession(
         tenant_id=tenant.id,
         plan_code=body.plan_code.strip().lower(),
@@ -243,8 +318,7 @@ def init_tenant_checkout(
             message="Pasarela no configurada (EPAYCO_PUBLIC_KEY en .env). El administrador puede registrar el pago desde backoffice.",
         )
 
-    base_front = settings.FRONTEND_URL.rstrip("/")
-    resp_url = f"{base_front}/suscripcion?session={session_row.id}"
+    resp_url = _epayco_public_response_url(session_row.id)
     conf_url = f"{settings.BACKEND_PUBLIC_BASE_URL.rstrip('/')}/api/v1/tenant/billing/webhooks/epayco"
     nombre = (tenant.nombre_representante or tenant.nombre_comercial or "Cliente")[:200]
     email = (tenant.correo_electronico or current_user.email or "cliente@local")[:200]
@@ -278,10 +352,30 @@ def init_tenant_checkout(
                 epayco_session_id=str(sid),
                 epayco_public_key=pk,
                 epayco_checkout_test=test_flag,
+                message=(
+                    f"Pruebas ePayco: monto forzado a COP {int(total):,}".replace(",", ".")
+                    if forced_amount is not None
+                    else None
+                ),
             )
-        except EpaycoApifyError:
+        except EpaycoApifyError as exc:
+            # Límite típico de cuentas test ePayco: evitar fallback legacy (404) y mostrar error accionable.
+            if _epayco_body_has_amount_range_error(getattr(exc, "body", None)):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "ePayco pruebas rechazó el monto: el comercio está limitado a pagos entre "
+                        "COP 5.000 y COP 200.000. Para continuar, reduzca temporalmente el valor de la "
+                        "prueba o solicite en ePayco ampliar el límite de monto de la cuenta de pruebas."
+                    ),
+                ) from exc
             # Fallback a redirección GET (checkout.php) con la misma factura/URLs
-            pass
+            _log.warning(
+                "tenant_billing epayco apify session fallback session_id=%s reason=%s body=%s",
+                session_row.id,
+                exc,
+                getattr(exc, "body", None),
+            )
 
     redirect = build_epayco_checkout_get_url(
         amount_cop=total,
@@ -299,7 +393,26 @@ def init_tenant_checkout(
         redirect_url=redirect,
         epayco_public_key=pk,
         epayco_checkout_test=test_flag,
+        message=(
+            f"Pruebas ePayco: monto forzado a COP {int(total):,}".replace(",", ".")
+            if forced_amount is not None
+            else None
+        ),
     )
+
+
+@router.get("/response-bridge")
+def epayco_response_bridge(request: Request):
+    """
+    Redirect público para ePayco -> frontend local.
+    Preserva query params (session + x_*), que luego Suscripcion reenvía a confirm-return.
+    """
+    base_front = settings.FRONTEND_URL.rstrip("/")
+    target = f"{base_front}/suscripcion"
+    pairs = list(request.query_params.multi_items())
+    if pairs:
+        return RedirectResponse(url=f"{target}?{urlencode(pairs, doseq=True)}", status_code=307)
+    return RedirectResponse(url=target, status_code=307)
 
 
 def _epayco_amount_in_form(form: dict) -> bool:
@@ -399,15 +512,19 @@ def _apply_epayco_form_to_session(
                 row.id,
             )
 
-    if not epayco_transaction_approved(form):
+    if not _epayco_is_hard_approved(form):
+        x_state = form.get("x_cod_transaction_state")
+        x_resp = form.get("x_response") or form.get("Response")
         row.last_webhook_payload = form
         db.add(row)
         db.commit()
         _log.info(
-            "tenant_billing epayco not_approved session_id=%s source=%s cod=%s",
+            "tenant_billing epayco not_approved session_id=%s source=%s cod=%s x_state=%s x_response=%s",
             row.id,
             source,
             cod,
+            x_state,
+            x_resp,
         )
         return {"ok": False, "reason": "not_approved"}
     tenant = db.query(Tenant).filter(Tenant.id == row.tenant_id).first()

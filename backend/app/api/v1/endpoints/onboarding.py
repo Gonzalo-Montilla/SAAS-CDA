@@ -30,6 +30,7 @@ from app.utils.email import (
     generar_email_bienvenida_tenant,
     generar_email_codigo_onboarding,
 )
+from app.utils.factus_validators import normalizar_numero_identificacion_proveedor
 
 router = APIRouter()
 
@@ -203,7 +204,7 @@ def validate_onboarding_rate_limit(db: Session, ip_address: str, admin_email: st
 
 
 def normalize_nit(nit_raw: str) -> str:
-    return re.sub(r"[^0-9A-Za-z-]", "", nit_raw).strip().upper()
+    return normalizar_numero_identificacion_proveedor(nit_raw)
 
 
 def normalize_phone(phone_raw: str) -> str:
@@ -386,8 +387,11 @@ def register_tenant_self_service(
     normalized_nit = normalize_nit(nit_cda)
     normalized_phone = normalize_phone(celular)
 
-    if len(normalized_nit) < 5:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="NIT del CDA inválido")
+    if not re.fullmatch(r"\d{5,20}-\d", normalized_nit):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="NIT del CDA inválido. Use formato NIT-DV (ej: 900123456-8).",
+        )
     if len(normalized_phone) < 7:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Celular inválido")
     if sedes_totales < 1:

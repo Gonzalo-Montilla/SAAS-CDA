@@ -37,6 +37,8 @@ export interface TenantFacturacionUbicacion {
 export interface TenantBillingInfo {
   gate: 'ok' | 'trial' | 'soft' | 'hard';
   subscription_status: string;
+  plan_actual?: string | null;
+  plan_ends_at?: string | null;
   demo_ends_at?: string | null;
   soft_grace_ends_at?: string | null;
 }
@@ -231,6 +233,43 @@ export interface SaaSCheckoutSessionItem {
   public_url?: string | null;
 }
 
+export interface SaaSCheckoutSessionCounts {
+  all: number;
+  pending: number;
+  paid: number;
+  fe_issue: number;
+}
+
+export interface SaaSCheckoutSessionListResponse {
+  items: SaaSCheckoutSessionItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
+  counts: SaaSCheckoutSessionCounts;
+}
+
+export interface SaaSFactusIssuerConfig {
+  enabled: boolean;
+  use_sandbox: boolean;
+  environment: 'sandbox' | 'production' | string;
+  base_url: string;
+  configured: boolean;
+  missing_fields: string[];
+  numbering_range_id?: number | null;
+  client_id_hint?: string | null;
+  api_username_hint?: string | null;
+  issuer_name: string;
+  issuer_email: string;
+}
+
+export interface SaaSFactusIssuerTestResult {
+  ok: boolean;
+  environment: 'sandbox' | 'production' | string;
+  message: string;
+  numbering_ranges_found?: number | null;
+}
+
 export interface SaaSAuditLogItem {
   id: string;
   action: string;
@@ -241,6 +280,14 @@ export interface SaaSAuditLogItem {
   ip_address?: string | null;
   tenant_slug?: string | null;
   created_at: string;
+}
+
+export interface SaaSAuditLogListResponse {
+  items: SaaSAuditLogItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
 }
 
 export interface SaaSSecuritySummary {
@@ -421,6 +468,14 @@ export interface SaaSSupportTicketItem {
   resolved_at?: string | null;
   created_at: string;
   updated_at?: string | null;
+}
+
+export interface SaaSSupportTicketListResponse {
+  items: SaaSSupportTicketItem[];
+  total: number;
+  page: number;
+  page_size: number;
+  total_pages: number;
 }
 
 export interface SaaSSupportSummary {

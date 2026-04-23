@@ -178,6 +178,13 @@
     @apply py-3.5 px-4 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-600 bg-slate-50/95 border-b border-slate-200;
   }
 
+  .table-shell .table-enterprise thead th {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    box-shadow: inset 0 -1px 0 rgba(226, 232, 240, 0.9);
+  }
+
   .table-enterprise tbody tr {
     @apply border-b border-slate-100 hover:bg-slate-50/80 transition-colors;
   }
@@ -209,12 +216,27 @@
 
   .btn-chip:hover {
     background-color: var(--ui-surface-muted);
+    transform: translateY(-1px);
+    box-shadow: 0 8px 18px -14px rgba(15, 23, 42, 0.5);
+  }
+
+  .btn-chip:active {
+    transform: translateY(0);
+    box-shadow: none;
   }
 
   @media (min-width: 1024px) {
     .table-enterprise {
       min-width: 100%;
     }
+  }
+
+  [data-table-density='compact'] .table-enterprise thead th {
+    @apply py-2.5 px-3 text-[10px];
+  }
+
+  [data-table-density='compact'] .table-enterprise tbody td {
+    @apply py-2.5 px-3 text-[13px];
   }
 
   .input-corporate {

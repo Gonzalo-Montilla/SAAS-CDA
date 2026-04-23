@@ -49,7 +49,7 @@ def build_epayco_checkout_get_url(
     }
     if settings.EPAYCO_TEST_MODE:
         params["p_test_request"] = "true"
-    return f"https://secure.epayco.co/checkout/payment?{urlencode(params)}"
+    return f"https://secure.epayco.co/checkout.php?{urlencode(params)}"
 
 
 def parse_epayco_approval(cod_response: str | None, response_code: str | None) -> bool:

@@ -26,11 +26,11 @@ import { BackofficeSectionHeading } from '../components/BackofficeSectionHeading
 import FactusMunicipalitySearchField from '../components/FactusMunicipalitySearchField';
 import { useAuth } from '../contexts/AuthContext';
 import { apiClient } from '../api/client';
-import { patchSaasSucursalUbicacion, patchSaasTenantLogo } from '../api/saasTenant';
-import { useEffect, useState } from 'react';
+import { patchSaasSucursalUbicacion, patchSaasTenantCoreData, patchSaasTenantLogo } from '../api/saasTenant';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { formatCurrency } from '../utils/formatNumber';
 import type {
-  SaaSAuditLogItem,
+  SaaSAuditLogListResponse,
   SaaSBillingPlanItem,
   SaaSBillingOverviewItem,
   SaaSPaymentRegisteredResponse,
@@ -38,12 +38,16 @@ import type {
   SaaSSecuritySummary,
   SaaSSupportSummary,
   SaaSSupportTicketItem,
+  SaaSSupportTicketListResponse,
   SaaSTenantProfile,
   SaaSTenantBillingQuote,
   SaaSTenantSummary,
   SaaSUser,
   SaaSUserSecurityItem,
   SaaSCheckoutSessionItem,
+  SaaSCheckoutSessionListResponse,
+  SaaSFactusIssuerConfig,
+  SaaSFactusIssuerTestResult,
 } from '../types';
 import logoCdaSoft from '../assets/LOGO_CDA_SOFT-SIN FONDO.png';
 import SaasTenantFactusPanel from '../components/SaasTenantFactusPanel';
@@ -62,14 +66,34 @@ interface SaaSPermissionsResponse {
 }
 
 type BackofficeModule = 'resumen' | 'tenants' | 'facturacion' | 'soporte' | 'usuarios' | 'auditoria' | 'seguridad';
+const TABLE_DENSITY_STORAGE_KEY = 'saas_backoffice_table_density';
+type TenantProfileSection = 'brandAccess' | 'sedes' | 'factus' | 'billing' | 'payments' | 'users';
+type CheckoutSessionsViewTab = 'all' | 'pending' | 'paid' | 'fe_issue';
+
+const DEFAULT_TENANT_PROFILE_SECTIONS_OPEN: Record<TenantProfileSection, boolean> = {
+  brandAccess: true,
+  sedes: false,
+  factus: false,
+  billing: false,
+  payments: false,
+  users: false,
+};
 
 export default function SaaSBackoffice() {
   const { user, logout, getLogoutRedirectPath } = useAuth();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [copiedTenantId, setCopiedTenantId] = useState<string | null>(null);
+  const copyResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const resendResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [activeModule, setActiveModule] = useState<BackofficeModule>('resumen');
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
+  const [tableDensity, setTableDensity] = useState<'comfortable' | 'compact'>(() => {
+    if (typeof window === 'undefined') {
+      return 'comfortable';
+    }
+    return window.localStorage.getItem(TABLE_DENSITY_STORAGE_KEY) === 'compact' ? 'compact' : 'comfortable';
+  });
   const [createUserError, setCreateUserError] = useState('');
   const [createUserSuccess, setCreateUserSuccess] = useState('');
   const [newUserEmail, setNewUserEmail] = useState('');
@@ -95,6 +119,11 @@ export default function SaaSBackoffice() {
   const [supportTenantFilter, setSupportTenantFilter] = useState('');
   const [supportStatusFilter, setSupportStatusFilter] = useState('');
   const [supportPriorityFilter, setSupportPriorityFilter] = useState('');
+  const [supportSortBy, setSupportSortBy] = useState<'created_at' | 'priority' | 'status' | 'tenant'>('created_at');
+  const [supportSortDir, setSupportSortDir] = useState<'asc' | 'desc'>('desc');
+  const [supportQuickSearch, setSupportQuickSearch] = useState('');
+  const [supportPage, setSupportPage] = useState(1);
+  const [expandedSupportTicketId, setExpandedSupportTicketId] = useState<string | null>(null);
   const [supportActionError, setSupportActionError] = useState('');
   const [supportActionSuccess, setSupportActionSuccess] = useState('');
   const [supportReplyTicketId, setSupportReplyTicketId] = useState<string | null>(null);
@@ -102,6 +131,12 @@ export default function SaaSBackoffice() {
   const [checkoutSessionStatusFilter, setCheckoutSessionStatusFilter] = useState('');
   const [checkoutSessionTenantId, setCheckoutSessionTenantId] = useState('');
   const [checkoutSessionFeFilter, setCheckoutSessionFeFilter] = useState('');
+  const [checkoutSessionQuickSearch, setCheckoutSessionQuickSearch] = useState('');
+  const [checkoutSessionsViewTab, setCheckoutSessionsViewTab] = useState<CheckoutSessionsViewTab>('all');
+  const [checkoutSessionsPage, setCheckoutSessionsPage] = useState(1);
+  const [checkoutSessionsSortBy, setCheckoutSessionsSortBy] = useState<'created_at' | 'total_cop' | 'status' | 'tenant'>('created_at');
+  const [checkoutSessionsSortDir, setCheckoutSessionsSortDir] = useState<'asc' | 'desc'>('desc');
+  const [expandedCheckoutSessionId, setExpandedCheckoutSessionId] = useState<string | null>(null);
   const [sedeUbicacionEdit, setSedeUbicacionEdit] = useState<{
     id: string;
     nombre: string;
@@ -115,12 +150,36 @@ export default function SaaSBackoffice() {
   const [tenantLogoUrl, setTenantLogoUrl] = useState('');
   const [tenantLogoFile, setTenantLogoFile] = useState<File | null>(null);
   const [tenantLogoError, setTenantLogoError] = useState('');
+  const [tenantCoreNombre, setTenantCoreNombre] = useState('');
+  const [tenantCoreNombreComercial, setTenantCoreNombreComercial] = useState('');
+  const [tenantCoreNit, setTenantCoreNit] = useState('');
+  const [tenantCoreCorreo, setTenantCoreCorreo] = useState('');
+  const [tenantCoreRepresentante, setTenantCoreRepresentante] = useState('');
+  const [tenantCoreCelular, setTenantCoreCelular] = useState('');
+  const [tenantCoreError, setTenantCoreError] = useState('');
+  const [tenantCoreEditMode, setTenantCoreEditMode] = useState(false);
+  const [auditSortBy, setAuditSortBy] = useState<'created_at' | 'action' | 'success' | 'tenant' | 'actor'>('created_at');
+  const [auditSortDir, setAuditSortDir] = useState<'asc' | 'desc'>('desc');
+  const [auditQuickSearch, setAuditQuickSearch] = useState('');
+  const [auditPage, setAuditPage] = useState(1);
+  const [expandedAuditLogId, setExpandedAuditLogId] = useState<string | null>(null);
+  const [tenantProfileSectionsOpen, setTenantProfileSectionsOpen] = useState<Record<TenantProfileSection, boolean>>(
+    DEFAULT_TENANT_PROFILE_SECTIONS_OPEN,
+  );
 
   const formatAmountForInput = (amount: number): string => {
     if (!Number.isFinite(amount)) {
       return '';
     }
     return Number.isInteger(amount) ? String(amount) : amount.toFixed(2);
+  };
+
+  const branchChargeSummary = (sedesTotalesRaw: number, facturablesRaw: number): string => {
+    const sedesTotales = Math.max(1, Number(sedesTotalesRaw) || 1);
+    const facturables = Math.max(0, Number(facturablesRaw) || 0);
+    return `${sedesTotales} total | ${facturables} adicional${facturables === 1 ? '' : 'es'} cobrada${
+      facturables === 1 ? '' : 's'
+    } (desde la 3.ª)`;
   };
 
   const subscriptionStatusLabel = (status: string): string => {
@@ -146,6 +205,18 @@ export default function SaaSBackoffice() {
     return labels[status] || status;
   };
 
+  const isPendingDianFactusError = (msg: string | null | undefined): boolean => {
+    const s = (msg || '').toLowerCase();
+    return s.includes('pendiente') && s.includes('dian');
+  };
+
+  const effectiveFeStatus = (status: string | null | undefined, err: string | null | undefined): string => {
+    if ((status || '') === 'error' && isPendingDianFactusError(err)) {
+      return 'pending_dian';
+    }
+    return status || '';
+  };
+
   const feLicenciaStatusLabel = (s: string | null | undefined): string => {
     if (s == null || s === '') {
       return 'Pendiente';
@@ -154,6 +225,7 @@ export default function SaaSBackoffice() {
       ok: 'Emitida',
       error: 'Error',
       skipped: 'Omitida',
+      pending_dian: 'Pendiente DIAN (Factus)',
     };
     return labels[s] || s;
   };
@@ -183,7 +255,7 @@ export default function SaaSBackoffice() {
     if (status === 'ok') {
       return 'badge badge-success';
     }
-    if (status === 'error' || status === 'skipped') {
+    if (status === 'error' || status === 'skipped' || status === 'pending_dian') {
       return 'badge badge-warning';
     }
     if (status === 'resuelto' || status === 'cerrado') {
@@ -201,6 +273,57 @@ export default function SaaSBackoffice() {
     };
     return labels[status] || status;
   };
+
+  const supportPriorityBadgeClass = (priority: string): string => {
+    if (priority === 'critica') return 'badge badge-danger';
+    if (priority === 'alta') return 'badge badge-warning';
+    if (priority === 'media') return 'badge badge-info';
+    return 'badge bg-slate-100 text-slate-700';
+  };
+
+  const toggleTenantProfileSection = (section: TenantProfileSection) => {
+    setTenantProfileSectionsOpen((prev) => ({ ...prev, [section]: !prev[section] }));
+  };
+
+  const openAllTenantProfileSections = () => {
+    setTenantProfileSectionsOpen({
+      brandAccess: true,
+      sedes: true,
+      factus: true,
+      billing: true,
+      payments: true,
+      users: true,
+    });
+  };
+
+  const collapseAllTenantProfileSections = () => {
+    setTenantProfileSectionsOpen({
+      brandAccess: true,
+      sedes: false,
+      factus: false,
+      billing: false,
+      payments: false,
+      users: false,
+    });
+  };
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+    window.localStorage.setItem(TABLE_DENSITY_STORAGE_KEY, tableDensity);
+  }, [tableDensity]);
+
+  useEffect(() => {
+    return () => {
+      if (copyResetTimeoutRef.current) {
+        clearTimeout(copyResetTimeoutRef.current);
+      }
+      if (resendResetTimeoutRef.current) {
+        clearTimeout(resendResetTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const LoadingBlock = ({ lines = 3 }: { lines?: number }) => (
     <div className="space-y-2 py-2">
@@ -250,10 +373,22 @@ export default function SaaSBackoffice() {
   });
 
   const supportTicketsQuery = useQuery({
-    queryKey: ['saas-support-tickets', supportTenantFilter, supportStatusFilter, supportPriorityFilter],
+    queryKey: [
+      'saas-support-tickets',
+      supportTenantFilter,
+      supportStatusFilter,
+      supportPriorityFilter,
+      supportQuickSearch,
+      supportPage,
+      supportSortBy,
+      supportSortDir,
+    ],
     queryFn: async () => {
       const params = new URLSearchParams();
-      params.append('limit', '100');
+      params.append('page', String(supportPage));
+      params.append('page_size', '15');
+      params.append('sort_by', supportSortBy);
+      params.append('sort_dir', supportSortDir);
       if (supportTenantFilter) {
         params.append('tenant_slug', supportTenantFilter);
       }
@@ -263,7 +398,10 @@ export default function SaaSBackoffice() {
       if (supportPriorityFilter) {
         params.append('priority', supportPriorityFilter);
       }
-      const response = await apiClient.get<SaaSSupportTicketItem[]>(`/saas/auth/support/tickets?${params.toString()}`);
+      if (supportQuickSearch.trim()) {
+        params.append('q', supportQuickSearch.trim());
+      }
+      const response = await apiClient.get<SaaSSupportTicketListResponse>(`/saas/auth/support/tickets?${params.toString()}`);
       return response.data;
     },
     enabled: activeModule === 'soporte' && canReadSupport,
@@ -295,8 +433,47 @@ export default function SaaSBackoffice() {
       setTenantLogoUrl('');
       setTenantLogoFile(null);
       setTenantLogoError('');
+      setTenantCoreError('');
+      setTenantProfileSectionsOpen(DEFAULT_TENANT_PROFILE_SECTIONS_OPEN);
     }
   }, [selectedTenantId]);
+
+  useEffect(() => {
+    const profile = tenantProfileQuery.data;
+    if (!profile) {
+      return;
+    }
+    setTenantCoreNombre(profile.nombre || '');
+    setTenantCoreNombreComercial(profile.nombre_comercial || '');
+    setTenantCoreNit(profile.nit_cda || '');
+    setTenantCoreCorreo(profile.correo_electronico || '');
+    setTenantCoreRepresentante(profile.nombre_representante || '');
+    setTenantCoreCelular(profile.celular || '');
+    setTenantCoreError('');
+    setTenantCoreEditMode(false);
+  }, [tenantProfileQuery.data]);
+
+  useEffect(() => {
+    setCheckoutSessionsPage(1);
+  }, [
+    checkoutSessionStatusFilter,
+    checkoutSessionTenantId,
+    checkoutSessionFeFilter,
+    checkoutSessionQuickSearch,
+    checkoutSessionsViewTab,
+    checkoutSessionsSortBy,
+    checkoutSessionsSortDir,
+  ]);
+
+  useEffect(() => {
+    setSupportPage(1);
+    setExpandedSupportTicketId(null);
+  }, [supportTenantFilter, supportStatusFilter, supportPriorityFilter, supportQuickSearch, supportSortBy, supportSortDir]);
+
+  useEffect(() => {
+    setAuditPage(1);
+    setExpandedAuditLogId(null);
+  }, [auditActionFilter, auditActorFilter, auditTenantFilter, auditDateFrom, auditDateTo, auditQuickSearch, auditSortBy, auditSortDir]);
 
   const tenantLogoMutation = useMutation({
     mutationFn: async () => {
@@ -362,6 +539,39 @@ export default function SaaSBackoffice() {
     },
   });
 
+  const tenantCoreMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedTenantId) {
+        throw new Error('Sin tenant seleccionado');
+      }
+      return patchSaasTenantCoreData(selectedTenantId, {
+        nombre: tenantCoreNombre.trim() || null,
+        nombre_comercial: tenantCoreNombreComercial.trim() || null,
+        nit_cda: tenantCoreNit.trim() || null,
+        correo_electronico: tenantCoreCorreo.trim() || null,
+        nombre_representante: tenantCoreRepresentante.trim() || null,
+        celular: tenantCoreCelular.trim() || null,
+      });
+    },
+    onSuccess: () => {
+      setTenantCoreError('');
+      setTenantCoreEditMode(false);
+      queryClient.invalidateQueries({ queryKey: ['saas-tenant-profile', selectedTenantId] });
+      queryClient.invalidateQueries({ queryKey: ['saas-tenants-list'] });
+    },
+    onError: (err: unknown) => {
+      const detail =
+        typeof err === 'object' && err !== null && 'response' in err
+          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : undefined;
+      if (err instanceof Error && err.message && !detail) {
+        setTenantCoreError(err.message);
+        return;
+      }
+      setTenantCoreError(typeof detail === 'string' ? detail : 'No se pudo actualizar los datos del tenant.');
+    },
+  });
+
   const billingOverviewQuery = useQuery({
     queryKey: ['saas-billing-overview'],
     queryFn: async () => {
@@ -374,13 +584,22 @@ export default function SaaSBackoffice() {
   const checkoutSessionsQuery = useQuery({
     queryKey: [
       'saas-billing-checkout-sessions',
+      checkoutSessionsPage,
+      checkoutSessionsSortBy,
+      checkoutSessionsSortDir,
+      checkoutSessionsViewTab,
+      checkoutSessionQuickSearch,
       checkoutSessionStatusFilter,
       checkoutSessionTenantId,
       checkoutSessionFeFilter,
     ],
     queryFn: async () => {
       const params = new URLSearchParams();
-      params.set('limit', '100');
+      params.set('page', String(checkoutSessionsPage));
+      params.set('page_size', '20');
+      params.set('view_tab', checkoutSessionsViewTab);
+      params.set('sort_by', checkoutSessionsSortBy);
+      params.set('sort_dir', checkoutSessionsSortDir);
       if (checkoutSessionStatusFilter) {
         params.set('status', checkoutSessionStatusFilter);
       }
@@ -390,7 +609,10 @@ export default function SaaSBackoffice() {
       if (checkoutSessionFeFilter) {
         params.set('fe_status', checkoutSessionFeFilter);
       }
-      const response = await apiClient.get<SaaSCheckoutSessionItem[]>(
+      if (checkoutSessionQuickSearch.trim()) {
+        params.set('q', checkoutSessionQuickSearch.trim());
+      }
+      const response = await apiClient.get<SaaSCheckoutSessionListResponse>(
         `/saas/auth/billing/checkout-sessions?${params.toString()}`,
       );
       return response.data;
@@ -398,8 +620,39 @@ export default function SaaSBackoffice() {
     enabled: activeModule === 'facturacion',
   });
 
-  const downloadCheckoutSessionsCsv = () => {
-    const rows = checkoutSessionsQuery.data;
+  const saasFactusIssuerConfigQuery = useQuery({
+    queryKey: ['saas-factus-issuer-config'],
+    queryFn: async () => {
+      const response = await apiClient.get<SaaSFactusIssuerConfig>('/saas/auth/billing/saas-factus/config');
+      return response.data;
+    },
+    enabled: activeModule === 'facturacion',
+  });
+
+  const saasFactusIssuerTestMutation = useMutation({
+    mutationFn: async () => {
+      const response = await apiClient.post<SaaSFactusIssuerTestResult>('/saas/auth/billing/saas-factus/test-connection');
+      return response.data;
+    },
+    onSuccess: (data) => {
+      if (data.ok) {
+        setBillingActionError('');
+        setBillingActionSuccess(
+          `${data.message} (${data.environment}${typeof data.numbering_ranges_found === 'number' ? `, rangos: ${data.numbering_ranges_found}` : ''})`,
+        );
+      } else {
+        setBillingActionSuccess('');
+        setBillingActionError(data.message);
+      }
+    },
+    onError: (err: any) => {
+      setBillingActionSuccess('');
+      setBillingActionError(err?.response?.data?.detail || 'No fue posible probar la conexión Factus SaaS.');
+    },
+  });
+
+  const downloadCheckoutSessionsCsv = (rowsOverride?: SaaSCheckoutSessionItem[]) => {
+    const rows = rowsOverride ?? checkoutSessionsQuery.data?.items;
     if (!rows?.length) {
       return;
     }
@@ -443,6 +696,31 @@ export default function SaaSBackoffice() {
     const link = document.createElement('a');
     link.href = url;
     link.setAttribute('download', `checkout_sesiones_${new Date().toISOString().slice(0, 10)}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.URL.revokeObjectURL(url);
+  };
+
+  const downloadCheckoutSessionsCsvServer = async () => {
+    const params = new URLSearchParams();
+    params.set('view_tab', checkoutSessionsViewTab);
+    params.set('sort_by', checkoutSessionsSortBy);
+    params.set('sort_dir', checkoutSessionsSortDir);
+    params.set('max_rows', '5000');
+    if (checkoutSessionTenantId) params.set('tenant_id', checkoutSessionTenantId);
+    if (checkoutSessionStatusFilter) params.set('status', checkoutSessionStatusFilter);
+    if (checkoutSessionFeFilter) params.set('fe_status', checkoutSessionFeFilter);
+    if (checkoutSessionQuickSearch.trim()) params.set('q', checkoutSessionQuickSearch.trim());
+
+    const response = await apiClient.get(`/saas/auth/billing/checkout-sessions/export?${params.toString()}`, {
+      responseType: 'blob',
+    });
+    const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', `checkout_sesiones_filtradas_${new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-')}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -513,10 +791,24 @@ export default function SaaSBackoffice() {
   });
 
   const auditLogsQuery = useQuery({
-    queryKey: ['saas-audit-logs', auditActionFilter, auditActorFilter, auditTenantFilter, auditDateFrom, auditDateTo],
+    queryKey: [
+      'saas-audit-logs',
+      auditActionFilter,
+      auditActorFilter,
+      auditTenantFilter,
+      auditDateFrom,
+      auditDateTo,
+      auditQuickSearch,
+      auditPage,
+      auditSortBy,
+      auditSortDir,
+    ],
     queryFn: async () => {
       const params = new URLSearchParams();
-      params.append('limit', '100');
+      params.append('page', String(auditPage));
+      params.append('page_size', '20');
+      params.append('sort_by', auditSortBy);
+      params.append('sort_dir', auditSortDir);
       if (auditActionFilter) {
         params.append('action', auditActionFilter);
       }
@@ -532,7 +824,10 @@ export default function SaaSBackoffice() {
       if (auditDateTo) {
         params.append('date_to', auditDateTo);
       }
-      const response = await apiClient.get<SaaSAuditLogItem[]>(`/saas/auth/audit-logs?${params.toString()}`);
+      if (auditQuickSearch.trim()) {
+        params.append('q', auditQuickSearch.trim());
+      }
+      const response = await apiClient.get<SaaSAuditLogListResponse>(`/saas/auth/audit-logs?${params.toString()}`);
       return response.data;
     },
     enabled: activeModule === 'auditoria',
@@ -687,7 +982,10 @@ export default function SaaSBackoffice() {
       setBillingActionError('');
       setBillingActionSuccess('Recibo reenviado correctamente al correo del CDA.');
       setResentPaymentLogId(resendReceiptMutation.variables || null);
-      setTimeout(() => {
+      if (resendResetTimeoutRef.current) {
+        clearTimeout(resendResetTimeoutRef.current);
+      }
+      resendResetTimeoutRef.current = setTimeout(() => {
         setResentPaymentLogId((current) => (current === resendReceiptMutation.variables ? null : current));
       }, 2500);
     },
@@ -725,7 +1023,10 @@ export default function SaaSBackoffice() {
     try {
       await navigator.clipboard.writeText(loginUrl);
       setCopiedTenantId(tenantId);
-      setTimeout(() => setCopiedTenantId(null), 2000);
+      if (copyResetTimeoutRef.current) {
+        clearTimeout(copyResetTimeoutRef.current);
+      }
+      copyResetTimeoutRef.current = setTimeout(() => setCopiedTenantId(null), 2000);
     } catch (_error) {
       // Silencioso para no bloquear UX.
     }
@@ -763,7 +1064,9 @@ export default function SaaSBackoffice() {
 
   const handleExportAuditCsv = async () => {
     const params = new URLSearchParams();
-    params.append('limit', '200');
+    params.append('max_rows', '5000');
+    params.append('sort_by', auditSortBy);
+    params.append('sort_dir', auditSortDir);
     if (auditActionFilter) {
       params.append('action', auditActionFilter);
     }
@@ -778,6 +1081,9 @@ export default function SaaSBackoffice() {
     }
     if (auditDateTo) {
       params.append('date_to', auditDateTo);
+    }
+    if (auditQuickSearch.trim()) {
+      params.append('q', auditQuickSearch.trim());
     }
 
     const response = await apiClient.get(`/saas/auth/audit-logs/export?${params.toString()}`, {
@@ -828,9 +1134,9 @@ export default function SaaSBackoffice() {
             )}
             {permissionsQuery.data && (
               <div className="flex flex-wrap gap-2">
-                {permissionsQuery.data.permissions.map((permission) => (
+                {permissionsQuery.data.permissions.map((permission, idx) => (
                   <span
-                    key={permission}
+                    key={`${permission}-${idx}`}
                     className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-700"
                   >
                     {permission}
@@ -846,7 +1152,7 @@ export default function SaaSBackoffice() {
     if (activeModule === 'tenants') {
       return (
         <div className="space-y-6">
-          <div className="section-card p-6">
+          <div className="section-card p-6 ring-1 ring-indigo-100/70">
             <BackofficeSectionHeading
               className="mb-4"
               icon={Building2}
@@ -869,7 +1175,6 @@ export default function SaaSBackoffice() {
                   <thead>
                     <tr>
                       <th>CDA</th>
-                      <th>Slug</th>
                       <th>Contacto</th>
                       <th>Plan</th>
                       <th>Sucursales</th>
@@ -881,13 +1186,17 @@ export default function SaaSBackoffice() {
                   <tbody>
                     {tenantsQuery.data.map((tenant) => (
                       <tr key={tenant.id}>
-                        <td className="font-semibold uppercase tracking-tight text-slate-900">{tenant.nombre_comercial}</td>
-                        <td>/{tenant.slug}</td>
-                        <td>{tenant.correo_electronico || '-'}</td>
-                        <td className="uppercase">{tenant.plan_actual}</td>
                         <td>
-                          {tenant.sedes_totales} total / {tenant.sucursales_facturables} fact.
+                          <p className="font-semibold uppercase tracking-tight text-slate-900">{tenant.nombre_comercial}</p>
+                          <p className="mt-0.5 text-xs text-slate-500">/{tenant.slug}</p>
                         </td>
+                        <td className="text-slate-700">{tenant.correo_electronico || '-'}</td>
+                        <td>
+                          <span className="inline-flex rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold uppercase text-indigo-800">
+                            {tenant.plan_actual}
+                          </span>
+                        </td>
+                        <td>{branchChargeSummary(tenant.sedes_totales, tenant.sucursales_facturables)}</td>
                         <td>
                           <span className={statusBadgeClass(tenant.subscription_status)}>
                             {subscriptionStatusLabel(tenant.subscription_status)}
@@ -901,7 +1210,7 @@ export default function SaaSBackoffice() {
                             <button
                               type="button"
                               onClick={() => openTenantSheet(tenant)}
-                              className="btn-chip"
+                              className="btn-chip border-brand-200 bg-brand-50 text-brand-800 hover:bg-brand-100"
                             >
                               Abrir perfil
                             </button>
@@ -1066,6 +1375,13 @@ export default function SaaSBackoffice() {
     }
 
     if (activeModule === 'facturacion') {
+      const checkoutList = checkoutSessionsQuery.data;
+      const checkoutRowsPage = checkoutList?.items ?? [];
+      const checkoutTabCounts = checkoutList?.counts ?? { all: 0, pending: 0, paid: 0, fe_issue: 0 };
+      const checkoutTotalPages = checkoutList?.total_pages ?? 1;
+      const safeCheckoutPage = checkoutList?.page ?? checkoutSessionsPage;
+      const checkoutFilteredTotal = checkoutList?.total ?? 0;
+
       return (
         <div className="space-y-6">
           {billingActionError && (
@@ -1086,10 +1402,126 @@ export default function SaaSBackoffice() {
             />
             <p className="text-xs text-slate-500 mb-3">
               Filtre por tenant, estado del pago (ePayco) o estado de la factura de licencia (DIAN / Factus SaaS). El CSV
-              refleja la vista actual (hasta 100 filas con los mismos filtros).
+              refleja la página visible con los filtros activos.
             </p>
-            <div className="flex flex-col gap-3 mb-4 lg:flex-row lg:items-end lg:justify-between">
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 flex-1">
+            <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4">
+              <p className="text-sm font-semibold text-slate-900">Configuración Factus emisor SaaS (PROMETHEUS)</p>
+              <p className="mt-1 text-xs text-slate-600">
+                Este bloque corresponde a la factura de licencia de CDASOFT (emisor SaaS). Es independiente del Factus
+                que cada tenant configura para su operación diaria.
+              </p>
+              {saasFactusIssuerConfigQuery.isLoading && (
+                <p className="mt-3 text-xs text-slate-500">Cargando estado de configuración…</p>
+              )}
+              {saasFactusIssuerConfigQuery.isError && (
+                <p className="mt-3 text-xs text-red-600">No fue posible consultar la configuración Factus SaaS.</p>
+              )}
+              {saasFactusIssuerConfigQuery.data && (
+                <div className="mt-3 space-y-2 text-xs text-slate-700">
+                  <p>
+                    Estado:{' '}
+                    <span
+                      className={
+                        saasFactusIssuerConfigQuery.data.configured
+                          ? 'font-semibold text-emerald-700'
+                          : 'font-semibold text-amber-700'
+                      }
+                    >
+                      {saasFactusIssuerConfigQuery.data.configured ? 'Configurado' : 'Incompleto'}
+                    </span>
+                    {' · '}Ambiente activo:{' '}
+                    <span className="font-semibold">{saasFactusIssuerConfigQuery.data.environment}</span>
+                    {' · '}Rango:{' '}
+                    <span className="font-semibold">
+                      {saasFactusIssuerConfigQuery.data.numbering_range_id ?? 'sin definir'}
+                    </span>
+                  </p>
+                  <p>
+                    Emisor: <strong>{saasFactusIssuerConfigQuery.data.issuer_name}</strong>{' '}
+                    {saasFactusIssuerConfigQuery.data.issuer_email ? `(${saasFactusIssuerConfigQuery.data.issuer_email})` : ''}
+                  </p>
+                  <p className="break-all">
+                    Base URL Factus: <code className="bg-slate-100 px-1 rounded">{saasFactusIssuerConfigQuery.data.base_url}</code>
+                  </p>
+                  <p>
+                    Client ID: <code>{saasFactusIssuerConfigQuery.data.client_id_hint ?? '—'}</code>
+                    {' · '}API user: <code>{saasFactusIssuerConfigQuery.data.api_username_hint ?? '—'}</code>
+                  </p>
+                  {!saasFactusIssuerConfigQuery.data.configured && (
+                    <p className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-amber-900">
+                      Faltan variables en `.env`: {saasFactusIssuerConfigQuery.data.missing_fields.join(', ')}
+                    </p>
+                  )}
+                  <div className="pt-1 flex flex-wrap items-center gap-2">
+                    <button
+                      type="button"
+                      disabled={!canRetrySaaSFe || saasFactusIssuerTestMutation.isLoading}
+                      onClick={() => {
+                        setBillingActionError('');
+                        setBillingActionSuccess('');
+                        saasFactusIssuerTestMutation.mutate();
+                      }}
+                      className="btn-chip"
+                    >
+                      {saasFactusIssuerTestMutation.isLoading ? 'Probando…' : 'Probar conexión Factus SaaS'}
+                    </button>
+                    {!canRetrySaaSFe && (
+                      <span className="text-slate-500">
+                        Solo owner/finanzas pueden ejecutar la prueba de conexión.
+                      </span>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className="sticky top-[88px] z-10 mb-4 rounded-xl border border-slate-200 bg-white/95 p-3 shadow-sm backdrop-blur-sm">
+              <div className="mb-2 flex items-center justify-between">
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Filtros de sesiones</p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCheckoutSessionTenantId('');
+                    setCheckoutSessionStatusFilter('');
+                    setCheckoutSessionFeFilter('');
+                    setCheckoutSessionQuickSearch('');
+                    setCheckoutSessionsViewTab('all');
+                    setCheckoutSessionsSortBy('created_at');
+                    setCheckoutSessionsSortDir('desc');
+                    setCheckoutSessionsPage(1);
+                    setExpandedCheckoutSessionId(null);
+                  }}
+                  className="btn-chip py-1 text-[11px]"
+                >
+                  Limpiar filtros
+                </button>
+              </div>
+              <div className="mb-3 flex flex-wrap items-center gap-2">
+                {[
+                  { id: 'all' as CheckoutSessionsViewTab, label: 'Todas', count: checkoutTabCounts.all },
+                  { id: 'pending' as CheckoutSessionsViewTab, label: 'Pendientes', count: checkoutTabCounts.pending },
+                  { id: 'paid' as CheckoutSessionsViewTab, label: 'Pagadas', count: checkoutTabCounts.paid },
+                  { id: 'fe_issue' as CheckoutSessionsViewTab, label: 'FE con novedad', count: checkoutTabCounts.fe_issue },
+                ].map((tab) => (
+                  <button
+                    key={tab.id}
+                    type="button"
+                    onClick={() => {
+                      setCheckoutSessionsViewTab(tab.id);
+                      setCheckoutSessionsPage(1);
+                    }}
+                    className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                      checkoutSessionsViewTab === tab.id
+                        ? 'border-slate-900 bg-slate-900 text-white'
+                        : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-100'
+                    }`}
+                  >
+                    <span>{tab.label}</span>
+                    <span className={`${checkoutSessionsViewTab === tab.id ? 'text-white/90' : 'text-slate-500'}`}>{tab.count}</span>
+                  </button>
+                ))}
+              </div>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-6 gap-3 flex-1">
                 <select
                   className="input-corporate"
                   value={checkoutSessionTenantId}
@@ -1122,107 +1554,214 @@ export default function SaaSBackoffice() {
                   <option value="error">Error de emisión</option>
                   <option value="skipped">Omitida (sin Factus, etc.)</option>
                 </select>
+                <input
+                  type="text"
+                  value={checkoutSessionQuickSearch}
+                  onChange={(e) => setCheckoutSessionQuickSearch(e.target.value)}
+                  placeholder="Buscar tenant, sesión, ref ePayco o documento"
+                  className="input-corporate"
+                />
+                <select
+                  className="input-corporate"
+                  value={checkoutSessionsSortBy}
+                  onChange={(e) =>
+                    setCheckoutSessionsSortBy(
+                      e.target.value as 'created_at' | 'total_cop' | 'status' | 'tenant'
+                    )
+                  }
+                >
+                  <option value="created_at">Ordenar por fecha</option>
+                  <option value="total_cop">Ordenar por total</option>
+                  <option value="status">Ordenar por estado</option>
+                  <option value="tenant">Ordenar por tenant</option>
+                </select>
+                <select
+                  className="input-corporate"
+                  value={checkoutSessionsSortDir}
+                  onChange={(e) => setCheckoutSessionsSortDir(e.target.value as 'asc' | 'desc')}
+                >
+                  <option value="desc">Descendente</option>
+                  <option value="asc">Ascendente</option>
+                </select>
               </div>
               <button
                 type="button"
-                onClick={downloadCheckoutSessionsCsv}
-                disabled={!checkoutSessionsQuery.data?.length}
+                onClick={() => downloadCheckoutSessionsCsv(checkoutRowsPage)}
+                disabled={!checkoutRowsPage.length}
                 className="btn-chip flex items-center justify-center gap-2 self-start lg:self-auto whitespace-nowrap"
               >
                 <Download className="w-4 h-4" />
-                Descargar CSV
+                CSV página
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  void downloadCheckoutSessionsCsvServer().catch(() => {
+                    setBillingActionError('No fue posible descargar el CSV completo.');
+                  });
+                }}
+                className="btn-chip flex items-center justify-center gap-2 self-start lg:self-auto whitespace-nowrap"
+              >
+                <Download className="w-4 h-4" />
+                CSV completo (filtros)
+              </button>
+              </div>
             </div>
             {checkoutSessionsQuery.isLoading && <LoadingBlock lines={4} />}
             {checkoutSessionsQuery.isError && (
               <p className="text-sm text-red-600">No fue posible cargar las sesiones de checkout.</p>
             )}
             {checkoutSessionsQuery.data &&
-              (checkoutSessionsQuery.data.length === 0 ? (
-                <EmptyState message="No hay sesiones de pago de suscripción registradas." />
+              (checkoutFilteredTotal === 0 ? (
+                <EmptyState message="No hay sesiones para los filtros, pestaña y búsqueda seleccionados." />
               ) : (
-                <div className="table-shell">
-                  <table className="table-enterprise text-sm">
-                    <thead>
-                      <tr>
-                        <th>Fecha</th>
-                        <th>Tenant</th>
-                        <th>Plan</th>
-                        <th>Total</th>
-                        <th>Sesión</th>
-                        <th>Estado pago</th>
-                        <th>FE licencia</th>
-                        <th>Comprobante</th>
-                        <th className="table-enterprise-col-actions">Acciones</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {checkoutSessionsQuery.data.map((row) => {
-                        const feSt = row.saas_fe_status || '';
-                        const feComplete = row.saas_fe_status === 'ok' && Boolean(row.numero_documento);
-                        const showRetry = canRetrySaaSFe && row.status === 'paid' && !feComplete;
-                        return (
-                          <tr key={row.session_id}>
-                            <td>{new Date(row.created_at).toLocaleString()}</td>
-                            <td className="font-medium text-slate-900">{row.tenant_nombre}</td>
-                            <td>{row.plan_code}</td>
-                            <td>{formatCurrency(row.total_cop)}</td>
-                            <td
-                              className="text-xs text-slate-500 font-mono max-w-[128px] truncate"
-                              title={row.session_id}
-                            >
-                              {row.session_id}
-                            </td>
-                            <td>
-                              <span className={statusBadgeClass(row.status)}>{row.status}</span>
-                            </td>
-                            <td>
-                              <span
-                                className={statusBadgeClass(feSt || 'pending')}
-                                title={row.saas_fe_error || undefined}
-                              >
-                                {feLicenciaStatusLabel(row.saas_fe_status)}
-                              </span>
-                            </td>
-                            <td>
-                              {row.public_url ? (
-                                <a
-                                  href={row.public_url}
-                                  target="_blank"
-                                  rel="noreferrer"
-                                  className="text-blue-600 hover:underline text-xs"
+                <>
+                  <div className="table-shell">
+                    <table className="table-enterprise text-sm">
+                      <thead>
+                        <tr>
+                          <th className="w-[86px]">Detalle</th>
+                          <th>Fecha</th>
+                          <th>Tenant</th>
+                          <th>Plan</th>
+                          <th>Total</th>
+                          <th>Sesión</th>
+                          <th>Estado pago</th>
+                          <th>FE licencia</th>
+                          <th>Comprobante</th>
+                          <th className="table-enterprise-col-actions">Acciones</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {checkoutRowsPage.map((row) => {
+                          const feSt = effectiveFeStatus(row.saas_fe_status, row.saas_fe_error);
+                          const feComplete = row.saas_fe_status === 'ok' && Boolean(row.numero_documento);
+                          const showRetry = canRetrySaaSFe && row.status === 'paid' && !feComplete;
+                          const isExpanded = expandedCheckoutSessionId === row.session_id;
+                          return (
+                            <Fragment key={row.session_id}>
+                              <tr>
+                                <td>
+                                  <button
+                                    type="button"
+                                    className="btn-chip py-1 text-[11px]"
+                                    onClick={() =>
+                                      setExpandedCheckoutSessionId((prev) => (prev === row.session_id ? null : row.session_id))
+                                    }
+                                  >
+                                    {isExpanded ? 'Ocultar' : 'Ver'}
+                                  </button>
+                                </td>
+                                <td>{new Date(row.created_at).toLocaleString()}</td>
+                                <td className="font-medium text-slate-900">{row.tenant_nombre}</td>
+                                <td>{row.plan_code}</td>
+                                <td>{formatCurrency(row.total_cop)}</td>
+                                <td
+                                  className="text-xs text-slate-500 font-mono max-w-[128px] truncate"
+                                  title={row.session_id}
                                 >
-                                  Abrir
-                                </a>
-                              ) : (
-                                <span className="text-xs text-slate-600">{row.numero_documento || '—'}</span>
+                                  {row.session_id}
+                                </td>
+                                <td>
+                                  <span className={statusBadgeClass(row.status)}>{row.status === 'paid' ? 'Pagada' : 'Pendiente'}</span>
+                                </td>
+                                <td>
+                                  <span
+                                    className={statusBadgeClass(feSt || 'pending')}
+                                    title={row.saas_fe_error || undefined}
+                                  >
+                                    {feLicenciaStatusLabel(feSt)}
+                                  </span>
+                                </td>
+                                <td>
+                                  {row.public_url ? (
+                                    <a
+                                      href={row.public_url}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="text-blue-600 hover:underline text-xs"
+                                    >
+                                      Abrir
+                                    </a>
+                                  ) : (
+                                    <span className="text-xs text-slate-600">{row.numero_documento || '—'}</span>
+                                  )}
+                                </td>
+                                <td className="table-enterprise-col-actions">
+                                  {showRetry && (
+                                    <button
+                                      type="button"
+                                      className="btn-chip"
+                                      disabled={retrySaaSCheckoutFeMutation.isLoading}
+                                      onClick={() => {
+                                        setBillingActionError('');
+                                        setBillingActionSuccess('');
+                                        retrySaaSCheckoutFeMutation.mutate(row.session_id);
+                                      }}
+                                    >
+                                      {retrySaaSCheckoutFeMutation.isLoading &&
+                                      retrySaaSCheckoutFeMutation.variables === row.session_id
+                                        ? 'Reintentando…'
+                                        : 'Reintentar FE'}
+                                    </button>
+                                  )}
+                                </td>
+                              </tr>
+                              {isExpanded && (
+                                <tr>
+                                  <td colSpan={10} className="bg-slate-50/70">
+                                    <div className="grid grid-cols-1 gap-2 p-3 text-xs text-slate-700 md:grid-cols-3">
+                                      <p>
+                                        <span className="font-semibold text-slate-900">Tenant slug:</span> /{row.tenant_slug}
+                                      </p>
+                                      <p>
+                                        <span className="font-semibold text-slate-900">Ref ePayco:</span> {row.epayco_ref || '—'}
+                                      </p>
+                                      <p>
+                                        <span className="font-semibold text-slate-900">Documento FE:</span> {row.numero_documento || '—'}
+                                      </p>
+                                      <p className="md:col-span-3 break-words">
+                                        <span className="font-semibold text-slate-900">Detalle FE:</span>{' '}
+                                        {row.saas_fe_error || 'Sin novedad reportada'}
+                                      </p>
+                                    </div>
+                                  </td>
+                                </tr>
                               )}
-                            </td>
-                            <td className="table-enterprise-col-actions">
-                              {showRetry && (
-                                <button
-                                  type="button"
-                                  className="btn-chip"
-                                  disabled={retrySaaSCheckoutFeMutation.isLoading}
-                                  onClick={() => {
-                                    setBillingActionError('');
-                                    setBillingActionSuccess('');
-                                    retrySaaSCheckoutFeMutation.mutate(row.session_id);
-                                  }}
-                                >
-                                  {retrySaaSCheckoutFeMutation.isLoading &&
-                                  retrySaaSCheckoutFeMutation.variables === row.session_id
-                                    ? 'Reintentando…'
-                                    : 'Reintentar FE'}
-                                </button>
-                              )}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                            </Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="mt-3 flex flex-col gap-2 text-xs text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+                    <p>
+                      Mostrando {checkoutRowsPage.length} de {checkoutFilteredTotal} registro(s)
+                    </p>
+                    <div className="inline-flex items-center gap-2">
+                      <button
+                        type="button"
+                        className="btn-chip py-1 text-[11px]"
+                        disabled={safeCheckoutPage <= 1}
+                        onClick={() => setCheckoutSessionsPage((p) => Math.max(1, p - 1))}
+                      >
+                        Anterior
+                      </button>
+                      <span className="rounded-md border border-slate-200 bg-white px-2 py-1 font-semibold text-slate-700">
+                        Página {safeCheckoutPage} / {checkoutTotalPages}
+                      </span>
+                      <button
+                        type="button"
+                        className="btn-chip py-1 text-[11px]"
+                        disabled={safeCheckoutPage >= checkoutTotalPages}
+                        onClick={() => setCheckoutSessionsPage((p) => Math.min(checkoutTotalPages, p + 1))}
+                      >
+                        Siguiente
+                      </button>
+                    </div>
+                  </div>
+                </>
               ))}
             {!canRetrySaaSFe && (
               <p className="text-xs text-slate-500 mt-3">
@@ -1265,9 +1804,7 @@ export default function SaaSBackoffice() {
                           <tr key={item.tenant_id}>
                             <td className="font-semibold text-slate-900">{item.tenant_nombre}</td>
                             <td>{item.plan_label}</td>
-                            <td>
-                              {item.sedes_totales} / {item.sucursales_facturables} fact.
-                            </td>
+                            <td>{branchChargeSummary(item.sedes_totales, item.sucursales_facturables)}</td>
                             <td>
                               <span className={statusBadgeClass(item.cobro_status)}>{cobroStatusLabel(item.cobro_status)}</span>
                             </td>
@@ -1315,9 +1852,15 @@ export default function SaaSBackoffice() {
     }
 
     if (activeModule === 'soporte') {
+      const supportList = supportTicketsQuery.data;
+      const supportRowsPage = supportList?.items ?? [];
+      const supportFilteredTotal = supportList?.total ?? 0;
+      const supportTotalPages = supportList?.total_pages ?? 1;
+      const supportSafePage = supportList?.page ?? supportPage;
+
       return (
         <div className="space-y-6">
-          <div className="section-card p-6 space-y-4">
+          <div className="section-card p-6 space-y-4 ring-1 ring-cyan-100/70">
             <BackofficeSectionHeading
               icon={LifeBuoy}
               title="Tickets de soporte"
@@ -1336,7 +1879,47 @@ export default function SaaSBackoffice() {
                 Tu rol tiene acceso de lectura a soporte. Solo owner y soporte pueden actualizar tickets.
               </p>
             )}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50/70 p-2 text-xs md:grid-cols-5">
+              <div className="rounded-lg bg-white px-2 py-1.5">
+                <p className="text-slate-500">Total</p>
+                <p className="font-semibold text-slate-900">{supportSummaryQuery.data?.total_tickets ?? '-'}</p>
+              </div>
+              <div className="rounded-lg bg-white px-2 py-1.5">
+                <p className="text-slate-500">Abiertos</p>
+                <p className="font-semibold text-amber-700">{supportSummaryQuery.data?.abiertos ?? '-'}</p>
+              </div>
+              <div className="rounded-lg bg-white px-2 py-1.5">
+                <p className="text-slate-500">En progreso</p>
+                <p className="font-semibold text-cyan-700">{supportSummaryQuery.data?.en_progreso ?? '-'}</p>
+              </div>
+              <div className="rounded-lg bg-white px-2 py-1.5">
+                <p className="text-slate-500">Sin resolver</p>
+                <p className="font-semibold text-rose-700">{supportSummaryQuery.data?.sin_resolver ?? '-'}</p>
+              </div>
+              <div className="rounded-lg bg-white px-2 py-1.5">
+                <p className="text-slate-500">Críticos</p>
+                <p className="font-semibold text-red-700">{supportSummaryQuery.data?.criticos_abiertos ?? '-'}</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setSupportTenantFilter('');
+                  setSupportStatusFilter('');
+                  setSupportPriorityFilter('');
+                  setSupportQuickSearch('');
+                  setSupportSortBy('created_at');
+                  setSupportSortDir('desc');
+                  setSupportPage(1);
+                  setExpandedSupportTicketId(null);
+                }}
+                className="btn-chip py-1 text-[11px]"
+              >
+                Limpiar filtros
+              </button>
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
               <select
                 value={supportTenantFilter}
                 onChange={(e) => setSupportTenantFilter(e.target.value)}
@@ -1371,18 +1954,44 @@ export default function SaaSBackoffice() {
                 <option value="alta">Alta</option>
                 <option value="critica">Crítica</option>
               </select>
+              <select
+                className="input-corporate"
+                value={supportSortBy}
+                onChange={(e) => setSupportSortBy(e.target.value as 'created_at' | 'priority' | 'status' | 'tenant')}
+              >
+                <option value="created_at">Ordenar por fecha</option>
+                <option value="priority">Ordenar por prioridad</option>
+                <option value="status">Ordenar por estado</option>
+                <option value="tenant">Ordenar por tenant</option>
+              </select>
+              <select
+                className="input-corporate"
+                value={supportSortDir}
+                onChange={(e) => setSupportSortDir(e.target.value as 'asc' | 'desc')}
+              >
+                <option value="desc">Descendente</option>
+                <option value="asc">Ascendente</option>
+              </select>
+              <input
+                type="text"
+                value={supportQuickSearch}
+                onChange={(e) => setSupportQuickSearch(e.target.value)}
+                placeholder="Buscar por tenant, asunto, estado, prioridad o asignado"
+                className="input-corporate"
+              />
             </div>
 
             {supportTicketsQuery.isLoading && <LoadingBlock lines={4} />}
             {supportTicketsQuery.isError && <p className="text-sm text-red-600">No fue posible cargar los tickets de soporte.</p>}
             {supportTicketsQuery.data && (
-              supportTicketsQuery.data.length === 0 ? (
+              supportFilteredTotal === 0 ? (
                 <EmptyState message="No hay tickets para los filtros seleccionados." />
               ) : (
                 <div className="table-shell">
                   <table className="table-enterprise">
                     <thead>
                       <tr>
+                        <th className="w-[86px]">Detalle</th>
                         <th>Fecha</th>
                         <th>Tenant</th>
                         <th>Asunto</th>
@@ -1394,56 +2003,128 @@ export default function SaaSBackoffice() {
                       </tr>
                     </thead>
                     <tbody>
-                      {supportTicketsQuery.data.map((ticket) => (
-                        <tr key={ticket.id}>
-                          <td>{new Date(ticket.created_at).toLocaleString()}</td>
-                          <td>{ticket.tenant_nombre}</td>
-                          <td>
-                            <p className="font-semibold text-slate-900">{ticket.title}</p>
-                            <p className="text-xs text-slate-500 mt-0.5">{ticket.description}</p>
-                          </td>
-                          <td className="capitalize">{ticket.priority}</td>
-                          <td>
-                            <span className={statusBadgeClass(ticket.status)}>{supportStatusLabel(ticket.status)}</span>
-                          </td>
-                          <td>{ticket.assigned_to_user_email || '-'}</td>
-                          <td>
-                            {ticket.tenant_response_message ? (
-                              <p className="text-xs text-slate-700">{ticket.tenant_response_message}</p>
-                            ) : (
-                              <span className="text-xs text-slate-400">Pendiente de respuesta</span>
+                      {supportRowsPage.map((ticket) => {
+                        const isExpanded = expandedSupportTicketId === ticket.id;
+                        return (
+                          <Fragment key={ticket.id}>
+                            <tr>
+                              <td>
+                                <button
+                                  type="button"
+                                  className="btn-chip py-1 text-[11px]"
+                                  onClick={() => setExpandedSupportTicketId((prev) => (prev === ticket.id ? null : ticket.id))}
+                                >
+                                  {isExpanded ? 'Ocultar' : 'Ver'}
+                                </button>
+                              </td>
+                              <td>{new Date(ticket.created_at).toLocaleString()}</td>
+                              <td>{ticket.tenant_nombre}</td>
+                              <td>
+                                <p className="font-semibold text-slate-900">{ticket.title}</p>
+                                <p className="mt-0.5 line-clamp-2 text-xs text-slate-500">{ticket.description}</p>
+                              </td>
+                              <td>
+                                <span className={supportPriorityBadgeClass(ticket.priority)}>{ticket.priority}</span>
+                              </td>
+                              <td>
+                                <span className={statusBadgeClass(ticket.status)}>{supportStatusLabel(ticket.status)}</span>
+                              </td>
+                              <td>{ticket.assigned_to_user_email || '-'}</td>
+                              <td>
+                                {ticket.tenant_response_message ? (
+                                  <p className="line-clamp-2 text-xs text-slate-700">{ticket.tenant_response_message}</p>
+                                ) : (
+                                  <span className="text-xs text-slate-400">Pendiente de respuesta</span>
+                                )}
+                              </td>
+                              <td className="table-enterprise-col-actions">
+                                <div className="flex flex-wrap items-center justify-end gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={() => updateSupportTicketMutation.mutate({ ticketId: ticket.id, status: 'en_progreso' })}
+                                    disabled={!canManageSupport || updateSupportTicketMutation.isLoading || ticket.status === 'en_progreso'}
+                                    className="btn-chip"
+                                  >
+                                    En progreso
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      setSupportReplyTicketId(ticket.id);
+                                      setSupportReplyMessage(ticket.tenant_response_message || '');
+                                      setSupportActionError('');
+                                    }}
+                                    disabled={!canManageSupport || updateSupportTicketMutation.isLoading}
+                                    className="btn-chip"
+                                  >
+                                    Responder y resolver
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                            {isExpanded && (
+                              <tr>
+                                <td colSpan={9} className="bg-slate-50/70">
+                                  <div className="grid grid-cols-1 gap-2 p-3 text-xs text-slate-700 md:grid-cols-3">
+                                    <p className="md:col-span-3 break-words">
+                                      <span className="font-semibold text-slate-900">Descripción completa:</span>{' '}
+                                      {ticket.description || '—'}
+                                    </p>
+                                    <p>
+                                      <span className="font-semibold text-slate-900">Creado por:</span>{' '}
+                                      {ticket.created_by_user_email || 'Sistema'}
+                                    </p>
+                                    <p>
+                                      <span className="font-semibold text-slate-900">Asignado:</span>{' '}
+                                      {ticket.assigned_to_user_email || 'Sin asignar'}
+                                    </p>
+                                    <p>
+                                      <span className="font-semibold text-slate-900">SLA:</span>{' '}
+                                      {ticket.sla_due_at ? new Date(ticket.sla_due_at).toLocaleString() : '—'}
+                                    </p>
+                                    <p className="md:col-span-3 break-words">
+                                      <span className="font-semibold text-slate-900">Respuesta al CDA:</span>{' '}
+                                      {ticket.tenant_response_message || 'Pendiente'}
+                                    </p>
+                                  </div>
+                                </td>
+                              </tr>
                             )}
-                          </td>
-                          <td className="table-enterprise-col-actions">
-                            <div className="flex flex-wrap items-center justify-end gap-2">
-                              <button
-                                type="button"
-                                onClick={() => updateSupportTicketMutation.mutate({ ticketId: ticket.id, status: 'en_progreso' })}
-                                disabled={!canManageSupport || updateSupportTicketMutation.isLoading || ticket.status === 'en_progreso'}
-                                className="btn-chip"
-                              >
-                                En progreso
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setSupportReplyTicketId(ticket.id);
-                                  setSupportReplyMessage(ticket.tenant_response_message || '');
-                                  setSupportActionError('');
-                                }}
-                                disabled={!canManageSupport || updateSupportTicketMutation.isLoading}
-                                className="btn-chip"
-                              >
-                                Responder y resolver
-                              </button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
+                          </Fragment>
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
               )
+            )}
+            {supportTicketsQuery.data && supportFilteredTotal > 0 && (
+              <div className="mt-3 flex flex-col gap-2 text-xs text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+                <p>
+                  Mostrando {supportRowsPage.length} de {supportFilteredTotal} ticket(s)
+                </p>
+                <div className="inline-flex items-center gap-2">
+                  <button
+                    type="button"
+                    className="btn-chip py-1 text-[11px]"
+                    disabled={supportSafePage <= 1}
+                    onClick={() => setSupportPage((p) => Math.max(1, p - 1))}
+                  >
+                    Anterior
+                  </button>
+                  <span className="rounded-md border border-slate-200 bg-white px-2 py-1 font-semibold text-slate-700">
+                    Página {supportSafePage} / {supportTotalPages}
+                  </span>
+                  <button
+                    type="button"
+                    className="btn-chip py-1 text-[11px]"
+                    disabled={supportSafePage >= supportTotalPages}
+                    onClick={() => setSupportPage((p) => Math.min(supportTotalPages, p + 1))}
+                  >
+                    Siguiente
+                  </button>
+                </div>
+              </div>
             )}
           </div>
 
@@ -1506,8 +2187,14 @@ export default function SaaSBackoffice() {
     }
 
     if (activeModule === 'auditoria') {
+      const auditList = auditLogsQuery.data;
+      const auditRowsPage = auditList?.items ?? [];
+      const auditFilteredTotal = auditList?.total ?? 0;
+      const auditTotalPages = auditList?.total_pages ?? 1;
+      const auditSafePage = auditList?.page ?? auditPage;
+
       return (
-        <div className="section-card p-6 space-y-4">
+        <div className="section-card p-6 space-y-4 ring-1 ring-amber-100/80">
           <BackofficeSectionHeading
             icon={FileClock}
             title="Auditoría global"
@@ -1518,7 +2205,29 @@ export default function SaaSBackoffice() {
               </button>
             }
           />
-          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+            <div className="mb-2 flex items-center justify-between gap-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Filtros de auditoría</p>
+              <button
+                type="button"
+                onClick={() => {
+                  setAuditActionFilter('');
+                  setAuditActorFilter('');
+                  setAuditTenantFilter('');
+                  setAuditDateFrom('');
+                  setAuditDateTo('');
+                  setAuditQuickSearch('');
+                  setAuditSortBy('created_at');
+                  setAuditSortDir('desc');
+                  setAuditPage(1);
+                  setExpandedAuditLogId(null);
+                }}
+                className="btn-chip py-1 text-[11px]"
+              >
+                Limpiar filtros
+              </button>
+            </div>
+            <div className="grid grid-cols-1 gap-3 md:grid-cols-8">
             <input
               type="text"
               value={auditActionFilter}
@@ -1557,17 +2266,45 @@ export default function SaaSBackoffice() {
               onChange={(e) => setAuditDateTo(e.target.value)}
               className="input-corporate"
             />
+            <input
+              type="text"
+              value={auditQuickSearch}
+              onChange={(e) => setAuditQuickSearch(e.target.value)}
+              placeholder="Buscar acción, descripción, actor o tenant"
+              className="input-corporate"
+            />
+            <select
+              className="input-corporate"
+              value={auditSortBy}
+              onChange={(e) => setAuditSortBy(e.target.value as 'created_at' | 'action' | 'success' | 'tenant' | 'actor')}
+            >
+              <option value="created_at">Ordenar por fecha</option>
+              <option value="action">Ordenar por acción</option>
+              <option value="success">Ordenar por estado</option>
+              <option value="tenant">Ordenar por tenant</option>
+              <option value="actor">Ordenar por actor</option>
+            </select>
+            <select
+              className="input-corporate"
+              value={auditSortDir}
+              onChange={(e) => setAuditSortDir(e.target.value as 'asc' | 'desc')}
+            >
+              <option value="desc">Descendente</option>
+              <option value="asc">Ascendente</option>
+            </select>
+            </div>
           </div>
           {auditLogsQuery.isLoading && <LoadingBlock lines={5} />}
           {auditLogsQuery.isError && <p className="text-sm text-red-600">No fue posible cargar la auditoría.</p>}
           {auditLogsQuery.data && (
-            auditLogsQuery.data.length === 0 ? (
+            auditFilteredTotal === 0 ? (
               <EmptyState message="No se encontraron eventos con los filtros aplicados." />
             ) : (
             <div className="table-shell">
               <table className="table-enterprise">
                 <thead>
                   <tr>
+                    <th className="w-[86px]">Detalle</th>
                     <th>Fecha</th>
                     <th>Acción</th>
                     <th>Descripción</th>
@@ -1577,24 +2314,89 @@ export default function SaaSBackoffice() {
                   </tr>
                 </thead>
                 <tbody>
-                  {auditLogsQuery.data.map((log) => (
-                    <tr key={log.id}>
-                      <td>{new Date(log.created_at).toLocaleString()}</td>
-                      <td>{log.action}</td>
-                      <td>{log.description}</td>
-                      <td>{log.usuario_email || 'Sistema'}</td>
-                      <td>{log.tenant_slug ? `/${log.tenant_slug}` : '-'}</td>
-                      <td>
-                        <span className={statusBadgeClass(log.success)}>
-                          {log.success === 'success' ? 'Exitoso' : 'Con error'}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
+                  {auditRowsPage.map((log) => {
+                    const isExpanded = expandedAuditLogId === log.id;
+                    return (
+                      <Fragment key={log.id}>
+                        <tr>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn-chip py-1 text-[11px]"
+                              onClick={() => setExpandedAuditLogId((prev) => (prev === log.id ? null : log.id))}
+                            >
+                              {isExpanded ? 'Ocultar' : 'Ver'}
+                            </button>
+                          </td>
+                          <td>{new Date(log.created_at).toLocaleString()}</td>
+                          <td>
+                            <span className="inline-flex rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                              {log.action}
+                            </span>
+                          </td>
+                          <td className="max-w-[26rem]">
+                            <p className="line-clamp-2">{log.description}</p>
+                          </td>
+                          <td>{log.usuario_email || 'Sistema'}</td>
+                          <td>{log.tenant_slug ? `/${log.tenant_slug}` : '-'}</td>
+                          <td>
+                            <span className={statusBadgeClass(log.success)}>
+                              {log.success === 'success' ? 'Exitoso' : 'Con error'}
+                            </span>
+                          </td>
+                        </tr>
+                        {isExpanded && (
+                          <tr>
+                            <td colSpan={7} className="bg-slate-50/70">
+                              <div className="grid grid-cols-1 gap-2 p-3 text-xs text-slate-700 md:grid-cols-2">
+                                <p className="break-words md:col-span-2">
+                                  <span className="font-semibold text-slate-900">Descripción completa:</span> {log.description}
+                                </p>
+                                <p>
+                                  <span className="font-semibold text-slate-900">Usuario:</span> {log.usuario_nombre || '—'}
+                                </p>
+                                <p>
+                                  <span className="font-semibold text-slate-900">IP:</span> {log.ip_address || '—'}
+                                </p>
+                              </div>
+                            </td>
+                          </tr>
+                        )}
+                      </Fragment>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
             )
+          )}
+          {auditLogsQuery.data && auditFilteredTotal > 0 && (
+            <div className="mt-3 flex flex-col gap-2 text-xs text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+              <p>
+                Mostrando {auditRowsPage.length} de {auditFilteredTotal} evento(s)
+              </p>
+              <div className="inline-flex items-center gap-2">
+                <button
+                  type="button"
+                  className="btn-chip py-1 text-[11px]"
+                  disabled={auditSafePage <= 1}
+                  onClick={() => setAuditPage((p) => Math.max(1, p - 1))}
+                >
+                  Anterior
+                </button>
+                <span className="rounded-md border border-slate-200 bg-white px-2 py-1 font-semibold text-slate-700">
+                  Página {auditSafePage} / {auditTotalPages}
+                </span>
+                <button
+                  type="button"
+                  className="btn-chip py-1 text-[11px]"
+                  disabled={auditSafePage >= auditTotalPages}
+                  onClick={() => setAuditPage((p) => Math.min(auditTotalPages, p + 1))}
+                >
+                  Siguiente
+                </button>
+              </div>
+            </div>
           )}
         </div>
       );
@@ -1700,6 +2502,67 @@ export default function SaaSBackoffice() {
     );
   };
 
+  const moduleCards: Array<{
+    id: BackofficeModule;
+    title: string;
+    subtitle: string;
+    icon: typeof Building2;
+    color: string;
+    count?: number;
+  }> = [
+    { id: 'resumen', title: 'Resumen', subtitle: 'KPIs y permisos globales', icon: Building2, color: 'text-blue-600' },
+    {
+      id: 'tenants',
+      title: 'Tenants',
+      subtitle: 'Gestión de CDAs y estado comercial',
+      icon: Users,
+      color: 'text-indigo-600',
+      count: tenantsQuery.data?.length,
+    },
+    {
+      id: 'facturacion',
+      title: 'Facturación',
+      subtitle: 'Cobros, checkout y FE de licencia',
+      icon: Wallet,
+      color: 'text-violet-600',
+    },
+    {
+      id: 'soporte',
+      title: 'Soporte',
+      subtitle: 'Tickets y SLA de atención',
+      icon: LifeBuoy,
+      color: 'text-cyan-600',
+      count: supportSummaryQuery.data?.notificaciones_pendientes,
+    },
+    {
+      id: 'usuarios',
+      title: 'Usuarios SaaS',
+      subtitle: 'Accesos y roles internos',
+      icon: ShieldCheck,
+      color: 'text-emerald-600',
+      count: usersQuery.data?.length,
+    },
+    {
+      id: 'auditoria',
+      title: 'Auditoría',
+      subtitle: 'Trazabilidad de acciones',
+      icon: FileClock,
+      color: 'text-amber-600',
+    },
+    {
+      id: 'seguridad',
+      title: 'Seguridad',
+      subtitle: 'Incidentes y controles',
+      icon: Shield,
+      color: 'text-rose-600',
+    },
+  ];
+
+  const activeModuleMeta = moduleCards.find((m) => m.id === activeModule) ?? moduleCards[0];
+  const tenantsTotal = tenantsQuery.data?.length ?? 0;
+  const tenantsActive = tenantsQuery.data?.filter((t) => t.activo).length ?? 0;
+  const supportPending = supportSummaryQuery.data?.notificaciones_pendientes ?? 0;
+
   return (
     <div className="corporate-shell">
       <header className="app-header !z-30">
@@ -1721,51 +2584,97 @@ export default function SaaSBackoffice() {
         </div>
       </header>
 
-      <main className="app-main relative">
-        <div className="section-card p-4 sm:p-6 mb-6">
-          <p className="text-sm text-slate-500 mb-1">Sesión global activa</p>
-          <h1 className="text-xl sm:text-2xl font-bold text-slate-900 mb-2">
-            Bienvenido, {user?.nombre_completo}
-          </h1>
-          <div className="flex items-center gap-2 text-sm text-slate-700">
-            <ShieldCheck className="w-4 h-4 text-emerald-600" />
-            Rol global: <span className="font-semibold capitalize">{permissionsQuery.data?.role || '-'}</span>
+      <main className="app-main relative" data-table-density={tableDensity}>
+        <div className="section-card mb-6 border-brand-200 bg-gradient-to-r from-white via-brand-50/40 to-indigo-50/40 p-4 sm:p-6">
+          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+            <div>
+              <p className="mb-1 text-sm text-slate-500">Sesión global activa</p>
+              <h1 className="mb-2 text-xl font-bold text-slate-900 sm:text-2xl">Bienvenido, {user?.nombre_completo}</h1>
+              <div className="flex flex-wrap items-center gap-2 text-sm text-slate-700">
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800">
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                  Rol: <span className="font-semibold capitalize">{permissionsQuery.data?.role || '-'}</span>
+                </span>
+                <span className="inline-flex items-center rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700">
+                  Módulo activo: {activeModuleMeta.title}
+                </span>
+                <span className="inline-flex items-center rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-800">
+                  {activeModuleMeta.subtitle}
+                </span>
+              </div>
+            </div>
+            <div className="grid grid-cols-3 gap-2 rounded-xl border border-slate-200 bg-white/80 p-2 text-center shadow-sm">
+              <div className="rounded-lg bg-slate-50 px-2 py-2">
+                <p className="text-[10px] uppercase tracking-wide text-slate-500">Tenants</p>
+                <p className="text-sm font-bold text-slate-900">{tenantsTotal}</p>
+              </div>
+              <div className="rounded-lg bg-emerald-50 px-2 py-2">
+                <p className="text-[10px] uppercase tracking-wide text-emerald-700">Activos</p>
+                <p className="text-sm font-bold text-emerald-800">{tenantsActive}</p>
+              </div>
+              <div className="rounded-lg bg-cyan-50 px-2 py-2">
+                <p className="text-[10px] uppercase tracking-wide text-cyan-700">Tickets</p>
+                <p className="text-sm font-bold text-cyan-800">{supportPending}</p>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div className="mb-6 overflow-x-auto">
+        <div className="mb-6 overflow-x-auto pt-1">
           <div className="grid grid-cols-7 gap-3 min-w-[860px] md:min-w-0">
-            {[
-              { id: 'resumen' as BackofficeModule, title: 'Resumen', icon: Building2, color: 'text-blue-600' },
-              { id: 'tenants' as BackofficeModule, title: 'Tenants', icon: Users, color: 'text-indigo-600' },
-              { id: 'facturacion' as BackofficeModule, title: 'Facturación', icon: Wallet, color: 'text-violet-600' },
-              { id: 'soporte' as BackofficeModule, title: 'Soporte', icon: LifeBuoy, color: 'text-cyan-600' },
-              { id: 'usuarios' as BackofficeModule, title: 'Usuarios SaaS', icon: ShieldCheck, color: 'text-emerald-600' },
-              { id: 'auditoria' as BackofficeModule, title: 'Auditoría', icon: FileClock, color: 'text-amber-600' },
-              { id: 'seguridad' as BackofficeModule, title: 'Seguridad', icon: Shield, color: 'text-rose-600' },
-            ].map((module) => (
+            {moduleCards.map((module) => (
               <button
                 key={module.id}
                 type="button"
                 onClick={() => setActiveModule(module.id)}
-                className={`rounded-xl border bg-white/85 backdrop-blur-sm p-4 text-left transition ${
+                className={`relative rounded-xl border bg-white/90 p-4 text-left transition-all duration-200 ${
                   activeModule === module.id
-                    ? 'border-slate-800 shadow-md ring-1 ring-slate-200'
-                    : 'border-slate-200/80 hover:border-slate-300 hover:shadow-sm'
+                    ? 'border-slate-800 shadow-lg ring-2 ring-brand-100'
+                    : 'border-slate-200/80 hover:border-slate-300 hover:shadow-md'
                 }`}
               >
-                <div className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100 mb-2">
+                {activeModule === module.id && (
+                  <span className="absolute right-2 top-2 rounded-full bg-slate-900 px-2 py-0.5 text-[10px] font-semibold text-white">
+                    Activo
+                  </span>
+                )}
+                <div className="mb-2 inline-flex h-8 w-8 items-center justify-center rounded-lg bg-slate-100">
                   <module.icon className={`w-4 h-4 ${module.color}`} />
                 </div>
-                {module.id === 'soporte' && (supportSummaryQuery.data?.notificaciones_pendientes || 0) > 0 && (
-                  <span className="inline-flex items-center rounded-full bg-rose-600 text-white text-[10px] font-semibold px-2 py-0.5 mb-2">
-                    {supportSummaryQuery.data?.notificaciones_pendientes}
+                {typeof module.count === 'number' && module.count > 0 && (
+                  <span className="mb-2 inline-flex items-center rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-700">
+                    {module.count}
                   </span>
                 )}
                 <p className="text-xs text-slate-500">Módulo</p>
                 <p className="font-semibold text-slate-900 text-sm">{module.title}</p>
+                <p className="mt-1 line-clamp-2 text-[11px] leading-snug text-slate-500">{module.subtitle}</p>
               </button>
             ))}
+          </div>
+        </div>
+
+        <div className="mb-4 flex items-center justify-end">
+          <div className="inline-flex items-center gap-1 rounded-xl border border-slate-200 bg-white p-1 shadow-sm">
+            <span className="px-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">Vista tabla</span>
+            <button
+              type="button"
+              onClick={() => setTableDensity('comfortable')}
+              className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                tableDensity === 'comfortable' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              Normal
+            </button>
+            <button
+              type="button"
+              onClick={() => setTableDensity('compact')}
+              className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
+                tableDensity === 'compact' ? 'bg-slate-900 text-white' : 'text-slate-600 hover:bg-slate-100'
+              }`}
+            >
+              Compacta
+            </button>
           </div>
         </div>
 
@@ -1796,195 +2705,365 @@ export default function SaaSBackoffice() {
             {tenantProfileQuery.isError && <p className="text-sm text-red-600">No fue posible cargar el perfil del tenant.</p>}
             {tenantProfileQuery.data && (
               <div className="space-y-4">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                  <div className="md:col-span-1 rounded-xl border border-slate-200 p-4 flex flex-col items-stretch gap-3">
-                    {tenantProfileQuery.data.logo_url ? (
-                      <img
-                        src={tenantProfileQuery.data.logo_url}
-                        alt={tenantProfileQuery.data.nombre_comercial}
-                        className="max-h-28 w-full object-contain mb-1"
-                      />
-                    ) : (
-                      <div className="h-28 w-full rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 text-xs">
-                        Sin logo
-                      </div>
-                    )}
-                    <p className="text-xs font-medium text-slate-600 text-center">Marca del CDA</p>
-                    <p className="text-[11px] text-slate-500 text-center leading-snug">
-                      Si el CDA no cargó logo en el registro, puedes asignarlo aquí (misma opción que en el alta).
-                    </p>
-                    <div className="grid grid-cols-2 gap-1.5">
-                      <button
-                        type="button"
-                        className={`rounded-lg px-2 py-1.5 text-[11px] font-semibold ${
-                          tenantLogoMode === 'url' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
-                        }`}
-                        onClick={() => {
-                          setTenantLogoMode('url');
-                          setTenantLogoFile(null);
-                          setTenantLogoError('');
-                        }}
-                      >
-                        Logo por URL
-                      </button>
-                      <button
-                        type="button"
-                        className={`rounded-lg px-2 py-1.5 text-[11px] font-semibold ${
-                          tenantLogoMode === 'file' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
-                        }`}
-                        onClick={() => {
-                          setTenantLogoMode('file');
-                          setTenantLogoUrl('');
-                          setTenantLogoError('');
-                        }}
-                      >
-                        Subir archivo
-                      </button>
-                    </div>
-                    {tenantLogoMode === 'url' ? (
-                      <input
-                        type="url"
-                        value={tenantLogoUrl}
-                        onChange={(e) => setTenantLogoUrl(e.target.value)}
-                        placeholder="https://…"
-                        className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
-                      />
-                    ) : (
-                      <input
-                        type="file"
-                        accept=".png,.jpg,.jpeg,.webp"
-                        onChange={(e) => setTenantLogoFile(e.target.files?.[0] ?? null)}
-                        className="w-full text-xs text-slate-600 file:mr-2 file:rounded file:border-0 file:bg-slate-100 file:px-2 file:py-1"
-                      />
-                    )}
-                    {tenantLogoError && (
-                      <p className="text-[11px] text-red-600">{tenantLogoError}</p>
-                    )}
-                    <button
-                      type="button"
-                      disabled={tenantLogoMutation.isLoading}
-                      onClick={() => tenantLogoMutation.mutate()}
-                      className="w-full rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
-                    >
-                      {tenantLogoMutation.isLoading ? 'Guardando…' : 'Guardar logo'}
-                    </button>
-                  </div>
-                  <div className="md:col-span-2 space-y-4">
+                <div className="rounded-xl border border-slate-200 bg-gradient-to-r from-white to-slate-50/90 p-4 shadow-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
-                        Información del CDA
-                      </p>
-                      <div className="rounded-xl border border-slate-200 bg-gradient-to-b from-white to-slate-50/90 p-4 shadow-sm ring-1 ring-slate-900/5">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
-                          <div className="space-y-1">
-                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Nombre comercial</p>
-                            <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.nombre_comercial}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Slug</p>
-                            <p className="text-sm font-mono font-semibold text-slate-900">/{tenantProfileQuery.data.slug}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">NIT</p>
-                            <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.nit_cda || '—'}</p>
-                          </div>
-                          <div className="space-y-1 min-w-0">
-                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Correo</p>
-                            <p className="text-sm font-semibold text-slate-900 break-all">{tenantProfileQuery.data.correo_electronico || '—'}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Representante</p>
-                            <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.nombre_representante || '—'}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Celular</p>
-                            <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.celular || '—'}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Plan actual</p>
-                            <p className="text-sm font-semibold uppercase text-slate-900">{tenantProfileQuery.data.plan_actual}</p>
-                          </div>
-                          <div className="space-y-1.5">
-                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Estado suscripción</p>
-                            <span className={statusBadgeClass(tenantProfileQuery.data.subscription_status)}>
-                              {subscriptionStatusLabel(tenantProfileQuery.data.subscription_status)}
-                            </span>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Sucursales totales</p>
-                            <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.sedes_totales}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Sucursales facturables</p>
-                            <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.sucursales_facturables}</p>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Próximo cobro</p>
-                            <p className="text-sm font-semibold text-slate-900">
-                              {tenantProfileQuery.data.next_billing_at
-                                ? new Date(tenantProfileQuery.data.next_billing_at).toLocaleDateString()
-                                : '—'}
-                            </p>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Último pago</p>
-                            <p className="text-sm font-semibold text-slate-900">
-                              {tenantProfileQuery.data.last_payment_at
-                                ? new Date(tenantProfileQuery.data.last_payment_at).toLocaleDateString()
-                                : '—'}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
+                      <p className="text-xs uppercase tracking-wide text-slate-500">Resumen rápido</p>
+                      <p className="text-base font-semibold text-slate-900">{tenantProfileQuery.data.nombre_comercial}</p>
+                      <p className="text-xs text-slate-500">/{tenantProfileQuery.data.slug}</p>
                     </div>
-
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
-                        URL de acceso (login del CDA)
-                      </p>
-                      <div className="flex flex-col sm:flex-row gap-2 sm:items-stretch">
-                        <div className="flex min-w-0 flex-1 items-start gap-2.5 rounded-xl border border-slate-200 bg-gradient-to-b from-white to-slate-50/90 px-3 py-2.5 shadow-sm ring-1 ring-slate-900/5">
-                          <Link2
-                            className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600"
-                            aria-hidden
-                          />
-                          <div className="min-w-0 flex-1">
-                            <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">
-                              URL personalizada
-                            </p>
-                            <p className="mt-0.5 text-sm font-mono text-slate-900 leading-snug break-all">
-                              {tenantProfileQuery.data.login_url}
-                            </p>
-                          </div>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() =>
-                            handleCopyLoginUrl(tenantProfileQuery.data.id, tenantProfileQuery.data.login_url)
-                          }
-                          className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 hover:border-slate-300 transition-colors sm:self-stretch"
-                        >
-                          {copiedTenantId === tenantProfileQuery.data.id ? (
-                            <>
-                              <Check className="h-4 w-4 text-emerald-600" aria-hidden />
-                              Copiado
-                            </>
-                          ) : (
-                            <>
-                              <Copy className="h-4 w-4 text-slate-500" aria-hidden />
-                              Copiar enlace
-                            </>
-                          )}
-                        </button>
-                      </div>
-                      <p className="mt-2 text-xs text-slate-500">
-                        Comparte este enlace con el CDA para que sus usuarios inicien sesión en su espacio.
-                      </p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="inline-flex rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold uppercase text-indigo-800">
+                        {tenantProfileQuery.data.plan_actual}
+                      </span>
+                      <span className={statusBadgeClass(tenantProfileQuery.data.subscription_status)}>
+                        {subscriptionStatusLabel(tenantProfileQuery.data.subscription_status)}
+                      </span>
+                      <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700">
+                        Próx. cobro:{' '}
+                        {tenantProfileQuery.data.next_billing_at
+                          ? new Date(tenantProfileQuery.data.next_billing_at).toLocaleDateString()
+                          : '—'}
+                      </span>
                     </div>
                   </div>
                 </div>
 
-                {(() => {
+                <div className="flex flex-wrap items-center justify-end gap-2">
+                  <button type="button" onClick={openAllTenantProfileSections} className="btn-chip py-1 text-[11px]">
+                    Expandir todo
+                  </button>
+                  <button type="button" onClick={collapseAllTenantProfileSections} className="btn-chip py-1 text-[11px]">
+                    Contraer todo
+                  </button>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => toggleTenantProfileSection('brandAccess')}
+                    className="flex w-full items-center justify-between px-4 py-3 text-left"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Marca y datos de acceso</p>
+                      <p className="text-xs text-slate-500">Logo del tenant, datos comerciales y URL de login</p>
+                    </div>
+                    <span className="text-xs font-semibold text-slate-600">
+                      {tenantProfileSectionsOpen.brandAccess ? 'Ocultar' : 'Mostrar'}
+                    </span>
+                  </button>
+                  {tenantProfileSectionsOpen.brandAccess && (
+                    <div className="border-t border-slate-200 p-4">
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
+                        <div className="md:col-span-1 rounded-xl border border-slate-200 p-4 flex flex-col items-stretch gap-3">
+                          {tenantProfileQuery.data.logo_url ? (
+                            <img
+                              src={tenantProfileQuery.data.logo_url}
+                              alt={tenantProfileQuery.data.nombre_comercial}
+                              className="max-h-28 w-full object-contain mb-1"
+                            />
+                          ) : (
+                            <div className="h-28 w-full rounded-lg bg-slate-100 flex items-center justify-center text-slate-400 text-xs">
+                              Sin logo
+                            </div>
+                          )}
+                          <p className="text-xs font-medium text-slate-600 text-center">Marca del CDA</p>
+                          <p className="text-[11px] text-slate-500 text-center leading-snug">
+                            Si el CDA no cargó logo en el registro, puedes asignarlo aquí (misma opción que en el alta).
+                          </p>
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <button
+                              type="button"
+                              className={`rounded-lg px-2 py-1.5 text-[11px] font-semibold ${
+                                tenantLogoMode === 'url' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
+                              }`}
+                              onClick={() => {
+                                setTenantLogoMode('url');
+                                setTenantLogoFile(null);
+                                setTenantLogoError('');
+                              }}
+                            >
+                              Logo por URL
+                            </button>
+                            <button
+                              type="button"
+                              className={`rounded-lg px-2 py-1.5 text-[11px] font-semibold ${
+                                tenantLogoMode === 'file' ? 'bg-slate-900 text-white' : 'bg-slate-100 text-slate-700'
+                              }`}
+                              onClick={() => {
+                                setTenantLogoMode('file');
+                                setTenantLogoUrl('');
+                                setTenantLogoError('');
+                              }}
+                            >
+                              Subir archivo
+                            </button>
+                          </div>
+                          {tenantLogoMode === 'url' ? (
+                            <input
+                              type="url"
+                              value={tenantLogoUrl}
+                              onChange={(e) => setTenantLogoUrl(e.target.value)}
+                              placeholder="https://…"
+                              className="w-full rounded-lg border border-slate-200 px-2 py-1.5 text-xs"
+                            />
+                          ) : (
+                            <input
+                              type="file"
+                              accept=".png,.jpg,.jpeg,.webp"
+                              onChange={(e) => setTenantLogoFile(e.target.files?.[0] ?? null)}
+                              className="w-full text-xs text-slate-600 file:mr-2 file:rounded file:border-0 file:bg-slate-100 file:px-2 file:py-1"
+                            />
+                          )}
+                          {tenantLogoError && (
+                            <p className="text-[11px] text-red-600">{tenantLogoError}</p>
+                          )}
+                          <button
+                            type="button"
+                            disabled={tenantLogoMutation.isLoading}
+                            onClick={() => tenantLogoMutation.mutate()}
+                            className="w-full rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
+                          >
+                            {tenantLogoMutation.isLoading ? 'Guardando…' : 'Guardar logo'}
+                          </button>
+                        </div>
+                        <div className="md:col-span-2 space-y-4">
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                              Información del CDA
+                            </p>
+                            <div className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50/70 p-3">
+                              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-indigo-700">
+                                Editar datos para FE SaaS
+                              </p>
+                              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                                <input
+                                  type="text"
+                                  value={tenantCoreNombre}
+                                  onChange={(e) => setTenantCoreNombre(e.target.value)}
+                                  placeholder="Razón social (RUT)"
+                                  className="input-corporate"
+                                  disabled={!tenantCoreEditMode}
+                                />
+                                <input
+                                  type="text"
+                                  value={tenantCoreNombreComercial}
+                                  onChange={(e) => setTenantCoreNombreComercial(e.target.value)}
+                                  placeholder="Nombre comercial"
+                                  className="input-corporate"
+                                  disabled={!tenantCoreEditMode}
+                                />
+                                <input
+                                  type="text"
+                                  value={tenantCoreNit}
+                                  onChange={(e) => setTenantCoreNit(e.target.value)}
+                                  placeholder="NIT con DV (ej: 900123456-8)"
+                                  className="input-corporate"
+                                  disabled={!tenantCoreEditMode}
+                                />
+                                <input
+                                  type="email"
+                                  value={tenantCoreCorreo}
+                                  onChange={(e) => setTenantCoreCorreo(e.target.value)}
+                                  placeholder="Correo de notificación"
+                                  className="input-corporate"
+                                  disabled={!tenantCoreEditMode}
+                                />
+                                <input
+                                  type="text"
+                                  value={tenantCoreRepresentante}
+                                  onChange={(e) => setTenantCoreRepresentante(e.target.value)}
+                                  placeholder="Representante legal"
+                                  className="input-corporate"
+                                  disabled={!tenantCoreEditMode}
+                                />
+                                <input
+                                  type="text"
+                                  value={tenantCoreCelular}
+                                  onChange={(e) => setTenantCoreCelular(e.target.value)}
+                                  placeholder="Celular de contacto"
+                                  className="input-corporate"
+                                  disabled={!tenantCoreEditMode}
+                                />
+                              </div>
+                              {tenantCoreError && <p className="mt-2 text-xs text-red-600">{tenantCoreError}</p>}
+                              <div className="mt-2 flex items-center justify-end gap-2">
+                                {!tenantCoreEditMode ? (
+                                  <button
+                                    type="button"
+                                    className="btn-chip"
+                                    onClick={() => {
+                                      setTenantCoreError('');
+                                      setTenantCoreEditMode(true);
+                                    }}
+                                  >
+                                    Habilitar edición
+                                  </button>
+                                ) : (
+                                  <>
+                                    <button
+                                      type="button"
+                                      className="btn-corporate-muted px-4"
+                                      onClick={() => {
+                                        const profile = tenantProfileQuery.data;
+                                        if (profile) {
+                                          setTenantCoreNombre(profile.nombre || '');
+                                          setTenantCoreNombreComercial(profile.nombre_comercial || '');
+                                          setTenantCoreNit(profile.nit_cda || '');
+                                          setTenantCoreCorreo(profile.correo_electronico || '');
+                                          setTenantCoreRepresentante(profile.nombre_representante || '');
+                                          setTenantCoreCelular(profile.celular || '');
+                                        }
+                                        setTenantCoreError('');
+                                        setTenantCoreEditMode(false);
+                                      }}
+                                    >
+                                      Cancelar
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="btn-corporate-primary px-4 disabled:opacity-60"
+                                      disabled={tenantCoreMutation.isLoading}
+                                      onClick={() => tenantCoreMutation.mutate()}
+                                    >
+                                      {tenantCoreMutation.isLoading ? 'Guardando...' : 'Guardar datos del CDA'}
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                            <div className="rounded-xl border border-slate-200 bg-gradient-to-b from-white to-slate-50/90 p-4 shadow-sm ring-1 ring-slate-900/5">
+                              <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
+                                <div className="space-y-1">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Nombre comercial</p>
+                                  <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.nombre_comercial}</p>
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Slug</p>
+                                  <p className="text-sm font-mono font-semibold text-slate-900">/{tenantProfileQuery.data.slug}</p>
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">NIT</p>
+                                  <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.nit_cda || '—'}</p>
+                                </div>
+                                <div className="space-y-1 min-w-0">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Correo</p>
+                                  <p className="text-sm font-semibold text-slate-900 break-all">{tenantProfileQuery.data.correo_electronico || '—'}</p>
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Representante</p>
+                                  <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.nombre_representante || '—'}</p>
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Celular</p>
+                                  <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.celular || '—'}</p>
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Plan actual</p>
+                                  <p className="text-sm font-semibold uppercase text-slate-900">{tenantProfileQuery.data.plan_actual}</p>
+                                </div>
+                                <div className="space-y-1.5">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Estado suscripción</p>
+                                  <span className={statusBadgeClass(tenantProfileQuery.data.subscription_status)}>
+                                    {subscriptionStatusLabel(tenantProfileQuery.data.subscription_status)}
+                                  </span>
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Sucursales totales</p>
+                                  <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.sedes_totales}</p>
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">
+                                    Sucursales adicionales cobradas
+                                  </p>
+                                  <p className="text-sm font-semibold text-slate-900">
+                                    {tenantProfileQuery.data.sucursales_facturables} (desde la 3.ª)
+                                  </p>
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Próximo cobro</p>
+                                  <p className="text-sm font-semibold text-slate-900">
+                                    {tenantProfileQuery.data.next_billing_at
+                                      ? new Date(tenantProfileQuery.data.next_billing_at).toLocaleDateString()
+                                      : '—'}
+                                  </p>
+                                </div>
+                                <div className="space-y-1">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Último pago</p>
+                                  <p className="text-sm font-semibold text-slate-900">
+                                    {tenantProfileQuery.data.last_payment_at
+                                      ? new Date(tenantProfileQuery.data.last_payment_at).toLocaleDateString()
+                                      : '—'}
+                                  </p>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+
+                          <div>
+                            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
+                              URL de acceso (login del CDA)
+                            </p>
+                            <div className="flex flex-col sm:flex-row gap-2 sm:items-stretch">
+                              <div className="flex min-w-0 flex-1 items-start gap-2.5 rounded-xl border border-slate-200 bg-gradient-to-b from-white to-slate-50/90 px-3 py-2.5 shadow-sm ring-1 ring-slate-900/5">
+                                <Link2
+                                  className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600"
+                                  aria-hidden
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">
+                                    URL personalizada
+                                  </p>
+                                  <p className="mt-0.5 text-sm font-mono text-slate-900 leading-snug break-all">
+                                    {tenantProfileQuery.data.login_url}
+                                  </p>
+                                </div>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() =>
+                                  handleCopyLoginUrl(tenantProfileQuery.data.id, tenantProfileQuery.data.login_url)
+                                }
+                                className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50 hover:border-slate-300 transition-colors sm:self-stretch"
+                              >
+                                {copiedTenantId === tenantProfileQuery.data.id ? (
+                                  <>
+                                    <Check className="h-4 w-4 text-emerald-600" aria-hidden />
+                                    Copiado
+                                  </>
+                                ) : (
+                                  <>
+                                    <Copy className="h-4 w-4 text-slate-500" aria-hidden />
+                                    Copiar enlace
+                                  </>
+                                )}
+                              </button>
+                            </div>
+                            <p className="mt-2 text-xs text-slate-500">
+                              Comparte este enlace con el CDA para que sus usuarios inicien sesión en su espacio.
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => toggleTenantProfileSection('sedes')}
+                    className="flex w-full items-center justify-between px-4 py-3 text-left"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Red de sedes y respaldo DIAN</p>
+                      <p className="text-xs text-slate-500">Matriz, sucursales y configuración de facturación por sede</p>
+                    </div>
+                    <span className="text-xs font-semibold text-slate-600">
+                      {tenantProfileSectionsOpen.sedes ? 'Ocultar' : 'Mostrar'}
+                    </span>
+                  </button>
+                  {tenantProfileSectionsOpen.sedes && (() => {
                   const profile = tenantProfileQuery.data;
                   if (!profile) return null;
                   const matriz = profile.facturacion_matriz ?? {
@@ -2246,277 +3325,360 @@ export default function SaaSBackoffice() {
                       )}
                     </div>
                   );
-                })()}
-
-                <div className="section-card p-4">
-                  <div className="rounded-xl border border-slate-200/90 bg-white shadow-sm overflow-hidden ring-1 ring-slate-900/5">
-                    <BackofficeSectionHeading
-                      embedded
-                      icon={Landmark}
-                      title="Facturación electrónica (Factus)"
-                      description="Credenciales, ambiente y rango fallback; el CDA define municipio y rango por sede"
-                    />
-                    <div className="p-4 border-t border-slate-100">
-                      <SaasTenantFactusPanel tenantId={tenantProfileQuery.data.id} />
-                    </div>
-                  </div>
+                  })()}
                 </div>
 
-                <div className="section-card p-4">
-                  <div className="rounded-xl border border-slate-200/90 bg-white shadow-sm overflow-hidden ring-1 ring-slate-900/5">
-                    <BackofficeSectionHeading
-                      embedded
-                      icon={CreditCard}
-                      title="Gestión de plan y pago"
-                      description="Asignar plan, cotización y registro de pagos"
-                    />
-                    <div className="p-4 space-y-3">
-                      {billingActionError && (
-                        <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">{billingActionError}</p>
-                      )}
-                      {billingActionSuccess && (
-                        <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-3">{billingActionSuccess}</p>
-                      )}
-                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                        <select
-                          value={billingPlanCode}
-                          onChange={(e) => setBillingPlanCode(e.target.value)}
-                          className="input-corporate"
-                        >
-                          {(billingPlansQuery.data || []).map((plan) => (
-                            <option key={plan.code} value={plan.code}>
-                              {plan.label}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          type="number"
-                          min={1}
-                          value={billingSedesTotales}
-                          onChange={(e) => setBillingSedesTotales(Math.max(1, Number(e.target.value) || 1))}
-                          className="input-corporate"
-                          placeholder="Sedes totales"
+                <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => toggleTenantProfileSection('factus')}
+                    className="flex w-full items-center justify-between px-4 py-3 text-left"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Facturación electrónica (Factus)</p>
+                      <p className="text-xs text-slate-500">Credenciales, ambiente y validación de integración</p>
+                    </div>
+                    <span className="text-xs font-semibold text-slate-600">
+                      {tenantProfileSectionsOpen.factus ? 'Ocultar' : 'Mostrar'}
+                    </span>
+                  </button>
+                  {tenantProfileSectionsOpen.factus && (
+                    <div className="border-t border-slate-200 p-4">
+                      <div className="rounded-xl border border-slate-200/90 bg-white shadow-sm overflow-hidden ring-1 ring-slate-900/5">
+                        <BackofficeSectionHeading
+                          embedded
+                          icon={Landmark}
+                          title="Facturación electrónica (Factus)"
+                          description="Credenciales, ambiente y rango fallback; el CDA define municipio y rango por sede"
                         />
-                        <button
-                          type="button"
-                          disabled={!billingQuoteQuery.data || assignPlanMutation.isLoading}
-                          onClick={() => {
-                            setBillingActionError('');
-                            setBillingActionSuccess('');
-                            assignPlanMutation.mutate();
-                          }}
-                          className="px-4 btn-corporate-primary disabled:opacity-50"
-                        >
-                          {assignPlanMutation.isLoading ? 'Aplicando plan...' : 'Asignar plan y activar periodo'}
-                        </button>
+                        <div className="p-4 border-t border-slate-100">
+                          <SaasTenantFactusPanel tenantId={tenantProfileQuery.data.id} />
+                        </div>
                       </div>
+                    </div>
+                  )}
+                </div>
 
-                      <div>
-                        {billingQuoteQuery.isLoading && <LoadingBlock lines={1} />}
-                        {billingQuoteQuery.isError && (
-                          <p className="text-sm text-red-600">No fue posible calcular la cotización.</p>
-                        )}
-                        {billingQuoteQuery.data && (
-                          <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-xs text-violet-900 shadow-sm">
-                            Resumen: {billingQuoteQuery.data.sedes_totales} sedes totales |{' '}
-                            {billingQuoteQuery.data.included_branches} incluidas |{' '}
-                            {billingQuoteQuery.data.chargeable_additional_branches} facturables | Total:{' '}
-                            {formatCurrency(billingQuoteQuery.data.total)}
-                          </div>
-                        )}
-                      </div>
-
-                      <div className="flex flex-wrap items-center gap-3">
-                        <input
-                          type="number"
-                          min={1}
-                          step="1000"
-                          value={paymentAmount}
-                          onChange={(e) => setPaymentAmount(e.target.value)}
-                          placeholder="Monto pago"
-                          className="input-corporate w-40"
+                <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => toggleTenantProfileSection('billing')}
+                    className="flex w-full items-center justify-between px-4 py-3 text-left"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Gestión de plan y pago</p>
+                      <p className="text-xs text-slate-500">Asignación de plan, cotización y registro manual</p>
+                    </div>
+                    <span className="text-xs font-semibold text-slate-600">
+                      {tenantProfileSectionsOpen.billing ? 'Ocultar' : 'Mostrar'}
+                    </span>
+                  </button>
+                  {tenantProfileSectionsOpen.billing && (
+                    <div className="border-t border-slate-200 p-4">
+                      <div className="rounded-xl border border-slate-200/90 bg-white shadow-sm overflow-hidden ring-1 ring-slate-900/5">
+                        <BackofficeSectionHeading
+                          embedded
+                          icon={CreditCard}
+                          title="Gestión de plan y pago"
+                          description="Asignar plan, cotización y registro de pagos"
                         />
-                        <input
-                          type="text"
-                          value={paymentNotes}
-                          onChange={(e) => setPaymentNotes(e.target.value)}
-                          placeholder="Notas pago (opcional)"
-                          className="input-corporate min-w-[220px]"
-                        />
-                        <button
-                          type="button"
-                          disabled={!billingTenantId || Number(paymentAmount) <= 0 || registerPaymentMutation.isLoading}
-                          onClick={() => {
-                            setBillingActionError('');
-                            setBillingActionSuccess('');
-                            registerPaymentMutation.mutate();
-                          }}
-                          className="px-4 btn-corporate-primary disabled:opacity-50"
-                        >
-                          {registerPaymentMutation.isLoading ? 'Registrando pago...' : 'Registrar pago'}
-                        </button>
-                      </div>
-
-                      {lastPaymentReceipt && (
-                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm space-y-1">
-                          <p className="font-semibold text-emerald-800">Recibo de pago registrado</p>
-                          <p>
-                            <span className="text-emerald-700">Referencia:</span> {lastPaymentReceipt.comprobante_referencia}
-                          </p>
-                          <p>
-                            <span className="text-emerald-700">Plan:</span> {lastPaymentReceipt.plan_label}
-                          </p>
-                          <p>
-                            <span className="text-emerald-700">Monto:</span> {formatCurrency(lastPaymentReceipt.amount)}
-                          </p>
-                          <p>
-                            <span className="text-emerald-700">Fecha pago:</span>{' '}
-                            {new Date(lastPaymentReceipt.paid_at).toLocaleString()}
-                          </p>
-                          <p>
-                            <span className="text-emerald-700">Sucursales:</span> {lastPaymentReceipt.sedes_totales} total /{' '}
-                            {lastPaymentReceipt.sucursales_facturables} facturables
-                          </p>
-                          <p>
-                            <span className="text-emerald-700">Próximo cobro:</span>{' '}
-                            {lastPaymentReceipt.next_billing_at
-                              ? new Date(lastPaymentReceipt.next_billing_at).toLocaleDateString()
-                              : 'N/A'}
-                          </p>
-                          <p>
-                            <span className="text-emerald-700">Correo enviado:</span>{' '}
-                            {lastPaymentReceipt.receipt_email_sent ? 'Si' : 'No (revisar SMTP/correo tenant)'}
-                          </p>
-                          <div className="pt-2">
+                        <div className="p-4 space-y-3">
+                          {billingActionError && (
+                            <p className="text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg p-3">{billingActionError}</p>
+                          )}
+                          {billingActionSuccess && (
+                            <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-3">{billingActionSuccess}</p>
+                          )}
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            <select
+                              value={billingPlanCode}
+                              onChange={(e) => setBillingPlanCode(e.target.value)}
+                              className="input-corporate"
+                            >
+                              {(billingPlansQuery.data || []).map((plan) => (
+                                <option key={plan.code} value={plan.code}>
+                                  {plan.label}
+                                </option>
+                              ))}
+                            </select>
+                            <input
+                              type="number"
+                              min={1}
+                              value={billingSedesTotales}
+                              onChange={(e) => setBillingSedesTotales(Math.max(1, Number(e.target.value) || 1))}
+                              className="input-corporate"
+                              placeholder="Sedes totales"
+                            />
                             <button
                               type="button"
-                              onClick={() =>
-                                handleDownloadReceipt(
-                                  lastPaymentReceipt.receipt_download_url,
-                                  lastPaymentReceipt.comprobante_referencia
-                                )
-                              }
-                              className="btn-chip bg-emerald-700 text-white border-emerald-700 hover:bg-emerald-600 hover:border-emerald-600"
+                              disabled={!billingQuoteQuery.data || assignPlanMutation.isLoading}
+                              onClick={() => {
+                                setBillingActionError('');
+                                setBillingActionSuccess('');
+                                assignPlanMutation.mutate();
+                              }}
+                              className="px-4 btn-corporate-primary disabled:opacity-50"
                             >
-                              Descargar recibo PDF
+                              {assignPlanMutation.isLoading ? 'Aplicando plan...' : 'Asignar plan y activar periodo'}
                             </button>
                           </div>
+
+                          <div>
+                            {billingQuoteQuery.isLoading && <LoadingBlock lines={1} />}
+                            {billingQuoteQuery.isError && (
+                              <p className="text-sm text-red-600">No fue posible calcular la cotización.</p>
+                            )}
+                            {billingQuoteQuery.data && (
+                              <div className="rounded-lg border border-violet-200 bg-violet-50 p-3 text-xs text-violet-900 shadow-sm">
+                                {(() => {
+                                  const q = billingQuoteQuery.data;
+                                  const includedTotal = 1 + q.included_branches;
+                                  return (
+                                    <>
+                                      <p>
+                                        Resumen: {q.sedes_totales} sedes totales | {includedTotal} incluidas en base (principal +{' '}
+                                        {q.included_branches} anexa{q.included_branches === 1 ? '' : 's'}) |{' '}
+                                        {q.chargeable_additional_branches} facturable
+                                        {q.chargeable_additional_branches === 1 ? '' : 's'} (desde la {includedTotal + 1}.a)
+                                      </p>
+                                      <p className="mt-1">
+                                        Subtotal: {formatCurrency(q.subtotal)} + IVA: {formatCurrency(q.iva)} ={' '}
+                                        <strong>Total: {formatCurrency(q.total)}</strong>
+                                      </p>
+                                    </>
+                                  );
+                                })()}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex flex-wrap items-center gap-3">
+                            <input
+                              type="number"
+                              min={1}
+                              step="1000"
+                              value={paymentAmount}
+                              onChange={(e) => setPaymentAmount(e.target.value)}
+                              placeholder="Monto pago"
+                              className="input-corporate w-40"
+                            />
+                            <input
+                              type="text"
+                              value={paymentNotes}
+                              onChange={(e) => setPaymentNotes(e.target.value)}
+                              placeholder="Notas pago (opcional)"
+                              className="input-corporate min-w-[220px]"
+                            />
+                            <button
+                              type="button"
+                              disabled={!billingTenantId || Number(paymentAmount) <= 0 || registerPaymentMutation.isLoading}
+                              onClick={() => {
+                                setBillingActionError('');
+                                setBillingActionSuccess('');
+                                registerPaymentMutation.mutate();
+                              }}
+                              className="px-4 btn-corporate-primary disabled:opacity-50"
+                            >
+                              {registerPaymentMutation.isLoading ? 'Registrando pago...' : 'Registrar pago'}
+                            </button>
+                          </div>
+
+                          {lastPaymentReceipt && (
+                            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm space-y-1">
+                              <p className="font-semibold text-emerald-800">Recibo de pago registrado</p>
+                              <p>
+                                <span className="text-emerald-700">Referencia:</span> {lastPaymentReceipt.comprobante_referencia}
+                              </p>
+                              <p>
+                                <span className="text-emerald-700">Plan:</span> {lastPaymentReceipt.plan_label}
+                              </p>
+                              <p>
+                                <span className="text-emerald-700">Monto:</span> {formatCurrency(lastPaymentReceipt.amount)}
+                              </p>
+                              <p>
+                                <span className="text-emerald-700">Fecha pago:</span>{' '}
+                                {new Date(lastPaymentReceipt.paid_at).toLocaleString()}
+                              </p>
+                              <p>
+                                <span className="text-emerald-700">Sucursales:</span>{' '}
+                                {branchChargeSummary(lastPaymentReceipt.sedes_totales, lastPaymentReceipt.sucursales_facturables)}
+                              </p>
+                              <p>
+                                <span className="text-emerald-700">Próximo cobro:</span>{' '}
+                                {lastPaymentReceipt.next_billing_at
+                                  ? new Date(lastPaymentReceipt.next_billing_at).toLocaleDateString()
+                                  : 'N/A'}
+                              </p>
+                              <p>
+                                <span className="text-emerald-700">Correo enviado:</span>{' '}
+                                {lastPaymentReceipt.receipt_email_sent ? 'Si' : 'No (revisar SMTP/correo tenant)'}
+                              </p>
+                              <div className="pt-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    handleDownloadReceipt(
+                                      lastPaymentReceipt.receipt_download_url,
+                                      lastPaymentReceipt.comprobante_referencia
+                                    )
+                                  }
+                                  className="btn-chip bg-emerald-700 text-white border-emerald-700 hover:bg-emerald-600 hover:border-emerald-600"
+                                >
+                                  Descargar recibo PDF
+                                </button>
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => toggleTenantProfileSection('payments')}
+                    className="flex w-full items-center justify-between px-4 py-3 text-left"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Historial de pagos</p>
+                      <p className="text-xs text-slate-500">Últimos movimientos y comprobantes</p>
+                    </div>
+                    <span className="text-xs font-semibold text-slate-600">
+                      {tenantProfileSectionsOpen.payments ? 'Ocultar' : 'Mostrar'}
+                    </span>
+                  </button>
+                  {tenantProfileSectionsOpen.payments && (
+                    <div className="border-t border-slate-200 p-4">
+                      {tenantPaymentsQuery.isLoading && <LoadingBlock lines={3} />}
+                      {tenantPaymentsQuery.isError && (
+                        <p className="text-sm text-red-600">No fue posible cargar el historial de pagos.</p>
+                      )}
+                      {tenantPaymentsQuery.data && (
+                        <div className="rounded-xl border border-slate-200/90 bg-white shadow-sm overflow-hidden ring-1 ring-slate-900/5">
+                          <BackofficeSectionHeading
+                            embedded
+                            icon={Wallet}
+                            title="Historial de pagos"
+                            description="Últimos 10 movimientos registrados"
+                          />
+                          {tenantPaymentsQuery.data.length === 0 ? (
+                            <div className="px-4 py-8 text-center">
+                              <p className="text-sm text-slate-500">Este tenant aún no tiene pagos registrados.</p>
+                            </div>
+                          ) : (
+                            <div className="overflow-x-auto">
+                              <table className="table-enterprise min-w-full">
+                                <thead>
+                                  <tr>
+                                    <th>Fecha</th>
+                                    <th>Monto</th>
+                                    <th>Plan</th>
+                                    <th>Recibo</th>
+                                    <th>Próx. cobro</th>
+                                    <th className="table-enterprise-col-actions">Acción</th>
+                                  </tr>
+                                </thead>
+                                <tbody>
+                                  {tenantPaymentsQuery.data.map((p) => (
+                                    <tr key={p.id}>
+                                      <td className="whitespace-nowrap text-slate-600">
+                                        {new Date(p.paid_at).toLocaleString()}
+                                      </td>
+                                      <td className="font-semibold text-slate-900">
+                                        {formatCurrency(p.amount)}
+                                      </td>
+                                      <td>{p.plan_label || p.plan_code || '—'}</td>
+                                      <td className="font-mono text-xs">{p.comprobante_referencia || '—'}</td>
+                                      <td>
+                                        {p.next_billing_at ? new Date(p.next_billing_at).toLocaleDateString() : '—'}
+                                      </td>
+                                      <td className="table-enterprise-col-actions">
+                                        <button
+                                          type="button"
+                                          onClick={() => handleDownloadReceipt(p.receipt_download_url, p.comprobante_referencia)}
+                                          className="btn-chip"
+                                        >
+                                          Descargar PDF
+                                        </button>
+                                      </td>
+                                    </tr>
+                                  ))}
+                                </tbody>
+                              </table>
+                            </div>
+                          )}
                         </div>
                       )}
                     </div>
-                  </div>
+                  )}
                 </div>
 
-                <div className="section-card p-4">
-                  {tenantPaymentsQuery.isLoading && <LoadingBlock lines={3} />}
-                  {tenantPaymentsQuery.isError && (
-                    <p className="text-sm text-red-600">No fue posible cargar el historial de pagos.</p>
-                  )}
-                  {tenantPaymentsQuery.data && (
-                    <div className="rounded-xl border border-slate-200/90 bg-white shadow-sm overflow-hidden ring-1 ring-slate-900/5">
-                      <BackofficeSectionHeading
-                        embedded
-                        icon={Wallet}
-                        title="Historial de pagos"
-                        description="Últimos 10 movimientos registrados"
-                      />
-                      {tenantPaymentsQuery.data.length === 0 ? (
-                        <div className="px-4 py-8 text-center">
-                          <p className="text-sm text-slate-500">Este tenant aún no tiene pagos registrados.</p>
-                        </div>
-                      ) : (
-                        <div className="overflow-x-auto">
-                          <table className="table-enterprise min-w-full">
-                            <thead>
-                              <tr>
-                                <th>Fecha</th>
-                                <th>Monto</th>
-                                <th>Plan</th>
-                                <th>Recibo</th>
-                                <th>Próx. cobro</th>
-                                <th className="table-enterprise-col-actions">Acción</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {tenantPaymentsQuery.data.map((p) => (
-                                <tr key={p.id}>
-                                  <td className="whitespace-nowrap text-slate-600">
-                                    {new Date(p.paid_at).toLocaleString()}
-                                  </td>
-                                  <td className="font-semibold text-slate-900">
-                                    {formatCurrency(p.amount)}
-                                  </td>
-                                  <td>{p.plan_label || p.plan_code || '—'}</td>
-                                  <td className="font-mono text-xs">{p.comprobante_referencia || '—'}</td>
-                                  <td>
-                                    {p.next_billing_at ? new Date(p.next_billing_at).toLocaleDateString() : '—'}
-                                  </td>
-                                  <td className="table-enterprise-col-actions">
-                                    <button
-                                      type="button"
-                                      onClick={() => handleDownloadReceipt(p.receipt_download_url, p.comprobante_referencia)}
-                                      className="btn-chip"
-                                    >
-                                      Descargar PDF
-                                    </button>
-                                  </td>
+                <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => toggleTenantProfileSection('users')}
+                    className="flex w-full items-center justify-between px-4 py-3 text-left"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Usuarios recientes</p>
+                      <p className="text-xs text-slate-500">Resumen de usuarios internos del tenant</p>
+                    </div>
+                    <span className="text-xs font-semibold text-slate-600">
+                      {tenantProfileSectionsOpen.users ? 'Ocultar' : 'Mostrar'}
+                    </span>
+                  </button>
+                  {tenantProfileSectionsOpen.users && (
+                    <div className="border-t border-slate-200 p-4">
+                      <div className="rounded-xl border border-slate-200/90 bg-white shadow-sm overflow-hidden ring-1 ring-slate-900/5">
+                        <BackofficeSectionHeading
+                          embedded
+                          icon={Users}
+                          title="Usuarios recientes"
+                          description={`${tenantProfileQuery.data.total_usuarios} usuario${
+                            tenantProfileQuery.data.total_usuarios === 1 ? '' : 's'
+                          } en el tenant`}
+                        />
+                        {tenantProfileQuery.data.usuarios_recientes.length === 0 ? (
+                          <div className="px-4 py-8 text-center">
+                            <p className="text-sm text-slate-500">No hay usuarios recientes para este tenant.</p>
+                          </div>
+                        ) : (
+                          <div className="overflow-x-auto">
+                            <table className="table-enterprise min-w-full">
+                              <thead>
+                                <tr>
+                                  <th>Nombre</th>
+                                  <th>Email</th>
+                                  <th>Rol</th>
+                                  <th>Estado</th>
                                 </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
+                              </thead>
+                              <tbody>
+                                {tenantProfileQuery.data.usuarios_recientes.map((u) => (
+                                  <tr key={u.id}>
+                                    <td className="font-semibold text-slate-900">{u.nombre_completo}</td>
+                                    <td className="text-slate-600 break-all">{u.email}</td>
+                                    <td>
+                                      <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-xs font-medium capitalize text-slate-700">
+                                        {u.rol}
+                                      </span>
+                                    </td>
+                                    <td>
+                                      <span className={u.activo ? 'badge badge-success' : 'badge badge-danger'}>
+                                        {u.activo ? 'Activo' : 'Inactivo'}
+                                      </span>
+                                    </td>
+                                  </tr>
+                                ))}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
-                </div>
-
-                <div className="section-card p-4">
-                  <div className="rounded-xl border border-slate-200/90 bg-white shadow-sm overflow-hidden ring-1 ring-slate-900/5">
-                    <BackofficeSectionHeading
-                      embedded
-                      icon={Users}
-                      title="Usuarios recientes"
-                      description={`${tenantProfileQuery.data.total_usuarios} usuario${
-                        tenantProfileQuery.data.total_usuarios === 1 ? '' : 's'
-                      } en el tenant`}
-                    />
-                    {tenantProfileQuery.data.usuarios_recientes.length === 0 ? (
-                      <div className="px-4 py-8 text-center">
-                        <p className="text-sm text-slate-500">No hay usuarios recientes para este tenant.</p>
-                      </div>
-                    ) : (
-                      <div className="overflow-x-auto">
-                        <table className="table-enterprise min-w-full">
-                          <thead>
-                            <tr>
-                              <th>Nombre</th>
-                              <th>Email</th>
-                              <th>Rol</th>
-                              <th>Estado</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {tenantProfileQuery.data.usuarios_recientes.map((u) => (
-                              <tr key={u.id}>
-                                <td className="font-semibold text-slate-900">{u.nombre_completo}</td>
-                                <td className="text-slate-600 break-all">{u.email}</td>
-                                <td>
-                                  <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-xs font-medium capitalize text-slate-700">
-                                    {u.rol}
-                                  </span>
-                                </td>
-                                <td>
-                                  <span className={u.activo ? 'badge badge-success' : 'badge badge-danger'}>
-                                    {u.activo ? 'Activo' : 'Inactivo'}
-                                  </span>
-                                </td>
-                              </tr>
-                            ))}
-                          </tbody>
-                        </table>
-                      </div>
-                    )}
-                  </div>
                 </div>
               </div>
             )}
