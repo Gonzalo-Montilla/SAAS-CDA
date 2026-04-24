@@ -25,6 +25,7 @@ from app.integrations.factus_client import (
     download_bill_pdf_resolved,
     factus_base_url,
     format_factus_error_detail,
+    format_factus_error_for_user,
     obtain_token,
     validate_invoice,
 )
@@ -40,11 +41,9 @@ from app.models.tenant_billing_checkout import TenantBillingCheckoutSession
 from app.services.saas_billing_plans import PLAN_DEFINITIONS, calculate_chargeable_branches_for_tenant
 from app.utils.archivo_fiscal_pdf import guardar_pdf_archivo_fiscal
 from app.utils.factus_validators import (
-    digito_verificacion_nit_colombia,
-    digito_verificacion_nit_colombia_serie_37,
     email_valido_factus,
-    parse_nit_colombiano_identificacion_y_dv,
     solo_digitos,
+    validar_nit_cda_con_dv,
 )
 
 _log = logging.getLogger(__name__)
@@ -90,37 +89,12 @@ def _resolve_tenant_nit_and_dv(nit_raw: str) -> tuple[str, int]:
     - Si llega sin guion pero parece incluir DV al final, lo detecta.
     - Si no hay forma inequívoca de DV, exige capturarlo explícitamente.
     """
-    s = (nit_raw or "").strip()
-    ident, dv_parse = parse_nit_colombiano_identificacion_y_dv(s)
+    normalized_nit, ident, dv = validar_nit_cda_con_dv(nit_raw)
     if len(ident) < 6:
         raise ValueError("NIT del CDA insuficiente para Factus.")
-
-    digits = solo_digitos(s)
-    if "-" not in s and dv_parse is None and len(digits) >= 7:
-        base_guess = digits[:-1]
-        dv_guess = int(digits[-1])
-        d71_guess = digito_verificacion_nit_colombia(base_guess)
-        d37_guess = digito_verificacion_nit_colombia_serie_37(base_guess)
-        if dv_guess == d71_guess or dv_guess == d37_guess:
-            ident = base_guess
-            dv_parse = dv_guess
-
-    if dv_parse is not None:
-        d71 = digito_verificacion_nit_colombia(ident)
-        d37 = digito_verificacion_nit_colombia_serie_37(ident)
-        if d71 == d37 and d71 != dv_parse:
-            raise ValueError(
-                "El DV no coincide con el NIT del CDA. Verifique en el RUT y regístrelo como 900123456-8."
-            )
-        return ident, int(dv_parse)
-
-    d71 = digito_verificacion_nit_colombia(ident)
-    d37 = digito_verificacion_nit_colombia_serie_37(ident)
-    if d71 != d37:
-        raise ValueError(
-            "No fue posible inferir un DV único para el NIT del CDA. Registre el NIT con guion y DV oficial del RUT (ej: 900123456-8)."
-        )
-    return ident, int(d71)
+    if "-" not in normalized_nit:
+        raise ValueError("Registre el NIT del CDA con guion y DV oficial (ej: 900123456-8).")
+    return ident, int(dv)
 
 
 def _customer_tenant_cda_nit(tenant: Tenant) -> dict[str, Any]:
@@ -237,6 +211,11 @@ def try_emit_saas_billing_electronic_invoice(
         .first()
     )
     if existing is not None:
+        if checkout.saas_fe_status != "ok":
+            checkout.saas_fe_status = "ok"
+            checkout.saas_fe_error = None
+            db.add(checkout)
+            db.commit()
         return
 
     pnorm = (checkout.plan_code or "").strip().lower()
@@ -324,7 +303,7 @@ def try_emit_saas_billing_electronic_invoice(
         _log.exception("FE SaaS no emitida para checkout %s", checkout.id)
         err_txt = str(exc)
         if isinstance(exc, FactusAPIError):
-            err_txt = format_factus_error_detail(exc)[:4000]
+            err_txt = format_factus_error_for_user(exc)[:4000]
         try:
             ref_ctx = _saas_checkout_reference_code(checkout.id)
             err_txt = f"{err_txt} | ref:{ref_ctx}"

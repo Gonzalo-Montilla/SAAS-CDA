@@ -8,6 +8,7 @@ import {
   completeTenantCheckoutMock,
   confirmTenantCheckoutReturn,
   fetchLatestSaasFe,
+  retrySaasFactusEmission,
   type SaasFeLatest,
   type TenantPlanItem,
 } from '../api/tenantBilling';
@@ -99,8 +100,12 @@ function isPendingDianFactusError(msg: string | null | undefined): boolean {
   return s.includes('pendiente') && s.includes('dian');
 }
 
-function saasFeStatusLabel(status: string | null | undefined, err: string | null | undefined): string {
-  if ((status || '') === 'error' && isPendingDianFactusError(err)) {
+function saasFeStatusLabel(
+  status: string | null | undefined,
+  err: string | null | undefined,
+  category?: string | null
+): string {
+  if ((status || '') === 'error' && (category === 'pending_dian' || isPendingDianFactusError(err))) {
     return 'En proceso de validación DIAN';
   }
   const s = (status || '').trim().toLowerCase();
@@ -233,6 +238,8 @@ export default function Suscripcion() {
   const [loading, setLoading] = useState(false);
   const [initResult, setInitResult] = useState<string | null>(null);
   const [saasFe, setSaasFe] = useState<SaasFeLatest | null>(null);
+  const [saasFeLoadError, setSaasFeLoadError] = useState<string | null>(null);
+  const [retryFeBusy, setRetryFeBusy] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
   const [quotePulse, setQuotePulse] = useState(false);
   /** Retorno ePayco con parámetros en la URL: confirmación al API en curso. */
@@ -240,9 +247,13 @@ export default function Suscripcion() {
 
   const loadSaasFe = useCallback(() => {
     if (authScope !== 'tenant') return;
+    setSaasFeLoadError(null);
     void fetchLatestSaasFe()
       .then(setSaasFe)
-      .catch(() => setSaasFe(null));
+      .catch(() => {
+        setSaasFe(null);
+        setSaasFeLoadError('No se pudo cargar el estado de la factura de licencia. Intente actualizar.');
+      });
   }, [authScope]);
 
   useEffect(() => {
@@ -337,6 +348,24 @@ export default function Suscripcion() {
   }, [quote?.total, quote?.subtotal, quote?.iva, quote?.sedes_totales, quote?.chargeable_additional_branches]);
 
   const isAdmin = u?.rol === 'administrador';
+  const canRetrySaasFe = isAdmin && Boolean(saasFe?.session_id) && (saasFe?.saas_fe_status || '') !== 'ok';
+
+  const retrySaasFe = async () => {
+    if (!saasFe?.session_id || retryFeBusy) return;
+    setRetryFeBusy(true);
+    setErr(null);
+    try {
+      const out = await retrySaasFactusEmission(saasFe.session_id);
+      setSaasFe(out);
+      await refreshTenantUser();
+      loadSaasFe();
+    } catch (e: unknown) {
+      const detail = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
+      setErr(typeof detail === 'string' ? detail : 'No se pudo reintentar la emisión de la factura electrónica.');
+    } finally {
+      setRetryFeBusy(false);
+    }
+  };
 
   return (
     <div className="corporate-shell">
@@ -389,6 +418,9 @@ export default function Suscripcion() {
         )}
 
         {err && <p className="mb-3 rounded border border-red-200 bg-red-50 p-2 text-sm text-red-800">{err}</p>}
+        {saasFeLoadError && (
+          <p className="mb-3 rounded border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900">{saasFeLoadError}</p>
+        )}
 
         {authScope === 'tenant' && saasFe?.session_id && (
           <div className="section-card p-4 sm:p-5 mb-6 text-sm text-slate-800">
@@ -400,8 +432,13 @@ export default function Suscripcion() {
             {typeof saasFe.total_cop === 'number' && <p>Total abonado: {fmtCop(saasFe.total_cop)}</p>}
             <p className="mt-2">
               <span className="font-medium">Estado DIAN (Factus licencia):</span>{' '}
-              {saasFeStatusLabel(saasFe.saas_fe_status, saasFe.saas_fe_error)}
+              {saasFeStatusLabel(saasFe.saas_fe_status, saasFe.saas_fe_error, saasFe.saas_fe_error_category)}
             </p>
+            {saasFe.saas_fe_reference_code && (
+              <p className="mt-1 text-xs text-slate-600">
+                Referencia de soporte Factus: <span className="font-mono">{saasFe.saas_fe_reference_code}</span>
+              </p>
+            )}
             {saasFe.numero_documento && (
               <p className="mt-1">
                 No. {saasFe.numero_documento}
@@ -418,7 +455,7 @@ export default function Suscripcion() {
                 Abrir comprobante (Factus)
               </a>
             )}
-            {isPendingDianFactusError(saasFe.saas_fe_error) ? (
+            {saasFe.saas_fe_error_category === 'pending_dian' || isPendingDianFactusError(saasFe.saas_fe_error) ? (
               <p className="mt-2 rounded border border-amber-200 bg-amber-50 p-2 text-xs text-amber-950">
                 Estamos validando tu factura electrónica. Este proceso puede tardar unos minutos. La factura electrónica
                 llegará al correo de su CDA.
@@ -429,6 +466,20 @@ export default function Suscripcion() {
                   {saasFe.saas_fe_error}
                 </p>
               )
+            )}
+            {canRetrySaasFe && (
+              <div className="mt-3">
+                <button
+                  type="button"
+                  className="btn-chip"
+                  disabled={retryFeBusy}
+                  onClick={() => {
+                    void retrySaasFe();
+                  }}
+                >
+                  {retryFeBusy ? 'Reintentando…' : 'Reintentar emisión FE'}
+                </button>
+              </div>
             )}
           </div>
         )}

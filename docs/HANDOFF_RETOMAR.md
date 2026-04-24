@@ -72,3 +72,60 @@ No guardar en repo credenciales reales: solo `.env` local (está en `.gitignore`
 8. Correr smoke test de frontend tenant (`/suscripcion` completo).
 9. Confirmar tests backend y CI en verde.
 10. Desplegar con monitoreo intensivo 24-48h.
+
+## Runbook operativo FE SaaS (PROMETHEUS -> CDA)
+
+Este runbook aplica para errores de licencia FE en backoffice (`Facturación > Pagos en línea`) o en `/suscripcion`.
+
+### 1) Identificar el caso
+
+- Confirmar `session_id`, `tenant_slug` y `saas_fe_reference_code` (`saas-sub-...`).
+- Revisar `saas_fe_error_category`:
+  - `pending_dian`: cola/bloqueo DIAN.
+  - `nit_dv`: inconsistencia NIT-DV.
+  - `rut_name`: nombre no coincide con RUT.
+  - `config`: variables/credenciales emisor.
+  - `validation`: validación general Factus.
+
+### 2) Consultar cola en Factus Sandbox (Postman)
+
+1. Obtener token:
+   - `POST https://api-sandbox.factus.com.co/oauth/token`
+2. Consultar referencia:
+   - `GET https://api-sandbox.factus.com.co/v1/bills?filter[reference_code]={reference_code}&page=1`
+3. (Opcional) Ver cola completa:
+   - `GET https://api-sandbox.factus.com.co/v1/bills?filter[status]=0&page=1`
+
+### 3) Destrabar y reintentar
+
+1. Borrar represada por referencia:
+   - `DELETE https://api-sandbox.factus.com.co/v1/bills/destroy/reference/{reference_code}`
+2. Verificar que quedó vacía:
+   - `GET https://api-sandbox.factus.com.co/v1/bills?filter[reference_code]={reference_code}&page=1`
+3. Reintentar FE:
+   - Tenant: botón `Reintentar emisión FE` en `/suscripcion`.
+   - Backoffice: acción `Reintentar FE` en tabla de checkout.
+
+### 4) Verificación final
+
+1. Confirmar `saas_fe_status = ok`.
+2. Confirmar `numero_documento` y `cufe`.
+3. Validar en Factus:
+   - `GET https://api-sandbox.factus.com.co/v1/bills/show/{numero_documento}`
+   - Revisar `customer.identification` y `customer.dv`.
+
+## Verificación E2E de salida (ejecutada en código)
+
+- Backend tests:
+  - `python -m pytest -q` -> `12 passed`.
+- Front typecheck:
+  - `npx tsc -b` -> OK.
+
+## Escenarios E2E manuales recomendados (sandbox)
+
+1. **Emisión directa OK**  
+   Pago aprobado -> FE `ok` sin intervención.
+2. **Corrección fiscal**  
+   Error `nit_dv` o `rut_name` -> ajustar datos tenant -> reintentar -> FE `ok`.
+3. **Cola DIAN**  
+   Error `pending_dian` -> borrar por `reference_code` -> reintentar -> FE `ok`.

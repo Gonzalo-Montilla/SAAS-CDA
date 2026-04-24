@@ -72,7 +72,13 @@ from app.integrations.factus_client import (
     obtain_token,
 )
 from app.api.v1.endpoints.tenant_billing import TenantSaasFeLatestOut
-from app.utils.factus_validators import normalizar_numero_identificacion_proveedor
+from app.services.saas_fe_diagnostics import (
+    categorize_saas_fe_error,
+    extract_saas_fe_reference_code,
+)
+from app.utils.factus_validators import (
+    validar_nit_cda_con_dv,
+)
 
 router = APIRouter()
 
@@ -391,6 +397,8 @@ class SaaSCheckoutSessionItem(BaseModel):
     epayco_ref: str | None
     saas_fe_status: str | None
     saas_fe_error: str | None
+    saas_fe_error_category: str | None = None
+    saas_fe_reference_code: str | None = None
     numero_documento: str | None = None
     cufe: str | None = None
     public_url: str | None = None
@@ -439,12 +447,15 @@ def _checkout_row_to_tenant_saas_fe_out(
     row: TenantBillingCheckoutSession, fe: FacturaElectronica | None
 ) -> TenantSaasFeLatestOut:
     total = float(row.total_cop) if row.total_cop is not None else None
+    err_msg = row.saas_fe_error[:2000] if row.saas_fe_error else None
     return TenantSaasFeLatestOut(
         session_id=str(row.id),
         plan_code=row.plan_code,
         total_cop=total,
         saas_fe_status=row.saas_fe_status,
-        saas_fe_error=(row.saas_fe_error[:2000] if row.saas_fe_error else None),
+        saas_fe_error=err_msg,
+        saas_fe_error_category=categorize_saas_fe_error(status=row.saas_fe_status, error_message=err_msg),
+        saas_fe_reference_code=extract_saas_fe_reference_code(err_msg),
         numero_documento=fe.numero_documento if fe else None,
         cufe=fe.cufe if fe else None,
         public_url=fe.public_url if fe else None,
@@ -1032,7 +1043,13 @@ def patch_saas_tenant_core_data(
     if "nit_cda" in data:
         raw_nit = (data["nit_cda"] or "").strip()
         if raw_nit:
-            normalized_nit = normalizar_numero_identificacion_proveedor(raw_nit)[:30]
+            try:
+                normalized_nit, _, _ = validar_nit_cda_con_dv(raw_nit)
+            except ValueError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=str(exc),
+                ) from exc
             existing = (
                 db.query(Tenant)
                 .filter(Tenant.nit_cda == normalized_nit, Tenant.id != tenant.id)
@@ -2023,6 +2040,7 @@ def list_billing_checkout_sessions(
     )
     out: list[SaaSCheckoutSessionItem] = []
     for s, slug, nombre, fe in rows:
+        err_msg = s.saas_fe_error[:2000] if s.saas_fe_error else None
         out.append(
             SaaSCheckoutSessionItem(
                 session_id=str(s.id),
@@ -2037,7 +2055,9 @@ def list_billing_checkout_sessions(
                 completed_at=s.completed_at,
                 epayco_ref=s.epayco_ref,
                 saas_fe_status=s.saas_fe_status,
-                saas_fe_error=(s.saas_fe_error[:2000] if s.saas_fe_error else None),
+                saas_fe_error=err_msg,
+                saas_fe_error_category=categorize_saas_fe_error(status=s.saas_fe_status, error_message=err_msg),
+                saas_fe_reference_code=extract_saas_fe_reference_code(err_msg),
                 numero_documento=fe.numero_documento if fe else None,
                 cufe=fe.cufe if fe else None,
                 public_url=fe.public_url if fe else None,
@@ -2175,6 +2195,8 @@ def export_billing_checkout_sessions_csv(
             "session_id",
             "status_pago",
             "saas_fe_status",
+            "saas_fe_error_category",
+            "saas_fe_reference_code",
             "saas_fe_error",
             "numero_documento",
             "cufe",
@@ -2183,6 +2205,7 @@ def export_billing_checkout_sessions_csv(
         ]
     )
     for s, slug, nombre, fe in rows:
+        err_msg = (s.saas_fe_error or "")[:2000]
         writer.writerow(
             [
                 s.created_at.isoformat() if s.created_at else "",
@@ -2193,7 +2216,9 @@ def export_billing_checkout_sessions_csv(
                 str(s.id),
                 s.status or "",
                 s.saas_fe_status or "",
-                (s.saas_fe_error or "")[:2000],
+                categorize_saas_fe_error(status=s.saas_fe_status, error_message=err_msg),
+                extract_saas_fe_reference_code(err_msg) or "",
+                err_msg,
                 fe.numero_documento if fe else "",
                 fe.cufe if fe else "",
                 fe.public_url if fe else "",
@@ -2240,6 +2265,15 @@ def saas_retry_checkout_session_saas_factus(
         .filter(FacturaElectronica.billing_checkout_session_id == row.id)
         .first()
     )
+    if row.saas_fe_status == "ok" and fe0 is None:
+        row.saas_fe_status = "error"
+        row.saas_fe_error = (
+            "Estado FE inconsistente: sesión marcada como ok sin registro de factura electrónica. "
+            "Se recomienda reintentar la emisión."
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
     if row.saas_fe_status == "ok" and fe0 is not None:
         return _checkout_row_to_tenant_saas_fe_out(row, fe0)
     tenant = db.query(Tenant).filter(Tenant.id == row.tenant_id).first()

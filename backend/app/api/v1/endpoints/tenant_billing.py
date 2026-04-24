@@ -41,6 +41,10 @@ from app.services.saas_billing_plans import (
     calculate_plan_quote,
     plan_codes_for_public_checkout,
 )
+from app.services.saas_fe_diagnostics import (
+    categorize_saas_fe_error,
+    extract_saas_fe_reference_code,
+)
 from app.services.tenant_billing_checkout import apply_successful_tenant_checkout, session_for_tenant
 from app.services.tenant_billing_state import (
     billing_gate_for_demo_tenant,
@@ -56,6 +60,17 @@ def utcnow_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _public_backend_base_url() -> str:
+    """
+    Normaliza BACKEND_PUBLIC_BASE_URL y tolera copiado accidental desde ngrok
+    con formato "https://xxx.ngrok... -> http://localhost:8000".
+    """
+    raw = (settings.BACKEND_PUBLIC_BASE_URL or "").strip()
+    if "->" in raw:
+        raw = raw.split("->", 1)[0].strip()
+    return raw.rstrip("/")
+
+
 def _epayco_public_response_url(session_id: UUID) -> str:
     """
     ePayco Apify exige response URL pública/valida.
@@ -64,7 +79,7 @@ def _epayco_public_response_url(session_id: UUID) -> str:
     front = settings.FRONTEND_URL.rstrip("/")
     low = front.lower()
     if low.startswith("http://localhost") or low.startswith("https://localhost") or "127.0.0.1" in low:
-        base_back = settings.BACKEND_PUBLIC_BASE_URL.rstrip("/")
+        base_back = _public_backend_base_url()
         return f"{base_back}/api/v1/tenant/billing/response-bridge?session={session_id}"
     return f"{front}/suscripcion?session={session_id}"
 
@@ -190,6 +205,8 @@ class TenantSaasFeLatestOut(BaseModel):
     total_cop: float | None = None
     saas_fe_status: str | None = None
     saas_fe_error: str | None = None
+    saas_fe_error_category: str | None = None
+    saas_fe_reference_code: str | None = None
     numero_documento: str | None = None
     cufe: str | None = None
     public_url: str | None = None
@@ -319,7 +336,7 @@ def init_tenant_checkout(
         )
 
     resp_url = _epayco_public_response_url(session_row.id)
-    conf_url = f"{settings.BACKEND_PUBLIC_BASE_URL.rstrip('/')}/api/v1/tenant/billing/webhooks/epayco"
+    conf_url = f"{_public_backend_base_url()}/api/v1/tenant/billing/webhooks/epayco"
     nombre = (tenant.nombre_representante or tenant.nombre_comercial or "Cliente")[:200]
     email = (tenant.correo_electronico or current_user.email or "cliente@local")[:200]
     pk = (settings.EPAYCO_PUBLIC_KEY or "").strip()
@@ -617,12 +634,15 @@ def _row_to_saas_fe_out(
     row: TenantBillingCheckoutSession, fe: FacturaElectronica | None
 ) -> TenantSaasFeLatestOut:
     total = float(row.total_cop) if row.total_cop is not None else None
+    err_msg = row.saas_fe_error[:2000] if row.saas_fe_error else None
     return TenantSaasFeLatestOut(
         session_id=str(row.id),
         plan_code=row.plan_code,
         total_cop=total,
         saas_fe_status=row.saas_fe_status,
-        saas_fe_error=(row.saas_fe_error[:2000] if row.saas_fe_error else None),
+        saas_fe_error=err_msg,
+        saas_fe_error_category=categorize_saas_fe_error(status=row.saas_fe_status, error_message=err_msg),
+        saas_fe_reference_code=extract_saas_fe_reference_code(err_msg),
         numero_documento=fe.numero_documento if fe else None,
         cufe=fe.cufe if fe else None,
         public_url=fe.public_url if fe else None,
@@ -651,6 +671,15 @@ def get_latest_saas_billing_factus_status(
         .filter(FacturaElectronica.billing_checkout_session_id == row.id)
         .first()
     )
+    if row.saas_fe_status == "ok" and fe is None:
+        row.saas_fe_status = "error"
+        row.saas_fe_error = (
+            "Estado FE inconsistente: sesión marcada como ok sin registro de factura electrónica. "
+            "Reintente la emisión desde esta vista."
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
     return _row_to_saas_fe_out(row, fe)
 
 
@@ -674,6 +703,15 @@ def retry_saas_billing_factus_emission(
         .filter(FacturaElectronica.billing_checkout_session_id == row.id)
         .first()
     )
+    if row.saas_fe_status == "ok" and fe0 is None:
+        row.saas_fe_status = "error"
+        row.saas_fe_error = (
+            "Estado FE inconsistente: sesión marcada como ok sin registro de factura electrónica. "
+            "Se recomienda reintentar la emisión."
+        )
+        db.add(row)
+        db.commit()
+        db.refresh(row)
     if row.saas_fe_status == "ok" and fe0 is not None:
         return _row_to_saas_fe_out(row, fe0)
     tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()

@@ -96,6 +96,8 @@ export type SaasFeLatest = {
   total_cop: number | null;
   saas_fe_status: string | null;
   saas_fe_error: string | null;
+  saas_fe_error_category: string | null;
+  saas_fe_reference_code: string | null;
   numero_documento: string | null;
   cufe: string | null;
   public_url: string | null;

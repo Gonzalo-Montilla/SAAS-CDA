@@ -36,20 +36,43 @@ def build_epayco_checkout_get_url(
     Nombres de parámetros alineados con integración web estándar ePayco.
     """
     pk = (settings.EPAYCO_PUBLIC_KEY or "").strip()
+    amount_int = int(round(float(amount_cop)))
+    amount_str = f"{amount_int:d}"
+    currency = "COP"
+    order_id = invoice
+
+    # Compatibilidad legacy checkout.php:
+    # algunos comercios requieren además p_cust_id_cliente + p_key + p_signature MD5.
+    cust_id = (settings.EPAYCO_CLIENT_ID or "").strip()
+    p_key = (settings.EPAYCO_P_KEY or "").strip()
+    sig = ""
+    if cust_id and p_key:
+        sig = hashlib.md5(f"{cust_id}^{p_key}^{order_id}^{amount_str}^{currency}".encode("utf-8")).hexdigest()
+
+    # Payload canónico de checkout legacy ePayco.
     params = {
-        "p_public_key": pk,
-        "p_amount": f"{int(round(float(amount_cop))):d}",
-        "p_currency": "COP",
-        "p_order_id": invoice,
+        "p_id_invoice": order_id,
         "p_description": (title or "Suscripción CDASOFT")[:200],
-        "p_email": email,
-        "p_name": (name or "Cliente")[:80],
+        "p_amount": amount_str,
+        "p_tax": "0",
+        "p_tax_base": "0",
+        "p_currency_code": currency,
         "p_url_response": url_response,
         "p_url_confirmation": url_confirmation,
+        "p_name": (name or "Cliente")[:80],
+        "p_email": email,
     }
+    if cust_id and p_key:
+        params["p_cust_id_cliente"] = cust_id
+        params["p_key"] = p_key
+        params["p_signature"] = sig
+    else:
+        # Fallback para integraciones que solo tienen llave pública.
+        params["p_public_key"] = pk
     if settings.EPAYCO_TEST_MODE:
-        params["p_test_request"] = "true"
-    return f"https://secure.epayco.co/checkout.php?{urlencode(params)}"
+        params["p_test_request"] = "TRUE"
+    # Host legacy más estable en pruebas: redirige a panel checkout activo.
+    return f"https://secure.payco.co/checkout.php?{urlencode(params)}"
 
 
 def parse_epayco_approval(cod_response: str | None, response_code: str | None) -> bool:

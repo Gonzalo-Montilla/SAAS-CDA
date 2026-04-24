@@ -210,9 +210,16 @@ export default function SaaSBackoffice() {
     return s.includes('pendiente') && s.includes('dian');
   };
 
-  const effectiveFeStatus = (status: string | null | undefined, err: string | null | undefined): string => {
-    if ((status || '') === 'error' && isPendingDianFactusError(err)) {
+  const effectiveFeStatus = (
+    status: string | null | undefined,
+    err: string | null | undefined,
+    category?: string | null
+  ): string => {
+    if ((status || '') === 'error' && (category === 'pending_dian' || isPendingDianFactusError(err))) {
       return 'pending_dian';
+    }
+    if ((status || '') === 'error' && category) {
+      return category;
     }
     return status || '';
   };
@@ -226,6 +233,10 @@ export default function SaaSBackoffice() {
       error: 'Error',
       skipped: 'Omitida',
       pending_dian: 'Pendiente DIAN (Factus)',
+      nit_dv: 'NIT / DV inválido',
+      rut_name: 'Nombre no coincide RUT',
+      config: 'Configuración emisor',
+      validation: 'Error validación Factus',
     };
     return labels[s] || s;
   };
@@ -255,7 +266,15 @@ export default function SaaSBackoffice() {
     if (status === 'ok') {
       return 'badge badge-success';
     }
-    if (status === 'error' || status === 'skipped' || status === 'pending_dian') {
+    if (
+      status === 'error' ||
+      status === 'skipped' ||
+      status === 'pending_dian' ||
+      status === 'nit_dv' ||
+      status === 'rut_name' ||
+      status === 'config' ||
+      status === 'validation'
+    ) {
       return 'badge badge-warning';
     }
     if (status === 'resuelto' || status === 'cerrado') {
@@ -665,6 +684,8 @@ export default function SaaSBackoffice() {
       'session_id',
       'status_pago',
       'saas_fe_status',
+      'saas_fe_error_category',
+      'saas_fe_reference_code',
       'saas_fe_error',
       'numero_documento',
       'cufe',
@@ -683,6 +704,8 @@ export default function SaaSBackoffice() {
           escapeCsvField(r.session_id),
           escapeCsvField(r.status),
           escapeCsvField(r.saas_fe_status ?? ''),
+          escapeCsvField(r.saas_fe_error_category ?? ''),
+          escapeCsvField(r.saas_fe_reference_code ?? ''),
           escapeCsvField(r.saas_fe_error ?? ''),
           escapeCsvField(r.numero_documento ?? ''),
           escapeCsvField(r.cufe ?? ''),
@@ -997,14 +1020,21 @@ export default function SaaSBackoffice() {
 
   const retrySaaSCheckoutFeMutation = useMutation({
     mutationFn: async (sessionId: string) => {
-      const response = await apiClient.post(
+      const response = await apiClient.post<{
+        saas_fe_status?: string | null;
+        saas_fe_error?: string | null;
+      }>(
         `/saas/auth/billing/checkout-sessions/${encodeURIComponent(sessionId)}/retry-saas-factus`,
       );
       return response.data;
     },
-    onSuccess: () => {
+    onSuccess: (data) => {
       setBillingActionError('');
-      setBillingActionSuccess('Factura electrónica (licencia) reintentada. Verifique el estado en la tabla.');
+      if ((data?.saas_fe_status || '') === 'ok') {
+        setBillingActionSuccess('Factura electrónica (licencia) emitida correctamente.');
+      } else {
+        setBillingActionSuccess('Reintento ejecutado. Revise el detalle FE para validar el resultado.');
+      }
       queryClient.invalidateQueries({ queryKey: ['saas-billing-checkout-sessions'] });
     },
     onError: (err: any) => {
@@ -1634,7 +1664,11 @@ export default function SaaSBackoffice() {
                       </thead>
                       <tbody>
                         {checkoutRowsPage.map((row) => {
-                          const feSt = effectiveFeStatus(row.saas_fe_status, row.saas_fe_error);
+                          const feSt = effectiveFeStatus(
+                            row.saas_fe_status,
+                            row.saas_fe_error,
+                            row.saas_fe_error_category,
+                          );
                           const feComplete = row.saas_fe_status === 'ok' && Boolean(row.numero_documento);
                           const showRetry = canRetrySaaSFe && row.status === 'paid' && !feComplete;
                           const isExpanded = expandedCheckoutSessionId === row.session_id;
@@ -1719,6 +1753,14 @@ export default function SaaSBackoffice() {
                                       </p>
                                       <p>
                                         <span className="font-semibold text-slate-900">Documento FE:</span> {row.numero_documento || '—'}
+                                      </p>
+                                      <p>
+                                        <span className="font-semibold text-slate-900">Categoría FE:</span>{' '}
+                                        {row.saas_fe_error_category || '—'}
+                                      </p>
+                                      <p>
+                                        <span className="font-semibold text-slate-900">Referencia FE:</span>{' '}
+                                        <span className="font-mono">{row.saas_fe_reference_code || '—'}</span>
                                       </p>
                                       <p className="md:col-span-3 break-words">
                                         <span className="font-semibold text-slate-900">Detalle FE:</span>{' '}

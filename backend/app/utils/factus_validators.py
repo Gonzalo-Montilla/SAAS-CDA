@@ -89,6 +89,33 @@ def normalizar_numero_identificacion_proveedor(raw: str | None) -> str:
     return solo_digitos(s.replace(".", ""))
 
 
+def validar_nit_cda_con_dv(raw: str | None) -> tuple[str, str, int]:
+    """
+    Valida y normaliza NIT de tenant en formato estricto NIT-DV.
+
+    Retorna:
+    - normalized_nit: cadena normalizada `base-dv`
+    - ident: base numérica del NIT
+    - dv: dígito de verificación (entero)
+    """
+    normalized_nit = normalizar_numero_identificacion_proveedor(raw)[:30]
+    if not re.fullmatch(r"\d{5,20}-\d", normalized_nit):
+        raise ValueError("NIT inválido. Use formato NIT-DV (ej: 900123456-8).")
+
+    ident, dv_parse = parse_nit_colombiano_identificacion_y_dv(normalized_nit)
+    if not ident or dv_parse is None:
+        raise ValueError("NIT inválido. Use formato NIT-DV (ej: 900123456-8).")
+
+    expected_dv = digito_verificacion_nit_colombia(ident)
+    alt_expected_dv = digito_verificacion_nit_colombia_serie_37(ident)
+    if int(dv_parse) not in {int(expected_dv), int(alt_expected_dv)}:
+        raise ValueError(
+            "DV inválido para el NIT indicado. "
+            f"Valores esperados: {ident}-{expected_dv} o {ident}-{alt_expected_dv}."
+        )
+    return normalized_nit, ident, int(dv_parse)
+
+
 def email_valido_factus(email_raw: str | None) -> bool:
     s = (email_raw or "").strip().lower()
     if not s or "@" not in s:
