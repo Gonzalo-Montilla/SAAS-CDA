@@ -382,7 +382,7 @@ class SaaSPaymentHistoryItem(BaseModel):
 
 
 class SaaSCheckoutSessionItem(BaseModel):
-    """Suscripción: sesión ePayco / init-payment y estado de FE (emisor PROMETHEUS), no el Factus del CDA."""
+    """Suscripción: sesión PSP / init-payment y estado FE (emisor PROMETHEUS), no el Factus del CDA."""
 
     session_id: str
     tenant_id: str
@@ -394,7 +394,9 @@ class SaaSCheckoutSessionItem(BaseModel):
     status: str
     created_at: datetime
     completed_at: datetime | None
-    epayco_ref: str | None
+    payment_provider: str | None = None
+    payment_ref: str | None = None
+    epayco_ref: str | None = None
     saas_fe_status: str | None
     saas_fe_error: str | None
     saas_fe_error_category: str | None = None
@@ -1912,7 +1914,7 @@ def list_billing_checkout_sessions(
     page_size: int = Query(default=20, ge=1, le=200),
     tenant_id: str | None = None,
     status_filter: str | None = Query(default=None, alias="status"),
-    q: str | None = Query(default=None, description="Búsqueda por tenant, sesión, ref ePayco o documento FE"),
+    q: str | None = Query(default=None, description="Búsqueda por tenant, sesión, referencia PSP o documento FE"),
     view_tab: str = Query(default="all", description="Vista: all | pending | paid | fe_issue"),
     sort_by: str = Query(default="created_at", description="Orden: created_at | total_cop | status | tenant"),
     sort_dir: str = Query(default="desc", description="Dirección: asc | desc"),
@@ -1923,7 +1925,7 @@ def list_billing_checkout_sessions(
     db: Session = Depends(get_db),
     _: SaaSUser = Depends(require_saas_role(["owner", "finanzas", "comercial", "soporte"])),
 ):
-    """Sesiones de pago de suscripción (ePayco) y estado de factura electrónica de licencia (Factus SaaS / PROMETHEUS)."""
+    """Sesiones de pago de suscripción (Wompi) y estado de factura electrónica de licencia (Factus SaaS / PROMETHEUS)."""
     base_q = (
         db.query(
             TenantBillingCheckoutSession,
@@ -1971,6 +1973,7 @@ def list_billing_checkout_sessions(
                 Tenant.nombre_comercial.ilike(pattern),
                 Tenant.slug.ilike(pattern),
                 func.cast(TenantBillingCheckoutSession.id, String).ilike(pattern),
+                TenantBillingCheckoutSession.payment_ref.ilike(pattern),
                 TenantBillingCheckoutSession.epayco_ref.ilike(pattern),
                 FacturaElectronica.numero_documento.ilike(pattern),
             )
@@ -2053,6 +2056,8 @@ def list_billing_checkout_sessions(
                 status=s.status,
                 created_at=s.created_at,
                 completed_at=s.completed_at,
+                payment_provider=s.payment_provider,
+                payment_ref=s.payment_ref,
                 epayco_ref=s.epayco_ref,
                 saas_fe_status=s.saas_fe_status,
                 saas_fe_error=err_msg,
@@ -2082,7 +2087,7 @@ def list_billing_checkout_sessions(
 def export_billing_checkout_sessions_csv(
     tenant_id: str | None = None,
     status_filter: str | None = Query(default=None, alias="status"),
-    q: str | None = Query(default=None, description="Búsqueda por tenant, sesión, ref ePayco o documento FE"),
+    q: str | None = Query(default=None, description="Búsqueda por tenant, sesión, referencia PSP o documento FE"),
     view_tab: str = Query(default="all", description="Vista: all | pending | paid | fe_issue"),
     sort_by: str = Query(default="created_at", description="Orden: created_at | total_cop | status | tenant"),
     sort_dir: str = Query(default="desc", description="Dirección: asc | desc"),
@@ -2142,6 +2147,7 @@ def export_billing_checkout_sessions_csv(
                 Tenant.nombre_comercial.ilike(pattern),
                 Tenant.slug.ilike(pattern),
                 func.cast(TenantBillingCheckoutSession.id, String).ilike(pattern),
+                TenantBillingCheckoutSession.payment_ref.ilike(pattern),
                 TenantBillingCheckoutSession.epayco_ref.ilike(pattern),
                 FacturaElectronica.numero_documento.ilike(pattern),
             )
@@ -2201,6 +2207,8 @@ def export_billing_checkout_sessions_csv(
             "numero_documento",
             "cufe",
             "public_url",
+            "payment_provider",
+            "payment_ref",
             "epayco_ref",
         ]
     )
@@ -2222,6 +2230,8 @@ def export_billing_checkout_sessions_csv(
                 fe.numero_documento if fe else "",
                 fe.cufe if fe else "",
                 fe.public_url if fe else "",
+                s.payment_provider or "",
+                s.payment_ref or "",
                 s.epayco_ref or "",
             ]
         )

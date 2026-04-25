@@ -690,6 +690,8 @@ export default function SaaSBackoffice() {
       'numero_documento',
       'cufe',
       'public_url',
+      'payment_provider',
+      'payment_ref',
       'epayco_ref',
     ];
     const lines = [header.join(',')];
@@ -710,6 +712,8 @@ export default function SaaSBackoffice() {
           escapeCsvField(r.numero_documento ?? ''),
           escapeCsvField(r.cufe ?? ''),
           escapeCsvField(r.public_url ?? ''),
+          escapeCsvField(r.payment_provider ?? ''),
+          escapeCsvField(r.payment_ref ?? ''),
           escapeCsvField(r.epayco_ref ?? ''),
         ].join(','),
       );
@@ -1428,10 +1432,10 @@ export default function SaaSBackoffice() {
               className="mb-4"
               icon={FileText}
               title="Pagos en línea (suscripción) y factura de licencia"
-              description="Sesiones ePayco desde el CDA; emisión DIAN vía el emisor SaaS (PROMETHEUS). Distinto al Factus que el CDA usa en operación."
+              description="Sesiones de pago del CDA; emisión DIAN vía el emisor SaaS (PROMETHEUS). Distinto al Factus que el CDA usa en operación."
             />
             <p className="text-xs text-slate-500 mb-3">
-              Filtre por tenant, estado del pago (ePayco) o estado de la factura de licencia (DIAN / Factus SaaS). El CSV
+              Filtre por tenant, estado del pago (PSP) o estado de la factura de licencia (DIAN / Factus SaaS). El CSV
               refleja la página visible con los filtros activos.
             </p>
             <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4">
@@ -1588,7 +1592,7 @@ export default function SaaSBackoffice() {
                   type="text"
                   value={checkoutSessionQuickSearch}
                   onChange={(e) => setCheckoutSessionQuickSearch(e.target.value)}
-                  placeholder="Buscar tenant, sesión, ref ePayco o documento"
+                  placeholder="Buscar tenant, sesión, referencia PSP o documento"
                   className="input-corporate"
                 />
                 <select
@@ -1749,7 +1753,12 @@ export default function SaaSBackoffice() {
                                         <span className="font-semibold text-slate-900">Tenant slug:</span> /{row.tenant_slug}
                                       </p>
                                       <p>
-                                        <span className="font-semibold text-slate-900">Ref ePayco:</span> {row.epayco_ref || '—'}
+                                        <span className="font-semibold text-slate-900">Proveedor pago:</span>{' '}
+                                        {row.payment_provider || (row.epayco_ref ? 'epayco' : '—')}
+                                      </p>
+                                      <p>
+                                        <span className="font-semibold text-slate-900">Referencia PSP:</span>{' '}
+                                        {row.payment_ref || row.epayco_ref || '—'}
                                       </p>
                                       <p>
                                         <span className="font-semibold text-slate-900">Documento FE:</span> {row.numero_documento || '—'}

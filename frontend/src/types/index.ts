@@ -213,7 +213,7 @@ export interface SaaSPaymentHistoryItem {
   notes?: string | null;
 }
 
-/** Checkouts ePayco (suscripción) y emisión FE licencia (PROMETHEUS), backoffice SaaS. */
+/** Checkouts PSP (suscripción) y emisión FE licencia (PROMETHEUS), backoffice SaaS. */
 export interface SaaSCheckoutSessionItem {
   session_id: string;
   tenant_id: string;
@@ -225,6 +225,8 @@ export interface SaaSCheckoutSessionItem {
   status: string;
   created_at: string;
   completed_at?: string | null;
+  payment_provider?: string | null;
+  payment_ref?: string | null;
   epayco_ref?: string | null;
   saas_fe_status?: string | null;
   saas_fe_error?: string | null;

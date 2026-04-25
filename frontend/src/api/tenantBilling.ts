@@ -27,12 +27,10 @@ export type TenantQuote = {
 export type InitPaymentOut = {
   session_id: string;
   total_cop: number;
-  mode: 'smart_checkout' | 'redirect' | 'unconfigured' | 'mock';
+  mode: 'redirect' | 'unconfigured' | 'mock';
   redirect_url?: string | null;
-  /** Smart Checkout v2 (Apify): abrir con checkout-v2.js */
-  epayco_session_id?: string | null;
-  epayco_public_key?: string | null;
-  epayco_checkout_test?: boolean;
+  wompi_reference?: string | null;
+  wompi_public_key?: string | null;
   message?: string | null;
 };
 
@@ -71,16 +69,10 @@ export type ConfirmCheckoutReturnResult = {
   reason?: string;
 };
 
-/** Tras el redirect ePayco: reenvía los parámetros de la query (o el webhook ya marcó pago). */
+/** Tras el redirect Wompi: reenvía session + transaction_id de la query. */
 export async function confirmTenantCheckoutReturn(body: {
   session_id: string;
-  ref_payco?: string;
-  cod_response?: string;
-  x_response?: string;
-  x_signature?: string;
-  x_transaction_id?: string;
-  x_amount?: string;
-  x_currency_code?: string;
+  transaction_id?: string;
 }): Promise<ConfirmCheckoutReturnResult> {
   const { data } = await apiClient.post<ConfirmCheckoutReturnResult>('/tenant/billing/confirm-return', body);
   return data;

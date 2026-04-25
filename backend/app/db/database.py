@@ -452,6 +452,8 @@ def ensure_tenant_billing_checkout_schema(db):
                 iva_cop NUMERIC(14, 2) NOT NULL,
                 total_cop NUMERIC(14, 2) NOT NULL,
                 status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                payment_provider VARCHAR(30),
+                payment_ref VARCHAR(120),
                 epayco_ref VARCHAR(120),
                 idempotency_key VARCHAR(100) UNIQUE,
                 last_webhook_payload JSONB,
@@ -474,6 +476,38 @@ def ensure_tenant_billing_checkout_schema(db):
             """
             CREATE INDEX IF NOT EXISTS ix_tb_checkout_status
             ON tenant_billing_checkout_sessions(status)
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            ALTER TABLE IF EXISTS tenant_billing_checkout_sessions
+            ADD COLUMN IF NOT EXISTS payment_provider VARCHAR(30)
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            ALTER TABLE IF EXISTS tenant_billing_checkout_sessions
+            ADD COLUMN IF NOT EXISTS payment_ref VARCHAR(120)
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_tb_checkout_payment_provider
+            ON tenant_billing_checkout_sessions(payment_provider)
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_tb_checkout_payment_ref
+            ON tenant_billing_checkout_sessions(payment_ref)
             """
         )
     )

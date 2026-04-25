@@ -127,17 +127,22 @@ class Settings(BaseSettings):
     TIMEZONE: str = "America/Bogota"
     LOCALE: str = "es_CO"
 
-    # ePayco (pasarela) — pago de suscripción tenant; dejar vacío hasta onboarding comercio
+    # Wompi (pasarela única) — pago de suscripción tenant
+    WOMPI_PUBLIC_KEY: str = Field(default="", env="WOMPI_PUBLIC_KEY")
+    WOMPI_INTEGRITY_SECRET: str = Field(default="", env="WOMPI_INTEGRITY_SECRET")
+    WOMPI_EVENTS_SECRET: str = Field(default="", env="WOMPI_EVENTS_SECRET")
+    WOMPI_USE_SANDBOX: bool = Field(default=True, env="WOMPI_USE_SANDBOX")
+    WOMPI_SANDBOX_BASE_URL: str = Field(default="https://sandbox.wompi.co", env="WOMPI_SANDBOX_BASE_URL")
+    WOMPI_PRODUCTION_BASE_URL: str = Field(default="https://production.wompi.co", env="WOMPI_PRODUCTION_BASE_URL")
+    # Solo desarrollo: simular aprobación sin webhook real (nunca en producción)
+    PAYMENT_DEV_MOCK_ENABLE: bool = Field(default=False, env="PAYMENT_DEV_MOCK_ENABLE")
+    # Compatibilidad temporal: permitir variables legacy en .env sin usarlas en rutas activas.
     EPAYCO_PUBLIC_KEY: str = Field(default="", env="EPAYCO_PUBLIC_KEY")
     EPAYCO_PRIVATE_KEY: str = Field(default="", env="EPAYCO_PRIVATE_KEY")
     EPAYCO_CLIENT_ID: str = Field(default="", env="EPAYCO_CLIENT_ID")
-    # Clave fija de integración (diferente a private) si la exige su API
     EPAYCO_P_KEY: str = Field(default="", env="EPAYCO_P_KEY")
     EPAYCO_TEST_MODE: bool = Field(default=True, env="EPAYCO_TEST_MODE")
-    # Solo pruebas locales/no productivas: forzar monto de cobro ePayco (COP).
-    # 0 = desactivado. Útil cuando la cuenta test de ePayco limita rango (p. ej. 5.000–200.000).
     EPAYCO_TEST_OVERRIDE_AMOUNT_COP: float = Field(default=0, env="EPAYCO_TEST_OVERRIDE_AMOUNT_COP")
-    # Desarrollo: simular aprobación sin webhook real (nunca en producción)
     EPAYCO_DEV_MOCK_ENABLE: bool = Field(default=False, env="EPAYCO_DEV_MOCK_ENABLE")
 
     # Factus — factura de **licencia/suscripción** (emisión: PROMETHEUS; adquirente: tenant). Distinto

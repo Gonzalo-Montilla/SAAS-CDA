@@ -54,7 +54,7 @@ const PLAN_MARKETING: Record<string, { blurb: string; bullets: string[]; badge?:
 function planMarketing(code: string) {
   return PLAN_MARKETING[code] ?? {
     blurb: 'Licencia de uso del software CDASOFT según condiciones comerciales.',
-    bullets: ['Cotización con sedes reales; pago con pasarela segura ePayco'],
+    bullets: ['Cotización con sedes reales; pago con pasarela segura Wompi'],
   };
 }
 
@@ -116,111 +116,19 @@ function saasFeStatusLabel(
   return status || '—';
 }
 
-const EPAYCO_CHECKOUT_V2 = 'https://checkout.epayco.co/checkout-v2.js';
-
 /** Evita doble post en StrictMode (módulo: se resetea al recargar la página). */
-const epaycoReturnUrlHandled = new Set<string>();
+const checkoutReturnUrlHandled = new Set<string>();
 
-function hasEpaycoReturnParams(sp: URLSearchParams): boolean {
-  const k = [
-    'x_signature',
-    'x_transaction_id',
-    'x_amount',
-    'x_ref_payco',
-    'ref_payco',
-    'x_cod_response',
-    'cod_respuesta',
-    'x_response',
-  ];
-  return k.some((d) => {
-    const v = sp.get(d);
-    return v != null && String(v).trim() !== '';
-  });
+function hasWompiReturnParams(sp: URLSearchParams): boolean {
+  const v = sp.get('id');
+  return v != null && String(v).trim() !== '';
 }
 
 function buildConfirmBodyFromQuery(sessionId: string, sp: URLSearchParams) {
-  const p = (a: string, b?: string) => sp.get(a) ?? (b ? sp.get(b) : null);
-  const t = (v: string | null) => (v != null && v.trim() !== '' ? v.trim() : undefined);
-  const amt = sp.get('x_amount') || sp.get('x_amount_approved');
   return {
     session_id: sessionId,
-    ref_payco: t(p('x_ref_payco', 'ref_payco')),
-    cod_response: t(p('x_cod_response', 'cod_respuesta')),
-    x_response: t(p('x_response')),
-    x_signature: t(p('x_signature')),
-    x_transaction_id: t(p('x_transaction_id')),
-    x_amount: t(amt),
-    x_currency_code: t(p('x_currency_code')),
+    transaction_id: (sp.get('id') || '').trim() || undefined,
   };
-}
-
-type EpaycoCheckoutHandle = {
-  open: () => void;
-  onCreated?: (cb: () => void) => void;
-  onErrors?: (cb: (errors: unknown) => void) => void;
-  onClosed?: (cb: () => void) => void;
-};
-
-type EpaycoWindow = {
-  ePayco?: {
-    checkout: {
-      configure: (opts: { sessionId: string; type: 'onpage' | 'standard'; test: boolean }) => EpaycoCheckoutHandle;
-    };
-  };
-};
-
-function loadEpaycoCheckoutV2Script(): Promise<void> {
-  const w = window as unknown as EpaycoWindow;
-  if (w.ePayco?.checkout?.configure) {
-    return Promise.resolve();
-  }
-  return new Promise((resolve, reject) => {
-    const id = 'epayco-checkout-v2';
-    if (document.getElementById(id)) {
-      const t = setInterval(() => {
-        if ((window as unknown as EpaycoWindow).ePayco?.checkout?.configure) {
-          clearInterval(t);
-          resolve();
-        }
-      }, 50);
-      setTimeout(() => {
-        clearInterval(t);
-        reject(new Error('Timeout cargando ePayco'));
-      }, 20000);
-      return;
-    }
-    const s = document.createElement('script');
-    s.id = id;
-    s.src = EPAYCO_CHECKOUT_V2;
-    s.async = true;
-    s.onload = () => resolve();
-    s.onerror = () => reject(new Error('No se pudo cargar el script de ePayco'));
-    document.body.appendChild(s);
-  });
-}
-
-function openEpaycoSmartCheckout(
-  sessionId: string,
-  test: boolean,
-  onClosed?: () => void
-): void {
-  const w = window as unknown as EpaycoWindow;
-  const ep = w.ePayco;
-  if (!ep?.checkout?.configure) {
-    throw new Error('ePayco no está disponible en la ventana');
-  }
-  const checkout = ep.checkout.configure({
-    sessionId,
-    type: 'onpage',
-    test,
-  });
-  checkout.onErrors?.((errors) => {
-    console.error('ePayco Smart Checkout', errors);
-  });
-  checkout.onClosed?.(() => {
-    onClosed?.();
-  });
-  checkout.open();
 }
 
 export default function Suscripcion() {
@@ -242,8 +150,8 @@ export default function Suscripcion() {
   const [retryFeBusy, setRetryFeBusy] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
   const [quotePulse, setQuotePulse] = useState(false);
-  /** Retorno ePayco con parámetros en la URL: confirmación al API en curso. */
-  const [epaycoReturnBusy, setEpaycoReturnBusy] = useState(false);
+  /** Retorno Wompi con parámetros en la URL: confirmación al API en curso. */
+  const [checkoutReturnBusy, setCheckoutReturnBusy] = useState(false);
 
   const loadSaasFe = useCallback(() => {
     if (authScope !== 'tenant') return;
@@ -270,18 +178,18 @@ export default function Suscripcion() {
     if (authScope !== 'tenant' || !sessionFromUrl) {
       return;
     }
-    const withEpayco = hasEpaycoReturnParams(searchParams);
-    const flowKey = withEpayco
+    const withProviderReturn = hasWompiReturnParams(searchParams);
+    const flowKey = withProviderReturn
       ? `c:${sessionFromUrl}?${searchParams.toString()}`
       : `r:${sessionFromUrl}`;
-    if (epaycoReturnUrlHandled.has(flowKey)) {
+    if (checkoutReturnUrlHandled.has(flowKey)) {
       return;
     }
-    epaycoReturnUrlHandled.add(flowKey);
+    checkoutReturnUrlHandled.add(flowKey);
 
     const go = async () => {
-      if (withEpayco) {
-        setEpaycoReturnBusy(true);
+      if (withProviderReturn) {
+        setCheckoutReturnBusy(true);
         try {
           const r = await confirmTenantCheckoutReturn(
             buildConfirmBodyFromQuery(sessionFromUrl, searchParams)
@@ -310,7 +218,7 @@ export default function Suscripcion() {
           await refreshTenantUser();
           loadSaasFe();
         } finally {
-          setEpaycoReturnBusy(false);
+          setCheckoutReturnBusy(false);
         }
         return;
       }
@@ -400,7 +308,7 @@ export default function Suscripcion() {
           <div className="mt-5 flex flex-wrap items-center gap-2 text-xs">
             <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">
               <ShieldCheck className="h-3.5 w-3.5" />
-              Pago seguro con ePayco
+              Pago seguro con Wompi
             </span>
             <span className="inline-flex items-center gap-1.5 rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 font-medium text-indigo-800">
               <BadgeCheck className="h-3.5 w-3.5" />
@@ -487,7 +395,7 @@ export default function Suscripcion() {
         {sessionFromUrl && (
           <div className="mb-3 text-sm text-slate-600">
             <p>Sesión de pago: {sessionFromUrl}</p>
-            {epaycoReturnBusy && hasEpaycoReturnParams(searchParams) && (
+            {checkoutReturnBusy && hasWompiReturnParams(searchParams) && (
               <p className="mt-1.5 flex items-center gap-2 text-slate-700">
                 <span
                   className="inline-block h-3.5 w-3.5 shrink-0 animate-spin rounded-full border-2 border-brand-500 border-t-transparent"
@@ -639,14 +547,6 @@ export default function Suscripcion() {
                       setIsPaying(true);
                       try {
                         const r = await initTenantPayment(planCode, sedes);
-                        if (r.mode === 'smart_checkout' && r.epayco_session_id) {
-                          await loadEpaycoCheckoutV2Script();
-                          openEpaycoSmartCheckout(r.epayco_session_id, r.epayco_checkout_test ?? true, () => {
-                            void refreshTenantUser();
-                            loadSaasFe();
-                          });
-                          return;
-                        }
                         if (r.mode === 'redirect' && r.redirect_url) {
                           window.location.assign(r.redirect_url);
                           return;
@@ -655,7 +555,7 @@ export default function Suscripcion() {
                           setInitResult(r.message ?? 'Modo mock: complete el pago con el botón de abajo.');
                           return;
                         }
-                        setInitResult(r.message ?? 'Configure EPAYCO_PUBLIC_KEY o use backoffice para registrar pago.');
+                        setInitResult(r.message ?? 'Configure WOMPI_PUBLIC_KEY/WOMPI_INTEGRITY_SECRET.');
                       } catch (e: unknown) {
                         const d = (e as { response?: { data?: { detail?: string } } })?.response?.data?.detail;
                         setErr(typeof d === 'string' ? d : 'No se pudo iniciar el pago');
@@ -671,7 +571,7 @@ export default function Suscripcion() {
                   >
                     {isPaying ? 'Abriendo pasarela…' : loading ? 'Calculando total…' : 'Continuar a pago seguro'}
                   </button>
-                  <p className="mt-2 text-center text-[11px] text-slate-500">Pago procesado por ePayco · Conexión segura.</p>
+                  <p className="mt-2 text-center text-[11px] text-slate-500">Pago procesado por Wompi · Conexión segura.</p>
                   {initResult && <p className="mt-2 text-sm text-slate-600">{initResult}</p>}
                   {searchParams.get('session') && (
                     <div className="mt-3">

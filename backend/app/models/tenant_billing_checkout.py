@@ -21,6 +21,8 @@ class TenantBillingCheckoutSession(Base):
     iva_cop = Column(Numeric(14, 2), nullable=False)
     total_cop = Column(Numeric(14, 2), nullable=False)
     status = Column(String(20), nullable=False, default="pending", index=True)
+    payment_provider = Column(String(30), nullable=True, index=True)
+    payment_ref = Column(String(120), nullable=True, index=True)
     epayco_ref = Column(String(120), nullable=True, index=True)
     idempotency_key = Column(String(100), nullable=True, unique=True)
     last_webhook_payload = Column(JSONB, nullable=True)

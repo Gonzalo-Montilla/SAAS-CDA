@@ -1,5 +1,5 @@
 """
-Facturación self-service del tenant: planes, cotización, checkout ePayco (mock en dev).
+Facturación self-service del tenant: planes, cotización, checkout Wompi (mock en dev).
 """
 from __future__ import annotations
 
@@ -16,20 +16,16 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.deps import get_current_user, get_db, require_role
 from app.integrations.saas_factus_billing import try_emit_saas_billing_electronic_invoice
-from app.integrations.epayco import (
-    build_epayco_checkout_get_url,
-    epayco_amount_matches_total,
-    epayco_configured,
-    epayco_return_signature_bundle_status,
-    epayco_webhook_signature_configured,
-    parse_epayco_approval,
-    validate_epayco_webhook_signature,
-)
-from app.integrations.epayco_apify import (
-    EpaycoApifyError,
-    apify_bearer_from_keys,
-    apify_smoke_configured,
-    create_smart_checkout_session,
+from app.integrations.wompi import (
+    WompiError,
+    build_wompi_checkout_url,
+    compute_wompi_integrity_signature,
+    extract_wompi_event_transaction,
+    fetch_wompi_transaction,
+    validate_wompi_event_signature,
+    wompi_configured,
+    wompi_events_secret_configured,
+    wompi_transaction_is_hard_approved,
 )
 from app.models.tenant import Tenant
 from app.models.tenant_billing_checkout import TenantBillingCheckoutSession
@@ -71,9 +67,9 @@ def _public_backend_base_url() -> str:
     return raw.rstrip("/")
 
 
-def _epayco_public_response_url(session_id: UUID) -> str:
+def _wompi_public_response_url(session_id: UUID) -> str:
     """
-    ePayco Apify exige response URL pública/valida.
+    Wompi redirige a URL pública; si frontend local, usar bridge backend.
     Si FRONTEND_URL es localhost, usar bridge público en backend y redirigir al front local.
     """
     front = settings.FRONTEND_URL.rstrip("/")
@@ -84,53 +80,8 @@ def _epayco_public_response_url(session_id: UUID) -> str:
     return f"{front}/suscripcion?session={session_id}"
 
 
-def _epayco_body_has_amount_range_error(body: object) -> bool:
-    if not isinstance(body, dict):
-        return False
-    data = body.get("data")
-    if not isinstance(data, dict):
-        return False
-    errors = data.get("errors")
-    if not isinstance(errors, list):
-        return False
-    for e in errors:
-        if not isinstance(e, dict):
-            continue
-        msg = str(e.get("errorMessage") or "").lower()
-        if "amount must be between 5000 and 200000" in msg:
-            return True
-    return False
-
-
-def _epayco_is_hard_approved(form: dict) -> bool:
-    """
-    Evita falsos positivos por estados intermedios (p. ej. pre-procesada en PSE).
-    Aprobado real: x_cod_response/cod_respuesta == 1.
-    """
-    cod = form.get("x_cod_response") or form.get("cod_respuesta")
-    if parse_epayco_approval(str(cod) if cod is not None else None, None):
-        x_state = str(form.get("x_cod_transaction_state") or "").strip()
-        # Si ePayco envía estado de transacción explícito y no es "1", aún no está aprobada.
-        if x_state and x_state != "1":
-            return False
-        return True
-    return False
-
-
-def _effective_epayco_test_amount_cop() -> float | None:
-    """
-    En no-producción, permite forzar monto de pago ePayco para cuentas test con límites.
-    Devuelve None si no aplica.
-    """
-    if str(settings.ENVIRONMENT).lower() == "production":
-        return None
-    if not bool(settings.EPAYCO_TEST_MODE):
-        return None
-    raw = float(settings.EPAYCO_TEST_OVERRIDE_AMOUNT_COP or 0)
-    if raw <= 0:
-        return None
-    # ePayco test observado en esta cuenta: 5.000 - 200.000 COP
-    return float(max(5000.0, min(200000.0, raw)))
+def _wompi_amount_in_cents(total_cop: float) -> int:
+    return int(round(float(total_cop) * 100))
 
 
 class TenantBillingPlanItem(BaseModel):
@@ -173,28 +124,17 @@ class TenantInitPaymentOut(BaseModel):
     session_id: str
     total_cop: float
     mode: str = Field(
-        description="smart_checkout (Apify v2) | redirect (GET legacy) | unconfigured | mock"
+        description="redirect | unconfigured | mock"
     )
-    redirect_url: str | None = Field(
-        default=None, description="URL checkout.php; solo modo redirect legacy."
-    )
-    epayco_session_id: str | None = None
-    epayco_public_key: str | None = None
-    epayco_checkout_test: bool = True
+    redirect_url: str | None = Field(default=None, description="URL checkout Wompi.")
+    wompi_reference: str | None = None
+    wompi_public_key: str | None = None
     message: str | None = None
 
 
-class TenantConfirmEpaycoBody(BaseModel):
-    """Reenviar desde el redirect de ePayco: con EPAYCO_CLIENT_ID+P_KEY en el servidor, hace falta el paquete completo de firma."""
-
+class TenantConfirmWompiBody(BaseModel):
     session_id: UUID
-    ref_payco: str | None = None
-    cod_response: str | None = None
-    x_response: str | None = None
-    x_signature: str | None = None
-    x_transaction_id: str | None = None
-    x_amount: str | None = None
-    x_currency_code: str | None = None
+    transaction_id: str | None = None
 
 
 class TenantSaasFeLatestOut(BaseModel):
@@ -294,17 +234,6 @@ def init_tenant_checkout(
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
     _plan, _ch, sub, iva, total = calculate_plan_quote(body.plan_code, body.sedes_totales)
-    forced_amount = _effective_epayco_test_amount_cop()
-    if forced_amount is not None:
-        # Pruebas: conservar coherencia de la sesión de cobro con el valor realmente enviado a ePayco.
-        sub = float(forced_amount)
-        iva = 0.0
-        total = float(forced_amount)
-        _log.warning(
-            "tenant_billing epayco test override amount session_preview plan=%s forced_total=%s",
-            body.plan_code,
-            total,
-        )
     session_row = TenantBillingCheckoutSession(
         tenant_id=tenant.id,
         plan_code=body.plan_code.strip().lower(),
@@ -313,116 +242,68 @@ def init_tenant_checkout(
         iva_cop=iva,
         total_cop=total,
         status="pending",
+        payment_provider="wompi",
         idempotency_key=f"tenantpay-{tenant.id}-{utcnow_naive().timestamp():.0f}",
     )
     db.add(session_row)
     db.commit()
     db.refresh(session_row)
 
-    # Sin ePayco: dev mock o mensaje
-    if settings.EPAYCO_DEV_MOCK_ENABLE and settings.ENVIRONMENT != "production":
+    # Sin PSP real: dev mock o mensaje
+    if settings.PAYMENT_DEV_MOCK_ENABLE and settings.ENVIRONMENT != "production":
         return TenantInitPaymentOut(
             session_id=str(session_row.id),
             total_cop=total,
             mode="mock",
-            message="EPAYCO_DEV_MOCK_ENABLE: usa POST /tenant/billing/complete-mock con session_id",
+            message="PAYMENT_DEV_MOCK_ENABLE: usa POST /tenant/billing/complete-mock con session_id",
         )
-    if not epayco_configured():
+    if not wompi_configured():
         return TenantInitPaymentOut(
             session_id=str(session_row.id),
             total_cop=total,
             mode="unconfigured",
-            message="Pasarela no configurada (EPAYCO_PUBLIC_KEY en .env). El administrador puede registrar el pago desde backoffice.",
+            message="Pasarela no configurada (WOMPI_PUBLIC_KEY/WOMPI_INTEGRITY_SECRET en .env).",
         )
 
-    resp_url = _epayco_public_response_url(session_row.id)
-    conf_url = f"{_public_backend_base_url()}/api/v1/tenant/billing/webhooks/epayco"
+    resp_url = _wompi_public_response_url(session_row.id)
+    _conf_url = f"{_public_backend_base_url()}/api/v1/tenant/billing/webhooks/wompi"
     nombre = (tenant.nombre_representante or tenant.nombre_comercial or "Cliente")[:200]
     email = (tenant.correo_electronico or current_user.email or "cliente@local")[:200]
-    pk = (settings.EPAYCO_PUBLIC_KEY or "").strip()
-    test_flag = bool(settings.EPAYCO_TEST_MODE)
-
-    if apify_smoke_configured():
-        try:
-            bearer = apify_bearer_from_keys(
-                settings.EPAYCO_PUBLIC_KEY,
-                (settings.EPAYCO_PRIVATE_KEY or "").strip(),
-            )
-            apify_data = create_smart_checkout_session(
-                bearer=bearer,
-                store_display_name="CDASOFT — licencia SaaS",
-                amount_cop=float(total),
-                invoice=str(session_row.id),
-                description=f"Plan {body.plan_code} — suscripción CDASOFT",
-                response_url=resp_url,
-                confirmation_url=conf_url,
-                customer_email=email,
-                customer_name=nombre,
-            )
-            sid = apify_data.get("sessionId") or apify_data.get("session_id")
-            if not sid:
-                raise EpaycoApifyError("Respuesta Apify sin sessionId", body=apify_data)
-            return TenantInitPaymentOut(
-                session_id=str(session_row.id),
-                total_cop=total,
-                mode="smart_checkout",
-                epayco_session_id=str(sid),
-                epayco_public_key=pk,
-                epayco_checkout_test=test_flag,
-                message=(
-                    f"Pruebas ePayco: monto forzado a COP {int(total):,}".replace(",", ".")
-                    if forced_amount is not None
-                    else None
-                ),
-            )
-        except EpaycoApifyError as exc:
-            # Límite típico de cuentas test ePayco: evitar fallback legacy (404) y mostrar error accionable.
-            if _epayco_body_has_amount_range_error(getattr(exc, "body", None)):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=(
-                        "ePayco pruebas rechazó el monto: el comercio está limitado a pagos entre "
-                        "COP 5.000 y COP 200.000. Para continuar, reduzca temporalmente el valor de la "
-                        "prueba o solicite en ePayco ampliar el límite de monto de la cuenta de pruebas."
-                    ),
-                ) from exc
-            # Fallback a redirección GET (checkout.php) con la misma factura/URLs
-            _log.warning(
-                "tenant_billing epayco apify session fallback session_id=%s reason=%s body=%s",
-                session_row.id,
-                exc,
-                getattr(exc, "body", None),
-            )
-
-    redirect = build_epayco_checkout_get_url(
-        amount_cop=total,
-        invoice=str(session_row.id),
-        title=f"Plan {body.plan_code} CDASOFT",
-        email=email,
-        name=nombre,
-        url_response=resp_url,
-        url_confirmation=conf_url,
+    public_key = (settings.WOMPI_PUBLIC_KEY or "").strip()
+    integrity_secret = (settings.WOMPI_INTEGRITY_SECRET or "").strip()
+    reference = str(session_row.id)
+    amount_in_cents = _wompi_amount_in_cents(float(total))
+    signature = compute_wompi_integrity_signature(
+        reference=reference,
+        amount_in_cents=amount_in_cents,
+        currency="COP",
+        integrity_secret=integrity_secret,
+    )
+    redirect = build_wompi_checkout_url(
+        public_key=public_key,
+        currency="COP",
+        amount_in_cents=amount_in_cents,
+        reference=reference,
+        signature_integrity=signature,
+        redirect_url=resp_url,
+        customer_email=email,
+        customer_full_name=nombre,
     )
     return TenantInitPaymentOut(
         session_id=str(session_row.id),
         total_cop=total,
         mode="redirect",
         redirect_url=redirect,
-        epayco_public_key=pk,
-        epayco_checkout_test=test_flag,
-        message=(
-            f"Pruebas ePayco: monto forzado a COP {int(total):,}".replace(",", ".")
-            if forced_amount is not None
-            else None
-        ),
+        wompi_reference=reference,
+        wompi_public_key=public_key,
     )
 
 
 @router.get("/response-bridge")
-def epayco_response_bridge(request: Request):
+def wompi_response_bridge(request: Request):
     """
-    Redirect público para ePayco -> frontend local.
-    Preserva query params (session + x_*), que luego Suscripcion reenvía a confirm-return.
+    Redirect público para Wompi -> frontend local.
+    Preserva query params (session + id).
     """
     base_front = settings.FRONTEND_URL.rstrip("/")
     target = f"{base_front}/suscripcion"
@@ -432,27 +313,18 @@ def epayco_response_bridge(request: Request):
     return RedirectResponse(url=target, status_code=307)
 
 
-def _epayco_amount_in_form(form: dict) -> bool:
-    raw = str(
-        form.get("x_amount") or form.get("x_amount_approved") or form.get("amount") or ""
-    ).strip()
-    return bool(raw)
-
-
-def _apply_epayco_form_to_session(
-    db: Session, form: dict, *, source: str = "webhook"
+def _apply_wompi_transaction_to_session(
+    db: Session, tx: dict, *, source: str = "webhook"
 ) -> dict:
     """
-    source: "webhook" (confirma server-to-server ePayco) | "return" (JSON del front) | "mock"
-    En webhook se valida x_signature si EPAYCO_CLIENT_ID + EPAYCO_P_KEY están definidos.
+    source: "webhook" (evento Wompi) | "return" (consulta por id transacción) | "mock".
     """
-    invoice = form.get("x_id_invoice") or form.get("invoice") or form.get("p_order_id")
-    cod = form.get("x_cod_response") or form.get("cod_respuesta")
-    ref = form.get("x_ref_payco") or form.get("ref_payco")
-    if not invoice:
+    reference = str(tx.get("reference") or "").strip()
+    tx_id = str(tx.get("id") or "").strip()
+    if not reference:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Sin referencia de pago")
     try:
-        sid = UUID(str(invoice))
+        sid = UUID(str(reference))
     except ValueError as exc:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="Referencia de sesión inválida"
@@ -462,93 +334,46 @@ def _apply_epayco_form_to_session(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesión no encontrada")
     if row.status == "paid":
         _log.info(
-            "tenant_billing epayco duplicate session_id=%s source=%s ref=%s",
+            "tenant_billing wompi duplicate session_id=%s source=%s tx_id=%s",
             row.id,
             source,
-            ref,
+            tx_id,
         )
         return {"ok": True, "duplicate": True}
 
-    if source == "webhook":
-        try:
-            validate_epayco_webhook_signature(form)
-        except ValueError as exc:
-            _log.warning("tenant_billing epayco signature: %s session_id=%s", exc, sid)
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN, detail="Firma ePayco inválida"
-            ) from exc
-        if _epayco_amount_in_form(form) and not epayco_amount_matches_total(
-            form, float(row.total_cop)
-        ):
-            _log.warning(
-                "tenant_billing epayco amount_mismatch session_id=%s total_row=%s",
-                row.id,
-                row.total_cop,
-            )
-            row.last_webhook_payload = form
-            db.add(row)
-            db.commit()
-            return {"ok": False, "reason": "amount_mismatch"}
-    elif source == "return" and epayco_webhook_signature_configured():
-        if not str(form.get("x_currency_code") or "").strip():
-            form["x_currency_code"] = "COP"
-        bundle = epayco_return_signature_bundle_status(form)
-        if bundle == "full":
-            try:
-                validate_epayco_webhook_signature(form)
-            except ValueError as exc:
-                _log.warning("tenant_billing epayco confirm signature: %s session_id=%s", exc, sid)
-                raise HTTPException(
-                    status_code=status.HTTP_403_FORBIDDEN, detail="Firma ePayco inválida"
-                ) from exc
-            if _epayco_amount_in_form(form) and not epayco_amount_matches_total(
-                form, float(row.total_cop)
-            ):
-                _log.warning(
-                    "tenant_billing epayco confirm amount_mismatch session_id=%s total_row=%s",
-                    row.id,
-                    row.total_cop,
-                )
-                row.last_webhook_payload = form
-                db.add(row)
-                db.commit()
-                return {"ok": False, "reason": "amount_mismatch"}
-        elif bundle == "partial":
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Faltan parámetros ePayco para la firma (x_signature, x_transaction_id, x_amount, x_ref_payco).",
-            )
-        else:
-            if str(settings.ENVIRONMENT).lower() == "production":
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail="Reenvíe en el cuerpo de la petición x_signature, x_transaction_id, x_amount, x_ref_payco (y x_currency_code) tal como responde ePayco, o confíe en la notificación al webhook.",
-                )
-            _log.warning(
-                "tenant_billing epayco confirm sin paquete de firma (modo no producción) session_id=%s",
-                row.id,
-            )
+    amount_in_cents = int(tx.get("amount_in_cents") or 0)
+    expected_cents = _wompi_amount_in_cents(float(row.total_cop))
+    if amount_in_cents and expected_cents and amount_in_cents != expected_cents:
+        _log.warning(
+            "tenant_billing wompi amount_mismatch session_id=%s expected=%s got=%s",
+            row.id,
+            expected_cents,
+            amount_in_cents,
+        )
+        row.last_webhook_payload = tx
+        db.add(row)
+        db.commit()
+        return {"ok": False, "reason": "amount_mismatch"}
 
-    if not _epayco_is_hard_approved(form):
-        x_state = form.get("x_cod_transaction_state")
-        x_resp = form.get("x_response") or form.get("Response")
-        row.last_webhook_payload = form
+    if not wompi_transaction_is_hard_approved(tx):
+        row.last_webhook_payload = tx
         db.add(row)
         db.commit()
         _log.info(
-            "tenant_billing epayco not_approved session_id=%s source=%s cod=%s x_state=%s x_response=%s",
+            "tenant_billing wompi not_approved session_id=%s source=%s tx_id=%s status=%s",
             row.id,
             source,
-            cod,
-            x_state,
-            x_resp,
+            tx_id,
+            tx.get("status"),
         )
         return {"ok": False, "reason": "not_approved"}
     tenant = db.query(Tenant).filter(Tenant.id == row.tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado")
-    row.epayco_ref = str(ref) if ref else None
-    row.last_webhook_payload = form
+    row.payment_provider = "wompi"
+    row.payment_ref = tx_id or reference
+    row.epayco_ref = None
+    row.last_webhook_payload = tx
     db.add(row)
     db.flush()
     applied = apply_successful_tenant_checkout(db, tenant=tenant, session_row=row)
@@ -556,55 +381,66 @@ def _apply_epayco_form_to_session(
         db.commit()
     if applied:
         _log.info(
-            "tenant_billing epayco paid session_id=%s tenant_id=%s source=%s ref=%s",
+            "tenant_billing wompi paid session_id=%s tenant_id=%s source=%s tx_id=%s",
             row.id,
             row.tenant_id,
             source,
-            ref,
+            tx_id,
         )
     else:
         _log.info(
-            "tenant_billing epayco paid ya aplicado (carrera webhook/return) session_id=%s ref=%s",
+            "tenant_billing wompi paid ya aplicado (carrera webhook/return) session_id=%s tx_id=%s",
             row.id,
-            ref,
+            tx_id,
         )
     return {"ok": True}
 
 
-@router.post("/webhooks/epayco")
-async def epayco_webhook_tenant_billing(request: Request, db: Session = Depends(get_db)):
-    """Confirmación server-to-server ePayco (form-urlencoded). Valida x_signature si hay EPAYCO_CLIENT_ID y EPAYCO_P_KEY."""
-    fd = await request.form()
-    form_flat: dict = {}
-    for key, value in fd.multi_items():
-        if hasattr(value, "read"):
-            continue
-        form_flat[key] = str(value)
-    return _apply_epayco_form_to_session(db, form_flat, source="webhook")
+@router.post("/webhooks/wompi")
+async def wompi_webhook_tenant_billing(request: Request, db: Session = Depends(get_db)):
+    """Eventos Wompi (JSON). Valida checksum con WOMPI_EVENTS_SECRET."""
+    payload = await request.json()
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Payload inválido")
+    if not wompi_events_secret_configured():
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Wompi events no configurado")
+    try:
+        validate_wompi_event_signature(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Firma Wompi inválida") from exc
+    event_name = str(payload.get("event") or "").strip()
+    if event_name != "transaction.updated":
+        return {"ok": True, "ignored": True}
+    tx = extract_wompi_event_transaction(payload)
+    if not tx:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Evento sin transaction")
+    return _apply_wompi_transaction_to_session(db, tx, source="webhook")
 
 
 @router.post("/confirm-return")
 def confirm_checkout_return(
-    body: TenantConfirmEpaycoBody,
+    body: TenantConfirmWompiBody,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    """Tras redirect del checkout: el front reenvía los parámetros de la URL de ePayco (o el webhook aplica pago en paralelo)."""
+    """Tras redirect del checkout Wompi: consulta transacción por id y aplica resultado."""
     row = session_for_tenant(db, body.session_id, current_user.tenant_id)
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sesión no encontrada")
-    ccy = (body.x_currency_code or "").strip() or "COP"
-    form = {
-        "x_id_invoice": str(row.id),
-        "x_cod_response": (body.cod_response or "").strip(),
-        "x_ref_payco": (body.ref_payco or "").strip(),
-        "x_response": (body.x_response or "").strip(),
-        "x_signature": (body.x_signature or "").strip(),
-        "x_transaction_id": (body.x_transaction_id or "").strip(),
-        "x_amount": (body.x_amount or "").strip(),
-        "x_currency_code": ccy,
-    }
-    return _apply_epayco_form_to_session(db, form, source="return")
+    tx_id = (body.transaction_id or "").strip()
+    if not tx_id:
+        return {"ok": False, "reason": "missing_transaction_id"}
+    try:
+        tx = fetch_wompi_transaction(
+            transaction_id=tx_id,
+            use_sandbox=bool(settings.WOMPI_USE_SANDBOX),
+        )
+    except WompiError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"No fue posible consultar transacción Wompi: {exc}",
+        ) from exc
+    return _apply_wompi_transaction_to_session(db, tx, source="return")
 
 
 @router.post("/complete-mock")
@@ -614,7 +450,7 @@ def complete_checkout_mock(
     current_user: Usuario = Depends(require_role(["administrador"])),
 ):
     """Solo desarrollo: marca pago aprobado sin ePayco."""
-    if not settings.EPAYCO_DEV_MOCK_ENABLE or str(settings.ENVIRONMENT).lower() == "production":
+    if not settings.PAYMENT_DEV_MOCK_ENABLE or str(settings.ENVIRONMENT).lower() == "production":
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="No habilitado")
     row = session_for_tenant(db, session_id, current_user.tenant_id)
     if not row or row.status != "pending":
@@ -622,12 +458,14 @@ def complete_checkout_mock(
     tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=404, detail="Tenant no encontrado")
-    form = {
-        "x_id_invoice": str(row.id),
-        "x_cod_response": "1",
-        "x_ref_payco": f"MOCK-{row.id}",
+    tx = {
+        "id": f"wompi-mock-{row.id}",
+        "reference": str(row.id),
+        "status": "APPROVED",
+        "amount_in_cents": _wompi_amount_in_cents(float(row.total_cop)),
+        "currency": "COP",
     }
-    return _apply_epayco_form_to_session(db, form, source="mock")
+    return _apply_wompi_transaction_to_session(db, tx, source="mock")
 
 
 def _row_to_saas_fe_out(
