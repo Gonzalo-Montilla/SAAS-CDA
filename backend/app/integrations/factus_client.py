@@ -114,8 +114,10 @@ def format_factus_error_for_user(e: FactusAPIError) -> str:
             return detail + hint
     if "dsaj24b" in low or "dv del nit" in low:
         hint = (
-            " [CDASOFT] Indique el NIT o cédula (como NIT) del proveedor **con guion y dígito de verificación** "
-            "tal como figura en el RUT/DIAN. Si solo pone dígitos, el sistema calcula el DV cuando no hay ambigüedad."
+            " [CDASOFT] El rechazo FAK24/DSAJ24B es por NIT-DV del **proveedor que Factus interpreta en ese documento**. "
+            "Cuando el texto menciona `[CDASOFT]`, en la factura de licencia SaaS se refiere al **emisor PROMETHEUS/CDASOFT "
+            "configurado en Factus** (no al tenant comprador). Verifique en la cuenta Factus del emisor que el NIT esté "
+            "exactamente como en RUT/DIAN, con guion y DV (ej: 902057790-8), y luego reintente."
         )
         if len(detail) + len(hint) <= 5000:
             return detail + hint

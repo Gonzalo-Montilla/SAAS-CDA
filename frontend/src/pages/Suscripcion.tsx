@@ -118,6 +118,35 @@ function saasFeStatusLabel(
 
 /** Evita doble post en StrictMode (módulo: se resetea al recargar la página). */
 const checkoutReturnUrlHandled = new Set<string>();
+const WOMPI_WIDGET_SCRIPT = 'https://checkout.wompi.co/widget.js';
+
+type WompiWidgetResult = {
+  transaction?: {
+    id?: string;
+    status?: string;
+  };
+};
+
+type WompiWidgetConfig = {
+  currency: string;
+  amountInCents: number;
+  reference: string;
+  publicKey: string;
+  signature: { integrity: string };
+  redirectUrl?: string;
+  customerData?: {
+    email?: string;
+    fullName?: string;
+  };
+};
+
+type WompiCheckoutInstance = {
+  open: (callback: (result: WompiWidgetResult) => void) => void;
+};
+
+type WompiWindow = Window & {
+  WidgetCheckout?: new (cfg: WompiWidgetConfig) => WompiCheckoutInstance;
+};
 
 function hasWompiReturnParams(sp: URLSearchParams): boolean {
   const v = sp.get('id');
@@ -129,6 +158,46 @@ function buildConfirmBodyFromQuery(sessionId: string, sp: URLSearchParams) {
     session_id: sessionId,
     transaction_id: (sp.get('id') || '').trim() || undefined,
   };
+}
+
+function loadWompiWidgetScript(): Promise<void> {
+  const w = window as WompiWindow;
+  if (w.WidgetCheckout) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve, reject) => {
+    const id = 'wompi-widget-script';
+    const existing = document.getElementById(id) as HTMLScriptElement | null;
+    if (existing) {
+      const timer = window.setInterval(() => {
+        if ((window as WompiWindow).WidgetCheckout) {
+          window.clearInterval(timer);
+          resolve();
+        }
+      }, 50);
+      window.setTimeout(() => {
+        window.clearInterval(timer);
+        reject(new Error('Timeout cargando Widget Wompi'));
+      }, 20000);
+      return;
+    }
+    const s = document.createElement('script');
+    s.id = id;
+    s.src = WOMPI_WIDGET_SCRIPT;
+    s.async = true;
+    s.onload = () => resolve();
+    s.onerror = () => reject(new Error('No se pudo cargar el script Widget Wompi'));
+    document.body.appendChild(s);
+  });
+}
+
+function openWompiWidget(config: WompiWidgetConfig, onResult: (result: WompiWidgetResult) => void): void {
+  const Ctor = (window as WompiWindow).WidgetCheckout;
+  if (!Ctor) {
+    throw new Error('Widget Wompi no disponible');
+  }
+  const checkout = new Ctor(config);
+  checkout.open((result) => onResult(result || {}));
 }
 
 export default function Suscripcion() {
@@ -547,6 +616,49 @@ export default function Suscripcion() {
                       setIsPaying(true);
                       try {
                         const r = await initTenantPayment(planCode, sedes);
+                        if (
+                          r.mode === 'widget' &&
+                          r.wompi_public_key &&
+                          r.wompi_reference &&
+                          r.wompi_signature_integrity &&
+                          r.wompi_amount_in_cents
+                        ) {
+                          await loadWompiWidgetScript();
+                          openWompiWidget(
+                            {
+                              currency: r.wompi_currency || 'COP',
+                              amountInCents: r.wompi_amount_in_cents,
+                              reference: r.wompi_reference,
+                              publicKey: r.wompi_public_key,
+                              signature: { integrity: r.wompi_signature_integrity },
+                              // Optional redirect if Wompi requires it in some payment methods.
+                              redirectUrl: r.wompi_redirect_url || undefined,
+                              customerData: {
+                                email: r.wompi_customer_email || undefined,
+                                fullName: r.wompi_customer_full_name || undefined,
+                              },
+                            },
+                            (result) => {
+                              const txId = result?.transaction?.id?.trim();
+                              if (!txId) {
+                                return;
+                              }
+                              void confirmTenantCheckoutReturn({ session_id: r.session_id, transaction_id: txId })
+                                .then(async () => {
+                                  await refreshTenantUser();
+                                  loadSaasFe();
+                                })
+                                .catch(() => {
+                                  setErr(
+                                    'El pago fue procesado pero no se pudo confirmar de inmediato. Actualice en unos segundos.'
+                                  );
+                                  void refreshTenantUser();
+                                  loadSaasFe();
+                                });
+                            }
+                          );
+                          return;
+                        }
                         if (r.mode === 'redirect' && r.redirect_url) {
                           window.location.assign(r.redirect_url);
                           return;

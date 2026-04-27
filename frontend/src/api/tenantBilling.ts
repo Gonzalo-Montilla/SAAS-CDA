@@ -27,10 +27,16 @@ export type TenantQuote = {
 export type InitPaymentOut = {
   session_id: string;
   total_cop: number;
-  mode: 'redirect' | 'unconfigured' | 'mock';
+  mode: 'widget' | 'redirect' | 'unconfigured' | 'mock';
   redirect_url?: string | null;
   wompi_reference?: string | null;
   wompi_public_key?: string | null;
+  wompi_amount_in_cents?: number | null;
+  wompi_currency?: string | null;
+  wompi_signature_integrity?: string | null;
+  wompi_redirect_url?: string | null;
+  wompi_customer_email?: string | null;
+  wompi_customer_full_name?: string | null;
   message?: string | null;
 };
 

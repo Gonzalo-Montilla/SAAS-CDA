@@ -124,11 +124,17 @@ class TenantInitPaymentOut(BaseModel):
     session_id: str
     total_cop: float
     mode: str = Field(
-        description="redirect | unconfigured | mock"
+        description="widget | redirect | unconfigured | mock"
     )
     redirect_url: str | None = Field(default=None, description="URL checkout Wompi.")
     wompi_reference: str | None = None
     wompi_public_key: str | None = None
+    wompi_amount_in_cents: int | None = None
+    wompi_currency: str | None = None
+    wompi_signature_integrity: str | None = None
+    wompi_redirect_url: str | None = None
+    wompi_customer_email: str | None = None
+    wompi_customer_full_name: str | None = None
     message: str | None = None
 
 
@@ -292,10 +298,16 @@ def init_tenant_checkout(
     return TenantInitPaymentOut(
         session_id=str(session_row.id),
         total_cop=total,
-        mode="redirect",
+        mode="widget",
         redirect_url=redirect,
         wompi_reference=reference,
         wompi_public_key=public_key,
+        wompi_amount_in_cents=amount_in_cents,
+        wompi_currency="COP",
+        wompi_signature_integrity=signature,
+        wompi_redirect_url=resp_url,
+        wompi_customer_email=email,
+        wompi_customer_full_name=nombre,
     )
 
 

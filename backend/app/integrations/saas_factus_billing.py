@@ -118,6 +118,7 @@ def _customer_tenant_cda_nit(tenant: Tenant) -> dict[str, Any]:
     mid = int(tenant.factus_municipality_id or settings.FACTUS_DEFAULT_MUNICIPALITY_ID)
     return {
         "identification_document_id": 6,
+        # Factus espera identificación numérica y DV en campo separado.
         "identification": ident[:20],
         "dv": str(dv_final),
         "company": name,
