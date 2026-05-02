@@ -27,6 +27,7 @@ from app.models.vehiculo import VehiculoProceso, EstadoVehiculo, MetodoPago
 from app.models.factus import TenantFactusSettings, FacturaElectronica
 from app.services.factus_tenant_settings import creds_complete_for_active_env
 from app.integrations.factus_client import FactusAPIError, format_factus_error_for_user
+from app.integrations.apitude_runt import ApitudeRuntError, consultar_runt_vehiculo_por_placa
 from app.integrations.factus_emit import (
     emitir_y_persistir_factura_cobro,
     resolve_numbering_range_id_for_cobro,
@@ -80,10 +81,27 @@ from app.schemas.vehiculo import (
     VehiculosPendientes,
     VehiculoConTarifa,
     TarifaCalculada,
-    VentaSOAT
+    VentaSOAT,
+    VehiculoConsultaRuntResponse,
 )
 
 router = APIRouter()
+
+
+@router.get("/consulta-runt/{placa}", response_model=VehiculoConsultaRuntResponse)
+def consultar_runt_por_placa(
+    placa: str,
+    current_user: Usuario = Depends(get_recepcionista_or_admin),
+):
+    """
+    Consulta externa RUNT por placa (vía Apitude), normalizada para autocompletado en recepción.
+    No registra ni modifica vehículos.
+    """
+    try:
+        return consultar_runt_vehiculo_por_placa(placa)
+    except ApitudeRuntError as exc:
+        status_code = exc.status_code if exc.status_code and 100 <= exc.status_code < 600 else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 
 def _filtro_vehiculo_sede(q, tenant_id, sucursal_id: UUID):

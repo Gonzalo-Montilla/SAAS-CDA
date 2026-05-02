@@ -1,5 +1,5 @@
 import apiClient from './client';
-import type { Vehiculo, VehiculoRegistro, VehiculoCobro } from '../types';
+import type { Vehiculo, VehiculoRegistro, VehiculoCobro, VehiculoConsultaRunt } from '../types';
 
 export interface VentaSOAT {
   placa: string;
@@ -47,6 +47,13 @@ export const vehiculosApi = {
   // Editar un vehículo registrado (Recepción)
   editar: async (vehiculoId: string, data: VehiculoRegistro): Promise<Vehiculo> => {
     const response = await apiClient.put<Vehiculo>(`/vehiculos/${vehiculoId}`, data);
+    return response.data;
+  },
+
+  // Consultar datos RUNT por placa (vía integración backend)
+  consultarRuntPorPlaca: async (placa: string): Promise<VehiculoConsultaRunt> => {
+    const cleaned = (placa || '').trim().toUpperCase();
+    const response = await apiClient.get<VehiculoConsultaRunt>(`/vehiculos/consulta-runt/${encodeURIComponent(cleaned)}`);
     return response.data;
   },
 

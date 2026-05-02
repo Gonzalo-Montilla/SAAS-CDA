@@ -571,6 +571,25 @@ export interface VehiculoRegistro {
   observaciones?: string;
 }
 
+export interface VehiculoConsultaRunt {
+  placa_consultada: string;
+  encontrado: boolean;
+  marca?: string | null;
+  linea?: string | null;
+  modelo?: string | null;
+  ano_modelo?: number | null;
+  color?: string | null;
+  clase_vehiculo?: string | null;
+  tipo_servicio?: string | null;
+  cilindraje?: string | null;
+  tipo_vehiculo_sugerido?: string | null;
+  confidence?: 'high' | 'medium' | 'low' | null;
+  fuente: string;
+  request_id?: string | null;
+  cached: boolean;
+  observaciones: string[];
+}
+
 export interface VehiculoCobro {
   vehiculo_id: string;
   metodo_pago: string;

@@ -164,6 +164,27 @@ class TarifaCalculada(BaseModel):
     descripcion_antiguedad: str
 
 
+class VehiculoConsultaRuntResponse(BaseModel):
+    """Respuesta normalizada de consulta RUNT por placa (vía proveedor externo)."""
+
+    placa_consultada: str
+    encontrado: bool
+    marca: Optional[str] = None
+    linea: Optional[str] = None
+    modelo: Optional[str] = None
+    ano_modelo: Optional[int] = None
+    color: Optional[str] = None
+    clase_vehiculo: Optional[str] = None
+    tipo_servicio: Optional[str] = None
+    cilindraje: Optional[str] = None
+    tipo_vehiculo_sugerido: Optional[str] = None
+    confidence: Optional[str] = None
+    fuente: str = "apitude_runt"
+    request_id: Optional[str] = None
+    cached: bool = False
+    observaciones: list[str] = []
+
+
 class VentaSOAT(BaseModel):
     """Venta solo de comisión SOAT (sin revisión técnica)"""
     placa: str = Field(min_length=5, max_length=10)

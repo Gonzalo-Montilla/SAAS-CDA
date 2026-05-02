@@ -93,6 +93,28 @@ class Settings(BaseSettings):
     RUNT_URL: str = "https://b2crunt2prd.b2clogin.com/runtprologin.runt.gov.co/b2c_1a_singin/oauth2/v2.0/authorize?client_id=4e0d509e-3bb5-44b9-b712-53e221b97393&scope=https%3A%2F%2FB2Crunt2prd.onmicrosoft.com%2FRNFTransversalMS%2Faccess.all%20openid%20profile%20offline_access&redirect_uri=https%3A%2F%2Fruntpro.runt.gov.co%2F"
     SICOV_URL: str = "https://sicovindra.com:9093/"
     INDRA_URL: str = "https://indra.paynet.com.co:14443/Login.aspx?ReturnUrl=%2fInformacionSeguridad.aspx"
+    # Integración RUNT vía tercero (Apitude)
+    APITUDE_ENABLED: bool = Field(default=False, env="APITUDE_ENABLED")
+    APITUDE_BASE_URL: str = Field(default="https://apitude.co", env="APITUDE_BASE_URL")
+    APITUDE_API_KEY: str = Field(default="", env="APITUDE_API_KEY")
+    APITUDE_TIMEOUT_SECONDS: float = Field(default=15.0, ge=1.0, le=60.0, env="APITUDE_TIMEOUT_SECONDS")
+    APITUDE_RUNT_SERVICE_PATH: str = Field(
+        default="/api/v1.0/requests/runt-vehicle-co/",
+        env="APITUDE_RUNT_SERVICE_PATH",
+    )
+    APITUDE_RUNT_DOCUMENT_TYPE: str = Field(default="placa", env="APITUDE_RUNT_DOCUMENT_TYPE")
+    APITUDE_RUNT_DOCUMENT_NUMBER_TEMPLATE: str = Field(
+        default="{placa}",
+        env="APITUDE_RUNT_DOCUMENT_NUMBER_TEMPLATE",
+    )
+    APITUDE_RUNT_POLL_MAX_ATTEMPTS: int = Field(default=6, ge=1, le=20, env="APITUDE_RUNT_POLL_MAX_ATTEMPTS")
+    APITUDE_RUNT_POLL_INTERVAL_SECONDS: float = Field(
+        default=1.2,
+        ge=0.2,
+        le=10.0,
+        env="APITUDE_RUNT_POLL_INTERVAL_SECONDS",
+    )
+    APITUDE_RUNT_CACHE_TTL_SECONDS: int = Field(default=600, ge=0, le=86400, env="APITUDE_RUNT_CACHE_TTL_SECONDS")
     
     # Facturación electrónica (Factus) — URLs oficiales en https://developers.factus.com.co/
     FACTUS_SANDBOX_BASE_URL: str = Field(default="https://api-sandbox.factus.com.co", env="FACTUS_SANDBOX_BASE_URL")

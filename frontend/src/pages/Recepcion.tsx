@@ -1,4 +1,4 @@
-import { useState, useEffect, type FormEvent } from 'react';
+import { useState, useEffect, useMemo, type FormEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ClipboardList, DollarSign, CheckCircle2, RotateCcw, Search, X, Calendar, CalendarDays, CalendarRange, BarChart3, Camera, Car, Edit, AlertTriangle } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
@@ -10,7 +10,7 @@ import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
 import { vehiculosApi, type TarifaCalculada } from '../api/vehiculos';
 import { tarifasApi } from '../api/tarifas';
-import type { VehiculoRegistro } from '../types';
+import type { VehiculoRegistro, VehiculoConsultaRunt } from '../types';
 import { formatCOP } from '../utils/formatNumber';
 
 export default function Recepcion() {
@@ -23,6 +23,7 @@ export default function Recepcion() {
   const [tarifaCalculada, setTarifaCalculada] = useState<TarifaCalculada | null>(null);
   const [tarifaError, setTarifaError] = useState<string>('');
   const [fotosVehiculo, setFotosVehiculo] = useState<string[]>([]);
+  const [runtSugerencia, setRuntSugerencia] = useState<VehiculoConsultaRunt | null>(null);
 
   // Estado para edición
   const [modoEdicion, setModoEdicion] = useState(false);
@@ -200,6 +201,41 @@ export default function Recepcion() {
     }
   });
 
+  const consultarRuntMutation = useMutation({
+    mutationFn: (placa: string) => vehiculosApi.consultarRuntPorPlaca(placa),
+    onSuccess: (data) => {
+      setRuntSugerencia(data);
+      if (!data.encontrado) {
+        showToast(
+          'warning',
+          'Sin datos para autocompletar',
+          `No se encontró información RUNT para ${data.placa_consultada}. Puedes continuar manualmente.`
+        );
+        return;
+      }
+      const resumen = [
+        data.marca,
+        data.linea,
+        data.modelo,
+        data.ano_modelo ? String(data.ano_modelo) : null,
+      ].filter(Boolean).join(' · ');
+      showToast(
+        'success',
+        'Consulta RUNT exitosa',
+        resumen || `Placa ${data.placa_consultada} encontrada`
+      );
+    },
+    onError: (error: any) => {
+      const errorMessage = error?.response?.data?.detail || 'No fue posible consultar RUNT en este momento.';
+      setRuntSugerencia(null);
+      showToast(
+        'error',
+        'Error consultando RUNT',
+        typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage)
+      );
+    },
+  });
+
   // Calcular tarifa cuando cambia el año del modelo o el tipo de vehículo
   useEffect(() => {
     const state = location.state as PrefillState | null;
@@ -308,6 +344,7 @@ export default function Recepcion() {
       tiene_soat: false,
       observaciones: '',
     });
+    setRuntSugerencia(null);
     
     // NO limpiar tarifaCalculada aquí - dejar que el useEffect lo maneje
     // Esto permite que la tarifa permanezca visible después del registro
@@ -352,7 +389,43 @@ export default function Recepcion() {
     setModoEdicion(false);
     setVehiculoEditando(null);
     setFotosVehiculo([]);
+    setRuntSugerencia(null);
     resetForm();
+  };
+
+  const camposSugeribles = useMemo(() => {
+    if (!runtSugerencia || !runtSugerencia.encontrado) return [];
+    return [
+      { key: 'marca', label: 'Marca', valor: runtSugerencia.marca },
+      { key: 'modelo', label: 'Modelo', valor: runtSugerencia.linea || runtSugerencia.modelo },
+      { key: 'ano_modelo', label: 'Año', valor: runtSugerencia.ano_modelo ? String(runtSugerencia.ano_modelo) : null },
+      { key: 'tipo_vehiculo', label: 'Tipo sugerido', valor: runtSugerencia.tipo_vehiculo_sugerido },
+    ].filter((c) => c.valor);
+  }, [runtSugerencia]);
+
+  const aplicarSugerenciaRunt = () => {
+    if (!runtSugerencia || !runtSugerencia.encontrado) return;
+    const ok = window.confirm(
+      `Se aplicarán sugerencias RUNT para la placa ${runtSugerencia.placa_consultada}. ¿Deseas continuar?`
+    );
+    if (!ok) return;
+    setFormData((prev) => ({
+      ...prev,
+      marca: runtSugerencia.marca || prev.marca || '',
+      modelo: runtSugerencia.linea || runtSugerencia.modelo || prev.modelo || '',
+      ano_modelo: runtSugerencia.ano_modelo || prev.ano_modelo,
+      tipo_vehiculo: runtSugerencia.tipo_vehiculo_sugerido || prev.tipo_vehiculo,
+    }));
+    showToast('success', 'Sugerencias aplicadas', 'Se aplicaron datos sugeridos desde RUNT.');
+  };
+
+  const consultarRunt = () => {
+    const placa = (formData.placa || '').trim().toUpperCase();
+    if (placa.length < 5) {
+      showToast('warning', 'Placa incompleta', 'Ingresa una placa válida antes de consultar.');
+      return;
+    }
+    consultarRuntMutation.mutate(placa);
   };
 
   const handleSubmit = (e: FormEvent) => {
@@ -471,15 +544,51 @@ export default function Recepcion() {
                 <label className="block text-sm font-medium text-slate-700 mb-2">
                   Placa <span className="text-red-600">*</span>
                 </label>
-                <input
-                  type="text"
-                  value={formData.placa}
-                  onChange={(e) => handleInputChange('placa', e.target.value.toUpperCase())}
-                  required
-                  className="input-pos uppercase"
-                  placeholder="ABC123"
-                  maxLength={10}
-                />
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={formData.placa}
+                    onChange={(e) => {
+                      handleInputChange('placa', e.target.value.toUpperCase());
+                      setRuntSugerencia(null);
+                    }}
+                    required
+                    className="input-pos uppercase"
+                    placeholder="ABC123"
+                    maxLength={10}
+                  />
+                  <button
+                    type="button"
+                    onClick={consultarRunt}
+                    disabled={consultarRuntMutation.isLoading}
+                    className="px-3 py-2 rounded-lg border border-primary-300 text-primary-700 font-semibold bg-white hover:bg-primary-50 disabled:opacity-60"
+                  >
+                    {consultarRuntMutation.isLoading ? 'Consultando...' : 'Consultar RUNT'}
+                  </button>
+                </div>
+                {runtSugerencia && (
+                  <div className="mt-2 p-2 rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-700">
+                    <p className="font-semibold mb-1">
+                      {runtSugerencia.encontrado
+                        ? `Sugerencias RUNT para ${runtSugerencia.placa_consultada}`
+                        : `Sin datos RUNT para ${runtSugerencia.placa_consultada}`}
+                    </p>
+                    {runtSugerencia.encontrado && camposSugeribles.length > 0 && (
+                      <>
+                        <p className="mb-1">
+                          {camposSugeribles.map((c) => `${c.label}: ${c.valor}`).join(' | ')}
+                        </p>
+                        <button
+                          type="button"
+                          onClick={aplicarSugerenciaRunt}
+                          className="text-primary-700 underline font-semibold"
+                        >
+                          Aplicar sugerencias al formulario
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Tipo de Vehículo */}
