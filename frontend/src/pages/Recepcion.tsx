@@ -202,7 +202,11 @@ export default function Recepcion() {
   });
 
   const consultarRuntMutation = useMutation({
-    mutationFn: (placa: string) => vehiculosApi.consultarRuntPorPlaca(placa),
+    mutationFn: (params: { placa: string; documentType: string; documentNumber: string }) =>
+      vehiculosApi.consultarRuntPorPlaca(params.placa, {
+        documentType: params.documentType,
+        documentNumber: params.documentNumber,
+      }),
     onSuccess: (data) => {
       setRuntSugerencia(data);
       if (!data.encontrado) {
@@ -425,7 +429,16 @@ export default function Recepcion() {
       showToast('warning', 'Placa incompleta', 'Ingresa una placa válida antes de consultar.');
       return;
     }
-    consultarRuntMutation.mutate(placa);
+    const documentNumber = (formData.cliente_documento || '').replace(/\D/g, '');
+    if (!documentNumber) {
+      showToast('warning', 'Documento requerido', 'Para consultar RUNT con Verifik debes digitar el documento del propietario.');
+      return;
+    }
+    consultarRuntMutation.mutate({
+      placa,
+      documentType: 'CC',
+      documentNumber,
+    });
   };
 
   const handleSubmit = (e: FormEvent) => {
@@ -563,9 +576,12 @@ export default function Recepcion() {
                     disabled={consultarRuntMutation.isLoading}
                     className="px-3 py-2 rounded-lg border border-primary-300 text-primary-700 font-semibold bg-white hover:bg-primary-50 disabled:opacity-60"
                   >
-                    {consultarRuntMutation.isLoading ? 'Consultando...' : 'Consultar RUNT'}
+                    {consultarRuntMutation.isLoading ? 'Consultando...' : 'Consultar RUNT (Verifik)'}
                   </button>
                 </div>
+                <p className="mt-1 text-xs text-slate-500">
+                  Requiere documento del propietario para consulta Verifik.
+                </p>
                 {runtSugerencia && (
                   <div className="mt-2 p-2 rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-700">
                     <p className="font-semibold mb-1">

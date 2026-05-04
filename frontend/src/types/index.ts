@@ -585,6 +585,7 @@ export interface VehiculoConsultaRunt {
   tipo_vehiculo_sugerido?: string | null;
   confidence?: 'high' | 'medium' | 'low' | null;
   fuente: string;
+  proveedor?: string | null;
   request_id?: string | null;
   cached: boolean;
   observaciones: string[];

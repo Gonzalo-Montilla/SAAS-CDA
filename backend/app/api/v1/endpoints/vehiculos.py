@@ -5,7 +5,7 @@ import re
 import traceback
 from io import BytesIO
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func
@@ -27,7 +27,7 @@ from app.models.vehiculo import VehiculoProceso, EstadoVehiculo, MetodoPago
 from app.models.factus import TenantFactusSettings, FacturaElectronica
 from app.services.factus_tenant_settings import creds_complete_for_active_env
 from app.integrations.factus_client import FactusAPIError, format_factus_error_for_user
-from app.integrations.apitude_runt import ApitudeRuntError, consultar_runt_vehiculo_por_placa
+from app.integrations.verifik_runt import VerifikRuntError, consultar_runt_vehiculo_por_placa
 from app.integrations.factus_emit import (
     emitir_y_persistir_factura_cobro,
     resolve_numbering_range_id_for_cobro,
@@ -91,15 +91,21 @@ router = APIRouter()
 @router.get("/consulta-runt/{placa}", response_model=VehiculoConsultaRuntResponse)
 def consultar_runt_por_placa(
     placa: str,
+    document_type: str | None = Query(default=None, alias="documentType"),
+    document_number: str | None = Query(default=None, alias="documentNumber"),
     current_user: Usuario = Depends(get_recepcionista_or_admin),
 ):
     """
-    Consulta externa RUNT por placa (vía Apitude), normalizada para autocompletado en recepción.
+    Consulta externa RUNT por placa (vía Verifik), normalizada para autocompletado en recepción.
     No registra ni modifica vehículos.
     """
     try:
-        return consultar_runt_vehiculo_por_placa(placa)
-    except ApitudeRuntError as exc:
+        return consultar_runt_vehiculo_por_placa(
+            placa,
+            document_type=document_type,
+            document_number=document_number,
+        )
+    except VerifikRuntError as exc:
         status_code = exc.status_code if exc.status_code and 100 <= exc.status_code < 600 else 400
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 

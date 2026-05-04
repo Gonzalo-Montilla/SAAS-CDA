@@ -179,10 +179,11 @@ class VehiculoConsultaRuntResponse(BaseModel):
     cilindraje: Optional[str] = None
     tipo_vehiculo_sugerido: Optional[str] = None
     confidence: Optional[str] = None
-    fuente: str = "apitude_runt"
+    fuente: str = "verifik_runt"
     request_id: Optional[str] = None
     cached: bool = False
     observaciones: list[str] = []
+    proveedor: Optional[str] = None
 
 
 class VentaSOAT(BaseModel):

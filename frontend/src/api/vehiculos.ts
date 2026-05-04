@@ -51,9 +51,20 @@ export const vehiculosApi = {
   },
 
   // Consultar datos RUNT por placa (vía integración backend)
-  consultarRuntPorPlaca: async (placa: string): Promise<VehiculoConsultaRunt> => {
+  consultarRuntPorPlaca: async (
+    placa: string,
+    opts?: { documentType?: string; documentNumber?: string }
+  ): Promise<VehiculoConsultaRunt> => {
     const cleaned = (placa || '').trim().toUpperCase();
-    const response = await apiClient.get<VehiculoConsultaRunt>(`/vehiculos/consulta-runt/${encodeURIComponent(cleaned)}`);
+    const response = await apiClient.get<VehiculoConsultaRunt>(
+      `/vehiculos/consulta-runt/${encodeURIComponent(cleaned)}`,
+      {
+        params: {
+          documentType: opts?.documentType,
+          documentNumber: opts?.documentNumber,
+        },
+      }
+    );
     return response.data;
   },
 
