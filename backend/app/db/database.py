@@ -1949,16 +1949,20 @@ def init_db():
     from app.models.documento_auditoria import TenantDocumentoAuditoria  # noqa: F401 — register model
     from app.models.proveedor_catalogo import ProveedorCatalogo  # noqa: F401 — register model
     from app.models.dse_retencion_motor import DseRetencionTasaConcepto, DseUvtPorAnio  # noqa: F401
-    from app.models.nomina import (
-        NominaCentroCosto,
-        NominaParametroLegal,
-        NominaEmpleado,
-        NominaContrato,
-        NominaPeriodo,
-        NominaNovedad,
-        NominaLiquidacion,
-        NominaDesprendibleVersion,
-    )  # noqa: F401
+    nomina_available = True
+    try:
+        from app.models.nomina import (
+            NominaCentroCosto,
+            NominaParametroLegal,
+            NominaEmpleado,
+            NominaContrato,
+            NominaPeriodo,
+            NominaNovedad,
+            NominaLiquidacion,
+            NominaDesprendibleVersion,
+        )  # noqa: F401
+    except ModuleNotFoundError:
+        nomina_available = False
     from app.core.security import get_password_hash
     from datetime import date
     
@@ -1992,7 +1996,8 @@ def init_db():
         ensure_quality_survey_responses_schema(db)
         ensure_quality_survey_invites_sucursal_schema(db)
         ensure_tenant_documentos_schema(db)
-        ensure_nomina_schema(db)
+        if nomina_available:
+            ensure_nomina_schema(db)
         db.commit()
 
         default_tenant = db.query(Tenant).filter(
