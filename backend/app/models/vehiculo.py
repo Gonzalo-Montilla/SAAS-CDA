@@ -49,6 +49,7 @@ class VehiculoProceso(Base):
     
     # Datos del cliente
     cliente_nombre = Column(String(200), nullable=False)
+    cliente_tipo_documento = Column(String(10), nullable=False, default="CC")
     cliente_documento = Column(String(50), nullable=False)
     cliente_telefono = Column(String(20))
     cliente_email = Column(String(255))

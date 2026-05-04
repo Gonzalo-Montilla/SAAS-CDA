@@ -99,7 +99,7 @@ class Settings(BaseSettings):
     VERIFIK_TOKEN: str = Field(default="", env="VERIFIK_TOKEN")
     VERIFIK_TIMEOUT_SECONDS: float = Field(default=15.0, ge=1.0, le=60.0, env="VERIFIK_TIMEOUT_SECONDS")
     VERIFIK_RUNT_SERVICE_PATH: str = Field(
-        default="/v2/co/runt/vehicle-by-plate-simplified",
+        default="/v2/co/runt/vehicle-by-plate",
         env="VERIFIK_RUNT_SERVICE_PATH",
     )
     VERIFIK_RUNT_DEFAULT_DOCUMENT_TYPE: str = Field(

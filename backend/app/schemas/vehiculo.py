@@ -6,7 +6,7 @@ import re
 from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator
 from decimal import Decimal
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Literal
 from uuid import UUID
 
 
@@ -28,6 +28,13 @@ def _validar_email_recepcion(v) -> str:
     return s
 
 
+def _normalizar_tipo_documento_cliente(v) -> str:
+    s = str(v or "").strip().upper()
+    if s not in {"CC", "CE", "PA", "NIT"}:
+        raise ValueError("Tipo de documento inválido. Use CC, CE, PA o NIT.")
+    return s
+
+
 class VehiculoRegistro(BaseModel):
     """Registro de vehículo por recepción"""
     placa: str = Field(min_length=5, max_length=10)
@@ -36,6 +43,7 @@ class VehiculoRegistro(BaseModel):
     modelo: Optional[str] = None
     ano_modelo: int = Field(ge=1950, le=2030)
     cliente_nombre: str = Field(min_length=3)
+    cliente_tipo_documento: Literal["CC", "CE", "PA", "NIT"] = "CC"
     cliente_documento: str = Field(min_length=5)
     cliente_telefono: str = Field(min_length=7, max_length=30)
     cliente_email: EmailStr
@@ -60,6 +68,11 @@ class VehiculoRegistro(BaseModel):
             return None
         return str(v).strip()[:300]
 
+    @field_validator("cliente_tipo_documento", mode="before")
+    @classmethod
+    def normalize_doc_type(cls, v):
+        return _normalizar_tipo_documento_cliente(v)
+
 
 class VehiculoEdicion(BaseModel):
     """Edición de vehículo registrado (antes de cobrar)"""
@@ -69,6 +82,7 @@ class VehiculoEdicion(BaseModel):
     modelo: Optional[str] = None
     ano_modelo: int = Field(ge=1950, le=2030)
     cliente_nombre: str = Field(min_length=3)
+    cliente_tipo_documento: Literal["CC", "CE", "PA", "NIT"] = "CC"
     cliente_documento: str = Field(min_length=5)
     cliente_telefono: str = Field(min_length=7, max_length=30)
     cliente_email: EmailStr
@@ -93,6 +107,11 @@ class VehiculoEdicion(BaseModel):
             return None
         return str(v).strip()[:300]
 
+    @field_validator("cliente_tipo_documento", mode="before")
+    @classmethod
+    def normalize_doc_type_edit(cls, v):
+        return _normalizar_tipo_documento_cliente(v)
+
 
 class VehiculoCobro(BaseModel):
     """Datos para cobrar un vehículo"""
@@ -116,6 +135,7 @@ class VehiculoResponse(BaseModel):
     modelo: Optional[str]
     ano_modelo: int
     cliente_nombre: str
+    cliente_tipo_documento: str
     cliente_documento: str
     cliente_telefono: Optional[str]
     cliente_email: Optional[str]
@@ -168,6 +188,9 @@ class VehiculoConsultaRuntResponse(BaseModel):
     """Respuesta normalizada de consulta RUNT por placa (vía proveedor externo)."""
 
     placa_consultada: str
+    document_type: Optional[str] = None
+    document_number: Optional[str] = None
+    titular_nombre: Optional[str] = None
     encontrado: bool
     marca: Optional[str] = None
     linea: Optional[str] = None

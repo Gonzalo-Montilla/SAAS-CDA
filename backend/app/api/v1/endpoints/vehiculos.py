@@ -332,6 +332,7 @@ def registrar_vehiculo(
         modelo=vehiculo_data.modelo,
         ano_modelo=vehiculo_data.ano_modelo,
         cliente_nombre=vehiculo_data.cliente_nombre,
+        cliente_tipo_documento=vehiculo_data.cliente_tipo_documento,
         cliente_documento=vehiculo_data.cliente_documento,
         cliente_telefono=vehiculo_data.cliente_telefono,
         cliente_email=cliente_email_normalizado,
@@ -521,6 +522,7 @@ def editar_vehiculo(
     vehiculo.modelo = vehiculo_data.modelo
     vehiculo.ano_modelo = vehiculo_data.ano_modelo
     vehiculo.cliente_nombre = vehiculo_data.cliente_nombre
+    vehiculo.cliente_tipo_documento = vehiculo_data.cliente_tipo_documento
     vehiculo.cliente_documento = vehiculo_data.cliente_documento
     vehiculo.cliente_telefono = vehiculo_data.cliente_telefono
     vehiculo.cliente_email = str(vehiculo_data.cliente_email).strip().lower()
@@ -1123,6 +1125,7 @@ def venta_solo_soat(
             modelo=None,
             ano_modelo=datetime.now().year,  # Año actual por defecto
             cliente_nombre=venta_data.cliente_nombre,
+            cliente_tipo_documento="CC",
             cliente_documento=venta_data.cliente_documento,
             cliente_telefono=None,
             valor_rtm=Decimal(0),  # NO hay revisión

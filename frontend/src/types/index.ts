@@ -534,6 +534,7 @@ export interface Vehiculo {
   modelo?: string;
   ano_modelo: number;
   cliente_nombre: string;
+  cliente_tipo_documento: 'CC' | 'CE' | 'PA' | 'NIT';
   cliente_documento: string;
   cliente_telefono?: string;
   cliente_email?: string;
@@ -563,6 +564,7 @@ export interface VehiculoRegistro {
   modelo?: string;
   ano_modelo: number;
   cliente_nombre: string;
+  cliente_tipo_documento: 'CC' | 'CE' | 'PA' | 'NIT';
   cliente_documento: string;
   cliente_telefono: string;
   cliente_email: string;
@@ -573,6 +575,9 @@ export interface VehiculoRegistro {
 
 export interface VehiculoConsultaRunt {
   placa_consultada: string;
+  document_type?: string | null;
+  document_number?: string | null;
+  titular_nombre?: string | null;
   encontrado: boolean;
   marca?: string | null;
   linea?: string | null;

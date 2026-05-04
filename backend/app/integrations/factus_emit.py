@@ -22,7 +22,13 @@ from app.integrations.factus_client import (
 )
 from app.models.factus import FacturaElectronica, TenantFactusSettings
 from app.services.factus_tenant_settings import active_auth_encrypted
+from app.utils.factus_validators import (
+    digito_verificacion_nit_colombia as _dv_nit_colombia,
+)
 from app.utils.factus_validators import email_valido_factus as _email_valido_factus
+from app.utils.factus_validators import (
+    parse_nit_colombiano_identificacion_y_dv as _parse_nit_ident_y_dv,
+)
 from app.utils.factus_validators import solo_digitos as _solo_digitos
 from app.models.sucursal import Sucursal
 from app.models.tarifa import Tarifa
@@ -186,8 +192,20 @@ def validar_datos_cliente_para_factus(vehiculo: VehiculoProceso) -> None:
     nombre = (vehiculo.cliente_nombre or "").strip()
     if len(nombre) < 2:
         raise ValueError("El cliente debe tener nombre completo registrado para facturar electrónicamente.")
-    digits = _solo_digitos(vehiculo.cliente_documento or "")
-    if len(digits) < 5:
+    doc_type = str(getattr(vehiculo, "cliente_tipo_documento", None) or "CC").strip().upper()
+    doc_raw = str(vehiculo.cliente_documento or "").strip()
+    if doc_type == "NIT":
+        ident, _dv = _parse_nit_ident_y_dv(doc_raw)
+        if len(ident) < 5:
+            raise ValueError("El cliente debe tener NIT válido para facturar electrónicamente.")
+    else:
+        cleaned = "".join(ch for ch in doc_raw.upper() if ch.isalnum())
+        if len(cleaned) < 5:
+            raise ValueError("El cliente debe tener documento de identidad válido para facturar electrónicamente.")
+    if doc_type not in {"CC", "CE", "PA", "NIT"}:
+        raise ValueError("Tipo de documento del cliente inválido para facturación electrónica.")
+
+    if not doc_raw:
         raise ValueError("El cliente debe tener documento de identidad válido para facturar electrónicamente.")
     if not _email_valido_factus(vehiculo.cliente_email):
         raise ValueError(
@@ -224,27 +242,60 @@ def _customer_payload(
     *,
     municipality_id: int,
 ) -> dict[str, Any]:
-    """Cliente persona natural (cédula); documento solo dígitos. Dirección opcional (Factus/DIAN puede ir en blanco)."""
-    digits = _solo_digitos(vehiculo.cliente_documento or "")
-    if not digits:
+    """Cliente FE usando tipo de documento capturado en recepción."""
+    doc_type = str(getattr(vehiculo, "cliente_tipo_documento", None) or "CC").strip().upper()
+    if doc_type not in {"CC", "CE", "PA", "NIT"}:
+        doc_type = "CC"
+
+    doc_raw = str(vehiculo.cliente_documento or "").strip()
+    if not doc_raw:
         raise ValueError("El cliente no tiene documento válido para emitir factura electrónica")
+
+    identification_document_id = 3
+    legal_organization_id = 2
+    company = ""
+    dv_value: str | None = None
+    identification = ""
+
+    if doc_type == "NIT":
+        identification_document_id = 6
+        legal_organization_id = 1
+        ident, dv_parse = _parse_nit_ident_y_dv(doc_raw)
+        if len(ident) < 5:
+            raise ValueError("El NIT del cliente es inválido para facturar electrónicamente.")
+        identification = ident[:20]
+        dv_value = str(dv_parse if dv_parse is not None else _dv_nit_colombia(ident))
+    else:
+        if doc_type == "CE":
+            identification_document_id = 5
+        elif doc_type == "PA":
+            identification_document_id = 7
+
+        # CE/PA pueden incluir letras; normalizamos a alfanumérico (sin espacios).
+        cleaned = "".join(ch for ch in doc_raw.upper() if ch.isalnum())
+        if not cleaned:
+            raise ValueError("El documento del cliente es inválido para facturar electrónicamente.")
+        identification = cleaned[:20]
+
     names = (vehiculo.cliente_nombre or "Cliente").strip()[:200]
+    if doc_type == "NIT":
+        company = names
     email = (vehiculo.cliente_email or "").strip().lower()
     if not _email_valido_factus(email):
         email = "cliente@local.invalid"
     phone = _solo_digitos(vehiculo.cliente_telefono or "") or "6000000000"
     addr = (vehiculo.cliente_direccion or "").strip()[:200]
     return {
-        "identification_document_id": 3,
-        "identification": digits[:20],
-        "dv": None,
-        "company": "",
+        "identification_document_id": identification_document_id,
+        "identification": identification,
+        "dv": dv_value,
+        "company": company,
         "trade_name": "",
         "names": names,
         "address": addr,
         "email": email[:200],
         "phone": phone[:20],
-        "legal_organization_id": 2,
+        "legal_organization_id": legal_organization_id,
         "tribute_id": 21,
         "municipality_id": municipality_id,
     }

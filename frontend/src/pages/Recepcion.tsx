@@ -14,6 +14,26 @@ import type { VehiculoRegistro, VehiculoConsultaRunt } from '../types';
 import { formatCOP } from '../utils/formatNumber';
 
 export default function Recepcion() {
+  const normalizarDocumentoCliente = (
+    raw: string,
+    tipo: VehiculoRegistro['cliente_tipo_documento']
+  ): string => {
+    const upper = (raw || '').toUpperCase();
+    if (tipo === 'NIT') {
+      const cleaned = upper.replace(/[^0-9-]/g, '');
+      const firstHyphen = cleaned.indexOf('-');
+      if (firstHyphen < 0) {
+        return cleaned.slice(0, 20);
+      }
+      const left = cleaned.slice(0, firstHyphen).replace(/-/g, '');
+      const right = cleaned.slice(firstHyphen + 1).replace(/-/g, '');
+      if (!left) return right.slice(0, 19);
+      if (!right) return `${left.slice(0, 20)}-`;
+      return `${left.slice(0, 20)}-${right.slice(0, 1)}`;
+    }
+    return upper.replace(/[^A-Z0-9]/g, '').slice(0, 20);
+  };
+
   const queryClient = useQueryClient();
   const navigate = useNavigate();
   const location = useLocation();
@@ -37,12 +57,20 @@ export default function Recepcion() {
     modelo: '',
     ano_modelo: anoActual, // Año actual por defecto
     cliente_nombre: '',
+    cliente_tipo_documento: 'CC',
     cliente_documento: '',
     cliente_telefono: '',
     cliente_email: '',
     cliente_direccion: '',
     tiene_soat: false,
     observaciones: '',
+  });
+  const [consultaRunt, setConsultaRunt] = useState<{
+    document_type: 'CC' | 'CE' | 'PA' | 'NIT';
+    document_number: string;
+  }>({
+    document_type: 'CC',
+    document_number: '',
   });
 
   type PrefillState = {
@@ -209,6 +237,20 @@ export default function Recepcion() {
       }),
     onSuccess: (data) => {
       setRuntSugerencia(data);
+      setFormData((prev) => {
+        const docTypeResolved =
+          data.document_type && ['CC', 'CE', 'PA', 'NIT'].includes(data.document_type)
+            ? (data.document_type as 'CC' | 'CE' | 'PA' | 'NIT')
+            : prev.cliente_tipo_documento;
+        return {
+          ...prev,
+          cliente_tipo_documento: docTypeResolved,
+          cliente_documento: data.document_number
+            ? normalizarDocumentoCliente(String(data.document_number), docTypeResolved)
+            : prev.cliente_documento,
+          cliente_nombre: data.titular_nombre ? String(data.titular_nombre).toUpperCase() : prev.cliente_nombre,
+        };
+      });
       if (!data.encontrado) {
         showToast(
           'warning',
@@ -341,6 +383,7 @@ export default function Recepcion() {
       modelo: '',
       ano_modelo: anoActual, // Mantener año actual para que la tarifa persista
       cliente_nombre: '',
+      cliente_tipo_documento: 'CC',
       cliente_documento: '',
       cliente_telefono: '',
       cliente_email: '',
@@ -349,6 +392,10 @@ export default function Recepcion() {
       observaciones: '',
     });
     setRuntSugerencia(null);
+    setConsultaRunt({
+      document_type: 'CC',
+      document_number: '',
+    });
     
     // NO limpiar tarifaCalculada aquí - dejar que el useEffect lo maneje
     // Esto permite que la tarifa permanezca visible después del registro
@@ -370,6 +417,10 @@ export default function Recepcion() {
     setModoEdicion(true);
     setVehiculoEditando(vehiculo.id);
     setFotosVehiculo(fotos);
+    setConsultaRunt({
+      document_type: (vehiculo.cliente_tipo_documento || 'CC') as 'CC' | 'CE' | 'PA' | 'NIT',
+      document_number: vehiculo.cliente_documento || '',
+    });
     setFormData({
       placa: vehiculo.placa,
       tipo_vehiculo: vehiculo.tipo_vehiculo,
@@ -377,7 +428,11 @@ export default function Recepcion() {
       modelo: vehiculo.modelo,
       ano_modelo: vehiculo.ano_modelo,
       cliente_nombre: vehiculo.cliente_nombre,
-      cliente_documento: vehiculo.cliente_documento,
+      cliente_tipo_documento: vehiculo.cliente_tipo_documento || 'CC',
+      cliente_documento: normalizarDocumentoCliente(
+        vehiculo.cliente_documento || '',
+        (vehiculo.cliente_tipo_documento || 'CC') as VehiculoRegistro['cliente_tipo_documento']
+      ),
       cliente_telefono: vehiculo.cliente_telefono || '',
       cliente_email: vehiculo.cliente_email || '',
       cliente_direccion: vehiculo.cliente_direccion || '',
@@ -429,14 +484,14 @@ export default function Recepcion() {
       showToast('warning', 'Placa incompleta', 'Ingresa una placa válida antes de consultar.');
       return;
     }
-    const documentNumber = (formData.cliente_documento || '').replace(/\D/g, '');
+    const documentNumber = (consultaRunt.document_number || '').replace(/\D/g, '');
     if (!documentNumber) {
       showToast('warning', 'Documento requerido', 'Para consultar RUNT con Verifik debes digitar el documento del propietario.');
       return;
     }
     consultarRuntMutation.mutate({
       placa,
-      documentType: 'CC',
+      documentType: consultaRunt.document_type,
       documentNumber,
     });
   };
@@ -551,13 +606,15 @@ export default function Recepcion() {
 
             {/* Los mensajes de éxito y error ahora se manejan con el componente Toast */}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {/* Placa */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Placa <span className="text-red-600">*</span>
-                </label>
-                <div className="flex gap-2">
+            <div className="mb-6 p-4 border border-slate-200 rounded-lg bg-slate-50 space-y-3">
+              <p className="text-sm font-semibold text-slate-800">
+                Datos para consulta RUNT (titular)
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
+                <div className="md:col-span-3">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Placa <span className="text-red-600">*</span>
+                  </label>
                   <input
                     type="text"
                     value={formData.placa}
@@ -570,42 +627,90 @@ export default function Recepcion() {
                     placeholder="ABC123"
                     maxLength={10}
                   />
+                </div>
+                <div className="md:col-span-3">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Tipo de documento <span className="text-red-600">*</span>
+                  </label>
+                  <select
+                    value={consultaRunt.document_type}
+                    onChange={(e) =>
+                      setConsultaRunt((prev) => ({
+                        ...prev,
+                        document_type: e.target.value as typeof prev.document_type,
+                      }))
+                    }
+                    className="input-pos"
+                  >
+                    <option value="CC">CC</option>
+                    <option value="CE">CE</option>
+                    <option value="PA">PA</option>
+                    <option value="NIT">NIT</option>
+                  </select>
+                </div>
+                <div className="md:col-span-3">
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Número de documento <span className="text-red-600">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={consultaRunt.document_number}
+                    onChange={(e) =>
+                      setConsultaRunt((prev) => ({
+                        ...prev,
+                        document_number: e.target.value.replace(/\D/g, ''),
+                      }))
+                    }
+                    className="input-pos"
+                    placeholder="123456789"
+                    maxLength={20}
+                  />
+                </div>
+                <div className="md:col-span-3 flex items-end">
                   <button
                     type="button"
                     onClick={consultarRunt}
                     disabled={consultarRuntMutation.isLoading}
-                    className="px-3 py-2 rounded-lg border border-primary-300 text-primary-700 font-semibold bg-white hover:bg-primary-50 disabled:opacity-60"
+                    className="w-full px-4 py-3 rounded-xl border border-primary-300 text-primary-700 text-sm font-medium bg-white hover:bg-primary-50 disabled:opacity-60 whitespace-nowrap"
                   >
-                    {consultarRuntMutation.isLoading ? 'Consultando...' : 'Consultar RUNT (Verifik)'}
+                    {consultarRuntMutation.isLoading ? 'Consultando...' : 'Consultar RUNT'}
                   </button>
                 </div>
-                <p className="mt-1 text-xs text-slate-500">
-                  Requiere documento del propietario para consulta Verifik.
-                </p>
-                {runtSugerencia && (
-                  <div className="mt-2 p-2 rounded-lg border border-slate-200 bg-slate-50 text-xs text-slate-700">
-                    <p className="font-semibold mb-1">
-                      {runtSugerencia.encontrado
-                        ? `Sugerencias RUNT para ${runtSugerencia.placa_consultada}`
-                        : `Sin datos RUNT para ${runtSugerencia.placa_consultada}`}
-                    </p>
-                    {runtSugerencia.encontrado && camposSugeribles.length > 0 && (
-                      <>
-                        <p className="mb-1">
-                          {camposSugeribles.map((c) => `${c.label}: ${c.valor}`).join(' | ')}
-                        </p>
-                        <button
-                          type="button"
-                          onClick={aplicarSugerenciaRunt}
-                          className="text-primary-700 underline font-semibold"
-                        >
-                          Aplicar sugerencias al formulario
-                        </button>
-                      </>
-                    )}
-                  </div>
-                )}
               </div>
+              <p className="text-xs text-slate-500">
+                Consulta RUNT por placa y documento. El nombre del titular puede no venir en esta fuente.
+              </p>
+              {runtSugerencia && (
+                <div className="mt-2 p-2 rounded-lg border border-slate-200 bg-white text-xs text-slate-700">
+                  <p className="font-semibold mb-1">
+                    {runtSugerencia.encontrado
+                      ? `Sugerencias RUNT para ${runtSugerencia.placa_consultada}`
+                      : `Sin datos RUNT para ${runtSugerencia.placa_consultada}`}
+                  </p>
+                  {runtSugerencia.encontrado && camposSugeribles.length > 0 && (
+                    <>
+                      <p className="mb-1">
+                        {camposSugeribles.map((c) => `${c.label}: ${c.valor}`).join(' | ')}
+                      </p>
+                      {!runtSugerencia.titular_nombre && (
+                        <p className="mb-1 text-amber-700">
+                          Nombre del titular no disponible
+                        </p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={aplicarSugerenciaRunt}
+                        className="text-primary-700 underline font-semibold"
+                      >
+                        Aplicar sugerencias al formulario
+                      </button>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
               {/* Tipo de Vehículo */}
               <div>
@@ -734,17 +839,18 @@ export default function Recepcion() {
               </div>
 
               {/* SOAT */}
-              <div className="flex items-center pt-8">
-                <label className="flex items-center cursor-pointer">
+              <div className="md:col-span-2 mt-1">
+                <label className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 cursor-pointer">
+                  <div>
+                    <p className="text-base font-semibold text-slate-900">¿Compra SOAT?</p>
+                    <p className="text-xs text-slate-500">Si aplica, la comisión se suma al total a cobrar.</p>
+                  </div>
                   <input
                     type="checkbox"
                     checked={formData.tiene_soat}
                     onChange={(e) => handleInputChange('tiene_soat', e.target.checked)}
-                    className="w-6 h-6 text-primary-600 border-slate-300 rounded focus:ring-primary-500"
+                    className="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500"
                   />
-                  <span className="ml-3 text-lg font-medium text-slate-900">
-                    ¿Compra SOAT?
-                  </span>
                 </label>
               </div>
             </div>
@@ -772,23 +878,50 @@ export default function Recepcion() {
               {/* Documento */}
               <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
+                  Tipo de documento <span className="text-red-600">*</span>
+                </label>
+                <select
+                  value={formData.cliente_tipo_documento}
+                  onChange={(e) => {
+                    const nextDocType = e.target.value as VehiculoRegistro['cliente_tipo_documento'];
+                    setFormData((prev) => ({
+                      ...prev,
+                      cliente_tipo_documento: nextDocType,
+                      cliente_documento: normalizarDocumentoCliente(prev.cliente_documento, nextDocType),
+                    }));
+                  }}
+                  required
+                  className="input-pos"
+                >
+                  <option value="CC">C.C.</option>
+                  <option value="CE">C.E.</option>
+                  <option value="PA">Pasaporte</option>
+                  <option value="NIT">NIT</option>
+                </select>
+              </div>
+
+              {/* Documento */}
+              <div>
+                <label className="block text-sm font-medium text-slate-700 mb-2">
                   Documento <span className="text-red-600">*</span>
                 </label>
                 <input
                   type="text"
                   value={formData.cliente_documento}
                   onChange={(e) => {
-                    const value = e.target.value.replace(/\D/g, ''); // Solo números
-                    if (value.length <= 10) { // Máximo 10 dígitos
-                      handleInputChange('cliente_documento', value);
-                    }
+                    handleInputChange(
+                      'cliente_documento',
+                      normalizarDocumentoCliente(e.target.value, formData.cliente_tipo_documento)
+                    );
                   }}
-                  maxLength={10}
-                  pattern="[0-9]{1,10}"
+                  maxLength={20}
                   required
                   className="input-pos"
-                  placeholder="1234567890 (máx. 10 dígitos)"
+                  placeholder={formData.cliente_tipo_documento === 'NIT' ? '900123456-8' : 'Número de documento'}
                 />
+                <p className="mt-1 text-xs text-slate-500">
+                  Puedes cambiar este documento si la factura debe salir a nombre de un tercero.
+                </p>
               </div>
 
               {/* Celular (obligatorio — factura electrónica / notificaciones) */}

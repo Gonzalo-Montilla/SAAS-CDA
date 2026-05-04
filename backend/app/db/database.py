@@ -247,6 +247,11 @@ def ensure_tenant_domain_schema(db):
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS tenant_id UUID"))
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS cliente_email VARCHAR(255)"))
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS cliente_direccion VARCHAR(300)"))
+    db.execute(
+        text(
+            "ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS cliente_tipo_documento VARCHAR(10) NOT NULL DEFAULT 'CC'"
+        )
+    )
     db.execute(text("ALTER TABLE tarifas ADD COLUMN IF NOT EXISTS tenant_id UUID"))
     db.execute(
         text(
@@ -334,6 +339,15 @@ def ensure_tenant_domain_schema(db):
             SET tenant_id = c.tenant_id
             FROM cajas c
             WHERE v.tenant_id IS NULL AND v.caja_id = c.id
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            UPDATE vehiculos_proceso
+            SET cliente_tipo_documento = 'CC'
+            WHERE cliente_tipo_documento IS NULL OR btrim(cliente_tipo_documento) = ''
             """
         )
     )
@@ -1506,6 +1520,399 @@ def ensure_tenant_documento_auditoria_schema(db):
     )
 
 
+def ensure_nomina_schema(db):
+    """
+    Esquema inicial de nómina multitenant (MVP base).
+    """
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS nomina_centros_costo (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                sucursal_id UUID REFERENCES sucursales(id) ON DELETE SET NULL,
+                codigo VARCHAR(30) NOT NULL,
+                nombre VARCHAR(160) NOT NULL,
+                descripcion TEXT,
+                activo VARCHAR(10) NOT NULL DEFAULT 'si',
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE,
+                created_by UUID NOT NULL REFERENCES usuarios(id),
+                CONSTRAINT ux_nomina_centro_costo_codigo_tenant UNIQUE (tenant_id, codigo)
+            )
+            """
+        )
+    )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_nomina_cc_tenant ON nomina_centros_costo(tenant_id)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_nomina_cc_sucursal ON nomina_centros_costo(sucursal_id)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_nomina_cc_activo ON nomina_centros_costo(activo)"))
+
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS nomina_parametros_legales (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                salario_minimo_mensual NUMERIC(14,2) NOT NULL DEFAULT 0,
+                auxilio_transporte_mensual NUMERIC(14,2) NOT NULL DEFAULT 0,
+                uvt NUMERIC(14,2) NOT NULL DEFAULT 0,
+                tope_ibc_smmlv NUMERIC(6,2) NOT NULL DEFAULT 25,
+                umbral_exoneracion_smmlv NUMERIC(6,2) NOT NULL DEFAULT 10,
+                exoneracion_aportes_activa BOOLEAN NOT NULL DEFAULT TRUE,
+                aplica_auxilio_transporte BOOLEAN NOT NULL DEFAULT TRUE,
+                umbral_auxilio_transporte_smmlv NUMERIC(6,2) NOT NULL DEFAULT 2,
+                aplica_fsp BOOLEAN NOT NULL DEFAULT TRUE,
+                umbral_fsp_smmlv NUMERIC(6,2) NOT NULL DEFAULT 4,
+                pct_fsp_base NUMERIC(6,5) NOT NULL DEFAULT 0.01,
+                aplica_subsistencia BOOLEAN NOT NULL DEFAULT TRUE,
+                aplica_retencion_fuente BOOLEAN NOT NULL DEFAULT FALSE,
+                umbral_retencion_uvt NUMERIC(8,2) NOT NULL DEFAULT 95,
+                pct_retencion_base NUMERIC(6,5) NOT NULL DEFAULT 0.19,
+                pct_ibc_salario_integral NUMERIC(6,5) NOT NULL DEFAULT 0.70,
+                pct_salud_empleado NUMERIC(6,5) NOT NULL DEFAULT 0.04,
+                pct_pension_empleado NUMERIC(6,5) NOT NULL DEFAULT 0.04,
+                pct_salud_empresa NUMERIC(6,5) NOT NULL DEFAULT 0.085,
+                pct_pension_empresa NUMERIC(6,5) NOT NULL DEFAULT 0.12,
+                pct_arl_empresa NUMERIC(6,5) NOT NULL DEFAULT 0.00522,
+                pct_caja_empresa NUMERIC(6,5) NOT NULL DEFAULT 0.04,
+                pct_sena_empresa NUMERIC(6,5) NOT NULL DEFAULT 0.02,
+                pct_icbf_empresa NUMERIC(6,5) NOT NULL DEFAULT 0.03,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE,
+                created_by UUID NOT NULL REFERENCES usuarios(id),
+                updated_by UUID REFERENCES usuarios(id),
+                CONSTRAINT ux_nomina_parametros_legales_tenant UNIQUE (tenant_id)
+            )
+            """
+        )
+    )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_nomina_param_legal_tenant ON nomina_parametros_legales(tenant_id)"))
+
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS nomina_empleados (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                sucursal_id UUID REFERENCES sucursales(id) ON DELETE SET NULL,
+                centro_costo_id UUID REFERENCES nomina_centros_costo(id) ON DELETE SET NULL,
+                codigo_interno VARCHAR(50),
+                documento_tipo VARCHAR(20) NOT NULL,
+                documento_numero VARCHAR(40) NOT NULL,
+                nombres VARCHAR(120) NOT NULL,
+                apellidos VARCHAR(120) NOT NULL,
+                email VARCHAR(255),
+                celular VARCHAR(30),
+                fecha_ingreso DATE NOT NULL,
+                activo VARCHAR(10) NOT NULL DEFAULT 'si',
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE,
+                created_by UUID NOT NULL REFERENCES usuarios(id),
+                CONSTRAINT ux_nomina_empleado_doc_tenant UNIQUE (tenant_id, documento_tipo, documento_numero)
+            )
+            """
+        )
+    )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_nomina_empleados_tenant ON nomina_empleados(tenant_id)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_nomina_empleados_sucursal ON nomina_empleados(sucursal_id)"))
+    db.execute(text("ALTER TABLE nomina_empleados ADD COLUMN IF NOT EXISTS centro_costo_id UUID"))
+    db.execute(
+        text(
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conname = 'fk_nomina_empleados_centro_costo'
+                ) THEN
+                    ALTER TABLE nomina_empleados
+                    ADD CONSTRAINT fk_nomina_empleados_centro_costo
+                    FOREIGN KEY (centro_costo_id) REFERENCES nomina_centros_costo(id) ON DELETE SET NULL;
+                END IF;
+            END$$;
+            """
+        )
+    )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_nomina_empleados_cc ON nomina_empleados(centro_costo_id)"))
+
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS nomina_contratos (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                empleado_id UUID NOT NULL REFERENCES nomina_empleados(id) ON DELETE CASCADE,
+                es_salario_integral BOOLEAN NOT NULL DEFAULT FALSE,
+                centro_costo_id UUID REFERENCES nomina_centros_costo(id) ON DELETE SET NULL,
+                tipo_contrato VARCHAR(30) NOT NULL,
+                periodicidad VARCHAR(20) NOT NULL DEFAULT 'mensual',
+                salario_base NUMERIC(14, 2) NOT NULL,
+                fecha_inicio DATE NOT NULL,
+                fecha_fin DATE,
+                estado VARCHAR(20) NOT NULL DEFAULT 'activo',
+                observaciones TEXT,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE,
+                created_by UUID NOT NULL REFERENCES usuarios(id)
+            )
+            """
+        )
+    )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_nomina_contratos_tenant ON nomina_contratos(tenant_id)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_nomina_contratos_empleado ON nomina_contratos(empleado_id)"))
+    db.execute(text("ALTER TABLE nomina_contratos ADD COLUMN IF NOT EXISTS es_salario_integral BOOLEAN NOT NULL DEFAULT FALSE"))
+    db.execute(text("ALTER TABLE nomina_contratos ADD COLUMN IF NOT EXISTS centro_costo_id UUID"))
+    db.execute(
+        text(
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1
+                    FROM pg_constraint
+                    WHERE conname = 'fk_nomina_contratos_centro_costo'
+                ) THEN
+                    ALTER TABLE nomina_contratos
+                    ADD CONSTRAINT fk_nomina_contratos_centro_costo
+                    FOREIGN KEY (centro_costo_id) REFERENCES nomina_centros_costo(id) ON DELETE SET NULL;
+                END IF;
+            END$$;
+            """
+        )
+    )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_nomina_contratos_cc ON nomina_contratos(centro_costo_id)"))
+
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS nomina_periodos (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                anio VARCHAR(4) NOT NULL,
+                mes VARCHAR(2) NOT NULL,
+                fecha_inicio DATE NOT NULL,
+                fecha_fin DATE NOT NULL,
+                fecha_pago DATE,
+                estado VARCHAR(20) NOT NULL DEFAULT 'borrador',
+                observaciones TEXT,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE,
+                opened_by UUID NOT NULL REFERENCES usuarios(id),
+                closed_by UUID REFERENCES usuarios(id),
+                CONSTRAINT ux_nomina_periodo_tenant_mes UNIQUE (tenant_id, anio, mes)
+            )
+            """
+        )
+    )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_nomina_periodos_tenant ON nomina_periodos(tenant_id)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_nomina_periodos_estado ON nomina_periodos(estado)"))
+
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS nomina_novedades (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                periodo_id UUID NOT NULL REFERENCES nomina_periodos(id) ON DELETE CASCADE,
+                empleado_id UUID NOT NULL REFERENCES nomina_empleados(id) ON DELETE CASCADE,
+                tipo VARCHAR(20) NOT NULL,
+                concepto VARCHAR(120) NOT NULL,
+                unidades NUMERIC(10,2) NOT NULL DEFAULT 1,
+                valor_unitario NUMERIC(14,2) NOT NULL DEFAULT 0,
+                valor_total NUMERIC(14,2) NOT NULL DEFAULT 0,
+                observaciones TEXT,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                created_by UUID NOT NULL REFERENCES usuarios(id)
+            )
+            """
+        )
+    )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_nomina_novedades_tenant ON nomina_novedades(tenant_id)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_nomina_novedades_periodo ON nomina_novedades(periodo_id)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_nomina_novedades_empleado ON nomina_novedades(empleado_id)"))
+
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS nomina_liquidaciones (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                periodo_id UUID NOT NULL REFERENCES nomina_periodos(id) ON DELETE CASCADE,
+                empleado_id UUID NOT NULL REFERENCES nomina_empleados(id) ON DELETE CASCADE,
+                contrato_id UUID NOT NULL REFERENCES nomina_contratos(id) ON DELETE CASCADE,
+                salario_base NUMERIC(14,2) NOT NULL DEFAULT 0,
+                total_devengos NUMERIC(14,2) NOT NULL DEFAULT 0,
+                total_deducciones NUMERIC(14,2) NOT NULL DEFAULT 0,
+                neto_pagar NUMERIC(14,2) NOT NULL DEFAULT 0,
+                auxilio_transporte_devengo NUMERIC(14,2) NOT NULL DEFAULT 0,
+                base_cotizacion NUMERIC(14,2) NOT NULL DEFAULT 0,
+                aporte_salud_empleado NUMERIC(14,2) NOT NULL DEFAULT 0,
+                aporte_pension_empleado NUMERIC(14,2) NOT NULL DEFAULT 0,
+                aporte_fsp_empleado NUMERIC(14,2) NOT NULL DEFAULT 0,
+                aporte_subsistencia_empleado NUMERIC(14,2) NOT NULL DEFAULT 0,
+                retencion_fuente_empleado NUMERIC(14,2) NOT NULL DEFAULT 0,
+                aporte_salud_empresa NUMERIC(14,2) NOT NULL DEFAULT 0,
+                aporte_pension_empresa NUMERIC(14,2) NOT NULL DEFAULT 0,
+                aporte_arl_empresa NUMERIC(14,2) NOT NULL DEFAULT 0,
+                aporte_caja_empresa NUMERIC(14,2) NOT NULL DEFAULT 0,
+                aporte_sena_empresa NUMERIC(14,2) NOT NULL DEFAULT 0,
+                aporte_icbf_empresa NUMERIC(14,2) NOT NULL DEFAULT 0,
+                provision_prima NUMERIC(14,2) NOT NULL DEFAULT 0,
+                provision_cesantias NUMERIC(14,2) NOT NULL DEFAULT 0,
+                provision_intereses_cesantias NUMERIC(14,2) NOT NULL DEFAULT 0,
+                provision_vacaciones NUMERIC(14,2) NOT NULL DEFAULT 0,
+                costo_total_empresa NUMERIC(14,2) NOT NULL DEFAULT 0,
+                observaciones TEXT,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE,
+                created_by UUID NOT NULL REFERENCES usuarios(id),
+                updated_by UUID REFERENCES usuarios(id),
+                CONSTRAINT ux_nomina_liq_tenant_periodo_empleado UNIQUE (tenant_id, periodo_id, empleado_id)
+            )
+            """
+        )
+    )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_nomina_liquidaciones_tenant ON nomina_liquidaciones(tenant_id)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_nomina_liquidaciones_periodo ON nomina_liquidaciones(periodo_id)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_nomina_liquidaciones_empleado ON nomina_liquidaciones(empleado_id)"))
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS desprendible_folio VARCHAR(30)")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS desprendible_version INTEGER NOT NULL DEFAULT 1")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS desprendible_pdf_relpath VARCHAR(512)")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS desprendible_pdf_sha256 VARCHAR(64)")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS desprendible_generated_at TIMESTAMP WITHOUT TIME ZONE")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS base_cotizacion NUMERIC(14,2) NOT NULL DEFAULT 0")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS aporte_salud_empleado NUMERIC(14,2) NOT NULL DEFAULT 0")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS aporte_pension_empleado NUMERIC(14,2) NOT NULL DEFAULT 0")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS aporte_fsp_empleado NUMERIC(14,2) NOT NULL DEFAULT 0")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS aporte_subsistencia_empleado NUMERIC(14,2) NOT NULL DEFAULT 0")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS retencion_fuente_empleado NUMERIC(14,2) NOT NULL DEFAULT 0")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS auxilio_transporte_devengo NUMERIC(14,2) NOT NULL DEFAULT 0")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS aporte_salud_empresa NUMERIC(14,2) NOT NULL DEFAULT 0")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS aporte_pension_empresa NUMERIC(14,2) NOT NULL DEFAULT 0")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS aporte_arl_empresa NUMERIC(14,2) NOT NULL DEFAULT 0")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS aporte_caja_empresa NUMERIC(14,2) NOT NULL DEFAULT 0")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS aporte_sena_empresa NUMERIC(14,2) NOT NULL DEFAULT 0")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS aporte_icbf_empresa NUMERIC(14,2) NOT NULL DEFAULT 0")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS provision_prima NUMERIC(14,2) NOT NULL DEFAULT 0")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS provision_cesantias NUMERIC(14,2) NOT NULL DEFAULT 0")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS provision_intereses_cesantias NUMERIC(14,2) NOT NULL DEFAULT 0")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS provision_vacaciones NUMERIC(14,2) NOT NULL DEFAULT 0")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_liquidaciones ADD COLUMN IF NOT EXISTS costo_total_empresa NUMERIC(14,2) NOT NULL DEFAULT 0")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_parametros_legales ADD COLUMN IF NOT EXISTS aplica_auxilio_transporte BOOLEAN NOT NULL DEFAULT TRUE")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_parametros_legales ADD COLUMN IF NOT EXISTS umbral_auxilio_transporte_smmlv NUMERIC(6,2) NOT NULL DEFAULT 2")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_parametros_legales ADD COLUMN IF NOT EXISTS aplica_fsp BOOLEAN NOT NULL DEFAULT TRUE")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_parametros_legales ADD COLUMN IF NOT EXISTS umbral_fsp_smmlv NUMERIC(6,2) NOT NULL DEFAULT 4")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_parametros_legales ADD COLUMN IF NOT EXISTS pct_fsp_base NUMERIC(6,5) NOT NULL DEFAULT 0.01")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_parametros_legales ADD COLUMN IF NOT EXISTS aplica_subsistencia BOOLEAN NOT NULL DEFAULT TRUE")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_parametros_legales ADD COLUMN IF NOT EXISTS aplica_retencion_fuente BOOLEAN NOT NULL DEFAULT FALSE")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_parametros_legales ADD COLUMN IF NOT EXISTS umbral_retencion_uvt NUMERIC(8,2) NOT NULL DEFAULT 95")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_parametros_legales ADD COLUMN IF NOT EXISTS pct_retencion_base NUMERIC(6,5) NOT NULL DEFAULT 0.19")
+    )
+    db.execute(
+        text("ALTER TABLE nomina_parametros_legales ADD COLUMN IF NOT EXISTS pct_ibc_salario_integral NUMERIC(6,5) NOT NULL DEFAULT 0.70")
+    )
+    db.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_nomina_liquidaciones_folio ON nomina_liquidaciones(desprendible_folio)")
+    )
+
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS nomina_desprendible_versiones (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                liquidacion_id UUID NOT NULL REFERENCES nomina_liquidaciones(id) ON DELETE CASCADE,
+                periodo_id UUID NOT NULL REFERENCES nomina_periodos(id) ON DELETE CASCADE,
+                empleado_id UUID NOT NULL REFERENCES nomina_empleados(id) ON DELETE CASCADE,
+                folio VARCHAR(30),
+                version INTEGER NOT NULL,
+                pdf_relpath VARCHAR(512) NOT NULL,
+                pdf_sha256 VARCHAR(64) NOT NULL,
+                generated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                generated_by UUID NOT NULL REFERENCES usuarios(id),
+                motivo VARCHAR(40) NOT NULL DEFAULT 'generacion',
+                CONSTRAINT ux_nomina_desprendible_version UNIQUE (tenant_id, liquidacion_id, version)
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_nomina_desprendibles_liquidacion ON nomina_desprendible_versiones(liquidacion_id)"
+        )
+    )
+    db.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_nomina_desprendibles_tenant ON nomina_desprendible_versiones(tenant_id)")
+    )
+    db.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_nomina_desprendibles_version ON nomina_desprendible_versiones(version)")
+    )
+
+
 def get_db():
     """
     Dependency para obtener sesión de base de datos
@@ -1542,6 +1949,16 @@ def init_db():
     from app.models.documento_auditoria import TenantDocumentoAuditoria  # noqa: F401 — register model
     from app.models.proveedor_catalogo import ProveedorCatalogo  # noqa: F401 — register model
     from app.models.dse_retencion_motor import DseRetencionTasaConcepto, DseUvtPorAnio  # noqa: F401
+    from app.models.nomina import (
+        NominaCentroCosto,
+        NominaParametroLegal,
+        NominaEmpleado,
+        NominaContrato,
+        NominaPeriodo,
+        NominaNovedad,
+        NominaLiquidacion,
+        NominaDesprendibleVersion,
+    )  # noqa: F401
     from app.core.security import get_password_hash
     from datetime import date
     
@@ -1575,6 +1992,7 @@ def init_db():
         ensure_quality_survey_responses_schema(db)
         ensure_quality_survey_invites_sucursal_schema(db)
         ensure_tenant_documentos_schema(db)
+        ensure_nomina_schema(db)
         db.commit()
 
         default_tenant = db.query(Tenant).filter(

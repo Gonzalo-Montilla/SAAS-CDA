@@ -35,7 +35,7 @@ def _patch_settings(monkeypatch):
     monkeypatch.setattr(
         verifik.settings,
         "VERIFIK_RUNT_SERVICE_PATH",
-        "/v2/co/runt/vehicle-by-plate-simplified",
+        "/v2/co/runt/vehicle-by-plate",
         raising=False,
     )
     monkeypatch.setattr(verifik.settings, "VERIFIK_RUNT_DEFAULT_DOCUMENT_TYPE", "CC", raising=False)
@@ -130,3 +130,40 @@ def test_consultar_runt_usa_cache(monkeypatch):
     assert first["cached"] is False
     assert second["cached"] is True
     assert len(fake.calls) == 1
+
+
+def test_consultar_runt_titular_nombre_si_viene_en_payload(monkeypatch):
+    verifik._CACHE.clear()
+    _patch_settings(monkeypatch)
+    monkeypatch.setattr(verifik.settings, "VERIFIK_RUNT_CACHE_TTL_SECONDS", 0, raising=False)
+
+    responses = [
+        _FakeResponse(
+            200,
+            {
+                "data": {
+                    "documentType": "CC",
+                    "documentNumber": "123456789",
+                    "plate": "ZZZ999",
+                    "ownerName": "JUAN PEREZ",
+                    "vehicle": {
+                        "marca": "RENAULT",
+                        "linea": "LOGAN",
+                        "modelo": "2018",
+                        "clasificacion": "AUTOMOVIL",
+                        "tipoServicio": "Particular",
+                    },
+                },
+                "id": "OWNER1",
+            },
+        ),
+    ]
+    fake = _FakeClient(responses)
+    monkeypatch.setattr(verifik.httpx, "Client", lambda timeout: fake)
+
+    out = verifik.consultar_runt_vehiculo_por_placa(
+        "ZZZ999",
+        document_type="CC",
+        document_number="123456789",
+    )
+    assert out["titular_nombre"] == "JUAN PEREZ"

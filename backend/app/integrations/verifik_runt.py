@@ -1,8 +1,8 @@
 """
-Integración Verifik para consulta RUNT simplificada por placa.
+Integración Verifik para consulta RUNT por placa.
 
 Docs:
-GET /v2/co/runt/vehicle-by-plate-simplified
+GET /v2/co/runt/vehicle-by-plate
 Headers: Authorization Bearer <token>
 Params: documentType, documentNumber, plate
 """
@@ -54,6 +54,53 @@ def _parse_year(raw: Any) -> int | None:
     if 1950 <= year <= 2030:
         return year
     return None
+
+
+def _first_text(values: list[Any]) -> str | None:
+    for v in values:
+        s = str(v or "").strip()
+        if s:
+            return s
+    return None
+
+
+def _extract_titular_nombre(payload: dict[str, Any]) -> str | None:
+    # Campos esperables según variantes de proveedores/fuentes.
+    candidates = [
+        payload.get("ownerName"),
+        payload.get("owner_name"),
+        payload.get("titular"),
+        payload.get("titularNombre"),
+        payload.get("nombreTitular"),
+        payload.get("nombrePropietario"),
+        payload.get("propietario"),
+    ]
+
+    # Estructuras potenciales
+    info_general = payload.get("informacionGeneral")
+    if isinstance(info_general, dict):
+        candidates.extend(
+            [
+                info_general.get("nombreTitular"),
+                info_general.get("nombrePropietario"),
+                info_general.get("propietario"),
+            ]
+        )
+
+    propietarios = payload.get("propietarios")
+    if isinstance(propietarios, list) and propietarios:
+        first = propietarios[0]
+        if isinstance(first, dict):
+            candidates.extend(
+                [
+                    first.get("nombre"),
+                    first.get("nombreCompleto"),
+                    first.get("fullName"),
+                    first.get("razonSocial"),
+                ]
+            )
+
+    return _first_text(candidates)
 
 
 def _suggest_tipo_vehiculo(clasificacion: str | None, tipo_servicio: str | None) -> tuple[str | None, str | None]:
@@ -137,7 +184,7 @@ def consultar_runt_vehiculo_por_placa(
         return cached
 
     base_url = (settings.VERIFIK_BASE_URL or "https://api.verifik.co").rstrip("/") + "/"
-    service_path = (settings.VERIFIK_RUNT_SERVICE_PATH or "/v2/co/runt/vehicle-by-plate-simplified").strip()
+    service_path = (settings.VERIFIK_RUNT_SERVICE_PATH or "/v2/co/runt/vehicle-by-plate").strip()
     url = service_path if service_path.startswith("http") else urljoin(base_url, service_path.lstrip("/"))
     timeout = float(settings.VERIFIK_TIMEOUT_SECONDS or 15.0)
 
@@ -164,22 +211,31 @@ def consultar_runt_vehiculo_por_placa(
 
     data = raw.get("data")
     payload = data if isinstance(data, dict) else {}
+    # Soporte para endpoint simplificado y completo.
     vehicle = payload.get("vehicle")
-    vehicle = vehicle if isinstance(vehicle, dict) else {}
+    if not isinstance(vehicle, dict):
+        info_general = payload.get("informacionGeneral")
+        vehicle = info_general if isinstance(info_general, dict) else {}
 
     plate_returned = str(payload.get("plate") or vehicle.get("noPlaca") or placa_norm).strip().upper()
     found = bool(vehicle)
+    titular_nombre = _extract_titular_nombre(payload)
     tipo_sugerido, confidence = _suggest_tipo_vehiculo(
-        str(vehicle.get("clasificacion") or "").strip() or None,
+        str(vehicle.get("clasificacion") or vehicle.get("claseVehiculo") or "").strip() or None,
         str(vehicle.get("tipoServicio") or "").strip() or None,
     )
 
     observaciones: list[str] = []
     if not found:
         observaciones.append("No se encontró información consolidada para autocompletar.")
+    if found and not titular_nombre:
+        observaciones.append("Verifik no devolvió nombre del titular en esta consulta.")
 
     mapped = {
         "placa_consultada": plate_returned,
+        "document_type": str(payload.get("documentType") or doc_type).strip() or None,
+        "document_number": str(payload.get("documentNumber") or doc_number).strip() or None,
+        "titular_nombre": titular_nombre,
         "encontrado": found,
         "marca": str(vehicle.get("marca") or "").strip() or None,
         "linea": str(vehicle.get("linea") or "").strip() or None,
