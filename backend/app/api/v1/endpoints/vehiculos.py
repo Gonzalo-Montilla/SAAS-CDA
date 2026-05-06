@@ -26,7 +26,9 @@ from app.models.tenant import Tenant
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo, MetodoPago
 from app.models.factus import TenantFactusSettings, FacturaElectronica
 from app.services.factus_tenant_settings import creds_complete_for_active_env
+from app.core.config import settings
 from app.integrations.factus_client import FactusAPIError, format_factus_error_for_user
+from app.integrations.placaapi_runt import PlacaApiRuntError, consultar_placaapi_por_placa
 from app.integrations.verifik_runt import VerifikRuntError, consultar_runt_vehiculo_por_placa
 from app.integrations.factus_emit import (
     emitir_y_persistir_factura_cobro,
@@ -96,16 +98,47 @@ def consultar_runt_por_placa(
     current_user: Usuario = Depends(get_recepcionista_or_admin),
 ):
     """
-    Consulta externa RUNT por placa (vía Verifik), normalizada para autocompletado en recepción.
+    Consulta externa por placa (Verifik o PlacaAPI), normalizada para autocompletado en recepción.
     No registra ni modifica vehículos.
     """
+    provider = (settings.RUNT_LOOKUP_PROVIDER or "verifik").strip().lower()
+    doc_number_digits = re.sub(r"\D", "", (document_number or "").strip())
+    can_try_verifik_fallback = bool(
+        settings.RUNT_FALLBACK_TO_VERIFIK_ON_EMPTY and settings.VERIFIK_ENABLED and doc_number_digits
+    )
     try:
+        if provider == "placaapi":
+            placaapi_result = consultar_placaapi_por_placa(placa)
+            if placaapi_result.get("encontrado"):
+                return placaapi_result
+            if can_try_verifik_fallback:
+                try:
+                    return consultar_runt_vehiculo_por_placa(
+                        placa,
+                        document_type=document_type,
+                        document_number=document_number,
+                    )
+                except VerifikRuntError:
+                    return placaapi_result
+            return placaapi_result
         return consultar_runt_vehiculo_por_placa(
             placa,
             document_type=document_type,
             document_number=document_number,
         )
     except VerifikRuntError as exc:
+        status_code = exc.status_code if exc.status_code and 100 <= exc.status_code < 600 else 400
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    except PlacaApiRuntError as exc:
+        if provider == "placaapi" and can_try_verifik_fallback:
+            try:
+                return consultar_runt_vehiculo_por_placa(
+                    placa,
+                    document_type=document_type,
+                    document_number=document_number,
+                )
+            except VerifikRuntError:
+                pass
         status_code = exc.status_code if exc.status_code and 100 <= exc.status_code < 600 else 400
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 

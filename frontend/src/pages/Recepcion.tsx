@@ -87,6 +87,8 @@ export default function Recepcion() {
   const { data: comisionesSOAT } = useQuery({
     queryKey: ['comisiones-soat'],
     queryFn: tarifasApi.obtenerComisionesSOAT,
+    retry: 1,
+    staleTime: 5 * 60 * 1000,
   });
 
   // Estado para filtros y paginación
@@ -143,6 +145,7 @@ export default function Recepcion() {
       fecha_hasta: hasta,
     }),
     refetchInterval: 15000, // Actualizar cada 15 segundos
+    retry: 1,
   });
 
   // Calcular paginación
@@ -160,6 +163,7 @@ export default function Recepcion() {
       limit: registrosPorPagina,
     }),
     refetchInterval: 15000, // Actualizar cada 15 segundos
+    retry: 1,
   });
 
   // Mutación para registrar vehículo - VERSIÓN ESTABLE
@@ -235,18 +239,25 @@ export default function Recepcion() {
         documentType: params.documentType,
         documentNumber: params.documentNumber,
       }),
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       setRuntSugerencia(data);
       setFormData((prev) => {
+        const docTypeFromQuery =
+          variables.documentType && ['CC', 'CE', 'PA', 'NIT'].includes(variables.documentType)
+            ? (variables.documentType as 'CC' | 'CE' | 'PA' | 'NIT')
+            : prev.cliente_tipo_documento;
         const docTypeResolved =
           data.document_type && ['CC', 'CE', 'PA', 'NIT'].includes(data.document_type)
             ? (data.document_type as 'CC' | 'CE' | 'PA' | 'NIT')
-            : prev.cliente_tipo_documento;
+            : docTypeFromQuery;
+        const documentFromResponse = data.document_number ? String(data.document_number) : '';
+        const documentFromQuery = variables.documentNumber ? String(variables.documentNumber) : '';
+        const finalDocument = (documentFromResponse || documentFromQuery).trim();
         return {
           ...prev,
           cliente_tipo_documento: docTypeResolved,
-          cliente_documento: data.document_number
-            ? normalizarDocumentoCliente(String(data.document_number), docTypeResolved)
+          cliente_documento: finalDocument
+            ? normalizarDocumentoCliente(finalDocument, docTypeResolved)
             : prev.cliente_documento,
           cliente_nombre: data.titular_nombre ? String(data.titular_nombre).toUpperCase() : prev.cliente_nombre,
         };
@@ -485,10 +496,6 @@ export default function Recepcion() {
       return;
     }
     const documentNumber = (consultaRunt.document_number || '').replace(/\D/g, '');
-    if (!documentNumber) {
-      showToast('warning', 'Documento requerido', 'Para consultar RUNT con Verifik debes digitar el documento del propietario.');
-      return;
-    }
     consultarRuntMutation.mutate({
       placa,
       documentType: consultaRunt.document_type,
@@ -678,7 +685,7 @@ export default function Recepcion() {
                 </div>
               </div>
               <p className="text-xs text-slate-500">
-                Consulta RUNT por placa y documento. El nombre del titular puede no venir en esta fuente.
+                Consulta por placa para autocompletar datos técnicos del vehículo. Los datos del cliente se registran manualmente.
               </p>
               {runtSugerencia && (
                 <div className="mt-2 p-2 rounded-lg border border-slate-200 bg-white text-xs text-slate-700">

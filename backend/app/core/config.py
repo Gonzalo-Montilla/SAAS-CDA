@@ -107,6 +107,15 @@ class Settings(BaseSettings):
         env="VERIFIK_RUNT_DEFAULT_DOCUMENT_TYPE",
     )
     VERIFIK_RUNT_CACHE_TTL_SECONDS: int = Field(default=600, ge=0, le=86400, env="VERIFIK_RUNT_CACHE_TTL_SECONDS")
+    # Proveedor alterno económico para autocompletar datos técnicos del vehículo por placa.
+    RUNT_LOOKUP_PROVIDER: str = Field(default="verifik", env="RUNT_LOOKUP_PROVIDER")
+    RUNT_FALLBACK_TO_VERIFIK_ON_EMPTY: bool = Field(default=True, env="RUNT_FALLBACK_TO_VERIFIK_ON_EMPTY")
+    PLACAAPI_ENABLED: bool = Field(default=False, env="PLACAAPI_ENABLED")
+    PLACAAPI_BASE_URL: str = Field(default="https://www.regcheck.org.uk", env="PLACAAPI_BASE_URL")
+    PLACAAPI_SERVICE_PATH: str = Field(default="/api/reg.asmx/CheckColombia", env="PLACAAPI_SERVICE_PATH")
+    PLACAAPI_USERNAME: str = Field(default="", env="PLACAAPI_USERNAME")
+    PLACAAPI_TIMEOUT_SECONDS: float = Field(default=15.0, ge=1.0, le=60.0, env="PLACAAPI_TIMEOUT_SECONDS")
+    PLACAAPI_CACHE_TTL_SECONDS: int = Field(default=600, ge=0, le=86400, env="PLACAAPI_CACHE_TTL_SECONDS")
     
     # Facturación electrónica (Factus) — URLs oficiales en https://developers.factus.com.co/
     FACTUS_SANDBOX_BASE_URL: str = Field(default="https://api-sandbox.factus.com.co", env="FACTUS_SANDBOX_BASE_URL")
