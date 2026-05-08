@@ -2,6 +2,7 @@
 Endpoints de Vehículos
 """
 import re
+import time
 import traceback
 from io import BytesIO
 
@@ -10,7 +11,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func
 from datetime import datetime, date, timezone
-from typing import List, Dict
+from typing import List, Dict, Any
 from decimal import Decimal
 from uuid import UUID
 
@@ -25,6 +26,7 @@ from app.models.usuario import Usuario
 from app.models.tenant import Tenant
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo, MetodoPago
 from app.models.factus import TenantFactusSettings, FacturaElectronica
+from app.models.runt_metrica import RuntConsultaMetrica
 from app.services.factus_tenant_settings import creds_complete_for_active_env
 from app.core.config import settings
 from app.integrations.factus_client import FactusAPIError, format_factus_error_for_user
@@ -89,13 +91,140 @@ from app.schemas.vehiculo import (
 
 router = APIRouter()
 
+_RUNT_FX_CACHE: dict[str, Any] = {"rate": None, "expires_at": 0.0}
+
+
+def _runt_doc_last4(document_number: str | None) -> str | None:
+    digits = re.sub(r"\D", "", (document_number or "").strip())
+    return digits[-4:] if digits else None
+
+
+def _resolve_runt_fx_rate_usd_cop() -> Decimal:
+    mode = (settings.RUNT_FX_MODE or "auto").strip().lower()
+    manual_rate = Decimal(str(settings.RUNT_FX_USD_COP or 0))
+    if mode != "auto":
+        return manual_rate
+
+    now = time.time()
+    cached_rate = _RUNT_FX_CACHE.get("rate")
+    expires_at = float(_RUNT_FX_CACHE.get("expires_at") or 0)
+    if cached_rate is not None and now < expires_at:
+        return Decimal(str(cached_rate))
+
+    try:
+        import httpx
+
+        with httpx.Client(timeout=8.0) as client:
+            resp = client.get(settings.RUNT_FX_AUTO_URL)
+            resp.raise_for_status()
+            payload = resp.json()
+        rate_val = None
+        if isinstance(payload, list) and payload:
+            first = payload[0]
+            if isinstance(first, dict):
+                rate_val = first.get("valor")
+        elif isinstance(payload, dict):
+            rate_val = payload.get("valor")
+        rate = Decimal(str(rate_val or 0))
+        if rate > 0:
+            _RUNT_FX_CACHE["rate"] = float(rate)
+            _RUNT_FX_CACHE["expires_at"] = now + float(settings.RUNT_FX_AUTO_TTL_SECONDS or 21600)
+            return rate
+    except Exception:
+        pass
+    return manual_rate
+
+
+def _runt_provider_cost(provider: str, *, cached: bool) -> tuple[Decimal, Decimal, Decimal]:
+    fx = _resolve_runt_fx_rate_usd_cop()
+    if cached:
+        return Decimal("0"), Decimal("0"), fx
+    p = (provider or "").strip().lower()
+    if p == "placaapi":
+        usd = Decimal(str(settings.RUNT_COST_PLACAAPI_USD or 0))
+        cop_fallback = Decimal(str(settings.RUNT_COST_PLACAAPI_COP or 0))
+    elif p == "verifik":
+        usd = Decimal(str(settings.RUNT_COST_VERIFIK_USD or 0))
+        cop_fallback = Decimal(str(settings.RUNT_COST_VERIFIK_COP or 0))
+    else:
+        usd = Decimal("0")
+        cop_fallback = Decimal("0")
+    if usd > 0 and fx > 0:
+        return (usd * fx).quantize(Decimal("0.01")), usd, fx
+    if cop_fallback > 0 and fx > 0:
+        return cop_fallback, (cop_fallback / fx).quantize(Decimal("0.000001")), fx
+    return cop_fallback, Decimal("0"), fx
+
+
+def _guardar_metrica_runt(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    sucursal_id: UUID | None,
+    usuario_id: UUID,
+    placa: str,
+    document_type: str | None,
+    document_number: str | None,
+    provider_configured: str,
+    provider_resolved: str,
+    providers_attempted: list[str],
+    fallback_used: bool,
+    status: str,
+    encontrado: bool,
+    cached: bool,
+    estimated_cost_cop: Decimal,
+    estimated_cost_usd: Decimal = Decimal("0"),
+    resolved_cost_cop: Decimal = Decimal("0"),
+    resolved_cost_usd: Decimal = Decimal("0"),
+    fallback_extra_cost_cop: Decimal = Decimal("0"),
+    fallback_extra_cost_usd: Decimal = Decimal("0"),
+    fx_rate_usd_cop_applied: Decimal | None = None,
+    error_detail: str | None = None,
+) -> None:
+    try:
+        row = RuntConsultaMetrica(
+            tenant_id=tenant_id,
+            sucursal_id=sucursal_id,
+            usuario_id=usuario_id,
+            placa_consultada=re.sub(r"[^A-Za-z0-9]", "", (placa or "").upper())[:12],
+            document_type=(document_type or "").strip().upper()[:10] or None,
+            document_number_last4=_runt_doc_last4(document_number),
+            provider_configured=(provider_configured or "verifik")[:30],
+            provider_resolved=(provider_resolved or provider_configured or "verifik")[:30],
+            providers_attempted=",".join([p for p in providers_attempted if p])[:80] or (provider_configured or "verifik"),
+            fallback_used=bool(fallback_used),
+            status=(status or "error")[:20],
+            encontrado=bool(encontrado),
+            cached=bool(cached),
+            error_detail=(error_detail or "")[:500] or None,
+            estimated_cost_cop=Decimal(str(estimated_cost_cop or 0)),
+            estimated_cost_usd=Decimal(str(estimated_cost_usd or 0)),
+            resolved_cost_cop=Decimal(str(resolved_cost_cop or 0)),
+            resolved_cost_usd=Decimal(str(resolved_cost_usd or 0)),
+            fallback_extra_cost_cop=Decimal(str(fallback_extra_cost_cop or 0)),
+            fallback_extra_cost_usd=Decimal(str(fallback_extra_cost_usd or 0)),
+            fx_rate_usd_cop_applied=Decimal(
+                str(
+                    fx_rate_usd_cop_applied
+                    if fx_rate_usd_cop_applied is not None
+                    else (settings.RUNT_FX_USD_COP or 0)
+                )
+            ),
+        )
+        db.add(row)
+        db.commit()
+    except Exception:
+        db.rollback()
+
 
 @router.get("/consulta-runt/{placa}", response_model=VehiculoConsultaRuntResponse)
 def consultar_runt_por_placa(
     placa: str,
     document_type: str | None = Query(default=None, alias="documentType"),
     document_number: str | None = Query(default=None, alias="documentNumber"),
+    db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_recepcionista_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Consulta externa por placa (Verifik o PlacaAPI), normalizada para autocompletado en recepción.
@@ -106,39 +235,264 @@ def consultar_runt_por_placa(
     can_try_verifik_fallback = bool(
         settings.RUNT_FALLBACK_TO_VERIFIK_ON_EMPTY and settings.VERIFIK_ENABLED and doc_number_digits
     )
+    attempted: list[str] = []
+    fallback_used = False
+    estimated_cost_cop = Decimal("0")
+    estimated_cost_usd = Decimal("0")
+    fx_rate_applied = Decimal(str(settings.RUNT_FX_USD_COP or 0))
+    placa_cost_cop = Decimal("0")
+    placa_cost_usd = Decimal("0")
+    verifik_cost_cop = Decimal("0")
+    verifik_cost_usd = Decimal("0")
     try:
         if provider == "placaapi":
+            attempted.append("placaapi")
             placaapi_result = consultar_placaapi_por_placa(placa)
-            if placaapi_result.get("encontrado"):
+            placaapi_encontrado = bool(placaapi_result.get("encontrado"))
+            # Regla de negocio: PlacaAPI no genera costo si no resuelve.
+            if placaapi_encontrado:
+                cop, usd, fx = _runt_provider_cost("placaapi", cached=bool(placaapi_result.get("cached")))
+                estimated_cost_cop += cop
+                estimated_cost_usd += usd
+                fx_rate_applied = fx
+                placa_cost_cop += cop
+                placa_cost_usd += usd
+            if placaapi_encontrado:
+                _guardar_metrica_runt(
+                    db,
+                    tenant_id=current_user.tenant_id,
+                    sucursal_id=active_sucursal_id,
+                    usuario_id=current_user.id,
+                    placa=placa,
+                    document_type=document_type,
+                    document_number=document_number,
+                    provider_configured=provider,
+                    provider_resolved="placaapi",
+                    providers_attempted=attempted,
+                    fallback_used=False,
+                    status="success",
+                    encontrado=True,
+                    cached=bool(placaapi_result.get("cached")),
+                    estimated_cost_cop=estimated_cost_cop,
+                    estimated_cost_usd=estimated_cost_usd,
+                    resolved_cost_cop=placa_cost_cop,
+                    resolved_cost_usd=placa_cost_usd,
+                    fx_rate_usd_cop_applied=fx_rate_applied,
+                )
                 return placaapi_result
             if can_try_verifik_fallback:
+                fallback_used = True
+                attempted.append("verifik")
                 try:
-                    return consultar_runt_vehiculo_por_placa(
+                    verifik_result = consultar_runt_vehiculo_por_placa(
                         placa,
                         document_type=document_type,
                         document_number=document_number,
                     )
+                    cop, usd, fx = _runt_provider_cost("verifik", cached=bool(verifik_result.get("cached")))
+                    estimated_cost_cop += cop
+                    estimated_cost_usd += usd
+                    fx_rate_applied = fx
+                    verifik_cost_cop += cop
+                    verifik_cost_usd += usd
+                    _guardar_metrica_runt(
+                        db,
+                        tenant_id=current_user.tenant_id,
+                        sucursal_id=active_sucursal_id,
+                        usuario_id=current_user.id,
+                        placa=placa,
+                        document_type=document_type,
+                        document_number=document_number,
+                        provider_configured=provider,
+                        provider_resolved="verifik",
+                        providers_attempted=attempted,
+                        fallback_used=True,
+                        status="success" if bool(verifik_result.get("encontrado")) else "empty",
+                        encontrado=bool(verifik_result.get("encontrado")),
+                        cached=bool(verifik_result.get("cached")),
+                        estimated_cost_cop=estimated_cost_cop,
+                        estimated_cost_usd=estimated_cost_usd,
+                        resolved_cost_cop=verifik_cost_cop,
+                        resolved_cost_usd=verifik_cost_usd,
+                        fallback_extra_cost_cop=placa_cost_cop,
+                        fallback_extra_cost_usd=placa_cost_usd,
+                        fx_rate_usd_cop_applied=fx_rate_applied,
+                    )
+                    return verifik_result
                 except VerifikRuntError:
+                    _guardar_metrica_runt(
+                        db,
+                        tenant_id=current_user.tenant_id,
+                        sucursal_id=active_sucursal_id,
+                        usuario_id=current_user.id,
+                        placa=placa,
+                        document_type=document_type,
+                        document_number=document_number,
+                        provider_configured=provider,
+                        provider_resolved="placaapi",
+                        providers_attempted=attempted,
+                        fallback_used=True,
+                        status="empty",
+                        encontrado=False,
+                        cached=bool(placaapi_result.get("cached")),
+                        estimated_cost_cop=estimated_cost_cop,
+                        estimated_cost_usd=estimated_cost_usd,
+                        resolved_cost_cop=placa_cost_cop,
+                        resolved_cost_usd=placa_cost_usd,
+                        fallback_extra_cost_cop=verifik_cost_cop,
+                        fallback_extra_cost_usd=verifik_cost_usd,
+                        fx_rate_usd_cop_applied=fx_rate_applied,
+                    )
                     return placaapi_result
+            _guardar_metrica_runt(
+                db,
+                tenant_id=current_user.tenant_id,
+                sucursal_id=active_sucursal_id,
+                usuario_id=current_user.id,
+                placa=placa,
+                document_type=document_type,
+                document_number=document_number,
+                provider_configured=provider,
+                provider_resolved="placaapi",
+                providers_attempted=attempted,
+                fallback_used=fallback_used,
+                status="empty",
+                encontrado=False,
+                cached=bool(placaapi_result.get("cached")),
+                estimated_cost_cop=estimated_cost_cop,
+                estimated_cost_usd=estimated_cost_usd,
+                resolved_cost_cop=placa_cost_cop,
+                resolved_cost_usd=placa_cost_usd,
+                fx_rate_usd_cop_applied=fx_rate_applied,
+            )
             return placaapi_result
-        return consultar_runt_vehiculo_por_placa(
+        attempted.append("verifik")
+        verifik_result = consultar_runt_vehiculo_por_placa(
             placa,
             document_type=document_type,
             document_number=document_number,
         )
+        cop, usd, fx = _runt_provider_cost("verifik", cached=bool(verifik_result.get("cached")))
+        estimated_cost_cop += cop
+        estimated_cost_usd += usd
+        fx_rate_applied = fx
+        verifik_cost_cop += cop
+        verifik_cost_usd += usd
+        _guardar_metrica_runt(
+            db,
+            tenant_id=current_user.tenant_id,
+            sucursal_id=active_sucursal_id,
+            usuario_id=current_user.id,
+            placa=placa,
+            document_type=document_type,
+            document_number=document_number,
+            provider_configured=provider,
+            provider_resolved="verifik",
+            providers_attempted=attempted,
+            fallback_used=False,
+            status="success" if bool(verifik_result.get("encontrado")) else "empty",
+            encontrado=bool(verifik_result.get("encontrado")),
+            cached=bool(verifik_result.get("cached")),
+            estimated_cost_cop=estimated_cost_cop,
+            estimated_cost_usd=estimated_cost_usd,
+            resolved_cost_cop=verifik_cost_cop,
+            resolved_cost_usd=verifik_cost_usd,
+            fx_rate_usd_cop_applied=fx_rate_applied,
+        )
+        return verifik_result
     except VerifikRuntError as exc:
+        _guardar_metrica_runt(
+            db,
+            tenant_id=current_user.tenant_id,
+            sucursal_id=active_sucursal_id,
+            usuario_id=current_user.id,
+            placa=placa,
+            document_type=document_type,
+            document_number=document_number,
+            provider_configured=provider,
+            provider_resolved="verifik",
+            providers_attempted=attempted or ["verifik"],
+            fallback_used=fallback_used,
+            status="error",
+            encontrado=False,
+            cached=False,
+            estimated_cost_cop=estimated_cost_cop,
+            estimated_cost_usd=estimated_cost_usd,
+            resolved_cost_cop=verifik_cost_cop,
+            resolved_cost_usd=verifik_cost_usd,
+            fallback_extra_cost_cop=placa_cost_cop,
+            fallback_extra_cost_usd=placa_cost_usd,
+            fx_rate_usd_cop_applied=fx_rate_applied,
+            error_detail=str(exc),
+        )
         status_code = exc.status_code if exc.status_code and 100 <= exc.status_code < 600 else 400
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
     except PlacaApiRuntError as exc:
         if provider == "placaapi" and can_try_verifik_fallback:
             try:
-                return consultar_runt_vehiculo_por_placa(
+                attempted.append("verifik")
+                fallback_used = True
+                verifik_result = consultar_runt_vehiculo_por_placa(
                     placa,
                     document_type=document_type,
                     document_number=document_number,
                 )
+                cop, usd, fx = _runt_provider_cost("verifik", cached=bool(verifik_result.get("cached")))
+                estimated_cost_cop += cop
+                estimated_cost_usd += usd
+                fx_rate_applied = fx
+                verifik_cost_cop += cop
+                verifik_cost_usd += usd
+                _guardar_metrica_runt(
+                    db,
+                    tenant_id=current_user.tenant_id,
+                    sucursal_id=active_sucursal_id,
+                    usuario_id=current_user.id,
+                    placa=placa,
+                    document_type=document_type,
+                    document_number=document_number,
+                    provider_configured=provider,
+                    provider_resolved="verifik",
+                    providers_attempted=attempted,
+                    fallback_used=True,
+                    status="success" if bool(verifik_result.get("encontrado")) else "empty",
+                    encontrado=bool(verifik_result.get("encontrado")),
+                    cached=bool(verifik_result.get("cached")),
+                    estimated_cost_cop=estimated_cost_cop,
+                    estimated_cost_usd=estimated_cost_usd,
+                    resolved_cost_cop=verifik_cost_cop,
+                    resolved_cost_usd=verifik_cost_usd,
+                    fallback_extra_cost_cop=placa_cost_cop,
+                    fallback_extra_cost_usd=placa_cost_usd,
+                    fx_rate_usd_cop_applied=fx_rate_applied,
+                )
+                return verifik_result
             except VerifikRuntError:
                 pass
+        _guardar_metrica_runt(
+            db,
+            tenant_id=current_user.tenant_id,
+            sucursal_id=active_sucursal_id,
+            usuario_id=current_user.id,
+            placa=placa,
+            document_type=document_type,
+            document_number=document_number,
+            provider_configured=provider,
+            provider_resolved="placaapi",
+            providers_attempted=attempted or ["placaapi"],
+            fallback_used=fallback_used,
+            status="error",
+            encontrado=False,
+            cached=False,
+            estimated_cost_cop=estimated_cost_cop,
+            estimated_cost_usd=estimated_cost_usd,
+            resolved_cost_cop=placa_cost_cop,
+            resolved_cost_usd=placa_cost_usd,
+            fallback_extra_cost_cop=verifik_cost_cop,
+            fallback_extra_cost_usd=verifik_cost_usd,
+            fx_rate_usd_cop_applied=fx_rate_applied,
+            error_detail=str(exc),
+        )
         status_code = exc.status_code if exc.status_code and 100 <= exc.status_code < 600 else 400
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 

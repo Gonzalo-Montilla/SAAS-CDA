@@ -4,6 +4,8 @@ import {
   ShieldCheck,
   LogOut,
   Users,
+  Activity,
+  Coins,
   Copy,
   Check,
   Building2,
@@ -29,6 +31,7 @@ import { apiClient } from '../api/client';
 import { patchSaasSucursalUbicacion, patchSaasTenantCoreData, patchSaasTenantLogo } from '../api/saasTenant';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { formatCurrency } from '../utils/formatNumber';
+import { runtMetricasApi, type RuntMetricasSummary } from '../api/runtMetricas';
 import type {
   SaaSAuditLogListResponse,
   SaaSBillingPlanItem,
@@ -65,7 +68,7 @@ interface SaaSPermissionsResponse {
   permissions: string[];
 }
 
-type BackofficeModule = 'resumen' | 'tenants' | 'facturacion' | 'soporte' | 'usuarios' | 'auditoria' | 'seguridad';
+type BackofficeModule = 'resumen' | 'tenants' | 'runt_metricas' | 'facturacion' | 'soporte' | 'usuarios' | 'auditoria' | 'seguridad';
 const TABLE_DENSITY_STORAGE_KEY = 'saas_backoffice_table_density';
 type TenantProfileSection = 'brandAccess' | 'sedes' | 'factus' | 'billing' | 'payments' | 'users';
 type CheckoutSessionsViewTab = 'all' | 'pending' | 'paid' | 'fe_issue';
@@ -87,6 +90,8 @@ export default function SaaSBackoffice() {
   const copyResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const resendResetTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [activeModule, setActiveModule] = useState<BackofficeModule>('resumen');
+  const [runtMetricasDays, setRuntMetricasDays] = useState<number>(30);
+  const [runtMetricasTenantId, setRuntMetricasTenantId] = useState<string>('');
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
   const [tableDensity, setTableDensity] = useState<'comfortable' | 'compact'>(() => {
     if (typeof window === 'undefined') {
@@ -166,6 +171,37 @@ export default function SaaSBackoffice() {
   const [tenantProfileSectionsOpen, setTenantProfileSectionsOpen] = useState<Record<TenantProfileSection, boolean>>(
     DEFAULT_TENANT_PROFILE_SECTIONS_OPEN,
   );
+  const formatUsd = (value: number): string =>
+    new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(
+      Number(value || 0),
+    );
+
+  const getTenantProviderEfficiency = (
+    row: RuntMetricasSummary['by_tenant'][number],
+  ): { placaapi: boolean; verifik: boolean } => {
+    const placaapiResueltas = Number(row.placaapi_resueltas || 0);
+    const verifikResueltas = Number(row.verifik_resueltas || 0);
+    if (placaapiResueltas <= 0 && verifikResueltas <= 0) {
+      return { placaapi: false, verifik: false };
+    }
+    if (placaapiResueltas > 0 && verifikResueltas <= 0) {
+      return { placaapi: true, verifik: false };
+    }
+    if (verifikResueltas > 0 && placaapiResueltas <= 0) {
+      return { placaapi: false, verifik: true };
+    }
+    const placaapiPromedio = Number(row.placaapi_costo_resuelto_cop || 0) / placaapiResueltas;
+    const verifikPromedio = Number(row.verifik_costo_resuelto_cop || 0) / verifikResueltas;
+    const delta = Math.abs(placaapiPromedio - verifikPromedio);
+    // Si son prácticamente iguales, se marcan ambos para evitar sesgo visual.
+    if (delta <= 0.01) {
+      return { placaapi: true, verifik: true };
+    }
+    return {
+      placaapi: placaapiPromedio < verifikPromedio,
+      verifik: verifikPromedio < placaapiPromedio,
+    };
+  };
 
   const formatAmountForInput = (amount: number): string => {
     if (!Number.isFinite(amount)) {
@@ -380,6 +416,15 @@ export default function SaaSBackoffice() {
       const response = await apiClient.get<SaaSTenantSummary[]>('/saas/auth/tenants');
       return response.data;
     },
+  });
+
+  const runtMetricasQuery = useQuery({
+    queryKey: ['saas-runt-metricas-summary', runtMetricasDays, runtMetricasTenantId],
+    queryFn: async () => {
+      return runtMetricasApi.getSummary(runtMetricasDays, runtMetricasTenantId || undefined);
+    },
+    enabled: activeModule === 'runt_metricas',
+    refetchInterval: activeModule === 'runt_metricas' ? 30000 : false,
   });
 
   const usersQuery = useQuery({
@@ -1176,6 +1221,206 @@ export default function SaaSBackoffice() {
                     {permission}
                   </span>
                 ))}
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (activeModule === 'runt_metricas') {
+      return (
+        <div className="space-y-6">
+          <div className="section-card p-6">
+            <BackofficeSectionHeading
+              className="mb-4"
+              icon={Activity}
+              title="Métricas RUNT por proveedor"
+              description="Consumo, éxito y fallback de consultas para control de costos SaaS."
+            />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+              <label className="text-sm text-slate-700">
+                Ventana
+                <select
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  value={runtMetricasDays}
+                  onChange={(e) => setRuntMetricasDays(Number(e.target.value))}
+                >
+                  <option value={7}>7 días</option>
+                  <option value={30}>30 días</option>
+                  <option value={90}>90 días</option>
+                </select>
+              </label>
+              <label className="text-sm text-slate-700 md:col-span-2">
+                Tenant (opcional)
+                <select
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  value={runtMetricasTenantId}
+                  onChange={(e) => setRuntMetricasTenantId(e.target.value)}
+                >
+                  <option value="">Todos los tenants</option>
+                  {(tenantsQuery.data || []).map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.nombre_comercial} (/{t.slug})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            {runtMetricasQuery.isLoading && <LoadingBlock lines={4} />}
+            {runtMetricasQuery.isError && (
+              <p className="text-sm text-red-600">No fue posible cargar métricas RUNT del backoffice.</p>
+            )}
+            {runtMetricasQuery.data && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                  <div className="kpi-card">
+                    <p className="kpi-label">Consultas</p>
+                    <p className="kpi-value">{runtMetricasQuery.data.total_consultas}</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">Éxito</p>
+                    <p className="kpi-value text-emerald-700">{runtMetricasQuery.data.success_rate_pct}%</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">Fallback</p>
+                    <p className="kpi-value text-amber-700">{runtMetricasQuery.data.fallback_rate_pct}%</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">Costo total</p>
+                    <p className="kpi-value">{formatCurrency(runtMetricasQuery.data.costo_estimado_total_cop)}</p>
+                    <p className="text-xs text-slate-500">{formatUsd(runtMetricasQuery.data.costo_estimado_total_usd)}</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">TRM promedio</p>
+                    <p className="kpi-value">{formatCurrency(runtMetricasQuery.data.fx_rate_avg_usd_cop)}</p>
+                    <p className="text-xs text-slate-500">USD/COP</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">Costo promedio</p>
+                    <p className="kpi-value">{formatCurrency(runtMetricasQuery.data.costo_promedio_cop)}</p>
+                    <p className="text-xs text-slate-500">{formatUsd(runtMetricasQuery.data.costo_promedio_usd)}</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">Costo proveedor resuelto (sin extra fallback)</p>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {formatCurrency(runtMetricasQuery.data.costo_resuelto_total_cop)} · {formatUsd(runtMetricasQuery.data.costo_resuelto_total_usd)}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="section-card p-4 border border-slate-200">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Coins className="w-4 h-4 text-slate-500" />
+                    <p className="text-sm font-semibold text-slate-800">Por proveedor</p>
+                  </div>
+                  <div className="table-shell">
+                    <table className="table-enterprise">
+                      <thead>
+                        <tr>
+                          <th>Proveedor</th>
+                          <th>Consultas</th>
+                          <th>Costo total (COP / USD)</th>
+                          <th>Resuelto (COP / USD)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {runtMetricasQuery.data.by_provider.map((row) => (
+                          <tr key={row.provider}>
+                            <td className="font-semibold text-slate-900">{row.provider}</td>
+                            <td>{row.consultas}</td>
+                            <td>
+                              {formatCurrency(row.costo_estimado_cop)}
+                              <span className="block text-xs text-slate-500">{formatUsd(row.costo_estimado_usd)}</span>
+                            </td>
+                            <td>
+                              {formatCurrency(row.costo_resuelto_cop)}
+                              <span className="block text-xs text-slate-500">{formatUsd(row.costo_resuelto_usd)}</span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="section-card p-4 border border-slate-200">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-slate-800">Top tenants por consultas</p>
+                    <span className="text-xs text-slate-500">Etiqueta verde: menor costo promedio resuelto</span>
+                  </div>
+                  <div className="table-shell">
+                    <table className="table-enterprise">
+                      <thead>
+                        <tr>
+                          <th>Tenant</th>
+                          <th>Consultas totales</th>
+                          <th>PlacaAPI resueltas</th>
+                          <th>Costo PlacaAPI (COP / USD)</th>
+                          <th>Verifik resueltas</th>
+                          <th>Costo Verifik (COP / USD)</th>
+                          <th>Costo total (COP / USD)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {runtMetricasQuery.data.by_tenant.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="text-slate-500">
+                              Sin datos en el período seleccionado.
+                            </td>
+                          </tr>
+                        ) : (
+                          runtMetricasQuery.data.by_tenant.map((row) => {
+                            const efficiency = getTenantProviderEfficiency(row);
+                            return (
+                            <tr key={row.tenant_slug}>
+                              <td className="font-semibold text-slate-900">
+                                {row.tenant_nombre} <span className="text-xs text-slate-500">/{row.tenant_slug}</span>
+                              </td>
+                              <td>{row.consultas}</td>
+                              <td>
+                                {row.placaapi_resueltas}
+                              </td>
+                              <td>
+                                <span className={efficiency.placaapi ? 'font-semibold text-emerald-700' : undefined}>
+                                  {formatCurrency(row.placaapi_costo_resuelto_cop)}
+                                </span>
+                                <span className="block text-xs text-slate-500">{formatUsd(row.placaapi_costo_resuelto_usd)}</span>
+                                {efficiency.placaapi && (
+                                  <span className="mt-1 inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 ring-1 ring-emerald-200/70">
+                                    Más eficiente
+                                  </span>
+                                )}
+                              </td>
+                              <td>
+                                {row.verifik_resueltas}
+                              </td>
+                              <td>
+                                <span className={efficiency.verifik ? 'font-semibold text-emerald-700' : undefined}>
+                                  {formatCurrency(row.verifik_costo_resuelto_cop)}
+                                </span>
+                                <span className="block text-xs text-slate-500">{formatUsd(row.verifik_costo_resuelto_usd)}</span>
+                                {efficiency.verifik && (
+                                  <span className="mt-1 inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 ring-1 ring-emerald-200/70">
+                                    Más eficiente
+                                  </span>
+                                )}
+                              </td>
+                              <td>
+                                {formatCurrency(row.costo_resuelto_cop)}
+                                <span className="block text-xs text-slate-500">{formatUsd(row.costo_resuelto_usd)}</span>
+                              </td>
+                            </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
             )}
           </div>
@@ -2569,6 +2814,14 @@ export default function SaaSBackoffice() {
       icon: Users,
       color: 'text-indigo-600',
       count: tenantsQuery.data?.length,
+    },
+    {
+      id: 'runt_metricas',
+      title: 'Métricas RUNT',
+      subtitle: 'Consumo y costo por proveedor',
+      icon: Activity,
+      color: 'text-fuchsia-600',
+      count: runtMetricasQuery.data?.total_consultas,
     },
     {
       id: 'facturacion',

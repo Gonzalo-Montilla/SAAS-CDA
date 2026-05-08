@@ -116,6 +116,18 @@ class Settings(BaseSettings):
     PLACAAPI_USERNAME: str = Field(default="", env="PLACAAPI_USERNAME")
     PLACAAPI_TIMEOUT_SECONDS: float = Field(default=15.0, ge=1.0, le=60.0, env="PLACAAPI_TIMEOUT_SECONDS")
     PLACAAPI_CACHE_TTL_SECONDS: int = Field(default=600, ge=0, le=86400, env="PLACAAPI_CACHE_TTL_SECONDS")
+    RUNT_FX_MODE: str = Field(default="auto", env="RUNT_FX_MODE")  # auto | manual
+    RUNT_FX_USD_COP: float = Field(default=4000.0, ge=0.0, env="RUNT_FX_USD_COP")
+    RUNT_FX_AUTO_TTL_SECONDS: int = Field(default=21600, ge=60, le=86400, env="RUNT_FX_AUTO_TTL_SECONDS")
+    RUNT_FX_AUTO_URL: str = Field(
+        default="https://www.datos.gov.co/resource/32sa-8pi3.json?$select=valor&$order=vigenciadesde%20DESC&$limit=1",
+        env="RUNT_FX_AUTO_URL",
+    )
+    RUNT_COST_PLACAAPI_USD: float = Field(default=0.02, ge=0.0, env="RUNT_COST_PLACAAPI_USD")
+    RUNT_COST_VERIFIK_USD: float = Field(default=0.20, ge=0.0, env="RUNT_COST_VERIFIK_USD")
+    # Compatibilidad temporal: fallback si no hay costos USD configurados.
+    RUNT_COST_PLACAAPI_COP: float = Field(default=74.0, ge=0.0, env="RUNT_COST_PLACAAPI_COP")
+    RUNT_COST_VERIFIK_COP: float = Field(default=740.0, ge=0.0, env="RUNT_COST_VERIFIK_COP")
     
     # Facturación electrónica (Factus) — URLs oficiales en https://developers.factus.com.co/
     FACTUS_SANDBOX_BASE_URL: str = Field(default="https://api-sandbox.factus.com.co", env="FACTUS_SANDBOX_BASE_URL")

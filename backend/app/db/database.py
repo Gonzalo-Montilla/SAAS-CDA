@@ -1520,6 +1520,88 @@ def ensure_tenant_documento_auditoria_schema(db):
     )
 
 
+def ensure_runt_metricas_schema(db):
+    """
+    Tabla de trazabilidad para métricas de consultas RUNT por proveedor.
+    """
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS runt_consultas_metricas (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                sucursal_id UUID REFERENCES sucursales(id) ON DELETE SET NULL,
+                usuario_id UUID NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+                placa_consultada VARCHAR(12) NOT NULL,
+                document_type VARCHAR(10),
+                document_number_last4 VARCHAR(4),
+                provider_configured VARCHAR(30) NOT NULL,
+                provider_resolved VARCHAR(30) NOT NULL,
+                providers_attempted VARCHAR(80) NOT NULL,
+                fallback_used BOOLEAN NOT NULL DEFAULT FALSE,
+                status VARCHAR(20) NOT NULL,
+                encontrado BOOLEAN NOT NULL DEFAULT FALSE,
+                cached BOOLEAN NOT NULL DEFAULT FALSE,
+                error_detail VARCHAR(500),
+                estimated_cost_cop NUMERIC(14,2) NOT NULL DEFAULT 0,
+                estimated_cost_usd NUMERIC(14,6) NOT NULL DEFAULT 0,
+                fx_rate_usd_cop_applied NUMERIC(14,6) NOT NULL DEFAULT 0,
+                resolved_cost_cop NUMERIC(14,2) NOT NULL DEFAULT 0,
+                resolved_cost_usd NUMERIC(14,6) NOT NULL DEFAULT 0,
+                fallback_extra_cost_cop NUMERIC(14,2) NOT NULL DEFAULT 0,
+                fallback_extra_cost_usd NUMERIC(14,6) NOT NULL DEFAULT 0,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE runt_consultas_metricas ADD COLUMN IF NOT EXISTS estimated_cost_usd NUMERIC(14,6) NOT NULL DEFAULT 0"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE runt_consultas_metricas ADD COLUMN IF NOT EXISTS fx_rate_usd_cop_applied NUMERIC(14,6) NOT NULL DEFAULT 0"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE runt_consultas_metricas ADD COLUMN IF NOT EXISTS resolved_cost_cop NUMERIC(14,2) NOT NULL DEFAULT 0"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE runt_consultas_metricas ADD COLUMN IF NOT EXISTS resolved_cost_usd NUMERIC(14,6) NOT NULL DEFAULT 0"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE runt_consultas_metricas ADD COLUMN IF NOT EXISTS fallback_extra_cost_cop NUMERIC(14,2) NOT NULL DEFAULT 0"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE runt_consultas_metricas ADD COLUMN IF NOT EXISTS fallback_extra_cost_usd NUMERIC(14,6) NOT NULL DEFAULT 0"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_runt_metricas_tenant_fecha ON runt_consultas_metricas(tenant_id, created_at DESC)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_runt_metricas_tenant_provider ON runt_consultas_metricas(tenant_id, provider_resolved)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_runt_metricas_tenant_status ON runt_consultas_metricas(tenant_id, status)"
+        )
+    )
+
+
 def ensure_nomina_schema(db):
     """
     Esquema inicial de nómina multitenant (MVP base).
@@ -1949,6 +2031,7 @@ def init_db():
     from app.models.documento_auditoria import TenantDocumentoAuditoria  # noqa: F401 — register model
     from app.models.proveedor_catalogo import ProveedorCatalogo  # noqa: F401 — register model
     from app.models.dse_retencion_motor import DseRetencionTasaConcepto, DseUvtPorAnio  # noqa: F401
+    from app.models.runt_metrica import RuntConsultaMetrica  # noqa: F401
     nomina_available = True
     try:
         from app.models.nomina import (
@@ -1996,6 +2079,7 @@ def init_db():
         ensure_quality_survey_responses_schema(db)
         ensure_quality_survey_invites_sucursal_schema(db)
         ensure_tenant_documentos_schema(db)
+        ensure_runt_metricas_schema(db)
         if nomina_available:
             ensure_nomina_schema(db)
         db.commit()
