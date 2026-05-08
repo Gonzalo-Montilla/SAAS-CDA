@@ -128,6 +128,7 @@ class SaaSTenantSummary(BaseModel):
     next_billing_at: datetime | None = None
     last_payment_at: datetime | None = None
     activo: bool
+    nomina_enabled: bool = False
     login_url: str
 
 
@@ -189,6 +190,7 @@ class SaaSTenantCoreDataPatch(BaseModel):
     correo_electronico: str | None = Field(default=None, max_length=255)
     nombre_representante: str | None = Field(default=None, max_length=200)
     celular: str | None = Field(default=None, max_length=30)
+    nomina_enabled: bool | None = None
 
 
 class SaaSAuditLogItem(BaseModel):
@@ -865,6 +867,7 @@ def list_saas_tenants(
             next_billing_at=tenant.next_billing_at,
             last_payment_at=tenant.last_payment_at,
             activo=tenant.activo,
+            nomina_enabled=bool(getattr(tenant, "nomina_enabled", False)),
             login_url=f"{base_url}/{tenant.slug}",
         )
         for tenant in tenants
@@ -931,6 +934,7 @@ def get_saas_tenant_profile(
         next_billing_at=tenant.next_billing_at,
         last_payment_at=tenant.last_payment_at,
         activo=tenant.activo,
+        nomina_enabled=bool(getattr(tenant, "nomina_enabled", False)),
         login_url=f"{base_url}/{tenant.slug}",
         facturacion_matriz=SaaSTenantFacturacionMatriz(
             direccion_facturacion=tenant.direccion_facturacion,
@@ -1074,6 +1078,8 @@ def patch_saas_tenant_core_data(
     if "celular" in data:
         phone = (data["celular"] or "").strip()
         tenant.celular = phone or None
+    if "nomina_enabled" in data and data["nomina_enabled"] is not None:
+        tenant.nomina_enabled = bool(data["nomina_enabled"])
 
     db.commit()
     return get_saas_tenant_profile(tenant_id=tenant_id, db=db)

@@ -332,6 +332,7 @@ def get_current_user_info(
         tenant_sedes_totales=tenant.sedes_totales,
         tenant_branding=branding,
         tenant_billing=tb,
+        tenant_nomina_enabled=bool(getattr(tenant, "nomina_enabled", False)),
     )
 
 

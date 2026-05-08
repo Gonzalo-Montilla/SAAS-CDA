@@ -61,6 +61,8 @@ export interface Usuario {
   tenant_sedes_totales?: number | null;
   /** Demo / gracia / bloqueo (modales de suscripción). */
   tenant_billing?: TenantBillingInfo | null;
+  /** Switch por tenant para habilitar o bloquear Nómina. */
+  tenant_nomina_enabled?: boolean;
 }
 
 export interface SaaSUser {
@@ -96,6 +98,7 @@ export interface SaaSTenantSummary {
   next_billing_at?: string | null;
   last_payment_at?: string | null;
   activo: boolean;
+  nomina_enabled: boolean;
   login_url: string;
 }
 

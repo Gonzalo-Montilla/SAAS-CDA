@@ -1,9 +1,10 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useBrand } from '../contexts/BrandContext';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import BranchSelector from '../components/BranchSelector';
 import BranchGateModal from '../components/BranchGateModal';
+import AccessRestrictedModal from '../components/AccessRestrictedModal';
 import apiClient from '../api/client';
 import type { Usuario } from '../types';
 import {
@@ -21,6 +22,7 @@ import {
   CalendarClock,
   FileStack,
   BookUser,
+  ReceiptText,
 } from 'lucide-react';
 const WIZARD_KEY = 'cdasoft_sedes_wizard_dismissed';
 
@@ -28,12 +30,23 @@ export default function Dashboard() {
   const { user, logout, getLogoutRedirectPath } = useAuth();
   const brand = useBrand();
   const navigate = useNavigate();
+  const location = useLocation();
   const [wizardNombre, setWizardNombre] = useState('');
   const [wizardBusy, setWizardBusy] = useState(false);
   const [wizardError, setWizardError] = useState<string | null>(null);
+  const [showNominaBlockedModal, setShowNominaBlockedModal] = useState(false);
 
   const tenantUser: Usuario | null =
     user && 'tenant_id' in user ? (user as Usuario) : null;
+  const nominaEnabled = Boolean(tenantUser?.tenant_nomina_enabled);
+
+  useEffect(() => {
+    const navState = location.state as { nominaLocked?: boolean } | null;
+    if (navState?.nominaLocked) {
+      setShowNominaBlockedModal(true);
+      navigate(location.pathname, { replace: true, state: null });
+    }
+  }, [location.pathname, location.state, navigate]);
 
   const showSedesWizard =
     tenantUser?.rol === 'administrador' &&
@@ -285,6 +298,25 @@ export default function Dashboard() {
               </button>
 
               <button
+                onClick={() => {
+                  if (!nominaEnabled) {
+                    setShowNominaBlockedModal(true);
+                    return;
+                  }
+                  navigate('/nomina');
+                }}
+                className="card-pos text-left group animate-fade-in animate-delay-300"
+              >
+                <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-fuchsia-100 text-fuchsia-700 mb-4 group-hover:bg-fuchsia-600 group-hover:text-white transition-all duration-300">
+                  <ReceiptText className="w-8 h-8 icon-hover" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mb-2">Nómina</h3>
+                <p className="text-slate-600 text-sm">
+                  Gestión de periodos, liquidaciones y desprendibles de pago
+                </p>
+              </button>
+
+              <button
                 onClick={() => navigate('/reportes')}
                 className="card-pos text-left group animate-fade-in"
               >
@@ -393,6 +425,20 @@ export default function Dashboard() {
           </button>
         </div>
       </main>
+
+      <AccessRestrictedModal
+        open={showNominaBlockedModal}
+        title="Módulo no habilitado"
+        message="No tienes habilitado el módulo de nómina. Si deseas habilitarlo, escribe a soporte."
+        badgeText="Acceso restringido"
+        closeLabel="Cerrar"
+        primaryLabel="Ir a soporte"
+        onClose={() => setShowNominaBlockedModal(false)}
+        onPrimaryAction={() => {
+          setShowNominaBlockedModal(false);
+          navigate('/soporte');
+        }}
+      />
     </div>
   );
 }

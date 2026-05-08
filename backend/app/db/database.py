@@ -58,6 +58,7 @@ def ensure_tenant_baseline_schema(db):
                 billing_cycle_days INTEGER NOT NULL DEFAULT 30,
                 next_billing_at TIMESTAMP WITHOUT TIME ZONE,
                 last_payment_at TIMESTAMP WITHOUT TIME ZONE,
+                nomina_enabled BOOLEAN NOT NULL DEFAULT FALSE,
                 created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMP WITHOUT TIME ZONE
             )
@@ -78,6 +79,7 @@ def ensure_tenant_baseline_schema(db):
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS billing_cycle_days INTEGER"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS next_billing_at TIMESTAMP WITHOUT TIME ZONE"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS last_payment_at TIMESTAMP WITHOUT TIME ZONE"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS nomina_enabled BOOLEAN"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS nit_cda VARCHAR(30)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS correo_electronico VARCHAR(255)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS nombre_representante VARCHAR(200)"))
@@ -92,6 +94,7 @@ def ensure_tenant_baseline_schema(db):
     db.execute(text("UPDATE tenants SET sedes_totales = COALESCE(sedes_totales, 1)"))
     db.execute(text("UPDATE tenants SET demo_ends_at = COALESCE(demo_ends_at, NOW() + INTERVAL '15 day')"))
     db.execute(text("UPDATE tenants SET billing_cycle_days = COALESCE(billing_cycle_days, 30)"))
+    db.execute(text("UPDATE tenants SET nomina_enabled = COALESCE(nomina_enabled, FALSE)"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN nombre_comercial SET NOT NULL"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN color_primario SET NOT NULL"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN color_secundario SET NOT NULL"))
@@ -99,6 +102,7 @@ def ensure_tenant_baseline_schema(db):
     db.execute(text("ALTER TABLE tenants ALTER COLUMN subscription_status SET NOT NULL"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN sedes_totales SET NOT NULL"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN billing_cycle_days SET NOT NULL"))
+    db.execute(text("ALTER TABLE tenants ALTER COLUMN nomina_enabled SET NOT NULL"))
 
     db.execute(
         text(
@@ -125,6 +129,7 @@ def ensure_tenant_baseline_schema(db):
                 billing_cycle_days,
                 next_billing_at,
                 last_payment_at,
+                nomina_enabled,
                 created_at
             )
             VALUES (
@@ -149,6 +154,7 @@ def ensure_tenant_baseline_schema(db):
                 30,
                 NOW() + INTERVAL '15 day',
                 NULL,
+                FALSE,
                 NOW()
             )
             ON CONFLICT (slug) DO NOTHING

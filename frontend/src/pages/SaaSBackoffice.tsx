@@ -161,6 +161,7 @@ export default function SaaSBackoffice() {
   const [tenantCoreCorreo, setTenantCoreCorreo] = useState('');
   const [tenantCoreRepresentante, setTenantCoreRepresentante] = useState('');
   const [tenantCoreCelular, setTenantCoreCelular] = useState('');
+  const [tenantCoreNominaEnabled, setTenantCoreNominaEnabled] = useState(false);
   const [tenantCoreError, setTenantCoreError] = useState('');
   const [tenantCoreEditMode, setTenantCoreEditMode] = useState(false);
   const [auditSortBy, setAuditSortBy] = useState<'created_at' | 'action' | 'success' | 'tenant' | 'actor'>('created_at');
@@ -513,6 +514,7 @@ export default function SaaSBackoffice() {
     setTenantCoreCorreo(profile.correo_electronico || '');
     setTenantCoreRepresentante(profile.nombre_representante || '');
     setTenantCoreCelular(profile.celular || '');
+    setTenantCoreNominaEnabled(Boolean(profile.nomina_enabled));
     setTenantCoreError('');
     setTenantCoreEditMode(false);
   }, [tenantProfileQuery.data]);
@@ -615,6 +617,7 @@ export default function SaaSBackoffice() {
         correo_electronico: tenantCoreCorreo.trim() || null,
         nombre_representante: tenantCoreRepresentante.trim() || null,
         celular: tenantCoreCelular.trim() || null,
+        nomina_enabled: tenantCoreNominaEnabled,
       });
     },
     onSuccess: () => {
@@ -3189,6 +3192,30 @@ export default function SaaSBackoffice() {
                                   className="input-corporate"
                                   disabled={!tenantCoreEditMode}
                                 />
+                                <label className="md:col-span-2 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2">
+                                  <div>
+                                    <p className="text-sm font-semibold text-slate-800">Módulo de Nómina</p>
+                                    <p className="text-xs text-slate-500">
+                                      Controla si el CDA puede acceder al módulo de nómina.
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={tenantCoreNominaEnabled}
+                                    onClick={() => tenantCoreEditMode && setTenantCoreNominaEnabled((prev) => !prev)}
+                                    disabled={!tenantCoreEditMode}
+                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                                      tenantCoreNominaEnabled ? 'bg-emerald-600' : 'bg-slate-300'
+                                    } ${tenantCoreEditMode ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
+                                  >
+                                    <span
+                                      className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${
+                                        tenantCoreNominaEnabled ? 'translate-x-5' : 'translate-x-1'
+                                      }`}
+                                    />
+                                  </button>
+                                </label>
                               </div>
                               {tenantCoreError && <p className="mt-2 text-xs text-red-600">{tenantCoreError}</p>}
                               <div className="mt-2 flex items-center justify-end gap-2">
@@ -3217,6 +3244,7 @@ export default function SaaSBackoffice() {
                                           setTenantCoreCorreo(profile.correo_electronico || '');
                                           setTenantCoreRepresentante(profile.nombre_representante || '');
                                           setTenantCoreCelular(profile.celular || '');
+                                          setTenantCoreNominaEnabled(Boolean(profile.nomina_enabled));
                                         }
                                         setTenantCoreError('');
                                         setTenantCoreEditMode(false);
@@ -3270,6 +3298,18 @@ export default function SaaSBackoffice() {
                                   <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Estado suscripción</p>
                                   <span className={statusBadgeClass(tenantProfileQuery.data.subscription_status)}>
                                     {subscriptionStatusLabel(tenantProfileQuery.data.subscription_status)}
+                                  </span>
+                                </div>
+                                <div className="space-y-1.5">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Nómina</p>
+                                  <span
+                                    className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                      tenantProfileQuery.data.nomina_enabled
+                                        ? 'border border-emerald-200 bg-emerald-50 text-emerald-800'
+                                        : 'border border-amber-200 bg-amber-50 text-amber-800'
+                                    }`}
+                                  >
+                                    {tenantProfileQuery.data.nomina_enabled ? 'Habilitada' : 'Deshabilitada'}
                                   </span>
                                 </div>
                                 <div className="space-y-1">

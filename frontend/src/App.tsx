@@ -21,6 +21,7 @@ const Reportes = lazy(() => import('./pages/Reportes'));
 const Organizacion = lazy(() => import('./pages/Organizacion'));
 const Soporte = lazy(() => import('./pages/Soporte'));
 const Documentos = lazy(() => import('./pages/Documentos'));
+const Nomina = lazy(() => import('./pages/Nomina'));
 const Calidad = lazy(() => import('./pages/Calidad'));
 const CalidadEncuesta = lazy(() => import('./pages/CalidadEncuesta'));
 const Agendamiento = lazy(() => import('./pages/Agendamiento'));
@@ -45,10 +46,12 @@ function ProtectedRoute({
   children,
   requiredScope,
   requiredTenantRoles,
+  requireNominaEnabled,
 }: {
   children: ReactNode;
   requiredScope?: AuthScope;
   requiredTenantRoles?: TenantRole[];
+  requireNominaEnabled?: boolean;
 }) {
   const { isAuthenticated, loading, authScope, user } = useAuth();
 
@@ -76,6 +79,13 @@ function ProtectedRoute({
     const tenantRole = (user as { rol?: TenantRole } | null)?.rol;
     if (!tenantRole || !requiredTenantRoles.includes(tenantRole)) {
       return <Navigate to="/dashboard" replace />;
+    }
+  }
+
+  if (requiredScope === 'tenant' && requireNominaEnabled) {
+    const nominaEnabled = Boolean((user as { tenant_nomina_enabled?: boolean } | null)?.tenant_nomina_enabled);
+    if (!nominaEnabled) {
+      return <Navigate to="/dashboard" replace state={{ nominaLocked: true }} />;
     }
   }
 
@@ -199,6 +209,18 @@ function App() {
               element={
                 <ProtectedRoute requiredScope="tenant">
                   <Documentos />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/nomina"
+              element={
+                <ProtectedRoute
+                  requiredScope="tenant"
+                  requiredTenantRoles={['administrador']}
+                  requireNominaEnabled
+                >
+                  <Nomina />
                 </ProtectedRoute>
               }
             />

@@ -259,6 +259,30 @@ def get_contador_or_admin(current_user: Usuario = Depends(get_current_user)) -> 
     return current_user
 
 
+def require_nomina_enabled_for_tenant(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+) -> Usuario:
+    """
+    Bloquea el módulo de Nómina cuando no está habilitado para el tenant.
+    """
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    if tenant is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant no encontrado",
+        )
+    if not bool(getattr(tenant, "nomina_enabled", False)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "No tienes habilitado el módulo de nómina. "
+                "Si deseas habilitarlo, escribe a soporte."
+            ),
+        )
+    return current_user
+
+
 def get_saas_owner(current_user: SaaSUser = Depends(get_current_saas_user)) -> SaaSUser:
     """Solo owner global SaaS."""
     if current_user.rol_global != "owner":

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import type { Usuario } from '../types';
+import AccessRestrictedModal from './AccessRestrictedModal';
 
 const SOFT_KEY = 'cdasoft_billing_soft_dismissed_session';
 
@@ -38,74 +39,42 @@ export default function TenantBillingOverlays() {
   }
 
   if (gate === 'soft' && !dismissedSoft) {
+    const softGraceEndLabel = billing.soft_grace_ends_at
+      ? ` Fin de gracia: ${new Date(billing.soft_grace_ends_at).toLocaleString('es-CO')}.`
+      : '';
     return (
-      <div className="fixed inset-0 z-[200] flex items-center justify-center bg-black/40 p-4">
-        <div className="max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-          <h2 className="text-lg font-semibold text-slate-900">Período de prueba finalizado</h2>
-          <p className="mt-2 text-sm text-slate-600">
-            El demo de 15 días ha terminado. Tienes unos días de gracia para elegir un plan y pagar;
-            luego el acceso de edición se bloqueará.
-          </p>
-          {billing.soft_grace_ends_at && (
-            <p className="mt-2 text-xs text-slate-500">
-              Fin de gracia suave: {new Date(billing.soft_grace_ends_at).toLocaleString('es-CO')}
-            </p>
-          )}
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => navigate('/suscripcion')}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-            >
-              Elegir plan y pagar
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                if (billing.soft_grace_ends_at) {
-                  sessionStorage.setItem(`${SOFT_KEY}_${billing.soft_grace_ends_at}`, '1');
-                }
-                setDismissedSoft(true);
-              }}
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-800 hover:bg-slate-50"
-            >
-              Cerrar
-            </button>
-          </div>
-        </div>
-      </div>
+      <AccessRestrictedModal
+        open
+        badgeText="Período de gracia"
+        title="Tu plan demo finalizó"
+        message={`El demo de 15 días ha terminado. Tienes unos días de gracia para elegir un plan y pagar antes del bloqueo de edición.${softGraceEndLabel}`}
+        closeLabel="Cerrar"
+        primaryLabel="Elegir plan y pagar"
+        onClose={() => {
+          if (billing.soft_grace_ends_at) {
+            sessionStorage.setItem(`${SOFT_KEY}_${billing.soft_grace_ends_at}`, '1');
+          }
+          setDismissedSoft(true);
+        }}
+        onPrimaryAction={() => navigate('/suscripcion')}
+      />
     );
   }
 
   if (gate === 'hard') {
     return (
-      <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-900/80 p-4">
-        <div className="max-w-md rounded-2xl bg-white p-6 shadow-2xl">
-          <h2 className="text-lg font-semibold text-slate-900">Acceso restringido</h2>
-          <p className="mt-2 text-sm text-slate-600">
-            La gracia de prueba finalizó. Debes contratar un plan y completar el pago para continuar
-            operando. Si ya pagó, reintente iniciar sesión o contacte a soporte.
-          </p>
-          <div className="mt-4 flex flex-wrap gap-2">
-            <button
-              type="button"
-              onClick={() => navigate('/suscripcion')}
-              className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700"
-            >
-              Elegir plan
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                void refreshTenantUser();
-              }}
-              className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm text-slate-800"
-            >
-              Comprobé mi pago
-            </button>
-          </div>
-        </div>
-      </div>
+      <AccessRestrictedModal
+        open
+        badgeText="Acceso restringido"
+        title="Operación bloqueada por suscripción"
+        message="La gracia de prueba finalizó. Debes contratar un plan y completar el pago para continuar operando. Si ya pagaste, usa “Comprobé mi pago”."
+        closeLabel="Comprobé mi pago"
+        primaryLabel="Ir a suscripción"
+        onClose={() => {
+          void refreshTenantUser();
+        }}
+        onPrimaryAction={() => navigate('/suscripcion')}
+      />
     );
   }
 

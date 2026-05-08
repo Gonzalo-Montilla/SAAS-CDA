@@ -81,6 +81,10 @@ class UsuarioResponse(BaseModel):
         default=None,
         description="Gate de facturación demo (modales) y fechas de gracia.",
     )
+    tenant_nomina_enabled: bool = Field(
+        default=False,
+        description="Indica si el módulo de nómina está habilitado para el tenant.",
+    )
 
     model_config = ConfigDict(from_attributes=True)
 

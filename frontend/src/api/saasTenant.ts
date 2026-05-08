@@ -45,6 +45,7 @@ export async function patchSaasTenantCoreData(
     correo_electronico?: string | null;
     nombre_representante?: string | null;
     celular?: string | null;
+    nomina_enabled?: boolean | null;
   },
 ): Promise<SaaSTenantProfile> {
   const r = await apiClient.patch<SaaSTenantProfile>(

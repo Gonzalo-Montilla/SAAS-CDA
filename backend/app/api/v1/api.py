@@ -24,6 +24,7 @@ from app.api.v1.endpoints import (
     documentos,
     proveedores_catalogo,
     dse_retencion_motor,
+    nomina,
     runt_metricas,
 )
 
@@ -54,4 +55,5 @@ api_router.include_router(
 api_router.include_router(
     dse_retencion_motor.router, prefix="/dse-retencion", tags=["dse-retencion"]
 )
+api_router.include_router(nomina.router, prefix="/nomina", tags=["nomina"])
 api_router.include_router(runt_metricas.router, prefix="/runt-metricas", tags=["runt-metricas"])

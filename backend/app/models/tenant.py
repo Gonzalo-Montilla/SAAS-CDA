@@ -35,6 +35,7 @@ class Tenant(Base):
     billing_cycle_days = Column(Integer, nullable=False, default=30)
     next_billing_at = Column(DateTime, nullable=True)
     last_payment_at = Column(DateTime, nullable=True)
+    nomina_enabled = Column(Boolean, nullable=False, default=False)
 
     # Facturación electrónica (Factus / DIAN): matriz / por defecto del CDA
     factus_municipality_id = Column(Integer, nullable=True)
