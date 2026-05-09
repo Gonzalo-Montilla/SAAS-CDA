@@ -1,0 +1,132 @@
+import { apiClient } from './client';
+import type {
+  SarlaftCase,
+  SarlaftCasePartyInput,
+  SarlaftCaseSummary,
+  SarlaftManualCheck,
+  SarlaftProfile,
+} from '../types';
+
+export const sarlaftApi = {
+  getProfile: async (): Promise<SarlaftProfile> => {
+    const response = await apiClient.get<SarlaftProfile>('/sarlaft/profile');
+    return response.data;
+  },
+
+  patchProfile: async (payload: Partial<SarlaftProfile>): Promise<SarlaftProfile> => {
+    const response = await apiClient.patch<SarlaftProfile>('/sarlaft/profile', payload);
+    return response.data;
+  },
+
+  createCase: async (payload: {
+    operacion_ref: string;
+    sede_id?: string | null;
+    transaction_amount_cop: number;
+    cash_amount_cop: number;
+    payment_method: 'efectivo' | 'mixto' | 'transferencia' | 'otro';
+    parties: SarlaftCasePartyInput[];
+  }): Promise<SarlaftCase> => {
+    const response = await apiClient.post<SarlaftCase>('/sarlaft/cases', payload);
+    return response.data;
+  },
+
+  getCase: async (caseId: string): Promise<SarlaftCase> => {
+    const response = await apiClient.get<SarlaftCase>(`/sarlaft/cases/${caseId}`);
+    return response.data;
+  },
+
+  listCases: async (params?: {
+    risk_level?: 'verde' | 'amarillo' | 'rojo';
+    status?: string;
+    limit?: number;
+  }): Promise<SarlaftCaseSummary[]> => {
+    const response = await apiClient.get<SarlaftCaseSummary[]>('/sarlaft/cases', { params });
+    return response.data;
+  },
+
+  screeningOpenSanctions: async (payload: {
+    schema: 'Person' | 'Company' | 'LegalEntity';
+    full_name: string;
+    document_number?: string | null;
+    birth_date?: string | null;
+    nationality?: string | null;
+    dataset?: string | null;
+    algorithm?: string | null;
+    limit?: number | null;
+    case_id?: string | null;
+    persist_in_case?: boolean;
+  }): Promise<{
+    provider: string;
+    dataset: string;
+    algorithm: string;
+    threshold: number;
+    hits: Array<{
+      entity_id?: string;
+      caption?: string;
+      schema?: string;
+      score?: number;
+      topics: string[];
+      first_seen?: string;
+      last_seen?: string;
+      source_url?: string;
+    }>;
+    alert: boolean;
+    raw_count: number;
+    risk_level: 'verde' | 'amarillo' | 'rojo';
+    recommended_action: string;
+    case_id?: string | null;
+  }> => {
+    const response = await apiClient.post('/sarlaft/screening/opensanctions', payload);
+    return response.data;
+  },
+
+  createManualCheck: async (payload: {
+    subject_type: 'natural' | 'juridica';
+    full_name: string;
+    doc_type?: string | null;
+    doc_number?: string | null;
+    email?: string | null;
+    phone?: string | null;
+    economic_activity?: string | null;
+    legal_representative?: string | null;
+    dataset?: 'default' | 'sanctions';
+    algorithm?: string;
+    limit?: number;
+    nationality?: string | null;
+    birth_date?: string | null;
+    notes?: string | null;
+  }): Promise<SarlaftManualCheck> => {
+    const response = await apiClient.post<SarlaftManualCheck>('/sarlaft/manual-checks', payload);
+    return response.data;
+  },
+
+  listManualChecks: async (params?: {
+    subject_type?: 'natural' | 'juridica';
+    risk_level?: 'verde' | 'amarillo' | 'rojo';
+    limit?: number;
+  }): Promise<SarlaftManualCheck[]> => {
+    const response = await apiClient.get<SarlaftManualCheck[]>('/sarlaft/manual-checks', { params });
+    return response.data;
+  },
+
+  downloadManualCheckCertificate: async (
+    manualCheckId: string
+  ): Promise<{ blob: Blob; filename: string; certificateCode: string | null }> => {
+    const response = await apiClient.get(`/sarlaft/manual-checks/${manualCheckId}/certificate`, {
+      responseType: 'blob',
+    });
+    const contentDisposition = response.headers['content-disposition'] as string | undefined;
+    let filename = `sarlaft_certificado_${manualCheckId}.pdf`;
+    if (contentDisposition) {
+      const m = /filename="([^"]+)"/.exec(contentDisposition) ?? /filename=([^;\s]+)/.exec(contentDisposition);
+      if (m?.[1]) filename = m[1].trim().replace(/^"|"$/g, '');
+    }
+    const rawCode = response.headers['x-sarlaft-certificate-code'];
+    const certificateCode = typeof rawCode === 'string' && rawCode.trim() ? rawCode.trim() : null;
+    return {
+      blob: response.data as Blob,
+      filename,
+      certificateCode,
+    };
+  },
+};

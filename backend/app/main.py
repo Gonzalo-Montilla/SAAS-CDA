@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, Response, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware
 from app.core.config import parse_backend_cors_origins, settings
@@ -67,7 +67,7 @@ app.add_middleware(
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
-    expose_headers=["Content-Disposition", "X-Certificacion-Codigo"],
+    expose_headers=["Content-Disposition", "X-Certificacion-Codigo", "X-Sarlaft-Certificate-Code"],
 )
 
 
@@ -142,6 +142,12 @@ def cdasoft_favicon():
 def cdasoft_brand_icon():
     """Compatibilidad: mismo recurso que el favicon (Nginx/proxy existentes)."""
     return _file_response_png(_resolve_cdasoft_favicon_path())
+
+
+@app.get("/sarlaft/verificar/{tenant_slug}/{certificate_code}", include_in_schema=False)
+def sarlaft_verify_public_shortcut(tenant_slug: str, certificate_code: str):
+    dest = f"/api/v1/sarlaft/manual-checks/certificate/v/{tenant_slug}/{certificate_code}?vista=1"
+    return RedirectResponse(url=dest, status_code=307)
 
 
 # Incluir routers de API

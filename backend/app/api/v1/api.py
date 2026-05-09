@@ -26,6 +26,7 @@ from app.api.v1.endpoints import (
     dse_retencion_motor,
     nomina,
     runt_metricas,
+    sarlaft,
 )
 
 api_router = APIRouter()
@@ -56,4 +57,6 @@ api_router.include_router(
     dse_retencion_motor.router, prefix="/dse-retencion", tags=["dse-retencion"]
 )
 api_router.include_router(nomina.router, prefix="/nomina", tags=["nomina"])
+api_router.include_router(sarlaft.router, prefix="/sarlaft", tags=["sarlaft"])
+api_router.include_router(sarlaft.public_router, prefix="/sarlaft", tags=["sarlaft-public"])
 api_router.include_router(runt_metricas.router, prefix="/runt-metricas", tags=["runt-metricas"])

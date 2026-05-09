@@ -46,6 +46,8 @@ export async function patchSaasTenantCoreData(
     nombre_representante?: string | null;
     celular?: string | null;
     nomina_enabled?: boolean | null;
+    sarlaft_enabled?: boolean | null;
+    sarlaft_mode?: 'manual' | 'api' | null;
   },
 ): Promise<SaaSTenantProfile> {
   const r = await apiClient.patch<SaaSTenantProfile>(

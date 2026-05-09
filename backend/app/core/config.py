@@ -128,6 +128,26 @@ class Settings(BaseSettings):
     # Compatibilidad temporal: fallback si no hay costos USD configurados.
     RUNT_COST_PLACAAPI_COP: float = Field(default=74.0, ge=0.0, env="RUNT_COST_PLACAAPI_COP")
     RUNT_COST_VERIFIK_COP: float = Field(default=740.0, ge=0.0, env="RUNT_COST_VERIFIK_COP")
+
+    # SARLAFT - OpenSanctions (screening externo)
+    OPENSANCTIONS_ENABLED: bool = Field(default=False, env="OPENSANCTIONS_ENABLED")
+    OPENSANCTIONS_BASE_URL: str = Field(default="https://api.opensanctions.org", env="OPENSANCTIONS_BASE_URL")
+    OPENSANCTIONS_API_KEY: str = Field(default="", env="OPENSANCTIONS_API_KEY")
+    OPENSANCTIONS_TIMEOUT_SECONDS: float = Field(
+        default=20.0,
+        ge=2.0,
+        le=60.0,
+        env="OPENSANCTIONS_TIMEOUT_SECONDS",
+    )
+    OPENSANCTIONS_MATCH_DATASET: str = Field(default="default", env="OPENSANCTIONS_MATCH_DATASET")
+    OPENSANCTIONS_MATCH_ALGORITHM: str = Field(default="best", env="OPENSANCTIONS_MATCH_ALGORITHM")
+    OPENSANCTIONS_MATCH_LIMIT: int = Field(default=5, ge=1, le=20, env="OPENSANCTIONS_MATCH_LIMIT")
+    OPENSANCTIONS_ALERT_SCORE_THRESHOLD: float = Field(
+        default=0.75,
+        ge=0.0,
+        le=1.0,
+        env="OPENSANCTIONS_ALERT_SCORE_THRESHOLD",
+    )
     
     # Facturación electrónica (Factus) — URLs oficiales en https://developers.factus.com.co/
     FACTUS_SANDBOX_BASE_URL: str = Field(default="https://api-sandbox.factus.com.co", env="FACTUS_SANDBOX_BASE_URL")

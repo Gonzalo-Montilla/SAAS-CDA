@@ -162,6 +162,8 @@ export default function SaaSBackoffice() {
   const [tenantCoreRepresentante, setTenantCoreRepresentante] = useState('');
   const [tenantCoreCelular, setTenantCoreCelular] = useState('');
   const [tenantCoreNominaEnabled, setTenantCoreNominaEnabled] = useState(false);
+  const [tenantCoreSarlaftEnabled, setTenantCoreSarlaftEnabled] = useState(false);
+  const [tenantCoreSarlaftMode, setTenantCoreSarlaftMode] = useState<'manual' | 'api'>('manual');
   const [tenantCoreError, setTenantCoreError] = useState('');
   const [tenantCoreEditMode, setTenantCoreEditMode] = useState(false);
   const [auditSortBy, setAuditSortBy] = useState<'created_at' | 'action' | 'success' | 'tenant' | 'actor'>('created_at');
@@ -515,6 +517,8 @@ export default function SaaSBackoffice() {
     setTenantCoreRepresentante(profile.nombre_representante || '');
     setTenantCoreCelular(profile.celular || '');
     setTenantCoreNominaEnabled(Boolean(profile.nomina_enabled));
+    setTenantCoreSarlaftEnabled(Boolean(profile.sarlaft_enabled));
+    setTenantCoreSarlaftMode((profile.sarlaft_mode === 'api' ? 'api' : 'manual') as 'manual' | 'api');
     setTenantCoreError('');
     setTenantCoreEditMode(false);
   }, [tenantProfileQuery.data]);
@@ -618,6 +622,8 @@ export default function SaaSBackoffice() {
         nombre_representante: tenantCoreRepresentante.trim() || null,
         celular: tenantCoreCelular.trim() || null,
         nomina_enabled: tenantCoreNominaEnabled,
+        sarlaft_enabled: tenantCoreSarlaftEnabled,
+        sarlaft_mode: tenantCoreSarlaftMode,
       });
     },
     onSuccess: () => {
@@ -3216,6 +3222,45 @@ export default function SaaSBackoffice() {
                                     />
                                   </button>
                                 </label>
+                                <label className="md:col-span-2 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2">
+                                  <div>
+                                    <p className="text-sm font-semibold text-slate-800">Módulo SARLAFT</p>
+                                    <p className="text-xs text-slate-500">
+                                      Controla acceso al módulo SARLAFT para el CDA.
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={tenantCoreSarlaftEnabled}
+                                    onClick={() => tenantCoreEditMode && setTenantCoreSarlaftEnabled((prev) => !prev)}
+                                    disabled={!tenantCoreEditMode}
+                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                                      tenantCoreSarlaftEnabled ? 'bg-emerald-600' : 'bg-slate-300'
+                                    } ${tenantCoreEditMode ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
+                                  >
+                                    <span
+                                      className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${
+                                        tenantCoreSarlaftEnabled ? 'translate-x-5' : 'translate-x-1'
+                                      }`}
+                                    />
+                                  </button>
+                                </label>
+                                <label className="md:col-span-2 flex flex-col gap-1">
+                                  <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Modo SARLAFT</span>
+                                  <select
+                                    value={tenantCoreSarlaftMode}
+                                    onChange={(e) => setTenantCoreSarlaftMode(e.target.value as 'manual' | 'api')}
+                                    className="input-corporate"
+                                    disabled={!tenantCoreEditMode || !tenantCoreSarlaftEnabled}
+                                  >
+                                    <option value="manual">Manual</option>
+                                    <option value="api">API</option>
+                                  </select>
+                                  <span className="text-[11px] text-slate-500">
+                                    Manual: reglas internas. API: screening externo por tenant.
+                                  </span>
+                                </label>
                               </div>
                               {tenantCoreError && <p className="mt-2 text-xs text-red-600">{tenantCoreError}</p>}
                               <div className="mt-2 flex items-center justify-end gap-2">
@@ -3245,6 +3290,8 @@ export default function SaaSBackoffice() {
                                           setTenantCoreRepresentante(profile.nombre_representante || '');
                                           setTenantCoreCelular(profile.celular || '');
                                           setTenantCoreNominaEnabled(Boolean(profile.nomina_enabled));
+                                          setTenantCoreSarlaftEnabled(Boolean(profile.sarlaft_enabled));
+                                          setTenantCoreSarlaftMode((profile.sarlaft_mode === 'api' ? 'api' : 'manual') as 'manual' | 'api');
                                         }
                                         setTenantCoreError('');
                                         setTenantCoreEditMode(false);
@@ -3311,6 +3358,21 @@ export default function SaaSBackoffice() {
                                   >
                                     {tenantProfileQuery.data.nomina_enabled ? 'Habilitada' : 'Deshabilitada'}
                                   </span>
+                                </div>
+                                <div className="space-y-1.5">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">SARLAFT</p>
+                                  <span
+                                    className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                      tenantProfileQuery.data.sarlaft_enabled
+                                        ? 'border border-emerald-200 bg-emerald-50 text-emerald-800'
+                                        : 'border border-amber-200 bg-amber-50 text-amber-800'
+                                    }`}
+                                  >
+                                    {tenantProfileQuery.data.sarlaft_enabled ? 'Habilitado' : 'Deshabilitado'}
+                                  </span>
+                                  <p className="text-[11px] text-slate-500">
+                                    Modo: {(tenantProfileQuery.data.sarlaft_mode || 'manual').toUpperCase()}
+                                  </p>
                                 </div>
                                 <div className="space-y-1">
                                   <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Sucursales totales</p>

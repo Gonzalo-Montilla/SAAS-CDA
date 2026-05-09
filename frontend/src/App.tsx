@@ -22,6 +22,7 @@ const Organizacion = lazy(() => import('./pages/Organizacion'));
 const Soporte = lazy(() => import('./pages/Soporte'));
 const Documentos = lazy(() => import('./pages/Documentos'));
 const Nomina = lazy(() => import('./pages/Nomina'));
+const Sarlaft = lazy(() => import('./pages/Sarlaft'));
 const Calidad = lazy(() => import('./pages/Calidad'));
 const CalidadEncuesta = lazy(() => import('./pages/CalidadEncuesta'));
 const Agendamiento = lazy(() => import('./pages/Agendamiento'));
@@ -47,11 +48,13 @@ function ProtectedRoute({
   requiredScope,
   requiredTenantRoles,
   requireNominaEnabled,
+  requireSarlaftEnabled,
 }: {
   children: ReactNode;
   requiredScope?: AuthScope;
   requiredTenantRoles?: TenantRole[];
   requireNominaEnabled?: boolean;
+  requireSarlaftEnabled?: boolean;
 }) {
   const { isAuthenticated, loading, authScope, user } = useAuth();
 
@@ -86,6 +89,13 @@ function ProtectedRoute({
     const nominaEnabled = Boolean((user as { tenant_nomina_enabled?: boolean } | null)?.tenant_nomina_enabled);
     if (!nominaEnabled) {
       return <Navigate to="/dashboard" replace state={{ nominaLocked: true }} />;
+    }
+  }
+
+  if (requiredScope === 'tenant' && requireSarlaftEnabled) {
+    const sarlaftEnabled = Boolean((user as { tenant_sarlaft_enabled?: boolean } | null)?.tenant_sarlaft_enabled);
+    if (!sarlaftEnabled) {
+      return <Navigate to="/dashboard" replace state={{ sarlaftLocked: true }} />;
     }
   }
 
@@ -209,6 +219,18 @@ function App() {
               element={
                 <ProtectedRoute requiredScope="tenant">
                   <Documentos />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/sarlaft"
+              element={
+                <ProtectedRoute
+                  requiredScope="tenant"
+                  requiredTenantRoles={['administrador', 'contador', 'recepcionista']}
+                  requireSarlaftEnabled
+                >
+                  <Sarlaft />
                 </ProtectedRoute>
               }
             />

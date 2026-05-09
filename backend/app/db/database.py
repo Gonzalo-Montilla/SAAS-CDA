@@ -59,6 +59,8 @@ def ensure_tenant_baseline_schema(db):
                 next_billing_at TIMESTAMP WITHOUT TIME ZONE,
                 last_payment_at TIMESTAMP WITHOUT TIME ZONE,
                 nomina_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                sarlaft_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                sarlaft_mode VARCHAR(20) NOT NULL DEFAULT 'manual',
                 created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
                 updated_at TIMESTAMP WITHOUT TIME ZONE
             )
@@ -80,6 +82,8 @@ def ensure_tenant_baseline_schema(db):
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS next_billing_at TIMESTAMP WITHOUT TIME ZONE"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS last_payment_at TIMESTAMP WITHOUT TIME ZONE"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS nomina_enabled BOOLEAN"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS sarlaft_enabled BOOLEAN"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS sarlaft_mode VARCHAR(20)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS nit_cda VARCHAR(30)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS correo_electronico VARCHAR(255)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS nombre_representante VARCHAR(200)"))
@@ -95,6 +99,8 @@ def ensure_tenant_baseline_schema(db):
     db.execute(text("UPDATE tenants SET demo_ends_at = COALESCE(demo_ends_at, NOW() + INTERVAL '15 day')"))
     db.execute(text("UPDATE tenants SET billing_cycle_days = COALESCE(billing_cycle_days, 30)"))
     db.execute(text("UPDATE tenants SET nomina_enabled = COALESCE(nomina_enabled, FALSE)"))
+    db.execute(text("UPDATE tenants SET sarlaft_enabled = COALESCE(sarlaft_enabled, FALSE)"))
+    db.execute(text("UPDATE tenants SET sarlaft_mode = COALESCE(NULLIF(sarlaft_mode, ''), 'manual')"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN nombre_comercial SET NOT NULL"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN color_primario SET NOT NULL"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN color_secundario SET NOT NULL"))
@@ -103,6 +109,8 @@ def ensure_tenant_baseline_schema(db):
     db.execute(text("ALTER TABLE tenants ALTER COLUMN sedes_totales SET NOT NULL"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN billing_cycle_days SET NOT NULL"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN nomina_enabled SET NOT NULL"))
+    db.execute(text("ALTER TABLE tenants ALTER COLUMN sarlaft_enabled SET NOT NULL"))
+    db.execute(text("ALTER TABLE tenants ALTER COLUMN sarlaft_mode SET NOT NULL"))
 
     db.execute(
         text(
@@ -130,6 +138,8 @@ def ensure_tenant_baseline_schema(db):
                 next_billing_at,
                 last_payment_at,
                 nomina_enabled,
+                sarlaft_enabled,
+                sarlaft_mode,
                 created_at
             )
             VALUES (
@@ -155,6 +165,8 @@ def ensure_tenant_baseline_schema(db):
                 NOW() + INTERVAL '15 day',
                 NULL,
                 FALSE,
+                FALSE,
+                'manual',
                 NOW()
             )
             ON CONFLICT (slug) DO NOTHING
@@ -1608,6 +1620,229 @@ def ensure_runt_metricas_schema(db):
     )
 
 
+def ensure_sarlaft_schema(db):
+    """
+    Esquema base SARLAFT (Sprint 1).
+    """
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS sarlaft_profiles (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE UNIQUE,
+                enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                mode VARCHAR(20) NOT NULL DEFAULT 'manual',
+                cash_threshold_cop NUMERIC(14,2) NOT NULL DEFAULT 0,
+                api_trigger_mode VARCHAR(20) NOT NULL DEFAULT 'risk_only',
+                api_provider VARCHAR(50),
+                api_fallback_to_manual BOOLEAN NOT NULL DEFAULT TRUE,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS sarlaft_cases (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                sede_id UUID REFERENCES sucursales(id) ON DELETE SET NULL,
+                operacion_ref VARCHAR(120) NOT NULL,
+                status VARCHAR(30) NOT NULL DEFAULT 'open',
+                risk_level VARCHAR(20) NOT NULL DEFAULT 'verde',
+                risk_score NUMERIC(5,2) NOT NULL DEFAULT 0,
+                transaction_amount_cop NUMERIC(14,2) NOT NULL DEFAULT 0,
+                cash_amount_cop NUMERIC(14,2) NOT NULL DEFAULT 0,
+                payment_method VARCHAR(30) NOT NULL DEFAULT 'otro',
+                created_by_user_id UUID NOT NULL REFERENCES usuarios(id),
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS sarlaft_case_parties (
+                id UUID PRIMARY KEY,
+                case_id UUID NOT NULL REFERENCES sarlaft_cases(id) ON DELETE CASCADE,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                role VARCHAR(30) NOT NULL,
+                doc_type VARCHAR(20) NOT NULL,
+                doc_number VARCHAR(40) NOT NULL,
+                full_name VARCHAR(220) NOT NULL,
+                phone VARCHAR(30),
+                email VARCHAR(255),
+                city VARCHAR(120),
+                address VARCHAR(300),
+                metadata_json JSONB,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS sarlaft_audit_logs (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                actor_user_id UUID REFERENCES usuarios(id),
+                entity_type VARCHAR(50) NOT NULL,
+                entity_id UUID,
+                action VARCHAR(60) NOT NULL,
+                before_json JSONB,
+                after_json JSONB,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS sarlaft_manual_checks (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                created_by_user_id UUID NOT NULL REFERENCES usuarios(id),
+                subject_type VARCHAR(20) NOT NULL DEFAULT 'natural',
+                full_name VARCHAR(220) NOT NULL,
+                doc_type VARCHAR(20),
+                doc_number VARCHAR(60),
+                email VARCHAR(255),
+                phone VARCHAR(30),
+                economic_activity VARCHAR(200),
+                legal_representative VARCHAR(220),
+                dataset VARCHAR(60) NOT NULL DEFAULT 'sanctions',
+                algorithm VARCHAR(40) NOT NULL DEFAULT 'best',
+                risk_level VARCHAR(20) NOT NULL DEFAULT 'verde',
+                risk_score NUMERIC(5,2) NOT NULL DEFAULT 0,
+                alert BOOLEAN NOT NULL DEFAULT FALSE,
+                hits_count INTEGER NOT NULL DEFAULT 0,
+                hits_json JSONB,
+                notes TEXT,
+                certificate_code VARCHAR(120),
+                certificate_pdf_relpath VARCHAR(512),
+                certificate_pdf_sha256 VARCHAR(64),
+                certificate_issued_at TIMESTAMP WITHOUT TIME ZONE,
+                certificate_issued_by_user_id UUID REFERENCES usuarios(id),
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    )
+    db.execute(text("ALTER TABLE sarlaft_manual_checks ADD COLUMN IF NOT EXISTS economic_activity VARCHAR(200)"))
+    db.execute(text("ALTER TABLE sarlaft_manual_checks ADD COLUMN IF NOT EXISTS legal_representative VARCHAR(220)"))
+    db.execute(text("ALTER TABLE sarlaft_manual_checks ADD COLUMN IF NOT EXISTS email VARCHAR(255)"))
+    db.execute(text("ALTER TABLE sarlaft_manual_checks ADD COLUMN IF NOT EXISTS phone VARCHAR(30)"))
+    db.execute(text("ALTER TABLE sarlaft_manual_checks ADD COLUMN IF NOT EXISTS certificate_code VARCHAR(120)"))
+    db.execute(text("ALTER TABLE sarlaft_manual_checks ADD COLUMN IF NOT EXISTS certificate_pdf_relpath VARCHAR(512)"))
+    db.execute(text("ALTER TABLE sarlaft_manual_checks ADD COLUMN IF NOT EXISTS certificate_pdf_sha256 VARCHAR(64)"))
+    db.execute(text("ALTER TABLE sarlaft_manual_checks ADD COLUMN IF NOT EXISTS certificate_issued_at TIMESTAMP WITHOUT TIME ZONE"))
+    db.execute(
+        text(
+            """
+            ALTER TABLE sarlaft_manual_checks
+            ADD COLUMN IF NOT EXISTS certificate_issued_by_user_id UUID REFERENCES usuarios(id)
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            UPDATE sarlaft_manual_checks
+            SET subject_type = CASE
+                WHEN subject_type = 'persona' THEN 'natural'
+                WHEN subject_type = 'proveedor' THEN 'juridica'
+                ELSE subject_type
+            END
+            """
+        )
+    )
+    db.execute(text("ALTER TABLE sarlaft_manual_checks ALTER COLUMN subject_type SET DEFAULT 'natural'"))
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_sarlaft_cases_tenant_created ON sarlaft_cases(tenant_id, created_at DESC)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_sarlaft_parties_doc ON sarlaft_case_parties(tenant_id, doc_number)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_sarlaft_audit_entity ON sarlaft_audit_logs(tenant_id, entity_type, entity_id, created_at DESC)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_sarlaft_manual_checks_tenant_created ON sarlaft_manual_checks(tenant_id, created_at DESC)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_sarlaft_manual_checks_doc ON sarlaft_manual_checks(tenant_id, doc_number)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_sarlaft_manual_checks_cert_code ON sarlaft_manual_checks(certificate_code) WHERE certificate_code IS NOT NULL"
+        )
+    )
+    import uuid as uuid_lib
+
+    tenant_rows = db.execute(
+        text(
+            """
+            SELECT id, COALESCE(sarlaft_enabled, FALSE) AS sarlaft_enabled, COALESCE(NULLIF(sarlaft_mode, ''), 'manual') AS sarlaft_mode
+            FROM tenants
+            """
+        )
+    ).fetchall()
+    for row in tenant_rows:
+        exists = db.execute(
+            text("SELECT 1 FROM sarlaft_profiles WHERE tenant_id = :tid"),
+            {"tid": row[0]},
+        ).scalar()
+        if exists:
+            continue
+        db.execute(
+            text(
+                """
+                INSERT INTO sarlaft_profiles (
+                    id,
+                    tenant_id,
+                    enabled,
+                    mode,
+                    cash_threshold_cop,
+                    api_trigger_mode,
+                    api_fallback_to_manual,
+                    created_at
+                ) VALUES (
+                    :id,
+                    :tenant_id,
+                    :enabled,
+                    :mode,
+                    0,
+                    'risk_only',
+                    TRUE,
+                    NOW()
+                )
+                """
+            ),
+            {
+                "id": str(uuid_lib.uuid4()),
+                "tenant_id": row[0],
+                "enabled": bool(row[1]),
+                "mode": row[2] or "manual",
+            },
+        )
+
+
 def ensure_nomina_schema(db):
     """
     Esquema inicial de nómina multitenant (MVP base).
@@ -2038,6 +2273,11 @@ def init_db():
     from app.models.proveedor_catalogo import ProveedorCatalogo  # noqa: F401 — register model
     from app.models.dse_retencion_motor import DseRetencionTasaConcepto, DseUvtPorAnio  # noqa: F401
     from app.models.runt_metrica import RuntConsultaMetrica  # noqa: F401
+    from app.models.sarlaft_profile import SarlaftProfile  # noqa: F401
+    from app.models.sarlaft_case import SarlaftCase  # noqa: F401
+    from app.models.sarlaft_case_party import SarlaftCaseParty  # noqa: F401
+    from app.models.sarlaft_audit_log import SarlaftAuditLog  # noqa: F401
+    from app.models.sarlaft_manual_check import SarlaftManualCheck  # noqa: F401
     nomina_available = True
     try:
         from app.models.nomina import (
@@ -2086,6 +2326,7 @@ def init_db():
         ensure_quality_survey_invites_sucursal_schema(db)
         ensure_tenant_documentos_schema(db)
         ensure_runt_metricas_schema(db)
+        ensure_sarlaft_schema(db)
         if nomina_available:
             ensure_nomina_schema(db)
         db.commit()

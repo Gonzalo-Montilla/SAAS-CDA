@@ -63,6 +63,8 @@ export interface Usuario {
   tenant_billing?: TenantBillingInfo | null;
   /** Switch por tenant para habilitar o bloquear Nómina. */
   tenant_nomina_enabled?: boolean;
+  /** Switch por tenant para habilitar o bloquear SARLAFT. */
+  tenant_sarlaft_enabled?: boolean;
 }
 
 export interface SaaSUser {
@@ -99,7 +101,92 @@ export interface SaaSTenantSummary {
   last_payment_at?: string | null;
   activo: boolean;
   nomina_enabled: boolean;
+  sarlaft_enabled: boolean;
+  sarlaft_mode: 'manual' | 'api' | string;
   login_url: string;
+}
+
+export interface SarlaftProfile {
+  enabled: boolean;
+  mode: 'manual' | 'api';
+  cash_threshold_cop: number;
+  api_trigger_mode: 'all' | 'risk_only' | 'on_demand';
+  api_provider?: string | null;
+  api_fallback_to_manual: boolean;
+}
+
+export interface SarlaftCasePartyInput {
+  role: 'cliente' | 'propietario' | 'pagador' | 'apoderado';
+  doc_type: string;
+  doc_number: string;
+  full_name: string;
+  phone?: string | null;
+  email?: string | null;
+  city?: string | null;
+  address?: string | null;
+  metadata_json?: Record<string, unknown> | null;
+}
+
+export interface SarlaftCase {
+  id: string;
+  tenant_id: string;
+  sede_id?: string | null;
+  operacion_ref: string;
+  status: string;
+  risk_level: string;
+  risk_score: number;
+  transaction_amount_cop: number;
+  cash_amount_cop: number;
+  payment_method: string;
+  created_by_user_id: string;
+  created_at: string;
+  updated_at?: string | null;
+  parties: Array<{
+    id: string;
+    role: string;
+    doc_type: string;
+    doc_number: string;
+    full_name: string;
+    phone?: string | null;
+    email?: string | null;
+    city?: string | null;
+    address?: string | null;
+    metadata_json?: Record<string, unknown> | null;
+  }>;
+}
+
+export interface SarlaftCaseSummary {
+  id: string;
+  operacion_ref: string;
+  status: string;
+  risk_level: 'verde' | 'amarillo' | 'rojo' | string;
+  risk_score: number;
+  payment_method: string;
+  transaction_amount_cop: number;
+  cash_amount_cop: number;
+  created_at: string;
+}
+
+export interface SarlaftManualCheck {
+  id: string;
+  subject_type: 'natural' | 'juridica' | string;
+  full_name: string;
+  doc_type?: string | null;
+  doc_number?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  economic_activity?: string | null;
+  legal_representative?: string | null;
+  dataset: string;
+  algorithm: string;
+  risk_level: 'verde' | 'amarillo' | 'rojo' | string;
+  risk_score: number;
+  alert: boolean;
+  hits_count: number;
+  notes?: string | null;
+  certificate_code?: string | null;
+  certificate_issued_at?: string | null;
+  created_at: string;
 }
 
 export interface SaaSTenantUserSummary {

@@ -85,6 +85,10 @@ class UsuarioResponse(BaseModel):
         default=False,
         description="Indica si el módulo de nómina está habilitado para el tenant.",
     )
+    tenant_sarlaft_enabled: bool = Field(
+        default=False,
+        description="Indica si el módulo SARLAFT está habilitado para el tenant.",
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
