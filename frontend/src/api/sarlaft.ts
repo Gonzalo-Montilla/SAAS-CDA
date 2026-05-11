@@ -3,6 +3,7 @@ import type {
   SarlaftCase,
   SarlaftCasePartyInput,
   SarlaftCaseSummary,
+  SarlaftInternalAlert,
   SarlaftManualCheck,
   SarlaftProfile,
 } from '../types';
@@ -19,7 +20,7 @@ export const sarlaftApi = {
   },
 
   createCase: async (payload: {
-    operacion_ref: string;
+    operacion_ref?: string | null;
     sede_id?: string | null;
     transaction_amount_cop: number;
     cash_amount_cop: number;
@@ -106,6 +107,23 @@ export const sarlaftApi = {
     limit?: number;
   }): Promise<SarlaftManualCheck[]> => {
     const response = await apiClient.get<SarlaftManualCheck[]>('/sarlaft/manual-checks', { params });
+    return response.data;
+  },
+
+  listInternalAlerts: async (params?: {
+    alert_level?: 'critica' | 'alta' | 'media' | 'baja';
+    case_id?: string;
+    limit?: number;
+  }): Promise<SarlaftInternalAlert[]> => {
+    const response = await apiClient.get<SarlaftInternalAlert[]>('/sarlaft/alerts/internal', { params });
+    return response.data;
+  },
+
+  decideInternalAlert: async (
+    alertId: string,
+    payload: { decision: 'justificada' | 'sospechosa'; notes?: string | null }
+  ): Promise<SarlaftInternalAlert> => {
+    const response = await apiClient.post<SarlaftInternalAlert>(`/sarlaft/alerts/internal/${alertId}/decision`, payload);
     return response.data;
   },
 

@@ -48,7 +48,7 @@ class SarlaftCasePartyInput(BaseModel):
 
 
 class SarlaftCaseCreate(BaseModel):
-    operacion_ref: str = Field(min_length=1, max_length=120)
+    operacion_ref: str | None = Field(default=None, max_length=120)
     sede_id: UUID | None = None
     transaction_amount_cop: Decimal = Field(ge=0)
     cash_amount_cop: Decimal = Field(ge=0)
@@ -90,6 +90,7 @@ class SarlaftCaseResponse(BaseModel):
     id: UUID
     tenant_id: UUID
     sede_id: UUID | None = None
+    sede_nombre: str | None = None
     operacion_ref: str
     status: str
     risk_level: str
@@ -97,6 +98,12 @@ class SarlaftCaseResponse(BaseModel):
     transaction_amount_cop: Decimal
     cash_amount_cop: Decimal
     payment_method: str
+    vehiculo_id: str | None = None
+    placa: str | None = None
+    tipo_vehiculo: str | None = None
+    cliente_doc_type: str | None = None
+    cliente_doc_number: str | None = None
+    cliente_full_name: str | None = None
     created_by_user_id: UUID
     created_at: datetime
     updated_at: datetime | None = None
@@ -154,6 +161,11 @@ class SarlaftCaseSummaryResponse(BaseModel):
     payment_method: str
     transaction_amount_cop: Decimal
     cash_amount_cop: Decimal
+    placa: str | None = None
+    tipo_vehiculo: str | None = None
+    cliente_doc_type: str | None = None
+    cliente_doc_number: str | None = None
+    cliente_full_name: str | None = None
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
@@ -234,3 +246,27 @@ class SarlaftCertificateVerificationResponse(BaseModel):
     risk_score: Decimal | None = None
     result_label: str | None = None
     detail: str | None = None
+
+
+class SarlaftInternalAlertResponse(BaseModel):
+    id: UUID
+    case_id: UUID | None = None
+    operacion_ref: str | None = None
+    alert_level: str
+    operation_classification: str | None = None
+    rule_code: str | None = None
+    reason: str | None = None
+    metrics: dict[str, Any] | None = None
+    risk_level: str | None = None
+    payment_method: str | None = None
+    transaction_amount_cop: Decimal | None = None
+    cash_amount_cop: Decimal | None = None
+    decision_status: str | None = None
+    decision_notes: str | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime
+
+
+class SarlaftInternalAlertDecisionRequest(BaseModel):
+    decision: Literal["justificada", "sospechosa"]
+    notes: str | None = Field(default=None, max_length=2000)

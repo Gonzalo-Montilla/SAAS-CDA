@@ -227,7 +227,7 @@ function App() {
               element={
                 <ProtectedRoute
                   requiredScope="tenant"
-                  requiredTenantRoles={['administrador', 'contador', 'recepcionista']}
+                  requiredTenantRoles={['administrador']}
                   requireSarlaftEnabled
                 >
                   <Sarlaft />

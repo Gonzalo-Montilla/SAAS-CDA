@@ -40,6 +40,12 @@ from app.integrations.factus_emit import (
 from app.models.tarifa import Tarifa, ComisionSOAT
 from app.models.caja import Caja, MovimientoCaja, TipoMovimiento, EstadoCaja
 from app.models.sucursal import Sucursal
+from app.models.sarlaft_profile import SarlaftProfile
+from app.models.sarlaft_case import SarlaftCase
+from app.models.sarlaft_case_party import SarlaftCaseParty
+from app.integrations.opensanctions import OpenSanctionsError, open_sanctions_match
+from app.services.sarlaft_audit import log_sarlaft_event
+from app.services.sarlaft_internal_alert_engine import evaluate_unusual_operation_rules
 from app.utils.email import (
     enviar_email,
     enviar_email_con_adjuntos,
@@ -502,6 +508,279 @@ def _filtro_vehiculo_sede(q, tenant_id, sucursal_id: UUID):
         VehiculoProceso.tenant_id == tenant_id,
         VehiculoProceso.sucursal_id == sucursal_id,
     )
+
+
+def _map_sarlaft_hits_count(raw_results: list[dict], threshold: float) -> tuple[int, float]:
+    max_score = 0.0
+    hit_count = 0
+    for item in raw_results:
+        if not isinstance(item, dict):
+            continue
+        score = item.get("score")
+        score_val = float(score) if score is not None else 0.0
+        if score_val > max_score:
+            max_score = score_val
+        if score_val >= threshold:
+            hit_count += 1
+    return hit_count, max_score
+
+
+def _classify_sarlaft_recepcion(dataset: str, alert: bool) -> tuple[str, str]:
+    ds = (dataset or "").strip().lower()
+    if ds == "sanctions":
+        return ("rojo" if alert else "amarillo", "in_review" if alert else "open")
+    return ("amarillo" if alert else "verde", "open")
+
+
+def _upsert_sarlaft_en_cobro(
+    *,
+    db: Session,
+    current_user: Usuario,
+    tenant: Tenant,
+    active_sucursal_id: UUID,
+    vehiculo: VehiculoProceso,
+    payment_method: str,
+    transaction_amount_cop: Decimal,
+    cash_amount_cop: Decimal,
+) -> None:
+    # Solo opera cuando el tenant tiene SARLAFT habilitado.
+    if not bool(getattr(tenant, "sarlaft_enabled", False)):
+        return
+
+    profile = (
+        db.query(SarlaftProfile)
+        .filter(SarlaftProfile.tenant_id == current_user.tenant_id)
+        .first()
+    )
+    if not profile:
+        # Fallback defensivo: si falta perfil SARLAFT, lo creamos para no perder trazabilidad en cobro.
+        profile = SarlaftProfile(
+            tenant_id=current_user.tenant_id,
+            enabled=True,
+            mode=(getattr(tenant, "sarlaft_mode", None) or "manual"),
+            cash_threshold_cop=Decimal("0"),
+            api_trigger_mode="risk_only",
+            api_fallback_to_manual=True,
+        )
+        db.add(profile)
+        db.flush()
+    operacion_ref = f"VEH-{vehiculo.id}"
+    existing_case = (
+        db.query(SarlaftCase)
+        .filter(
+            SarlaftCase.tenant_id == current_user.tenant_id,
+            SarlaftCase.operacion_ref == operacion_ref,
+        )
+        .first()
+    )
+    if existing_case:
+        case = existing_case
+        case.sede_id = active_sucursal_id
+        case.transaction_amount_cop = Decimal(str(transaction_amount_cop or 0))
+        case.cash_amount_cop = Decimal(str(cash_amount_cop or 0))
+        case.payment_method = (payment_method or "otro").strip().lower() or "otro"
+    else:
+        case = SarlaftCase(
+            tenant_id=current_user.tenant_id,
+            sede_id=active_sucursal_id,
+            operacion_ref=operacion_ref,
+            status="open",
+            risk_level="verde",
+            risk_score=Decimal("0"),
+            transaction_amount_cop=Decimal(str(transaction_amount_cop or 0)),
+            cash_amount_cop=Decimal(str(cash_amount_cop or 0)),
+            payment_method=(payment_method or "otro").strip().lower() or "otro",
+            created_by_user_id=current_user.id,
+        )
+        db.add(case)
+        db.flush()
+
+    party = (
+        db.query(SarlaftCaseParty)
+        .filter(
+            SarlaftCaseParty.case_id == case.id,
+            SarlaftCaseParty.tenant_id == current_user.tenant_id,
+            SarlaftCaseParty.role == "cliente",
+        )
+        .first()
+    )
+    if not party:
+        party = SarlaftCaseParty(
+            case_id=case.id,
+            tenant_id=current_user.tenant_id,
+            role="cliente",
+            doc_type=(vehiculo.cliente_tipo_documento or "").strip() or "CC",
+            doc_number=(vehiculo.cliente_documento or "").strip() or "N/D",
+            full_name=(vehiculo.cliente_nombre or "").strip() or "N/D",
+            phone=(vehiculo.cliente_telefono or "").strip() or None,
+            email=(vehiculo.cliente_email or "").strip().lower() or None,
+            city=None,
+            address=(vehiculo.cliente_direccion or "").strip() or None,
+            metadata_json={
+                "source": "caja_cobro",
+                "vehiculo_id": str(vehiculo.id),
+                "placa": vehiculo.placa,
+                "tipo_vehiculo": vehiculo.tipo_vehiculo,
+            },
+        )
+        db.add(party)
+    else:
+        party.doc_type = (vehiculo.cliente_tipo_documento or "").strip() or party.doc_type
+        party.doc_number = (vehiculo.cliente_documento or "").strip() or party.doc_number
+        party.full_name = (vehiculo.cliente_nombre or "").strip() or party.full_name
+        party.phone = (vehiculo.cliente_telefono or "").strip() or party.phone
+        party.email = (vehiculo.cliente_email or "").strip().lower() or party.email
+        party.address = (vehiculo.cliente_direccion or "").strip() or party.address
+        metadata = party.metadata_json if isinstance(party.metadata_json, dict) else {}
+        metadata["source"] = "caja_cobro"
+        metadata["vehiculo_id"] = str(vehiculo.id)
+        metadata["placa"] = vehiculo.placa
+        metadata["tipo_vehiculo"] = vehiculo.tipo_vehiculo
+        party.metadata_json = metadata
+
+    log_sarlaft_event(
+        db,
+        tenant_id=current_user.tenant_id,
+        actor_user=current_user,
+        action="case_upsert_from_cobro",
+        entity_type="case",
+        entity_id=case.id,
+        after_json={
+            "operacion_ref": operacion_ref,
+            "vehiculo_id": str(vehiculo.id),
+            "placa": vehiculo.placa,
+            "cliente_documento": vehiculo.cliente_documento,
+            "payment_method": case.payment_method,
+            "transaction_amount_cop": str(case.transaction_amount_cop),
+            "cash_amount_cop": str(case.cash_amount_cop),
+        },
+    )
+
+    # Si el perfil está deshabilitado, conservamos trazabilidad (caso/parte/log) pero no ejecutamos screening.
+    if not bool(profile.enabled):
+        return
+
+    # Si no está en modo API, dejamos el caso para revisión manual posterior.
+    if (profile.mode or "").strip().lower() != "api":
+        return
+
+    trigger_mode = (profile.api_trigger_mode or "risk_only").strip().lower()
+    threshold_cash = Decimal(str(profile.cash_threshold_cop or 0))
+    method_is_cash_risky = case.payment_method in {"efectivo", "mixto"}
+    should_screen = (
+        trigger_mode == "all"
+        or (trigger_mode == "risk_only" and (case.cash_amount_cop >= threshold_cash or method_is_cash_risky))
+    )
+    if not should_screen:
+        return
+
+    dataset = (settings.OPENSANCTIONS_MATCH_DATASET or "default").strip() or "default"
+    threshold = float(settings.OPENSANCTIONS_ALERT_SCORE_THRESHOLD or 0.75)
+    try:
+        screening = open_sanctions_match(
+            schema="Person",
+            full_name=party.full_name,
+            id_number=party.doc_number,
+            dataset=dataset,
+            algorithm=(settings.OPENSANCTIONS_MATCH_ALGORITHM or "best"),
+            limit=int(settings.OPENSANCTIONS_MATCH_LIMIT or 5),
+        )
+        raw_results = screening.get("results") if isinstance(screening, dict) else []
+        raw_results = raw_results if isinstance(raw_results, list) else []
+        hits_count, max_score = _map_sarlaft_hits_count(raw_results, threshold)
+        alert = max_score >= threshold
+        risk_level, status_case = _classify_sarlaft_recepcion(dataset, alert)
+        case.risk_level = risk_level
+        case.risk_score = Decimal(str(round(max_score * 100, 2)))
+        case.status = status_case
+
+        log_sarlaft_event(
+            db,
+            tenant_id=current_user.tenant_id,
+            actor_user=current_user,
+            action="auto_screening_from_recepcion",
+            entity_type="case",
+            entity_id=case.id,
+            after_json={
+                "provider": "opensanctions",
+                "dataset": dataset,
+                "hits_count": len(raw_results),
+                "hits_alert_count": hits_count,
+                "risk_level": risk_level,
+                "risk_score_pct": float(case.risk_score),
+                "alert_threshold": threshold,
+            },
+        )
+        # Motor interno de alertas SARLAFT (trazable en auditoría).
+        alert_level = None
+        if case.risk_level == "rojo":
+            alert_level = "critica"
+        elif case.risk_level == "amarillo" or method_is_cash_risky:
+            alert_level = "media"
+        if alert_level:
+            log_sarlaft_event(
+                db,
+                tenant_id=current_user.tenant_id,
+                actor_user=current_user,
+                action="internal_alert_generated",
+                entity_type="alert",
+                entity_id=case.id,
+                after_json={
+                    "alert_level": alert_level,
+                    "reason": (
+                        "riesgo_rojo"
+                        if case.risk_level == "rojo"
+                        else "riesgo_amarillo_o_metodo_pago_riesgoso"
+                    ),
+                    "payment_method": case.payment_method,
+                    "transaction_amount_cop": str(case.transaction_amount_cop),
+                    "cash_amount_cop": str(case.cash_amount_cop),
+                },
+            )
+
+        # Motor robusto: detección de operación inusual por reglas de frecuencia/efectivo.
+        rule_alerts = evaluate_unusual_operation_rules(
+            db,
+            tenant_id=current_user.tenant_id,
+            cliente_doc_number=party.doc_number or "",
+        )
+        for ra in rule_alerts:
+            log_sarlaft_event(
+                db,
+                tenant_id=current_user.tenant_id,
+                actor_user=current_user,
+                action="internal_alert_generated",
+                entity_type="alert",
+                entity_id=case.id,
+                after_json={
+                    "alert_level": str(ra.get("alert_level") or "media"),
+                    "operation_classification": str(ra.get("operation_classification") or "operacion_inusual"),
+                    "rule_code": str(ra.get("rule_code") or "N/A"),
+                    "reason": str(ra.get("reason") or "motor_interno"),
+                    "window_days": int(ra.get("window_days") or 0),
+                    "metrics": ra.get("metrics") if isinstance(ra.get("metrics"), dict) else {},
+                    "payment_method": case.payment_method,
+                    "transaction_amount_cop": str(case.transaction_amount_cop),
+                    "cash_amount_cop": str(case.cash_amount_cop),
+                    "cliente_doc_number": party.doc_number,
+                },
+            )
+    except OpenSanctionsError as exc:
+        case.status = "open"
+        log_sarlaft_event(
+            db,
+            tenant_id=current_user.tenant_id,
+            actor_user=current_user,
+            action="auto_screening_from_cobro_failed",
+            entity_type="case",
+            entity_id=case.id,
+            after_json={"error": str(exc)},
+        )
+        if not bool(profile.api_fallback_to_manual):
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"No fue posible ejecutar screening SARLAFT automático en recepción: {exc}",
+            ) from exc
 
 
 VALID_PAYMENT_METHODS = {
@@ -1377,6 +1656,23 @@ def cobrar_vehiculo(
         
         db.commit()
         db.refresh(vehiculo)
+
+        tenant_row = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+        if tenant_row:
+            cash_amount_cop = Decimal(str(vehiculo.total_cobrado or 0))
+            if metodo_pago not in {"efectivo", "mixto"}:
+                cash_amount_cop = Decimal("0")
+            _upsert_sarlaft_en_cobro(
+                db=db,
+                current_user=current_user,
+                tenant=tenant_row,
+                active_sucursal_id=active_sucursal_id,
+                vehiculo=vehiculo,
+                payment_method=metodo_pago,
+                transaction_amount_cop=Decimal(str(vehiculo.total_cobrado or 0)),
+                cash_amount_cop=cash_amount_cop,
+            )
+            db.commit()
 
         # Programar encuesta de calidad (envío diferido) sin bloquear el flujo de cobro.
         try:

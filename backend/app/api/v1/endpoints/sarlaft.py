@@ -6,7 +6,7 @@ from decimal import Decimal
 import hashlib
 import html
 from urllib.parse import quote
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse, Response
@@ -17,12 +17,16 @@ from app.core.config import settings
 from app.integrations.opensanctions import OpenSanctionsError, open_sanctions_match
 from app.models.sarlaft_case import SarlaftCase
 from app.models.sarlaft_case_party import SarlaftCaseParty
+from app.models.sarlaft_audit_log import SarlaftAuditLog
 from app.models.sarlaft_manual_check import SarlaftManualCheck
 from app.models.sarlaft_profile import SarlaftProfile
+from app.models.sucursal import Sucursal
 from app.models.tenant import Tenant
 from app.models.usuario import RolEnum, Usuario
 from app.schemas.sarlaft import (
     SarlaftCertificateVerificationResponse,
+    SarlaftInternalAlertDecisionRequest,
+    SarlaftInternalAlertResponse,
     SarlaftCaseCreate,
     SarlaftCaseResponse,
     SarlaftCaseSummaryResponse,
@@ -61,7 +65,9 @@ def _ensure_profile(db: Session, tenant_id: UUID) -> SarlaftProfile:
 
 
 def _assert_sarlaft_editor(current_user: Usuario) -> None:
-    if current_user.rol not in [RolEnum.ADMINISTRADOR, RolEnum.CONTADOR]:
+    # Nota: por política temporal, SARLAFT queda restringido a ADMINISTRADOR
+    # hasta crear el rol OFICIAL_CUMPLIMIENTO.
+    if current_user.rol != RolEnum.ADMINISTRADOR:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para configurar SARLAFT.",
@@ -258,6 +264,51 @@ def _run_opensanctions_screening(
     return screening, hits, threshold, risk_level, recommended_action, alert
 
 
+def _build_case_response(
+    db: Session,
+    case: SarlaftCase,
+    parties: list[SarlaftCaseParty],
+) -> SarlaftCaseResponse:
+    cliente = next((p for p in parties if (p.role or "").strip().lower() == "cliente"), None)
+    if not cliente and parties:
+        cliente = parties[0]
+    meta = cliente.metadata_json if (cliente and isinstance(cliente.metadata_json, dict)) else {}
+    sede_nombre = None
+    if case.sede_id:
+        sede = (
+            db.query(Sucursal)
+            .filter(Sucursal.id == case.sede_id, Sucursal.tenant_id == case.tenant_id)
+            .first()
+        )
+        if sede:
+            sede_nombre = sede.nombre
+    return SarlaftCaseResponse(
+        **{
+            "id": case.id,
+            "tenant_id": case.tenant_id,
+            "sede_id": case.sede_id,
+            "sede_nombre": sede_nombre,
+            "operacion_ref": case.operacion_ref,
+            "status": case.status,
+            "risk_level": case.risk_level,
+            "risk_score": case.risk_score,
+            "transaction_amount_cop": case.transaction_amount_cop,
+            "cash_amount_cop": case.cash_amount_cop,
+            "payment_method": case.payment_method,
+            "vehiculo_id": str(meta.get("vehiculo_id") or "").strip() or None,
+            "placa": str(meta.get("placa") or "").strip() or None,
+            "tipo_vehiculo": str(meta.get("tipo_vehiculo") or "").strip() or None,
+            "cliente_doc_type": cliente.doc_type if cliente else None,
+            "cliente_doc_number": cliente.doc_number if cliente else None,
+            "cliente_full_name": cliente.full_name if cliente else None,
+            "created_by_user_id": case.created_by_user_id,
+            "created_at": case.created_at,
+            "updated_at": case.updated_at,
+            "parties": [SarlaftCasePartyResponse.model_validate(p) for p in parties],
+        }
+    )
+
+
 @router.get("/profile", response_model=SarlaftProfileResponse)
 def get_sarlaft_profile(
     db: Session = Depends(get_db),
@@ -327,7 +378,7 @@ def screening_opensanctions(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in [RolEnum.ADMINISTRADOR, RolEnum.CONTADOR, RolEnum.RECEPCIONISTA]:
+    if current_user.rol != RolEnum.ADMINISTRADOR:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para ejecutar screening SARLAFT.",
@@ -414,7 +465,7 @@ def create_sarlaft_manual_check(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in [RolEnum.ADMINISTRADOR, RolEnum.CONTADOR, RolEnum.RECEPCIONISTA]:
+    if current_user.rol != RolEnum.ADMINISTRADOR:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para registrar consultas manuales SARLAFT.",
@@ -505,7 +556,7 @@ def download_sarlaft_manual_check_certificate(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in [RolEnum.ADMINISTRADOR, RolEnum.CONTADOR, RolEnum.RECEPCIONISTA]:
+    if current_user.rol != RolEnum.ADMINISTRADOR:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para emitir certificados SARLAFT.",
@@ -668,7 +719,7 @@ def list_sarlaft_manual_checks(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in [RolEnum.ADMINISTRADOR, RolEnum.CONTADOR, RolEnum.RECEPCIONISTA]:
+    if current_user.rol != RolEnum.ADMINISTRADOR:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para listar consultas manuales SARLAFT.",
@@ -768,7 +819,7 @@ def list_sarlaft_cases(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in [RolEnum.ADMINISTRADOR, RolEnum.CONTADOR, RolEnum.RECEPCIONISTA]:
+    if current_user.rol != RolEnum.ADMINISTRADOR:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para listar casos SARLAFT.",
@@ -783,7 +834,224 @@ def list_sarlaft_cases(
     if status_filter:
         q = q.filter(SarlaftCase.status == status_filter.strip().lower())
     rows = q.limit(limit).all()
-    return [SarlaftCaseSummaryResponse.model_validate(r) for r in rows]
+    case_ids = [r.id for r in rows]
+    parties = []
+    if case_ids:
+        parties = (
+            db.query(SarlaftCaseParty)
+            .filter(
+                SarlaftCaseParty.tenant_id == current_user.tenant_id,
+                SarlaftCaseParty.case_id.in_(case_ids),
+                SarlaftCaseParty.role == "cliente",
+            )
+            .all()
+        )
+    party_by_case_id: dict[UUID, SarlaftCaseParty] = {}
+    for p in parties:
+        # En caso de duplicidad histórica, nos quedamos con la primera coincidencia.
+        if p.case_id not in party_by_case_id:
+            party_by_case_id[p.case_id] = p
+
+    out: list[SarlaftCaseSummaryResponse] = []
+    for r in rows:
+        party = party_by_case_id.get(r.id)
+        meta = party.metadata_json if (party and isinstance(party.metadata_json, dict)) else {}
+        out.append(
+            SarlaftCaseSummaryResponse(
+                id=r.id,
+                operacion_ref=r.operacion_ref,
+                status=r.status,
+                risk_level=r.risk_level,
+                risk_score=r.risk_score,
+                payment_method=r.payment_method,
+                transaction_amount_cop=r.transaction_amount_cop,
+                cash_amount_cop=r.cash_amount_cop,
+                placa=str(meta.get("placa") or "").strip() or None,
+                tipo_vehiculo=str(meta.get("tipo_vehiculo") or "").strip() or None,
+                cliente_doc_type=party.doc_type if party else None,
+                cliente_doc_number=party.doc_number if party else None,
+                cliente_full_name=party.full_name if party else None,
+                created_at=r.created_at,
+            )
+        )
+    return out
+
+
+@router.get("/alerts/internal", response_model=list[SarlaftInternalAlertResponse])
+def list_sarlaft_internal_alerts(
+    alert_level: str | None = Query(default=None),
+    case_id: UUID | None = Query(default=None),
+    limit: int = Query(default=50, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    if current_user.rol != RolEnum.ADMINISTRADOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para listar alertas internas SARLAFT.",
+        )
+
+    q = (
+        db.query(SarlaftAuditLog)
+        .filter(
+            SarlaftAuditLog.tenant_id == current_user.tenant_id,
+            SarlaftAuditLog.action == "internal_alert_generated",
+        )
+        .order_by(SarlaftAuditLog.created_at.desc())
+    )
+    if case_id:
+        q = q.filter(SarlaftAuditLog.entity_id == case_id)
+    rows = q.limit(limit).all()
+    alert_ids = [r.id for r in rows]
+    reviews = []
+    if alert_ids:
+        reviews = (
+            db.query(SarlaftAuditLog)
+            .filter(
+                SarlaftAuditLog.tenant_id == current_user.tenant_id,
+                SarlaftAuditLog.action == "internal_alert_reviewed",
+                SarlaftAuditLog.entity_type == "internal_alert",
+                SarlaftAuditLog.entity_id.in_(alert_ids),
+            )
+            .order_by(SarlaftAuditLog.created_at.desc())
+            .all()
+        )
+    review_by_alert_id: dict[UUID, SarlaftAuditLog] = {}
+    for rev in reviews:
+        if rev.entity_id and rev.entity_id not in review_by_alert_id:
+            review_by_alert_id[rev.entity_id] = rev
+
+    normalized_filter = (alert_level or "").strip().lower()
+    if normalized_filter == "alta":
+        normalized_filter = "critica"
+
+    items: list[SarlaftInternalAlertResponse] = []
+    for row in rows:
+        meta = row.after_json if isinstance(row.after_json, dict) else {}
+        lv = str(meta.get("alert_level") or "").strip().lower()
+        if normalized_filter and lv != normalized_filter:
+            continue
+
+        case = None
+        if row.entity_id:
+            case = (
+                db.query(SarlaftCase)
+                .filter(
+                    SarlaftCase.id == row.entity_id,
+                    SarlaftCase.tenant_id == current_user.tenant_id,
+                )
+                .first()
+            )
+        review = review_by_alert_id.get(row.id)
+        review_meta = review.after_json if (review and isinstance(review.after_json, dict)) else {}
+        decision_status = str(review_meta.get("decision") or "").strip().lower() or None
+        operation_classification = str(meta.get("operation_classification") or "").strip() or None
+        if decision_status == "sospechosa":
+            operation_classification = "operacion_sospechosa"
+        items.append(
+            SarlaftInternalAlertResponse(
+                id=row.id,
+                case_id=row.entity_id,
+                operacion_ref=case.operacion_ref if case else None,
+                alert_level=lv or "media",
+                operation_classification=operation_classification,
+                rule_code=str(meta.get("rule_code") or "").strip() or None,
+                reason=str(meta.get("reason") or "").strip() or None,
+                metrics=meta.get("metrics") if isinstance(meta.get("metrics"), dict) else None,
+                risk_level=case.risk_level if case else None,
+                payment_method=str(meta.get("payment_method") or "").strip() or (case.payment_method if case else None),
+                transaction_amount_cop=Decimal(str(meta.get("transaction_amount_cop"))) if meta.get("transaction_amount_cop") is not None else (case.transaction_amount_cop if case else None),
+                cash_amount_cop=Decimal(str(meta.get("cash_amount_cop"))) if meta.get("cash_amount_cop") is not None else (case.cash_amount_cop if case else None),
+                decision_status=decision_status,
+                decision_notes=str(review_meta.get("notes") or "").strip() or None,
+                reviewed_at=review.created_at if review else None,
+                created_at=row.created_at,
+            )
+        )
+    return items
+
+
+@router.post("/alerts/internal/{alert_id}/decision", response_model=SarlaftInternalAlertResponse)
+def decide_sarlaft_internal_alert(
+    alert_id: UUID,
+    payload: SarlaftInternalAlertDecisionRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    if current_user.rol != RolEnum.ADMINISTRADOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para decidir alertas SARLAFT.",
+        )
+
+    alert_row = (
+        db.query(SarlaftAuditLog)
+        .filter(
+            SarlaftAuditLog.id == alert_id,
+            SarlaftAuditLog.tenant_id == current_user.tenant_id,
+            SarlaftAuditLog.action == "internal_alert_generated",
+        )
+        .first()
+    )
+    if not alert_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alerta interna SARLAFT no encontrada.")
+
+    case = None
+    if alert_row.entity_id:
+        case = (
+            db.query(SarlaftCase)
+            .filter(
+                SarlaftCase.id == alert_row.entity_id,
+                SarlaftCase.tenant_id == current_user.tenant_id,
+            )
+            .first()
+        )
+    if case:
+        if payload.decision == "justificada":
+            case.status = "inusual_justificada"
+        else:
+            case.status = "sospechosa_ros_pendiente"
+            case.risk_level = "rojo"
+
+    log_sarlaft_event(
+        db,
+        tenant_id=current_user.tenant_id,
+        actor_user=current_user,
+        action="internal_alert_reviewed",
+        entity_type="internal_alert",
+        entity_id=alert_row.id,
+        after_json={
+            "decision": payload.decision,
+            "notes": (payload.notes or "").strip() or None,
+            "alert_log_id": str(alert_row.id),
+            "case_id": str(alert_row.entity_id) if alert_row.entity_id else None,
+        },
+    )
+    db.commit()
+
+    # Respuesta compatible con la bandeja.
+    meta = alert_row.after_json if isinstance(alert_row.after_json, dict) else {}
+    operation_classification = str(meta.get("operation_classification") or "").strip() or None
+    if payload.decision == "sospechosa":
+        operation_classification = "operacion_sospechosa"
+    return SarlaftInternalAlertResponse(
+        id=alert_row.id,
+        case_id=alert_row.entity_id,
+        operacion_ref=case.operacion_ref if case else None,
+        alert_level=str(meta.get("alert_level") or "media"),
+        operation_classification=operation_classification,
+        rule_code=str(meta.get("rule_code") or "").strip() or None,
+        reason=str(meta.get("reason") or "").strip() or None,
+        metrics=meta.get("metrics") if isinstance(meta.get("metrics"), dict) else None,
+        risk_level=case.risk_level if case else None,
+        payment_method=str(meta.get("payment_method") or "").strip() or (case.payment_method if case else None),
+        transaction_amount_cop=Decimal(str(meta.get("transaction_amount_cop"))) if meta.get("transaction_amount_cop") is not None else (case.transaction_amount_cop if case else None),
+        cash_amount_cop=Decimal(str(meta.get("cash_amount_cop"))) if meta.get("cash_amount_cop") is not None else (case.cash_amount_cop if case else None),
+        decision_status=payload.decision,
+        decision_notes=(payload.notes or "").strip() or None,
+        reviewed_at=datetime.utcnow(),
+        created_at=alert_row.created_at,
+    )
 
 
 @router.post("/cases", response_model=SarlaftCaseResponse, status_code=status.HTTP_201_CREATED)
@@ -792,16 +1060,20 @@ def create_sarlaft_case(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in [RolEnum.ADMINISTRADOR, RolEnum.RECEPCIONISTA, RolEnum.CAJERO]:
+    if current_user.rol != RolEnum.ADMINISTRADOR:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para crear casos SARLAFT.",
         )
 
+    operacion_ref = (payload.operacion_ref or "").strip()
+    if not operacion_ref:
+        operacion_ref = f"MAN-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{str(uuid4())[:8].upper()}"
+
     case = SarlaftCase(
         tenant_id=current_user.tenant_id,
         sede_id=payload.sede_id,
-        operacion_ref=payload.operacion_ref.strip(),
+        operacion_ref=operacion_ref,
         status="open",
         risk_level="verde",
         risk_score=Decimal("0"),
@@ -857,24 +1129,7 @@ def create_sarlaft_case(
         .filter(SarlaftCaseParty.case_id == case.id, SarlaftCaseParty.tenant_id == current_user.tenant_id)
         .all()
     )
-    return SarlaftCaseResponse(
-        **{
-            "id": case.id,
-            "tenant_id": case.tenant_id,
-            "sede_id": case.sede_id,
-            "operacion_ref": case.operacion_ref,
-            "status": case.status,
-            "risk_level": case.risk_level,
-            "risk_score": case.risk_score,
-            "transaction_amount_cop": case.transaction_amount_cop,
-            "cash_amount_cop": case.cash_amount_cop,
-            "payment_method": case.payment_method,
-            "created_by_user_id": case.created_by_user_id,
-            "created_at": case.created_at,
-            "updated_at": case.updated_at,
-            "parties": [SarlaftCasePartyResponse.model_validate(p) for p in saved_parties],
-        }
-    )
+    return _build_case_response(db, case, saved_parties)
 
 
 @router.get("/cases/{case_id}", response_model=SarlaftCaseResponse)
@@ -883,7 +1138,7 @@ def get_sarlaft_case(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in [RolEnum.ADMINISTRADOR, RolEnum.CONTADOR, RolEnum.RECEPCIONISTA]:
+    if current_user.rol != RolEnum.ADMINISTRADOR:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para consultar casos SARLAFT.",
@@ -902,21 +1157,4 @@ def get_sarlaft_case(
         .filter(SarlaftCaseParty.case_id == case.id, SarlaftCaseParty.tenant_id == current_user.tenant_id)
         .all()
     )
-    return SarlaftCaseResponse(
-        **{
-            "id": case.id,
-            "tenant_id": case.tenant_id,
-            "sede_id": case.sede_id,
-            "operacion_ref": case.operacion_ref,
-            "status": case.status,
-            "risk_level": case.risk_level,
-            "risk_score": case.risk_score,
-            "transaction_amount_cop": case.transaction_amount_cop,
-            "cash_amount_cop": case.cash_amount_cop,
-            "payment_method": case.payment_method,
-            "created_by_user_id": case.created_by_user_id,
-            "created_at": case.created_at,
-            "updated_at": case.updated_at,
-            "parties": [SarlaftCasePartyResponse.model_validate(p) for p in parties],
-        }
-    )
+    return _build_case_response(db, case, parties)

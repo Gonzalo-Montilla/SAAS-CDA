@@ -323,24 +323,26 @@ export default function Dashboard() {
                 </p>
               </button>
 
-              <button
-                onClick={() => {
-                  if (!sarlaftEnabled) {
-                    setShowSarlaftBlockedModal(true);
-                    return;
-                  }
-                  navigate('/sarlaft');
-                }}
-                className="card-pos text-left group animate-fade-in animate-delay-300"
-              >
-                <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-amber-100 text-amber-700 mb-4 group-hover:bg-amber-600 group-hover:text-white transition-all duration-300">
-                  <Shield className="w-8 h-8 icon-hover" />
-                </div>
-                <h3 className="text-xl font-bold text-slate-900 mb-2">SARLAFT</h3>
-                <p className="text-slate-600 text-sm">
-                  Captura de casos de cumplimiento y trazabilidad de riesgo
-                </p>
-              </button>
+              {user?.rol === 'administrador' && (
+                <button
+                  onClick={() => {
+                    if (!sarlaftEnabled) {
+                      setShowSarlaftBlockedModal(true);
+                      return;
+                    }
+                    navigate('/sarlaft');
+                  }}
+                  className="card-pos text-left group animate-fade-in animate-delay-300"
+                >
+                  <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-amber-100 text-amber-700 mb-4 group-hover:bg-amber-600 group-hover:text-white transition-all duration-300">
+                    <Shield className="w-8 h-8 icon-hover" />
+                  </div>
+                  <h3 className="text-xl font-bold text-slate-900 mb-2">SARLAFT</h3>
+                  <p className="text-slate-600 text-sm">
+                    Captura de casos de cumplimiento y trazabilidad de riesgo
+                  </p>
+                </button>
+              )}
 
               <button
                 onClick={() => navigate('/reportes')}

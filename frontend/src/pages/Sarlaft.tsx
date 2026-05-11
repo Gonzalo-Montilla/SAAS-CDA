@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery } from '@tanstack/react-query';
-import { Search, ShieldAlert, ShieldCheck } from 'lucide-react';
+import { BellRing, RefreshCw, Search, ShieldAlert, ShieldCheck, X } from 'lucide-react';
 import Layout from '../components/Layout';
 import { sarlaftApi } from '../api/sarlaft';
-import type { SarlaftCase, SarlaftCasePartyInput, SarlaftManualCheck } from '../types';
+import type { SarlaftCase, SarlaftCasePartyInput, SarlaftInternalAlert, SarlaftManualCheck } from '../types';
 
 function money(v: number): string {
   return new Intl.NumberFormat('es-CO', {
@@ -12,6 +12,16 @@ function money(v: number): string {
     maximumFractionDigits: 0,
   }).format(v || 0);
 }
+
+type SarlaftSeccion = 'resumen' | 'alertas' | 'casos' | 'consultas' | 'screening';
+
+const SARLAFT_SECCIONES: { id: SarlaftSeccion; label: string; hint: string }[] = [
+  { id: 'resumen', label: 'Resumen', hint: 'Panorama general de alertas, casos y consultas manuales.' },
+  { id: 'alertas', label: 'Alertas internas', hint: 'Seguimiento del motor interno SARLAFT y severidad por operación.' },
+  { id: 'casos', label: 'Casos', hint: 'Creación, búsqueda y bandeja de casos SARLAFT.' },
+  { id: 'consultas', label: 'Consultas manuales', hint: 'Consultas fuera de recepción con trazabilidad y certificado.' },
+  { id: 'screening', label: 'Screening', hint: 'Ejecución OpenSanctions y clasificación automática de riesgo.' },
+];
 
 export default function Sarlaft() {
   const [operacionRef, setOperacionRef] = useState('');
@@ -48,6 +58,12 @@ export default function Sarlaft() {
   const [createdManualCheck, setCreatedManualCheck] = useState<SarlaftManualCheck | null>(null);
   const [downloadingCertificateId, setDownloadingCertificateId] = useState<string | null>(null);
   const [copiedManualCheckId, setCopiedManualCheckId] = useState<string | null>(null);
+  const [copiedCaseId, setCopiedCaseId] = useState<string | null>(null);
+  const [internalAlertLevelFilter, setInternalAlertLevelFilter] = useState<'todas' | 'critica' | 'media' | 'baja'>('todas');
+  const [sarlaftSeccion, setSarlaftSeccion] = useState<SarlaftSeccion>('resumen');
+  const [caseDetailModalOpen, setCaseDetailModalOpen] = useState(false);
+  const [contingenciaOpen, setContingenciaOpen] = useState(false);
+  const [alertDecisionDrafts, setAlertDecisionDrafts] = useState<Record<string, string>>({});
 
   useEffect(() => {
     setManualDocType((prev) => {
@@ -56,6 +72,22 @@ export default function Sarlaft() {
       return prev;
     });
   }, [manualSubjectType]);
+
+  useEffect(() => {
+    if (!caseDetailModalOpen) return;
+    document.body.style.overflow = 'hidden';
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        closeCaseDetailModal();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.body.style.overflow = '';
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, [caseDetailModalOpen]);
 
   const saveBlobAsFile = (blob: Blob, filename: string): void => {
     const url = window.URL.createObjectURL(blob);
@@ -89,6 +121,11 @@ export default function Sarlaft() {
       }
     }
   };
+  const closeCaseDetailModal = (): void => {
+    setCaseDetailModalOpen(false);
+    setCaseIdLookup('');
+    setFoundCase(null);
+  };
 
   const casesQuery = useQuery({
     queryKey: ['sarlaft-cases-list', 20],
@@ -97,6 +134,14 @@ export default function Sarlaft() {
   const manualChecksQuery = useQuery({
     queryKey: ['sarlaft-manual-checks-list', 20],
     queryFn: async () => sarlaftApi.listManualChecks({ limit: 20 }),
+  });
+  const internalAlertsQuery = useQuery({
+    queryKey: ['sarlaft-internal-alerts-list', internalAlertLevelFilter, 30],
+    queryFn: async () =>
+      sarlaftApi.listInternalAlerts({
+        limit: 30,
+        alert_level: internalAlertLevelFilter === 'todas' ? undefined : internalAlertLevelFilter,
+      }),
   });
 
   const createMutation = useMutation({
@@ -110,7 +155,7 @@ export default function Sarlaft() {
         },
       ];
       return sarlaftApi.createCase({
-        operacion_ref: operacionRef.trim(),
+        operacion_ref: operacionRef.trim() || null,
         transaction_amount_cop: Number(transactionAmount || 0),
         cash_amount_cop: Number(cashAmount || 0),
         payment_method: paymentMethod,
@@ -122,6 +167,13 @@ export default function Sarlaft() {
       setCreatedCase(data);
       setFoundCase(null);
       setScreeningCaseId(data.id);
+      setOperacionRef('');
+      setTransactionAmount('');
+      setCashAmount('');
+      setPartyRole('cliente');
+      setPartyDocType('CC');
+      setPartyDocNumber('');
+      setPartyName('');
     },
     onError: (err: any) => {
       setFeedback(err?.response?.data?.detail || 'No se pudo crear el caso SARLAFT.');
@@ -129,13 +181,15 @@ export default function Sarlaft() {
   });
 
   const findMutation = useMutation({
-    mutationFn: async () => sarlaftApi.getCase(caseIdLookup.trim()),
+    mutationFn: async (caseId?: string) => sarlaftApi.getCase((caseId || caseIdLookup).trim()),
     onSuccess: (data) => {
       setFeedback(null);
       setFoundCase(data);
+      setCaseDetailModalOpen(true);
     },
     onError: (err: any) => {
       setFoundCase(null);
+      setCaseDetailModalOpen(false);
       setFeedback(err?.response?.data?.detail || 'No se encontró el caso.');
     },
   });
@@ -231,6 +285,23 @@ export default function Sarlaft() {
       manualChecksQuery.refetch();
     },
   });
+  const decideAlertMutation = useMutation({
+    mutationFn: async (payload: { alertId: string; decision: 'justificada' | 'sospechosa'; notes?: string | null }) =>
+      sarlaftApi.decideInternalAlert(payload.alertId, { decision: payload.decision, notes: payload.notes || null }),
+    onSuccess: (_, vars) => {
+      setFeedback(
+        vars.decision === 'justificada'
+          ? 'Alerta marcada como Operación Inusual Justificada.'
+          : 'Alerta marcada como Operación Sospechosa (ROS pendiente).'
+      );
+      setAlertDecisionDrafts((prev) => ({ ...prev, [vars.alertId]: '' }));
+      internalAlertsQuery.refetch();
+      casesQuery.refetch();
+    },
+    onError: (err: any) => {
+      setFeedback(err?.response?.data?.detail || 'No fue posible registrar la decisión de la alerta.');
+    },
+  });
 
   const riskBadgeClass = useMemo(
     () => (riskLevel: string) => {
@@ -256,47 +327,238 @@ export default function Sarlaft() {
         : 'border border-amber-200 bg-amber-50 text-amber-800',
     [],
   );
+  const alertBadgeClass = useMemo(
+    () => (level: string) => {
+      if (level === 'critica' || level === 'alta') return 'border border-rose-200 bg-rose-50 text-rose-800';
+      if (level === 'media') return 'border border-amber-200 bg-amber-50 text-amber-800';
+      return 'border border-slate-200 bg-slate-100 text-slate-700';
+    },
+    [],
+  );
+  const internalAlertsKpi = useMemo(() => {
+    const rows = internalAlertsQuery.data || [];
+    const total = rows.length;
+    const criticas = rows.filter((r) => r.alert_level === 'critica' || r.alert_level === 'alta').length;
+    const medias = rows.filter((r) => r.alert_level === 'media').length;
+    const riesgoRojo = rows.filter((r) => r.risk_level === 'rojo').length;
+    const pagoRiesgoso = rows.filter((r) => ['efectivo', 'mixto'].includes((r.payment_method || '').toLowerCase())).length;
+    return { total, criticas, medias, riesgoRojo, pagoRiesgoso };
+  }, [internalAlertsQuery.data]);
+  const internalAlertsRows = useMemo(() => {
+    const levelWeight = (level: string): number => {
+      if (level === 'critica' || level === 'alta') return 0;
+      if (level === 'media') return 1;
+      return 2;
+    };
+    return [...(internalAlertsQuery.data || [])].sort((a, b) => {
+      const levelDiff = levelWeight(a.alert_level) - levelWeight(b.alert_level);
+      if (levelDiff !== 0) return levelDiff;
+      const dateA = new Date(a.created_at).getTime();
+      const dateB = new Date(b.created_at).getTime();
+      return dateB - dateA;
+    });
+  }, [internalAlertsQuery.data]);
+  const alertLevelLabel = useMemo(
+    () => (level: string) => {
+      if (level === 'critica' || level === 'alta') return 'CRITICA';
+      if (level === 'media') return 'MEDIA';
+      if (level === 'baja') return 'BAJA';
+      return (level || 'N/A').toUpperCase();
+    },
+    [],
+  );
+  const alertReasonLabel = useMemo(
+    () => (reason?: string | null) => {
+      const code = (reason || '').trim().toLowerCase();
+      if (code === 'riesgo_rojo') return 'Riesgo rojo detectado por screening.';
+      if (code === 'riesgo_amarillo_o_metodo_pago_riesgoso') return 'Riesgo amarillo o pago riesgoso (efectivo/mixto).';
+      if (code === 'frecuencia_excesiva_fraccionamiento') return 'Frecuencia excesiva de operaciones y múltiples placas en ventana.';
+      if (code === 'uso_intensivo_efectivo') return 'Uso intensivo de efectivo detectado en ventana temporal.';
+      return reason || 'Sin detalle de motor.';
+    },
+    [],
+  );
+  const operationClassLabel = useMemo(
+    () => (op?: string | null) => {
+      const v = (op || '').trim().toLowerCase();
+      if (v === 'operacion_inusual') return 'Inusual';
+      if (v === 'operacion_sospechosa') return 'Sospechosa';
+      return 'Regla básica';
+    },
+    [],
+  );
+  const decisionStatusLabel = useMemo(
+    () => (decision?: string | null) => {
+      const v = (decision || '').trim().toLowerCase();
+      if (v === 'justificada') return 'Inusual justificada';
+      if (v === 'sospechosa') return 'Sospechosa';
+      return 'Pendiente';
+    },
+    [],
+  );
+  const alertRowClass = useMemo(
+    () => (level: string) => {
+      if (level === 'critica' || level === 'alta') return 'border-t border-l-4 border-l-rose-400 border-slate-100 bg-rose-50/40';
+      if (level === 'media') return 'border-t border-l-4 border-l-amber-400 border-slate-100 bg-amber-50/30';
+      return 'border-t border-slate-100';
+    },
+    [],
+  );
+  const resumenKpi = useMemo(
+    () => ({
+      alertasInternas: internalAlertsKpi.total,
+      casosRegistrados: (casesQuery.data || []).length,
+      consultasManuales: (manualChecksQuery.data || []).length,
+      alertasCriticas: internalAlertsKpi.criticas,
+    }),
+    [internalAlertsKpi, casesQuery.data, manualChecksQuery.data],
+  );
+  const seccionHint = useMemo(
+    () => SARLAFT_SECCIONES.find((s) => s.id === sarlaftSeccion)?.hint || '',
+    [sarlaftSeccion],
+  );
 
   return (
     <Layout title="SARLAFT">
       <div className="space-y-6">
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-          <div className="flex items-center gap-3 mb-4">
-            <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
-              <ShieldAlert className="h-5 w-5" />
-            </div>
-            <div>
-              <h2 className="text-lg font-semibold text-slate-900">Crear caso SARLAFT</h2>
-              <p className="text-xs text-slate-500">Captura mínima de cumplimiento (Sprint 1).</p>
-            </div>
+        <div className="sticky top-0 z-10 rounded-xl border border-slate-200/90 bg-white/95 shadow-sm backdrop-blur-sm supports-[backdrop-filter]:bg-white/90">
+          <div
+            className="flex overflow-x-auto gap-0 border-b border-slate-100 px-1 pt-1 sm:px-2"
+            role="tablist"
+            aria-label="Secciones del panel SARLAFT"
+          >
+            {SARLAFT_SECCIONES.map((s) => {
+              const active = sarlaftSeccion === s.id;
+              return (
+                <button
+                  key={s.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={active}
+                  onClick={() => setSarlaftSeccion(s.id)}
+                  className={`min-w-[6.5rem] shrink-0 rounded-t-lg px-3 py-2.5 text-sm font-semibold transition-colors sm:min-w-0 sm:px-4 ${
+                    active
+                      ? 'border-b-2 border-primary-600 bg-primary-50/70 text-primary-900'
+                      : 'border-b-2 border-transparent text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                  }`}
+                >
+                  {s.label}
+                </button>
+              );
+            })}
           </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <input className="input-corporate" placeholder="Referencia operación" value={operacionRef} onChange={(e) => setOperacionRef(e.target.value)} />
-            <select className="input-corporate" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as any)}>
-              <option value="efectivo">Efectivo</option>
-              <option value="mixto">Mixto</option>
-              <option value="transferencia">Transferencia</option>
-              <option value="otro">Otro</option>
-            </select>
-            <input className="input-corporate" type="number" placeholder="Valor total COP" value={transactionAmount} onChange={(e) => setTransactionAmount(e.target.value)} />
-            <input className="input-corporate" type="number" placeholder="Valor efectivo COP" value={cashAmount} onChange={(e) => setCashAmount(e.target.value)} />
-            <select className="input-corporate" value={partyRole} onChange={(e) => setPartyRole(e.target.value as any)}>
-              <option value="cliente">Cliente</option>
-              <option value="propietario">Propietario</option>
-              <option value="pagador">Pagador</option>
-              <option value="apoderado">Apoderado</option>
-            </select>
-            <input className="input-corporate" placeholder="Tipo documento" value={partyDocType} onChange={(e) => setPartyDocType(e.target.value)} />
-            <input className="input-corporate" placeholder="Número documento" value={partyDocNumber} onChange={(e) => setPartyDocNumber(e.target.value)} />
-            <input className="input-corporate" placeholder="Nombre completo" value={partyName} onChange={(e) => setPartyName(e.target.value)} />
-          </div>
-          <div className="mt-4 flex justify-end">
-            <button className="btn-corporate-primary px-4" disabled={createMutation.isLoading} onClick={() => createMutation.mutate()}>
-              {createMutation.isLoading ? 'Guardando...' : 'Crear caso'}
-            </button>
-          </div>
+          <p className="border-t border-slate-50 px-3 py-2 text-xs leading-relaxed text-slate-500 sm:px-4">{seccionHint}</p>
         </div>
 
+        {feedback && <p className="text-sm text-slate-700">{feedback}</p>}
+
+        {sarlaftSeccion === 'resumen' && (
+          <div className="space-y-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p className="text-xs text-slate-500">Alertas internas</p>
+                <p className="mt-1 text-2xl font-semibold text-slate-900">{resumenKpi.alertasInternas}</p>
+              </div>
+              <div className="rounded-2xl border border-rose-200 bg-rose-50 p-4 shadow-sm">
+                <p className="text-xs text-rose-700">Alertas críticas</p>
+                <p className="mt-1 text-2xl font-semibold text-rose-800">{resumenKpi.alertasCriticas}</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p className="text-xs text-slate-500">Casos SARLAFT</p>
+                <p className="mt-1 text-2xl font-semibold text-slate-900">{resumenKpi.casosRegistrados}</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <p className="text-xs text-slate-500">Consultas manuales</p>
+                <p className="mt-1 text-2xl font-semibold text-slate-900">{resumenKpi.consultasManuales}</p>
+              </div>
+            </div>
+            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+              <h3 className="text-base font-semibold text-slate-900">Atajos rápidos</h3>
+              <p className="mt-1 text-xs text-slate-500">Navega por pestañas para evitar una pantalla extensa y mantener foco operativo.</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button className="btn-corporate-muted px-3 py-1.5 text-xs" onClick={() => setSarlaftSeccion('alertas')}>
+                  Ver alertas internas
+                </button>
+                <button className="btn-corporate-muted px-3 py-1.5 text-xs" onClick={() => setSarlaftSeccion('casos')}>
+                  Gestionar casos
+                </button>
+                <button className="btn-corporate-muted px-3 py-1.5 text-xs" onClick={() => setSarlaftSeccion('consultas')}>
+                  Registrar consulta manual
+                </button>
+                <button className="btn-corporate-muted px-3 py-1.5 text-xs" onClick={() => setSarlaftSeccion('screening')}>
+                  Ejecutar screening
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {sarlaftSeccion === 'casos' && (
+        <div className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 shadow-sm">
+          <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-amber-900">Contingencia: registro manual de caso</h3>
+              <p className="text-xs text-amber-800">
+                Úsalo solo si el flujo automático de caja falla. Si no ingresas referencia interna, el sistema la genera automáticamente.
+              </p>
+            </div>
+            <button
+              type="button"
+              className="btn-corporate-muted px-3 py-1.5 text-xs"
+              onClick={() => setContingenciaOpen((prev) => !prev)}
+            >
+              {contingenciaOpen ? 'Ocultar contingencia' : 'Mostrar contingencia'}
+            </button>
+          </div>
+          {contingenciaOpen && (
+            <div className="mt-3 rounded-xl border border-slate-200 bg-white p-4">
+              <div className="flex items-center gap-3 mb-4">
+                <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-amber-100 text-amber-700">
+                  <ShieldAlert className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-semibold text-slate-900">Registro manual de caso SARLAFT</h2>
+                  <p className="text-xs text-slate-500">
+                    Crea expediente base; el screening se ejecuta en la pestaña Screening o por el flujo automático en caja.
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <input
+                  className="input-corporate"
+                  placeholder="Referencia interna (opcional)"
+                  value={operacionRef}
+                  onChange={(e) => setOperacionRef(e.target.value)}
+                />
+                <select className="input-corporate" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as any)}>
+                  <option value="efectivo">Efectivo</option>
+                  <option value="mixto">Mixto</option>
+                  <option value="transferencia">Transferencia</option>
+                  <option value="otro">Otro</option>
+                </select>
+                <input className="input-corporate" type="number" placeholder="Valor total COP" value={transactionAmount} onChange={(e) => setTransactionAmount(e.target.value)} />
+                <input className="input-corporate" type="number" placeholder="Valor efectivo COP" value={cashAmount} onChange={(e) => setCashAmount(e.target.value)} />
+                <select className="input-corporate" value={partyRole} onChange={(e) => setPartyRole(e.target.value as any)}>
+                  <option value="cliente">Cliente</option>
+                  <option value="propietario">Propietario</option>
+                  <option value="pagador">Pagador</option>
+                  <option value="apoderado">Apoderado</option>
+                </select>
+                <input className="input-corporate" placeholder="Tipo documento" value={partyDocType} onChange={(e) => setPartyDocType(e.target.value)} />
+                <input className="input-corporate" placeholder="Número documento" value={partyDocNumber} onChange={(e) => setPartyDocNumber(e.target.value)} />
+                <input className="input-corporate" placeholder="Nombre completo" value={partyName} onChange={(e) => setPartyName(e.target.value)} />
+              </div>
+              <div className="mt-4 flex justify-end">
+                <button className="btn-corporate-primary px-4" disabled={createMutation.isLoading} onClick={() => createMutation.mutate()}>
+                  {createMutation.isLoading ? 'Guardando...' : 'Crear caso'}
+                </button>
+              </div>
+            </div>
+          )}
+        </div>
+        )}
+
+        {sarlaftSeccion === 'consultas' && (
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-center gap-3 mb-4">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
@@ -431,7 +693,9 @@ export default function Sarlaft() {
             </div>
           )}
         </div>
+        )}
 
+        {sarlaftSeccion === 'screening' && (
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="flex items-center gap-3 mb-4">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
@@ -485,16 +749,22 @@ export default function Sarlaft() {
             </div>
           )}
         </div>
+        )}
 
+        {sarlaftSeccion === 'casos' && (
+        <>
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h3 className="text-base font-semibold text-slate-900 mb-3">Consultar caso por ID</h3>
           <div className="flex gap-2">
-            <input className="input-corporate flex-1" placeholder="UUID del caso" value={caseIdLookup} onChange={(e) => setCaseIdLookup(e.target.value)} />
+            <input className="input-corporate flex-1" placeholder="UUID del caso SARLAFT" value={caseIdLookup} onChange={(e) => setCaseIdLookup(e.target.value)} />
             <button className="btn-corporate-muted px-4 flex items-center gap-2" disabled={findMutation.isLoading} onClick={() => findMutation.mutate()}>
               <Search className="h-4 w-4" />
               Buscar
             </button>
           </div>
+          <p className="mt-2 text-xs text-slate-500">
+            Tip: puedes usar <strong>Ver detalle</strong> o <strong>Copiar ID</strong> desde la tabla de casos para no digitar el UUID manualmente.
+          </p>
         </div>
 
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -504,10 +774,15 @@ export default function Sarlaft() {
               <thead className="text-left text-slate-500">
                 <tr>
                   <th className="py-2 pr-3">Operación</th>
+                  <th className="py-2 pr-3">Placa</th>
+                  <th className="py-2 pr-3">Tipo vehículo</th>
+                  <th className="py-2 pr-3">Documento</th>
+                  <th className="py-2 pr-3">Nombre cliente</th>
                   <th className="py-2 pr-3">Estado</th>
                   <th className="py-2 pr-3">Riesgo</th>
                   <th className="py-2 pr-3">Score</th>
                   <th className="py-2 pr-3">Monto</th>
+                  <th className="py-2 pr-3">Acciones</th>
                   <th className="py-2 pr-3">Creado</th>
                 </tr>
               </thead>
@@ -515,6 +790,12 @@ export default function Sarlaft() {
                 {(casesQuery.data || []).map((row) => (
                   <tr key={row.id} className="border-t border-slate-100">
                     <td className="py-2 pr-3 font-medium text-slate-900">{row.operacion_ref}</td>
+                    <td className="py-2 pr-3 text-slate-700">{row.placa || '—'}</td>
+                    <td className="py-2 pr-3 text-slate-700">{row.tipo_vehiculo || '—'}</td>
+                    <td className="py-2 pr-3 text-slate-700">
+                      {(row.cliente_doc_type || '—') + (row.cliente_doc_number ? ` ${row.cliente_doc_number}` : '')}
+                    </td>
+                    <td className="py-2 pr-3 text-slate-700">{row.cliente_full_name || '—'}</td>
                     <td className="py-2 pr-3 text-slate-700">{row.status}</td>
                     <td className="py-2 pr-3">
                       <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${riskBadgeClass(row.risk_level)}`}>
@@ -523,12 +804,43 @@ export default function Sarlaft() {
                     </td>
                     <td className="py-2 pr-3 text-slate-700">{Number(row.risk_score || 0).toFixed(2)}</td>
                     <td className="py-2 pr-3 text-slate-700">{money(row.transaction_amount_cop)}</td>
+                    <td className="py-2 pr-3">
+                      <div className="flex items-center gap-2">
+                        <button
+                          className="btn-corporate-muted px-2.5 py-1 text-xs"
+                          onClick={() => {
+                            setCaseIdLookup(row.id);
+                            findMutation.mutate(row.id);
+                          }}
+                          disabled={findMutation.isLoading}
+                        >
+                          Ver detalle
+                        </button>
+                        <button
+                          className="btn-corporate-muted px-2.5 py-1 text-xs"
+                          onClick={async () => {
+                            const ok = await copyTextToClipboard(row.id);
+                            if (ok) {
+                              setCopiedCaseId(row.id);
+                              setFeedback('ID del caso copiado al portapapeles.');
+                              window.setTimeout(() => {
+                                setCopiedCaseId((prev) => (prev === row.id ? null : prev));
+                              }, 1500);
+                            } else {
+                              setFeedback('No fue posible copiar el ID del caso.');
+                            }
+                          }}
+                        >
+                          {copiedCaseId === row.id ? 'Copiado' : 'Copiar ID'}
+                        </button>
+                      </div>
+                    </td>
                     <td className="py-2 pr-3 text-slate-500">{new Date(row.created_at).toLocaleString('es-CO')}</td>
                   </tr>
                 ))}
                 {!casesQuery.isLoading && (casesQuery.data || []).length === 0 && (
                   <tr>
-                    <td className="py-3 text-slate-500" colSpan={6}>
+                    <td className="py-3 text-slate-500" colSpan={11}>
                       Sin casos registrados aún.
                     </td>
                   </tr>
@@ -537,7 +849,226 @@ export default function Sarlaft() {
             </table>
           </div>
         </div>
+        </>
+        )}
 
+        {sarlaftSeccion === 'alertas' && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+            <div className="flex items-start gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-100 text-rose-700">
+                <BellRing className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-slate-900">Alertas internas SARLAFT (últimas 30)</h3>
+                <p className="text-xs text-slate-500">
+                  Eventos generados por motor interno desde cobro/validación para seguimiento de cumplimiento.
+                </p>
+              </div>
+            </div>
+            <div className="flex w-full flex-col gap-2 md:w-auto md:items-end">
+              <div className="flex w-full gap-2 md:w-auto">
+                <select
+                  className="input-corporate w-full md:w-52"
+                  value={internalAlertLevelFilter}
+                  onChange={(e) => setInternalAlertLevelFilter(e.target.value as 'todas' | 'critica' | 'media' | 'baja')}
+                >
+                  <option value="todas">Todas</option>
+                  <option value="critica">Crítica</option>
+                  <option value="media">Media</option>
+                  <option value="baja">Baja</option>
+                </select>
+                <button
+                  className="btn-corporate-muted inline-flex items-center gap-2 px-3"
+                  onClick={() => internalAlertsQuery.refetch()}
+                  disabled={internalAlertsQuery.isFetching}
+                >
+                  <RefreshCw className={`h-4 w-4 ${internalAlertsQuery.isFetching ? 'animate-spin' : ''}`} />
+                  Actualizar
+                </button>
+              </div>
+              <p className="text-[11px] text-slate-500">
+                {internalAlertsQuery.dataUpdatedAt
+                  ? `Actualizado: ${new Date(internalAlertsQuery.dataUpdatedAt).toLocaleString('es-CO')}`
+                  : 'Sin sincronización aún.'}
+              </p>
+            </div>
+          </div>
+          <div className="mb-4 grid grid-cols-1 gap-2 md:grid-cols-5">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">Total alertas</p>
+              <p className="text-lg font-semibold text-slate-900">{internalAlertsKpi.total}</p>
+            </div>
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-rose-700">Críticas</p>
+              <p className="text-lg font-semibold text-rose-800">{internalAlertsKpi.criticas}</p>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-amber-700">Medias</p>
+              <p className="text-lg font-semibold text-amber-800">{internalAlertsKpi.medias}</p>
+            </div>
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-rose-700">Riesgo rojo</p>
+              <p className="text-lg font-semibold text-rose-800">{internalAlertsKpi.riesgoRojo}</p>
+            </div>
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-indigo-700">Pago riesgoso</p>
+              <p className="text-lg font-semibold text-indigo-800">{internalAlertsKpi.pagoRiesgoso}</p>
+            </div>
+          </div>
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="text-left text-slate-500">
+                <tr>
+                  <th className="py-2 pr-3">Nivel alerta</th>
+                  <th className="py-2 pr-3">Clasificación</th>
+                  <th className="py-2 pr-3">Regla</th>
+                  <th className="py-2 pr-3">Riesgo caso</th>
+                  <th className="py-2 pr-3">Operación</th>
+                  <th className="py-2 pr-3">Motivo</th>
+                  <th className="py-2 pr-3">Pago</th>
+                  <th className="py-2 pr-3">Monto</th>
+                  <th className="py-2 pr-3">Efectivo</th>
+                  <th className="py-2 pr-3">Decisión oficial</th>
+                  <th className="py-2 pr-3">Acción</th>
+                  <th className="py-2 pr-3">Fecha</th>
+                </tr>
+              </thead>
+              <tbody>
+                {internalAlertsQuery.isLoading && (
+                  <tr>
+                    <td className="py-3 text-slate-500" colSpan={12}>
+                      Cargando alertas internas...
+                    </td>
+                  </tr>
+                )}
+                {internalAlertsRows.map((row: SarlaftInternalAlert) => (
+                  <tr key={row.id} className={alertRowClass(row.alert_level)}>
+                    <td className="py-2 pr-3">
+                      <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${alertBadgeClass(row.alert_level)}`}>
+                        {alertLevelLabel(row.alert_level)}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-3">
+                      <span className="inline-flex rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-800">
+                        {operationClassLabel(row.operation_classification)}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-3 text-slate-700">{row.rule_code || 'BASE'}</td>
+                    <td className="py-2 pr-3">
+                      {row.risk_level ? (
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${riskBadgeClass(row.risk_level)}`}>
+                          {row.risk_level.toUpperCase()}
+                        </span>
+                      ) : (
+                        <span className="text-slate-400">—</span>
+                      )}
+                    </td>
+                    <td className="py-2 pr-3 text-slate-700">{row.operacion_ref || row.case_id || '—'}</td>
+                    <td className="py-2 pr-3 text-slate-700">{alertReasonLabel(row.reason)}</td>
+                    <td className="py-2 pr-3 text-slate-700 capitalize">{row.payment_method || '—'}</td>
+                    <td className="py-2 pr-3 text-slate-700">{typeof row.transaction_amount_cop === 'number' ? money(row.transaction_amount_cop) : '—'}</td>
+                    <td className="py-2 pr-3 text-slate-700">{typeof row.cash_amount_cop === 'number' ? money(row.cash_amount_cop) : '—'}</td>
+                    <td className="py-2 pr-3">
+                      <div className="space-y-1">
+                        <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                          {decisionStatusLabel(row.decision_status)}
+                        </span>
+                        {row.reviewed_at && (
+                          <p className="text-[11px] text-slate-500">
+                            {new Date(row.reviewed_at).toLocaleString('es-CO')}
+                          </p>
+                        )}
+                        {row.decision_notes && (
+                          <p className="max-w-[240px] truncate text-[11px] text-slate-600" title={row.decision_notes}>
+                            {row.decision_notes}
+                          </p>
+                        )}
+                      </div>
+                    </td>
+                    <td className="py-2 pr-3">
+                      <div className="flex flex-col gap-1">
+                        <button
+                          className="btn-corporate-muted px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
+                          disabled={!row.case_id}
+                          onClick={() => {
+                            if (!row.case_id) return;
+                            setCaseIdLookup(row.case_id);
+                            setSarlaftSeccion('casos');
+                            findMutation.mutate(row.case_id);
+                          }}
+                        >
+                          Ver caso
+                        </button>
+                        <button
+                          className="btn-corporate-muted px-2.5 py-1 text-xs disabled:opacity-50"
+                          disabled={decideAlertMutation.isLoading}
+                          onClick={() =>
+                            decideAlertMutation.mutate({
+                              alertId: row.id,
+                              decision: 'justificada',
+                              notes: alertDecisionDrafts[row.id] || null,
+                            })
+                          }
+                        >
+                          Justificar
+                        </button>
+                        <button
+                          className="btn-corporate-muted border-rose-200 bg-rose-50 text-rose-700 px-2.5 py-1 text-xs disabled:opacity-50"
+                          disabled={decideAlertMutation.isLoading}
+                          onClick={() =>
+                            decideAlertMutation.mutate({
+                              alertId: row.id,
+                              decision: 'sospechosa',
+                              notes: alertDecisionDrafts[row.id] || null,
+                            })
+                          }
+                        >
+                          Marcar sospechosa
+                        </button>
+                        <input
+                          className="input-corporate px-2 py-1 text-xs"
+                          placeholder="Nota del oficial (opcional)"
+                          value={alertDecisionDrafts[row.id] || ''}
+                          onChange={(e) =>
+                            setAlertDecisionDrafts((prev) => ({
+                              ...prev,
+                              [row.id]: e.target.value,
+                            }))
+                          }
+                        />
+                      </div>
+                    </td>
+                    <td className="py-2 pr-3 text-slate-500">{new Date(row.created_at).toLocaleString('es-CO')}</td>
+                  </tr>
+                ))}
+                {internalAlertsQuery.isError && (
+                  <tr>
+                    <td className="py-3 text-red-600" colSpan={12}>
+                      No fue posible cargar las alertas internas. Intenta actualizar.
+                    </td>
+                  </tr>
+                )}
+                {!internalAlertsQuery.isLoading && (internalAlertsQuery.data || []).length === 0 && (
+                  <tr>
+                    <td className="py-4" colSpan={12}>
+                      <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-slate-600">
+                        <p className="text-sm font-medium text-slate-800">Sin alertas internas para el filtro actual.</p>
+                        <p className="mt-1 text-xs">
+                          Para probar, registra un cobro con método <strong>efectivo/mixto</strong> o genera un caso con
+                          riesgo <strong>amarillo/rojo</strong>.
+                        </p>
+                      </div>
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        )}
+
+        {sarlaftSeccion === 'consultas' && (
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <h3 className="text-base font-semibold text-slate-900 mb-3">
             Consultas manuales SARLAFT (últimas 20)
@@ -605,24 +1136,125 @@ export default function Sarlaft() {
             </table>
           </div>
         </div>
+        )}
 
-        {feedback && <p className="text-sm text-slate-700">{feedback}</p>}
+        {caseDetailModalOpen && (foundCase || createdCase) && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4"
+            onClick={closeCaseDetailModal}
+          >
+            <div
+              className="modal-panel glass-card max-h-[90vh] w-full max-w-5xl border border-slate-200/80 p-0"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {(() => {
+                const c = foundCase || createdCase;
+                if (!c) return null;
+                const cliente =
+                  c.parties.find((p) => (p.role || '').toLowerCase() === 'cliente') ||
+                  c.parties[0] ||
+                  null;
+                return (
+                  <>
+                    <div className="modal-header-sticky -mx-0 border-b border-slate-200 bg-white/95 px-5 py-4 backdrop-blur-sm">
+                      <div className="flex items-start justify-between gap-4">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Detalle de caso SARLAFT</p>
+                          <h3 className="mt-1 text-lg font-semibold text-slate-900">{c.operacion_ref}</h3>
+                          <p className="mt-1 text-xs text-slate-500">
+                            Creado {new Date(c.created_at).toLocaleString('es-CO')}
+                          </p>
+                        </div>
+                        <button
+                          className="rounded-md border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
+                          onClick={closeCaseDetailModal}
+                        >
+                          <X className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
 
-        {(createdCase || foundCase) && (
-          <div className="rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4">
-            {(() => {
-              const c = foundCase || createdCase;
-              if (!c) return null;
-              return (
-                <div className="text-sm text-emerald-900 space-y-1">
-                  <p><strong>ID:</strong> {c.id}</p>
-                  <p><strong>Operación:</strong> {c.operacion_ref}</p>
-                  <p><strong>Estado:</strong> {c.status} · <strong>Nivel:</strong> {c.risk_level}</p>
-                  <p><strong>Monto:</strong> {money(c.transaction_amount_cop)} · <strong>Efectivo:</strong> {money(c.cash_amount_cop)}</p>
-                  <p><strong>Partes:</strong> {c.parties?.length || 0}</p>
-                </div>
-              );
-            })()}
+                    <div className="space-y-4 p-5">
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-4">
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                          <p className="text-[11px] uppercase tracking-wide text-slate-500">Estado</p>
+                          <p className="mt-1 text-sm font-semibold text-slate-900">{(c.status || 'N/D').toUpperCase()}</p>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                          <p className="text-[11px] uppercase tracking-wide text-slate-500">Riesgo</p>
+                          <span className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${riskBadgeClass(c.risk_level)}`}>
+                            {(c.risk_level || 'N/D').toUpperCase()}
+                          </span>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                          <p className="text-[11px] uppercase tracking-wide text-slate-500">Monto total</p>
+                          <p className="mt-1 text-sm font-semibold text-slate-900">{money(c.transaction_amount_cop)}</p>
+                        </div>
+                        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                          <p className="text-[11px] uppercase tracking-wide text-slate-500">Efectivo</p>
+                          <p className="mt-1 text-sm font-semibold text-slate-900">{money(c.cash_amount_cop)}</p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                        <div className="rounded-xl border border-slate-200 p-4">
+                          <h4 className="text-sm font-semibold text-slate-900">Información operativa</h4>
+                          <div className="mt-3 space-y-1 text-sm text-slate-700">
+                            <p><strong>ID caso:</strong> <span className="font-mono">{c.id}</span></p>
+                            <p><strong>Sucursal:</strong> {c.sede_nombre || 'N/D'}</p>
+                            <p><strong>Método pago:</strong> {(c.payment_method || 'N/D').replace('_', ' ')}</p>
+                            <p><strong>Score:</strong> {Number(c.risk_score || 0).toFixed(2)}</p>
+                            <p><strong>Vehículo ID:</strong> {c.vehiculo_id || 'N/D'}</p>
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-slate-200 p-4">
+                          <h4 className="text-sm font-semibold text-slate-900">Vehículo y cliente principal</h4>
+                          <div className="mt-3 space-y-1 text-sm text-slate-700">
+                            <p><strong>Placa:</strong> {c.placa || 'N/D'}</p>
+                            <p><strong>Tipo vehículo:</strong> {c.tipo_vehiculo || 'N/D'}</p>
+                            <p>
+                              <strong>Documento:</strong>{' '}
+                              {((c.cliente_doc_type || cliente?.doc_type || 'N/D') + ' ' + (c.cliente_doc_number || cliente?.doc_number || '')).trim()}
+                            </p>
+                            <p><strong>Nombre:</strong> {c.cliente_full_name || cliente?.full_name || 'N/D'}</p>
+                            <p><strong>Correo:</strong> {cliente?.email || 'N/D'}</p>
+                            <p><strong>Teléfono:</strong> {cliente?.phone || 'N/D'}</p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="rounded-xl border border-slate-200 p-4">
+                        <h4 className="text-sm font-semibold text-slate-900">Partes asociadas ({c.parties.length})</h4>
+                        <div className="mt-3 overflow-x-auto">
+                          <table className="min-w-full text-sm">
+                            <thead className="text-left text-slate-500">
+                              <tr>
+                                <th className="py-2 pr-3">Rol</th>
+                                <th className="py-2 pr-3">Nombre</th>
+                                <th className="py-2 pr-3">Documento</th>
+                                <th className="py-2 pr-3">Correo</th>
+                                <th className="py-2 pr-3">Teléfono</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {c.parties.map((p) => (
+                                <tr key={p.id} className="border-t border-slate-100">
+                                  <td className="py-2 pr-3 capitalize text-slate-700">{p.role}</td>
+                                  <td className="py-2 pr-3 text-slate-900">{p.full_name}</td>
+                                  <td className="py-2 pr-3 text-slate-700">{`${p.doc_type} ${p.doc_number}`.trim()}</td>
+                                  <td className="py-2 pr-3 text-slate-700">{p.email || '—'}</td>
+                                  <td className="py-2 pr-3 text-slate-700">{p.phone || '—'}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
           </div>
         )}
       </div>

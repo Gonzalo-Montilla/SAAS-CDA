@@ -148,6 +148,20 @@ class Settings(BaseSettings):
         le=1.0,
         env="OPENSANCTIONS_ALERT_SCORE_THRESHOLD",
     )
+    # SARLAFT - Motor interno (operación inusual)
+    SARLAFT_UNUSUAL_FREQ_THRESHOLD: int = Field(default=4, ge=2, le=100, env="SARLAFT_UNUSUAL_FREQ_THRESHOLD")
+    SARLAFT_UNUSUAL_FREQ_WINDOW_DAYS: int = Field(default=365, ge=1, le=3650, env="SARLAFT_UNUSUAL_FREQ_WINDOW_DAYS")
+    SARLAFT_UNUSUAL_FREQ_DISTINCT_PLACAS_THRESHOLD: int = Field(
+        default=4, ge=1, le=100, env="SARLAFT_UNUSUAL_FREQ_DISTINCT_PLACAS_THRESHOLD"
+    )
+    SARLAFT_UNUSUAL_CASH_COUNT_THRESHOLD: int = Field(default=4, ge=1, le=100, env="SARLAFT_UNUSUAL_CASH_COUNT_THRESHOLD")
+    SARLAFT_UNUSUAL_CASH_WINDOW_DAYS: int = Field(default=365, ge=1, le=3650, env="SARLAFT_UNUSUAL_CASH_WINDOW_DAYS")
+    SARLAFT_UNUSUAL_CASH_RATIO_THRESHOLD: float = Field(
+        default=0.7, ge=0.0, le=1.0, env="SARLAFT_UNUSUAL_CASH_RATIO_THRESHOLD"
+    )
+    SARLAFT_UNUSUAL_CRITICAL_COUNT_THRESHOLD: int = Field(
+        default=10, ge=2, le=500, env="SARLAFT_UNUSUAL_CRITICAL_COUNT_THRESHOLD"
+    )
     
     # Facturación electrónica (Factus) — URLs oficiales en https://developers.factus.com.co/
     FACTUS_SANDBOX_BASE_URL: str = Field(default="https://api-sandbox.factus.com.co", env="FACTUS_SANDBOX_BASE_URL")

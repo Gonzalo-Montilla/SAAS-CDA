@@ -131,6 +131,7 @@ export interface SarlaftCase {
   id: string;
   tenant_id: string;
   sede_id?: string | null;
+  sede_nombre?: string | null;
   operacion_ref: string;
   status: string;
   risk_level: string;
@@ -138,6 +139,12 @@ export interface SarlaftCase {
   transaction_amount_cop: number;
   cash_amount_cop: number;
   payment_method: string;
+  vehiculo_id?: string | null;
+  placa?: string | null;
+  tipo_vehiculo?: string | null;
+  cliente_doc_type?: string | null;
+  cliente_doc_number?: string | null;
+  cliente_full_name?: string | null;
   created_by_user_id: string;
   created_at: string;
   updated_at?: string | null;
@@ -164,6 +171,11 @@ export interface SarlaftCaseSummary {
   payment_method: string;
   transaction_amount_cop: number;
   cash_amount_cop: number;
+  placa?: string | null;
+  tipo_vehiculo?: string | null;
+  cliente_doc_type?: string | null;
+  cliente_doc_number?: string | null;
+  cliente_full_name?: string | null;
   created_at: string;
 }
 
@@ -186,6 +198,25 @@ export interface SarlaftManualCheck {
   notes?: string | null;
   certificate_code?: string | null;
   certificate_issued_at?: string | null;
+  created_at: string;
+}
+
+export interface SarlaftInternalAlert {
+  id: string;
+  case_id?: string | null;
+  operacion_ref?: string | null;
+  alert_level: 'critica' | 'alta' | 'media' | 'baja' | string;
+  operation_classification?: 'operacion_inusual' | 'operacion_sospechosa' | string | null;
+  rule_code?: string | null;
+  reason?: string | null;
+  metrics?: Record<string, unknown> | null;
+  risk_level?: 'verde' | 'amarillo' | 'rojo' | string | null;
+  payment_method?: string | null;
+  transaction_amount_cop?: number | null;
+  cash_amount_cop?: number | null;
+  decision_status?: 'justificada' | 'sospechosa' | string | null;
+  decision_notes?: string | null;
+  reviewed_at?: string | null;
   created_at: string;
 }
 
