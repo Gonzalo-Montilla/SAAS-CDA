@@ -579,6 +579,7 @@ function VehiculosPendientes({
   const { showToast } = useToast();
   const [vehiculoSeleccionado, setVehiculoSeleccionado] = useState<Vehiculo | null>(null);
   const [busqueda, setBusqueda] = useState('');
+  const [sarlaftEscalationNotice, setSarlaftEscalationNotice] = useState<string | null>(null);
 
   const notificarPasoCaja = (vehiculo: Vehiculo) => {
     void vehiculosApi.notificarPasoCaja(vehiculo.id)
@@ -606,6 +607,40 @@ function VehiculosPendientes({
     notificarPasoCaja(vehiculo);
     setVehiculoSeleccionado(vehiculo);
   };
+  const sarlaftEscalationModal = sarlaftEscalationNotice ? (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-slate-900/70 p-4 backdrop-blur-sm">
+      <div
+        className="modal-panel w-full max-w-lg border border-rose-200 bg-white p-6"
+        role="dialog"
+        aria-modal="true"
+        aria-label="Alerta SARLAFT para cajera"
+      >
+        <div className="mb-4 flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-700">
+            <AlertTriangle className="h-5 w-5" />
+          </div>
+          <div>
+            <h4 className="text-lg font-bold text-slate-900">Alerta SARLAFT detectada</h4>
+            <p className="mt-1 text-sm text-slate-700">
+              Remite al cliente al Oficial de Cumplimiento para validación del formulario DDI.
+            </p>
+          </div>
+        </div>
+        <div className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-900">
+          {sarlaftEscalationNotice}
+        </div>
+        <div className="mt-5 flex justify-end">
+          <button
+            type="button"
+            className="btn-corporate-primary px-4"
+            onClick={() => setSarlaftEscalationNotice(null)}
+          >
+            Entendido
+          </button>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   if (loading) {
     return <LoadingSpinner message="Cargando vehículos pendientes de cobro..." />;
@@ -630,6 +665,7 @@ function VehiculosPendientes({
           <RefreshCw className="w-5 h-5" />
           Reintentar
         </button>
+        {sarlaftEscalationModal}
       </div>
     );
   }
@@ -655,6 +691,7 @@ function VehiculosPendientes({
           <RefreshCw className="w-5 h-5" />
           Reintentar
         </button>
+        {sarlaftEscalationModal}
       </div>
     );
   }
@@ -671,6 +708,7 @@ function VehiculosPendientes({
         <p className="text-gray-600">
           Todos los vehículos registrados han sido cobrados
         </p>
+        {sarlaftEscalationModal}
       </div>
     );
   }
@@ -787,15 +825,25 @@ function VehiculosPendientes({
           <ModalCobro
             vehiculo={vehiculoSeleccionado}
             onClose={() => setVehiculoSeleccionado(null)}
+            onSarlaftEscalation={(message) => setSarlaftEscalationNotice(message)}
           />
         </ErrorBoundary>
       )}
+      {sarlaftEscalationModal}
     </div>
   );
 }
 
 // Componente Modal de Cobro
-function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => void }) {
+function ModalCobro({
+  vehiculo,
+  onClose,
+  onSarlaftEscalation,
+}: {
+  vehiculo: Vehiculo,
+  onClose: () => void,
+  onSarlaftEscalation: (message: string) => void,
+}) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { user } = useAuth();
@@ -936,6 +984,12 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
         'Cobro registrado',
         `Recibo: ${nombreArchivo}${emailStatusNote.replace(/^\n+/, ' ').replace(/\n/g, ' ')}`,
       );
+      if (vehiculoCobrado.sarlaft_alert_generated) {
+        onSarlaftEscalation(
+          vehiculoCobrado.sarlaft_alert_message ||
+            'Remite al cliente con el Oficial de Cumplimiento para DDI obligatoria.',
+        );
+      }
       
       // Defer query invalidation to prevent React DOM errors
       setTimeout(() => {
@@ -945,7 +999,9 @@ function ModalCobro({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => 
         queryClient.invalidateQueries({ queryKey: ['vehiculos-pendientes'] });
       }, 300);
       
-      onClose();
+      if (!vehiculoCobrado.sarlaft_alert_generated) {
+        onClose();
+      }
     },
   });
 

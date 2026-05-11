@@ -542,10 +542,13 @@ def _upsert_sarlaft_en_cobro(
     payment_method: str,
     transaction_amount_cop: Decimal,
     cash_amount_cop: Decimal,
-) -> None:
+) -> dict:
     # Solo opera cuando el tenant tiene SARLAFT habilitado.
     if not bool(getattr(tenant, "sarlaft_enabled", False)):
-        return
+        return {"alerts_generated": 0, "requires_officer_review": False, "alert_messages": []}
+
+    alerts_generated = 0
+    alert_messages: list[str] = []
 
     profile = (
         db.query(SarlaftProfile)
@@ -559,7 +562,7 @@ def _upsert_sarlaft_en_cobro(
             enabled=True,
             mode=(getattr(tenant, "sarlaft_mode", None) or "manual"),
             cash_threshold_cop=Decimal("0"),
-            api_trigger_mode="risk_only",
+            api_trigger_mode="all",
             api_fallback_to_manual=True,
         )
         db.add(profile)
@@ -658,23 +661,69 @@ def _upsert_sarlaft_en_cobro(
 
     # Si el perfil está deshabilitado, conservamos trazabilidad (caso/parte/log) pero no ejecutamos screening.
     if not bool(profile.enabled):
-        return
+        return {"alerts_generated": 0, "requires_officer_review": False, "alert_messages": []}
+
+    # Motor robusto SIEMPRE activo (independiente de API externa).
+    rule_alerts = evaluate_unusual_operation_rules(
+        db,
+        tenant_id=current_user.tenant_id,
+        cliente_doc_number=party.doc_number or "",
+    )
+    for ra in rule_alerts:
+        alerts_generated += 1
+        alert_messages.append(str(ra.get("reason") or ra.get("rule_code") or "motor_interno"))
+        log_sarlaft_event(
+            db,
+            tenant_id=current_user.tenant_id,
+            actor_user=current_user,
+            action="internal_alert_generated",
+            entity_type="alert",
+            entity_id=case.id,
+            after_json={
+                "alert_level": str(ra.get("alert_level") or "media"),
+                "operation_classification": str(ra.get("operation_classification") or "operacion_inusual"),
+                "rule_code": str(ra.get("rule_code") or "N/A"),
+                "reason": str(ra.get("reason") or "motor_interno"),
+                "window_days": int(ra.get("window_days") or 0),
+                "metrics": ra.get("metrics") if isinstance(ra.get("metrics"), dict) else {},
+                "payment_method": case.payment_method,
+                "transaction_amount_cop": str(case.transaction_amount_cop),
+                "cash_amount_cop": str(case.cash_amount_cop),
+                "cliente_doc_number": party.doc_number,
+            },
+        )
 
     # Si no está en modo API, dejamos el caso para revisión manual posterior.
     if (profile.mode or "").strip().lower() != "api":
-        return
+        return {
+            "alerts_generated": alerts_generated,
+            "requires_officer_review": alerts_generated > 0,
+            "alert_messages": alert_messages,
+        }
 
-    trigger_mode = (profile.api_trigger_mode or "risk_only").strip().lower()
-    threshold_cash = Decimal(str(profile.cash_threshold_cop or 0))
-    method_is_cash_risky = case.payment_method in {"efectivo", "mixto"}
-    should_screen = (
-        trigger_mode == "all"
-        or (trigger_mode == "risk_only" and (case.cash_amount_cop >= threshold_cash or method_is_cash_risky))
-    )
-    if not should_screen:
-        return
+    trigger_mode = (profile.api_trigger_mode or "all").strip().lower()
+    if trigger_mode == "on_demand":
+        log_sarlaft_event(
+            db,
+            tenant_id=current_user.tenant_id,
+            actor_user=current_user,
+            action="auto_screening_skipped_on_demand",
+            entity_type="case",
+            entity_id=case.id,
+            after_json={
+                "reason": "profile_api_trigger_mode_on_demand",
+                "payment_method": case.payment_method,
+                "transaction_amount_cop": str(case.transaction_amount_cop),
+                "cash_amount_cop": str(case.cash_amount_cop),
+            },
+        )
+        return {
+            "alerts_generated": alerts_generated,
+            "requires_officer_review": alerts_generated > 0,
+            "alert_messages": alert_messages,
+        }
 
-    dataset = (settings.OPENSANCTIONS_MATCH_DATASET or "default").strip() or "default"
+    dataset = (settings.OPENSANCTIONS_MATCH_DATASET or "sanctions").strip() or "sanctions"
     threshold = float(settings.OPENSANCTIONS_ALERT_SCORE_THRESHOLD or 0.75)
     try:
         screening = open_sanctions_match(
@@ -711,13 +760,10 @@ def _upsert_sarlaft_en_cobro(
                 "alert_threshold": threshold,
             },
         )
-        # Motor interno de alertas SARLAFT (trazable en auditoría).
-        alert_level = None
+        # Alerta base por screening: solo cuando hay hit alto (riesgo rojo).
         if case.risk_level == "rojo":
-            alert_level = "critica"
-        elif case.risk_level == "amarillo" or method_is_cash_risky:
-            alert_level = "media"
-        if alert_level:
+            alerts_generated += 1
+            alert_messages.append("hit_open_sanctions_alto_riesgo")
             log_sarlaft_event(
                 db,
                 tenant_id=current_user.tenant_id,
@@ -726,45 +772,14 @@ def _upsert_sarlaft_en_cobro(
                 entity_type="alert",
                 entity_id=case.id,
                 after_json={
-                    "alert_level": alert_level,
-                    "reason": (
-                        "riesgo_rojo"
-                        if case.risk_level == "rojo"
-                        else "riesgo_amarillo_o_metodo_pago_riesgoso"
-                    ),
+                    "alert_level": "critica",
+                    "reason": "hit_open_sanctions_alto_riesgo",
                     "payment_method": case.payment_method,
                     "transaction_amount_cop": str(case.transaction_amount_cop),
                     "cash_amount_cop": str(case.cash_amount_cop),
                 },
             )
 
-        # Motor robusto: detección de operación inusual por reglas de frecuencia/efectivo.
-        rule_alerts = evaluate_unusual_operation_rules(
-            db,
-            tenant_id=current_user.tenant_id,
-            cliente_doc_number=party.doc_number or "",
-        )
-        for ra in rule_alerts:
-            log_sarlaft_event(
-                db,
-                tenant_id=current_user.tenant_id,
-                actor_user=current_user,
-                action="internal_alert_generated",
-                entity_type="alert",
-                entity_id=case.id,
-                after_json={
-                    "alert_level": str(ra.get("alert_level") or "media"),
-                    "operation_classification": str(ra.get("operation_classification") or "operacion_inusual"),
-                    "rule_code": str(ra.get("rule_code") or "N/A"),
-                    "reason": str(ra.get("reason") or "motor_interno"),
-                    "window_days": int(ra.get("window_days") or 0),
-                    "metrics": ra.get("metrics") if isinstance(ra.get("metrics"), dict) else {},
-                    "payment_method": case.payment_method,
-                    "transaction_amount_cop": str(case.transaction_amount_cop),
-                    "cash_amount_cop": str(case.cash_amount_cop),
-                    "cliente_doc_number": party.doc_number,
-                },
-            )
     except OpenSanctionsError as exc:
         case.status = "open"
         log_sarlaft_event(
@@ -779,8 +794,13 @@ def _upsert_sarlaft_en_cobro(
         if not bool(profile.api_fallback_to_manual):
             raise HTTPException(
                 status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"No fue posible ejecutar screening SARLAFT automático en recepción: {exc}",
+                detail=f"No fue posible ejecutar screening SARLAFT automático en cobro: {exc}",
             ) from exc
+    return {
+        "alerts_generated": alerts_generated,
+        "requires_officer_review": alerts_generated > 0,
+        "alert_messages": alert_messages,
+    }
 
 
 VALID_PAYMENT_METHODS = {
@@ -1657,12 +1677,17 @@ def cobrar_vehiculo(
         db.commit()
         db.refresh(vehiculo)
 
+        sarlaft_eval_result = {
+            "alerts_generated": 0,
+            "requires_officer_review": False,
+            "alert_messages": [],
+        }
         tenant_row = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
         if tenant_row:
             cash_amount_cop = Decimal(str(vehiculo.total_cobrado or 0))
             if metodo_pago not in {"efectivo", "mixto"}:
                 cash_amount_cop = Decimal("0")
-            _upsert_sarlaft_en_cobro(
+            sarlaft_eval_result = _upsert_sarlaft_en_cobro(
                 db=db,
                 current_user=current_user,
                 tenant=tenant_row,
@@ -1673,6 +1698,20 @@ def cobrar_vehiculo(
                 cash_amount_cop=cash_amount_cop,
             )
             db.commit()
+
+        alert_count = int(sarlaft_eval_result.get("alerts_generated") or 0)
+        requires_officer = bool(sarlaft_eval_result.get("requires_officer_review"))
+        if requires_officer:
+            msg_suffix = f" ({alert_count} alerta{'s' if alert_count != 1 else ''})" if alert_count > 0 else ""
+            alert_text = (
+                "Cliente con alerta SARLAFT: remitir a Oficial de Cumplimiento para DDI obligatoria"
+                f"{msg_suffix}."
+            )
+        else:
+            alert_text = None
+        setattr(vehiculo, "sarlaft_alert_generated", requires_officer)
+        setattr(vehiculo, "sarlaft_alert_count", alert_count)
+        setattr(vehiculo, "sarlaft_alert_message", alert_text)
 
         # Programar encuesta de calidad (envío diferido) sin bloquear el flujo de cobro.
         try:

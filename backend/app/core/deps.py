@@ -17,8 +17,14 @@ from app.models.tenant import Tenant
 from app.services.tenant_billing_state import refresh_tenant_billing_state
 
 # OAuth2 scheme
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
-oauth2_scheme_saas = OAuth2PasswordBearer(tokenUrl="/api/v1/saas/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="/api/v1/auth/login",
+    scheme_name="TenantOAuth2Password",
+)
+oauth2_scheme_saas = OAuth2PasswordBearer(
+    tokenUrl="/api/v1/saas/auth/login",
+    scheme_name="SaaSOAuth2Password",
+)
 
 
 def get_current_user(

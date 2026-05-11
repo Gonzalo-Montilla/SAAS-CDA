@@ -270,3 +270,15 @@ class SarlaftInternalAlertResponse(BaseModel):
 class SarlaftInternalAlertDecisionRequest(BaseModel):
     decision: Literal["justificada", "sospechosa"]
     notes: str | None = Field(default=None, max_length=2000)
+    funds_source_declaration: str = Field(min_length=3, max_length=2000)
+    economic_activity_support: str = Field(min_length=3, max_length=2000)
+    cashier_interview: Literal["normal", "nervioso", "evasivo", "apresurado"]
+    support_refs: list[str] = Field(default_factory=list, max_length=20)
+
+    @model_validator(mode="after")
+    def validate_support_refs(self):
+        refs = [r.strip() for r in self.support_refs if isinstance(r, str) and r.strip()]
+        self.support_refs = refs
+        if len(refs) < 1:
+            raise ValueError("Debe registrar al menos un soporte o referencia de respaldo.")
+        return self

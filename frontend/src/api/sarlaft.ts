@@ -121,7 +121,14 @@ export const sarlaftApi = {
 
   decideInternalAlert: async (
     alertId: string,
-    payload: { decision: 'justificada' | 'sospechosa'; notes?: string | null }
+    payload: {
+      decision: 'justificada' | 'sospechosa';
+      notes?: string | null;
+      funds_source_declaration: string;
+      economic_activity_support: string;
+      cashier_interview: 'normal' | 'nervioso' | 'evasivo' | 'apresurado';
+      support_refs: string[];
+    }
   ): Promise<SarlaftInternalAlert> => {
     const response = await apiClient.post<SarlaftInternalAlert>(`/sarlaft/alerts/internal/${alertId}/decision`, payload);
     return response.data;

@@ -676,6 +676,10 @@ export interface Vehiculo {
   fecha_registro: string;
   /** Nombre del usuario que cobró (solo en detalle GET). */
   cajero_nombre?: string | null;
+  /** Señal SARLAFT para flujo en Caja (DDI). */
+  sarlaft_alert_generated?: boolean | null;
+  sarlaft_alert_count?: number | null;
+  sarlaft_alert_message?: string | null;
 }
 
 export interface VehiculoRegistro {

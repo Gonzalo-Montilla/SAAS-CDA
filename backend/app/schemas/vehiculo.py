@@ -157,6 +157,9 @@ class VehiculoResponse(BaseModel):
     # Campos calculados
     antiguedad: Optional[int] = None
     cajero_nombre: Optional[str] = None
+    sarlaft_alert_generated: Optional[bool] = None
+    sarlaft_alert_count: Optional[int] = None
+    sarlaft_alert_message: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

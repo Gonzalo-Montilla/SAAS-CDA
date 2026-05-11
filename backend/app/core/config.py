@@ -139,7 +139,7 @@ class Settings(BaseSettings):
         le=60.0,
         env="OPENSANCTIONS_TIMEOUT_SECONDS",
     )
-    OPENSANCTIONS_MATCH_DATASET: str = Field(default="default", env="OPENSANCTIONS_MATCH_DATASET")
+    OPENSANCTIONS_MATCH_DATASET: str = Field(default="sanctions", env="OPENSANCTIONS_MATCH_DATASET")
     OPENSANCTIONS_MATCH_ALGORITHM: str = Field(default="best", env="OPENSANCTIONS_MATCH_ALGORITHM")
     OPENSANCTIONS_MATCH_LIMIT: int = Field(default=5, ge=1, le=20, env="OPENSANCTIONS_MATCH_LIMIT")
     OPENSANCTIONS_ALERT_SCORE_THRESHOLD: float = Field(

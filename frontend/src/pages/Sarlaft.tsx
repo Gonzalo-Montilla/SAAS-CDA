@@ -4,6 +4,7 @@ import { BellRing, RefreshCw, Search, ShieldAlert, ShieldCheck, X } from 'lucide
 import Layout from '../components/Layout';
 import { sarlaftApi } from '../api/sarlaft';
 import type { SarlaftCase, SarlaftCasePartyInput, SarlaftInternalAlert, SarlaftManualCheck } from '../types';
+import { useAuth } from '../contexts/AuthContext';
 
 function money(v: number): string {
   return new Intl.NumberFormat('es-CO', {
@@ -20,10 +21,16 @@ const SARLAFT_SECCIONES: { id: SarlaftSeccion; label: string; hint: string }[] =
   { id: 'alertas', label: 'Alertas internas', hint: 'Seguimiento del motor interno SARLAFT y severidad por operación.' },
   { id: 'casos', label: 'Casos', hint: 'Creación, búsqueda y bandeja de casos SARLAFT.' },
   { id: 'consultas', label: 'Consultas manuales', hint: 'Consultas fuera de recepción con trazabilidad y certificado.' },
-  { id: 'screening', label: 'Screening', hint: 'Ejecución OpenSanctions y clasificación automática de riesgo.' },
+  // La pestaña de screening técnico se mantiene fuera del flujo visible para evitar ruido operativo.
 ];
 
 export default function Sarlaft() {
+  const { user } = useAuth();
+  const isAdmin = user?.rol === 'administrador';
+  const actionableAlertsStorageKey = useMemo(
+    () => `sarlaft-only-actionable-alerts:${user?.id || user?.email || 'anon'}`,
+    [user?.id, user?.email]
+  );
   const [operacionRef, setOperacionRef] = useState('');
   const [transactionAmount, setTransactionAmount] = useState('');
   const [cashAmount, setCashAmount] = useState('');
@@ -60,10 +67,18 @@ export default function Sarlaft() {
   const [copiedManualCheckId, setCopiedManualCheckId] = useState<string | null>(null);
   const [copiedCaseId, setCopiedCaseId] = useState<string | null>(null);
   const [internalAlertLevelFilter, setInternalAlertLevelFilter] = useState<'todas' | 'critica' | 'media' | 'baja'>('todas');
+  const [onlyActionableAlerts, setOnlyActionableAlerts] = useState(true);
   const [sarlaftSeccion, setSarlaftSeccion] = useState<SarlaftSeccion>('resumen');
   const [caseDetailModalOpen, setCaseDetailModalOpen] = useState(false);
   const [contingenciaOpen, setContingenciaOpen] = useState(false);
-  const [alertDecisionDrafts, setAlertDecisionDrafts] = useState<Record<string, string>>({});
+  const [decisionModal, setDecisionModal] = useState<{
+    alertId: string;
+  } | null>(null);
+  const [decisionNotes, setDecisionNotes] = useState('');
+  const [decisionFundsSource, setDecisionFundsSource] = useState('');
+  const [decisionEconomicSupport, setDecisionEconomicSupport] = useState('');
+  const [decisionCashierInterview, setDecisionCashierInterview] = useState<'normal' | 'nervioso' | 'evasivo' | 'apresurado'>('normal');
+  const [decisionSupportRefsRaw, setDecisionSupportRefsRaw] = useState('');
 
   useEffect(() => {
     setManualDocType((prev) => {
@@ -72,6 +87,23 @@ export default function Sarlaft() {
       return prev;
     });
   }, [manualSubjectType]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const raw = window.localStorage.getItem(actionableAlertsStorageKey);
+    if (raw === '1') {
+      setOnlyActionableAlerts(true);
+      return;
+    }
+    if (raw === '0') {
+      setOnlyActionableAlerts(false);
+    }
+  }, [actionableAlertsStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(actionableAlertsStorageKey, onlyActionableAlerts ? '1' : '0');
+  }, [actionableAlertsStorageKey, onlyActionableAlerts]);
 
   useEffect(() => {
     if (!caseDetailModalOpen) return;
@@ -126,6 +158,14 @@ export default function Sarlaft() {
     setCaseIdLookup('');
     setFoundCase(null);
   };
+  const closeDecisionModal = (): void => {
+    setDecisionModal(null);
+    setDecisionNotes('');
+    setDecisionFundsSource('');
+    setDecisionEconomicSupport('');
+    setDecisionCashierInterview('normal');
+    setDecisionSupportRefsRaw('');
+  };
 
   const casesQuery = useQuery({
     queryKey: ['sarlaft-cases-list', 20],
@@ -142,6 +182,10 @@ export default function Sarlaft() {
         limit: 30,
         alert_level: internalAlertLevelFilter === 'todas' ? undefined : internalAlertLevelFilter,
       }),
+  });
+  const profileQuery = useQuery({
+    queryKey: ['sarlaft-profile'],
+    queryFn: async () => sarlaftApi.getProfile(),
   });
 
   const createMutation = useMutation({
@@ -286,20 +330,54 @@ export default function Sarlaft() {
     },
   });
   const decideAlertMutation = useMutation({
-    mutationFn: async (payload: { alertId: string; decision: 'justificada' | 'sospechosa'; notes?: string | null }) =>
-      sarlaftApi.decideInternalAlert(payload.alertId, { decision: payload.decision, notes: payload.notes || null }),
+    mutationFn: async (payload: {
+      alertId: string;
+      decision: 'justificada' | 'sospechosa';
+      notes?: string | null;
+      funds_source_declaration: string;
+      economic_activity_support: string;
+      cashier_interview: 'normal' | 'nervioso' | 'evasivo' | 'apresurado';
+      support_refs: string[];
+    }) =>
+      sarlaftApi.decideInternalAlert(payload.alertId, {
+        decision: payload.decision,
+        notes: payload.notes || null,
+        funds_source_declaration: payload.funds_source_declaration,
+        economic_activity_support: payload.economic_activity_support,
+        cashier_interview: payload.cashier_interview,
+        support_refs: payload.support_refs,
+      }),
     onSuccess: (_, vars) => {
       setFeedback(
         vars.decision === 'justificada'
           ? 'Alerta marcada como Operación Inusual Justificada.'
           : 'Alerta marcada como Operación Sospechosa (ROS pendiente).'
       );
-      setAlertDecisionDrafts((prev) => ({ ...prev, [vars.alertId]: '' }));
+      closeDecisionModal();
       internalAlertsQuery.refetch();
       casesQuery.refetch();
     },
     onError: (err: any) => {
       setFeedback(err?.response?.data?.detail || 'No fue posible registrar la decisión de la alerta.');
+    },
+  });
+  const toggleApiMutation = useMutation({
+    mutationFn: async (enabled: boolean) =>
+      sarlaftApi.patchProfile({
+        enabled: true,
+        mode: enabled ? 'api' : 'manual',
+        api_trigger_mode: enabled ? 'all' : profileQuery.data?.api_trigger_mode || 'all',
+      }),
+    onSuccess: (data) => {
+      profileQuery.refetch();
+      setFeedback(
+        data.mode === 'api'
+          ? 'API externa SARLAFT activada. El motor interno sigue activo permanentemente.'
+          : 'API externa SARLAFT desactivada. El motor interno continúa activo.'
+      );
+    },
+    onError: (err: any) => {
+      setFeedback(err?.response?.data?.detail || 'No se pudo cambiar el estado de API externa SARLAFT.');
     },
   });
 
@@ -335,29 +413,35 @@ export default function Sarlaft() {
     },
     [],
   );
-  const internalAlertsKpi = useMemo(() => {
-    const rows = internalAlertsQuery.data || [];
-    const total = rows.length;
-    const criticas = rows.filter((r) => r.alert_level === 'critica' || r.alert_level === 'alta').length;
-    const medias = rows.filter((r) => r.alert_level === 'media').length;
-    const riesgoRojo = rows.filter((r) => r.risk_level === 'rojo').length;
-    const pagoRiesgoso = rows.filter((r) => ['efectivo', 'mixto'].includes((r.payment_method || '').toLowerCase())).length;
-    return { total, criticas, medias, riesgoRojo, pagoRiesgoso };
-  }, [internalAlertsQuery.data]);
   const internalAlertsRows = useMemo(() => {
     const levelWeight = (level: string): number => {
       if (level === 'critica' || level === 'alta') return 0;
       if (level === 'media') return 1;
       return 2;
     };
-    return [...(internalAlertsQuery.data || [])].sort((a, b) => {
-      const levelDiff = levelWeight(a.alert_level) - levelWeight(b.alert_level);
-      if (levelDiff !== 0) return levelDiff;
-      const dateA = new Date(a.created_at).getTime();
-      const dateB = new Date(b.created_at).getTime();
-      return dateB - dateA;
-    });
-  }, [internalAlertsQuery.data]);
+    const rows = [...(internalAlertsQuery.data || [])]
+      .filter((row) => {
+        if (!onlyActionableAlerts) return true;
+        return !String(row.decision_status || '').trim();
+      })
+      .sort((a, b) => {
+        const levelDiff = levelWeight(a.alert_level) - levelWeight(b.alert_level);
+        if (levelDiff !== 0) return levelDiff;
+        const dateA = new Date(a.created_at).getTime();
+        const dateB = new Date(b.created_at).getTime();
+        return dateB - dateA;
+      });
+    return rows;
+  }, [internalAlertsQuery.data, onlyActionableAlerts]);
+  const internalAlertsKpi = useMemo(() => {
+    const rows = internalAlertsRows;
+    const total = rows.length;
+    const criticas = rows.filter((r) => r.alert_level === 'critica' || r.alert_level === 'alta').length;
+    const medias = rows.filter((r) => r.alert_level === 'media').length;
+    const riesgoRojo = rows.filter((r) => r.risk_level === 'rojo').length;
+    const pagoRiesgoso = rows.filter((r) => ['efectivo', 'mixto'].includes((r.payment_method || '').toLowerCase())).length;
+    return { total, criticas, medias, riesgoRojo, pagoRiesgoso };
+  }, [internalAlertsRows]);
   const alertLevelLabel = useMemo(
     () => (level: string) => {
       if (level === 'critica' || level === 'alta') return 'CRITICA';
@@ -396,6 +480,24 @@ export default function Sarlaft() {
     },
     [],
   );
+  const decisionSupportRefs = useMemo(
+    () =>
+      decisionSupportRefsRaw
+        .split('\n')
+        .map((x) => x.trim())
+        .filter(Boolean),
+    [decisionSupportRefsRaw],
+  );
+  const decisionFormValid = useMemo(
+    () =>
+      Boolean(
+        decisionFundsSource.trim() &&
+          decisionEconomicSupport.trim() &&
+          decisionCashierInterview &&
+          decisionSupportRefs.length >= 1
+      ),
+    [decisionFundsSource, decisionEconomicSupport, decisionCashierInterview, decisionSupportRefs.length],
+  );
   const alertRowClass = useMemo(
     () => (level: string) => {
       if (level === 'critica' || level === 'alta') return 'border-t border-l-4 border-l-rose-400 border-slate-100 bg-rose-50/40';
@@ -422,6 +524,39 @@ export default function Sarlaft() {
     <Layout title="SARLAFT">
       <div className="space-y-6">
         <div className="sticky top-0 z-10 rounded-xl border border-slate-200/90 bg-white/95 shadow-sm backdrop-blur-sm supports-[backdrop-filter]:bg-white/90">
+          <div className="flex flex-col gap-2 border-b border-slate-100 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Motor SARLAFT</p>
+              <p className="text-sm text-slate-700">
+                Monitoreo interno: <strong>Siempre activo</strong>
+              </p>
+            </div>
+            <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <span className="text-xs font-medium text-slate-600">API externa</span>
+              <button
+                type="button"
+                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                  (profileQuery.data?.mode || 'manual') === 'api' ? 'bg-primary-600' : 'bg-slate-300'
+                } ${!isAdmin ? 'cursor-not-allowed opacity-60' : ''}`}
+                onClick={() => {
+                  if (!isAdmin || toggleApiMutation.isLoading || profileQuery.isLoading) return;
+                  const current = (profileQuery.data?.mode || 'manual') === 'api';
+                  toggleApiMutation.mutate(!current);
+                }}
+                disabled={!isAdmin || toggleApiMutation.isLoading || profileQuery.isLoading}
+                title={isAdmin ? 'Activar/desactivar API externa' : 'Solo administrador'}
+              >
+                <span
+                  className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                    (profileQuery.data?.mode || 'manual') === 'api' ? 'translate-x-5' : 'translate-x-1'
+                  }`}
+                />
+              </button>
+              <span className="text-xs font-semibold text-slate-700">
+                {(profileQuery.data?.mode || 'manual') === 'api' ? 'Activa' : 'Inactiva'}
+              </span>
+            </div>
+          </div>
           <div
             className="flex overflow-x-auto gap-0 border-b border-slate-100 px-1 pt-1 sm:px-2"
             role="tablist"
@@ -757,7 +892,11 @@ export default function Sarlaft() {
           <h3 className="text-base font-semibold text-slate-900 mb-3">Consultar caso por ID</h3>
           <div className="flex gap-2">
             <input className="input-corporate flex-1" placeholder="UUID del caso SARLAFT" value={caseIdLookup} onChange={(e) => setCaseIdLookup(e.target.value)} />
-            <button className="btn-corporate-muted px-4 flex items-center gap-2" disabled={findMutation.isLoading} onClick={() => findMutation.mutate()}>
+            <button
+              className="btn-corporate-muted px-4 flex items-center gap-2"
+              disabled={findMutation.isLoading}
+              onClick={() => findMutation.mutate(caseIdLookup)}
+            >
               <Search className="h-4 w-4" />
               Buscar
             </button>
@@ -887,6 +1026,19 @@ export default function Sarlaft() {
                   Actualizar
                 </button>
               </div>
+              <div className="flex w-full justify-end">
+                <button
+                  type="button"
+                  onClick={() => setOnlyActionableAlerts((prev) => !prev)}
+                  className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-semibold transition ${
+                    onlyActionableAlerts
+                      ? 'border-primary-200 bg-primary-50 text-primary-800'
+                      : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  Solo alertas accionables: {onlyActionableAlerts ? 'ON' : 'OFF'}
+                </button>
+              </div>
               <p className="text-[11px] text-slate-500">
                 {internalAlertsQuery.dataUpdatedAt
                   ? `Actualizado: ${new Date(internalAlertsQuery.dataUpdatedAt).toLocaleString('es-CO')}`
@@ -1003,40 +1155,17 @@ export default function Sarlaft() {
                         <button
                           className="btn-corporate-muted px-2.5 py-1 text-xs disabled:opacity-50"
                           disabled={decideAlertMutation.isLoading}
-                          onClick={() =>
-                            decideAlertMutation.mutate({
-                              alertId: row.id,
-                              decision: 'justificada',
-                              notes: alertDecisionDrafts[row.id] || null,
-                            })
-                          }
+                          onClick={() => {
+                            setDecisionModal({ alertId: row.id });
+                            setDecisionNotes('');
+                            setDecisionFundsSource('');
+                            setDecisionEconomicSupport('');
+                            setDecisionCashierInterview('normal');
+                            setDecisionSupportRefsRaw('');
+                          }}
                         >
-                          Justificar
+                          Evaluar alerta (DDI)
                         </button>
-                        <button
-                          className="btn-corporate-muted border-rose-200 bg-rose-50 text-rose-700 px-2.5 py-1 text-xs disabled:opacity-50"
-                          disabled={decideAlertMutation.isLoading}
-                          onClick={() =>
-                            decideAlertMutation.mutate({
-                              alertId: row.id,
-                              decision: 'sospechosa',
-                              notes: alertDecisionDrafts[row.id] || null,
-                            })
-                          }
-                        >
-                          Marcar sospechosa
-                        </button>
-                        <input
-                          className="input-corporate px-2 py-1 text-xs"
-                          placeholder="Nota del oficial (opcional)"
-                          value={alertDecisionDrafts[row.id] || ''}
-                          onChange={(e) =>
-                            setAlertDecisionDrafts((prev) => ({
-                              ...prev,
-                              [row.id]: e.target.value,
-                            }))
-                          }
-                        />
                       </div>
                     </td>
                     <td className="py-2 pr-3 text-slate-500">{new Date(row.created_at).toLocaleString('es-CO')}</td>
@@ -1049,14 +1178,13 @@ export default function Sarlaft() {
                     </td>
                   </tr>
                 )}
-                {!internalAlertsQuery.isLoading && (internalAlertsQuery.data || []).length === 0 && (
+                {!internalAlertsQuery.isLoading && internalAlertsRows.length === 0 && (
                   <tr>
                     <td className="py-4" colSpan={12}>
                       <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-slate-600">
                         <p className="text-sm font-medium text-slate-800">Sin alertas internas para el filtro actual.</p>
                         <p className="mt-1 text-xs">
-                          Para probar, registra un cobro con método <strong>efectivo/mixto</strong> o genera un caso con
-                          riesgo <strong>amarillo/rojo</strong>.
+                          Si tienes activado <strong>Solo alertas accionables</strong>, se ocultan alertas ya decididas.
                         </p>
                       </div>
                     </td>
@@ -1136,6 +1264,116 @@ export default function Sarlaft() {
             </table>
           </div>
         </div>
+        )}
+
+        {decisionModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+            <div className="modal-panel glass-card max-h-[90vh] w-full max-w-2xl overflow-y-auto border border-slate-200/80 p-5">
+              <div className="modal-header-sticky -mx-5 mb-4 border-b border-slate-200 px-5 pb-3 pt-1">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Debida diligencia intensificada</p>
+                    <h3 className="text-base font-semibold text-slate-900">
+                      Evaluar alerta interna SARLAFT
+                    </h3>
+                    <p className="text-xs text-slate-500">
+                      La venta no se bloquea; esta decisión exige soporte documental para trazabilidad ante auditoría.
+                    </p>
+                  </div>
+                  <button
+                    className="rounded-md border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
+                    onClick={closeDecisionModal}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+
+              <div className="space-y-3">
+                <textarea
+                  className="input-corporate min-h-[72px]"
+                  placeholder="Origen de fondos declarado por el cliente *"
+                  value={decisionFundsSource}
+                  onChange={(e) => setDecisionFundsSource(e.target.value)}
+                />
+                <textarea
+                  className="input-corporate min-h-[72px]"
+                  placeholder="Soporte de actividad económica presentado (RUT, contrato, etc.) *"
+                  value={decisionEconomicSupport}
+                  onChange={(e) => setDecisionEconomicSupport(e.target.value)}
+                />
+                <div>
+                  <label className="mb-1 block text-xs font-semibold text-slate-600">Entrevista cajero *</label>
+                  <select
+                    className="input-corporate"
+                    value={decisionCashierInterview}
+                    onChange={(e) =>
+                      setDecisionCashierInterview(
+                        e.target.value as 'normal' | 'nervioso' | 'evasivo' | 'apresurado'
+                      )
+                    }
+                  >
+                    <option value="normal">Normal</option>
+                    <option value="nervioso">Nervioso</option>
+                    <option value="evasivo">Evasivo</option>
+                    <option value="apresurado">Apresurado</option>
+                  </select>
+                </div>
+                <textarea
+                  className="input-corporate min-h-[88px]"
+                  placeholder="Referencias de soportes (una por línea) *"
+                  value={decisionSupportRefsRaw}
+                  onChange={(e) => setDecisionSupportRefsRaw(e.target.value)}
+                />
+                <textarea
+                  className="input-corporate min-h-[72px]"
+                  placeholder="Nota del oficial (opcional)"
+                  value={decisionNotes}
+                  onChange={(e) => setDecisionNotes(e.target.value)}
+                />
+              </div>
+
+              <div className="mt-4 flex items-center justify-end gap-2">
+                <button className="btn-corporate-muted px-4" onClick={closeDecisionModal}>
+                  Cancelar
+                </button>
+                <button
+                  className="btn-corporate-primary px-4 disabled:opacity-50"
+                  disabled={!decisionFormValid || decideAlertMutation.isLoading}
+                  onClick={() =>
+                    decideAlertMutation.mutate({
+                      alertId: decisionModal.alertId,
+                      decision: 'justificada',
+                      notes: decisionNotes || null,
+                      funds_source_declaration: decisionFundsSource.trim(),
+                      economic_activity_support: decisionEconomicSupport.trim(),
+                      cashier_interview: decisionCashierInterview,
+                      support_refs: decisionSupportRefs,
+                    })
+                  }
+                >
+                  {decideAlertMutation.isLoading ? 'Guardando...' : 'Guardar como justificada'}
+                </button>
+                <button
+                  className="rounded-xl border border-rose-200 bg-rose-600 px-4 py-2 font-semibold text-white hover:bg-rose-700 disabled:opacity-50"
+                  disabled={!decisionFormValid || decideAlertMutation.isLoading}
+                  onClick={() =>
+                    decideAlertMutation.mutate({
+                      alertId: decisionModal.alertId,
+                      decision: 'sospechosa',
+                      notes: decisionNotes || null,
+                      funds_source_declaration: decisionFundsSource.trim(),
+                      economic_activity_support: decisionEconomicSupport.trim(),
+                      cashier_interview: decisionCashierInterview,
+                      support_refs: decisionSupportRefs,
+                    })
+                  }
+                >
+                  {decideAlertMutation.isLoading ? 'Guardando...' : 'Guardar como sospechosa'}
+                </button>
+              </div>
+            </div>
+          </div>
         )}
 
         {caseDetailModalOpen && (foundCase || createdCase) && (

@@ -946,6 +946,21 @@ def list_sarlaft_internal_alerts(
         review_meta = review.after_json if (review and isinstance(review.after_json, dict)) else {}
         decision_status = str(review_meta.get("decision") or "").strip().lower() or None
         operation_classification = str(meta.get("operation_classification") or "").strip() or None
+        rule_code = str(meta.get("rule_code") or "").strip() or None
+        reason = str(meta.get("reason") or "").strip() or None
+
+        # Higiene de bandeja:
+        # ocultar alertas "básicas" históricas sin decisión en casos VERDE
+        # (ruido por pago en efectivo/mixto sin inusualidad real por regla).
+        is_green_case = bool(case and (case.risk_level or "").strip().lower() == "verde")
+        is_base_rule = (rule_code or "").strip().upper() in {"", "BASE"}
+        is_legacy_payment_risk = (reason or "").strip().lower() in {
+            "riesgo_amarillo_o_metodo_pago_riesgoso",
+            "metodo_pago_riesgoso",
+        }
+        if not decision_status and is_green_case and is_base_rule and is_legacy_payment_risk:
+            continue
+
         if decision_status == "sospechosa":
             operation_classification = "operacion_sospechosa"
         items.append(
@@ -955,8 +970,8 @@ def list_sarlaft_internal_alerts(
                 operacion_ref=case.operacion_ref if case else None,
                 alert_level=lv or "media",
                 operation_classification=operation_classification,
-                rule_code=str(meta.get("rule_code") or "").strip() or None,
-                reason=str(meta.get("reason") or "").strip() or None,
+                rule_code=rule_code,
+                reason=reason,
                 metrics=meta.get("metrics") if isinstance(meta.get("metrics"), dict) else None,
                 risk_level=case.risk_level if case else None,
                 payment_method=str(meta.get("payment_method") or "").strip() or (case.payment_method if case else None),
@@ -1023,6 +1038,10 @@ def decide_sarlaft_internal_alert(
         after_json={
             "decision": payload.decision,
             "notes": (payload.notes or "").strip() or None,
+            "funds_source_declaration": payload.funds_source_declaration.strip(),
+            "economic_activity_support": payload.economic_activity_support.strip(),
+            "cashier_interview": payload.cashier_interview,
+            "support_refs": payload.support_refs,
             "alert_log_id": str(alert_row.id),
             "case_id": str(alert_row.entity_id) if alert_row.entity_id else None,
         },
