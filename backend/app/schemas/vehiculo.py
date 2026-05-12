@@ -8,6 +8,13 @@ from decimal import Decimal
 from datetime import datetime
 from typing import Optional, Literal
 from uuid import UUID
+from app.utils.factus_validators import (
+    digito_verificacion_nit_colombia,
+    digito_verificacion_nit_colombia_serie_37,
+    normalizar_base_nit_persona_natural_colombia,
+    parse_nit_colombiano_identificacion_y_dv,
+    normalizar_numero_identificacion_proveedor,
+)
 
 
 def _validar_celular_recepcion(v) -> str:
@@ -33,6 +40,32 @@ def _normalizar_tipo_documento_cliente(v) -> str:
     if s not in {"CC", "CE", "PA", "NIT"}:
         raise ValueError("Tipo de documento inválido. Use CC, CE, PA o NIT.")
     return s
+
+
+def _normalizar_documento_cliente(v, doc_type: str) -> str:
+    raw = str(v or "").strip()
+    if not raw:
+        raise ValueError("El documento del cliente es obligatorio.")
+    if doc_type == "NIT":
+        normalized = normalizar_numero_identificacion_proveedor(raw)
+        if not re.fullmatch(r"\d{5,20}(-\d)?", normalized):
+            raise ValueError("Para NIT use solo números, opcionalmente con DV (ejemplo: 900123456 o 900123456-8).")
+        ident, dv_parse = parse_nit_colombiano_identificacion_y_dv(normalized)
+        if not ident:
+            raise ValueError("NIT inválido.")
+        if dv_parse is None:
+            return ident[:20]
+        norm_ident = normalizar_base_nit_persona_natural_colombia(ident)
+        expected = {
+            int(digito_verificacion_nit_colombia(ident)),
+            int(digito_verificacion_nit_colombia_serie_37(ident)),
+            int(digito_verificacion_nit_colombia(norm_ident)),
+            int(digito_verificacion_nit_colombia_serie_37(norm_ident)),
+        }
+        if int(dv_parse) not in expected:
+            raise ValueError("DV inválido para el NIT indicado. Verifique el RUT.")
+        return normalized
+    return re.sub(r"[^A-Z0-9]", "", raw.upper())[:20]
 
 
 class VehiculoRegistro(BaseModel):
@@ -73,6 +106,12 @@ class VehiculoRegistro(BaseModel):
     def normalize_doc_type(cls, v):
         return _normalizar_tipo_documento_cliente(v)
 
+    @field_validator("cliente_documento", mode="before")
+    @classmethod
+    def normalize_doc_number(cls, v, info):
+        doc_type = _normalizar_tipo_documento_cliente(info.data.get("cliente_tipo_documento", "CC"))
+        return _normalizar_documento_cliente(v, doc_type)
+
 
 class VehiculoEdicion(BaseModel):
     """Edición de vehículo registrado (antes de cobrar)"""
@@ -111,6 +150,12 @@ class VehiculoEdicion(BaseModel):
     @classmethod
     def normalize_doc_type_edit(cls, v):
         return _normalizar_tipo_documento_cliente(v)
+
+    @field_validator("cliente_documento", mode="before")
+    @classmethod
+    def normalize_doc_number_edit(cls, v, info):
+        doc_type = _normalizar_tipo_documento_cliente(info.data.get("cliente_tipo_documento", "CC"))
+        return _normalizar_documento_cliente(v, doc_type)
 
 
 class VehiculoCobro(BaseModel):

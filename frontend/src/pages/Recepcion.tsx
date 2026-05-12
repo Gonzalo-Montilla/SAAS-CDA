@@ -516,11 +516,11 @@ export default function Recepcion() {
       alert('Ingrese un correo electrónico válido.');
       return;
     }
-
     const dirCliente = (formData.cliente_direccion || '').trim();
     // Preparar datos incluyendo fotos en observaciones
     const dataConFotos = {
       ...formData,
+      cliente_documento: normalizarDocumentoCliente(formData.cliente_documento, formData.cliente_tipo_documento),
       cliente_telefono: telDigits,
       cliente_email: clienteEmailNormalizado,
       cliente_direccion: dirCliente ? dirCliente.slice(0, 300) : undefined,

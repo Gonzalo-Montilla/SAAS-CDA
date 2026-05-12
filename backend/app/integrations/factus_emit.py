@@ -25,7 +25,16 @@ from app.services.factus_tenant_settings import active_auth_encrypted
 from app.utils.factus_validators import (
     digito_verificacion_nit_colombia as _dv_nit_colombia,
 )
+from app.utils.factus_validators import (
+    digito_verificacion_nit_colombia_serie_37 as _dv_nit_colombia_serie_37,
+)
 from app.utils.factus_validators import email_valido_factus as _email_valido_factus
+from app.utils.factus_validators import (
+    normalizar_base_nit_persona_natural_colombia as _normalizar_base_nit_persona_natural_colombia,
+)
+from app.utils.factus_validators import (
+    normalizar_numero_identificacion_proveedor as _normalizar_numero_identificacion_proveedor,
+)
 from app.utils.factus_validators import (
     parse_nit_colombiano_identificacion_y_dv as _parse_nit_ident_y_dv,
 )
@@ -195,9 +204,20 @@ def validar_datos_cliente_para_factus(vehiculo: VehiculoProceso) -> None:
     doc_type = str(getattr(vehiculo, "cliente_tipo_documento", None) or "CC").strip().upper()
     doc_raw = str(vehiculo.cliente_documento or "").strip()
     if doc_type == "NIT":
-        ident, _dv = _parse_nit_ident_y_dv(doc_raw)
+        normalized = _normalizar_numero_identificacion_proveedor(doc_raw)
+        ident, dv_parse = _parse_nit_ident_y_dv(normalized)
         if len(ident) < 5:
             raise ValueError("El cliente debe tener NIT válido para facturar electrónicamente.")
+        if dv_parse is not None:
+            norm_ident = _normalizar_base_nit_persona_natural_colombia(ident)
+            expected = {
+                int(_dv_nit_colombia(ident)),
+                int(_dv_nit_colombia_serie_37(ident)),
+                int(_dv_nit_colombia(norm_ident)),
+                int(_dv_nit_colombia_serie_37(norm_ident)),
+            }
+            if int(dv_parse) not in expected:
+                raise ValueError("El DV del NIT del cliente no coincide con el número informado.")
     else:
         cleaned = "".join(ch for ch in doc_raw.upper() if ch.isalnum())
         if len(cleaned) < 5:
@@ -260,11 +280,12 @@ def _customer_payload(
     if doc_type == "NIT":
         identification_document_id = 6
         legal_organization_id = 1
-        ident, dv_parse = _parse_nit_ident_y_dv(doc_raw)
+        normalized = _normalizar_numero_identificacion_proveedor(doc_raw)
+        ident, dv_parse = _parse_nit_ident_y_dv(normalized)
         if len(ident) < 5:
             raise ValueError("El NIT del cliente es inválido para facturar electrónicamente.")
         identification = ident[:20]
-        dv_value = str(dv_parse if dv_parse is not None else _dv_nit_colombia(ident))
+        dv_value = str(dv_parse) if dv_parse is not None else None
     else:
         if doc_type == "CE":
             identification_document_id = 5
