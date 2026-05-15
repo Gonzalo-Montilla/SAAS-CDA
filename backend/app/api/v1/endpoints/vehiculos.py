@@ -525,11 +525,26 @@ def _map_sarlaft_hits_count(raw_results: list[dict], threshold: float) -> tuple[
     return hit_count, max_score
 
 
-def _classify_sarlaft_recepcion(dataset: str, alert: bool) -> tuple[str, str]:
+def _classify_sarlaft_recepcion(
+    dataset: str,
+    *,
+    max_score: float,
+    threshold: float,
+    auto_red_threshold: float,
+) -> tuple[str, str]:
     ds = (dataset or "").strip().lower()
     if ds == "sanctions":
-        return ("rojo" if alert else "amarillo", "in_review" if alert else "open")
-    return ("amarillo" if alert else "verde", "open")
+        has_alert = max_score >= threshold
+        return ("rojo" if has_alert else "amarillo", "in_review" if has_alert else "open")
+
+    # Flujo automatico (default): verde para bajo riesgo, amarillo para alerta media
+    # y rojo solo para coincidencias extremas (score muy alto).
+    effective_auto_red_threshold = max(auto_red_threshold, threshold)
+    if max_score >= effective_auto_red_threshold:
+        return ("rojo", "in_review")
+    if max_score >= threshold:
+        return ("amarillo", "open")
+    return ("verde", "open")
 
 
 def _upsert_sarlaft_en_cobro(
@@ -728,6 +743,7 @@ def _upsert_sarlaft_en_cobro(
     # - Flujo manual por oficial: lista fuerte (sanctions) desde módulo SARLAFT.
     dataset = (settings.OPENSANCTIONS_MATCH_DATASET or "default").strip() or "default"
     threshold = float(settings.OPENSANCTIONS_ALERT_SCORE_THRESHOLD or 0.75)
+    auto_red_threshold = float(settings.OPENSANCTIONS_AUTO_RED_SCORE_THRESHOLD or 0.95)
     try:
         screening = open_sanctions_match(
             schema="Person",
@@ -740,8 +756,12 @@ def _upsert_sarlaft_en_cobro(
         raw_results = screening.get("results") if isinstance(screening, dict) else []
         raw_results = raw_results if isinstance(raw_results, list) else []
         hits_count, max_score = _map_sarlaft_hits_count(raw_results, threshold)
-        alert = max_score >= threshold
-        risk_level, status_case = _classify_sarlaft_recepcion(dataset, alert)
+        risk_level, status_case = _classify_sarlaft_recepcion(
+            dataset,
+            max_score=max_score,
+            threshold=threshold,
+            auto_red_threshold=auto_red_threshold,
+        )
         case.risk_level = risk_level
         case.risk_score = Decimal(str(round(max_score * 100, 2)))
         case.status = status_case
@@ -761,6 +781,7 @@ def _upsert_sarlaft_en_cobro(
                 "risk_level": risk_level,
                 "risk_score_pct": float(case.risk_score),
                 "alert_threshold": threshold,
+                "auto_red_threshold": auto_red_threshold,
             },
         )
         # Alerta base por screening: solo cuando hay hit alto (riesgo rojo).

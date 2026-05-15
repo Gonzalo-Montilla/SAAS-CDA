@@ -148,6 +148,12 @@ class Settings(BaseSettings):
         le=1.0,
         env="OPENSANCTIONS_ALERT_SCORE_THRESHOLD",
     )
+    OPENSANCTIONS_AUTO_RED_SCORE_THRESHOLD: float = Field(
+        default=0.95,
+        ge=0.0,
+        le=1.0,
+        env="OPENSANCTIONS_AUTO_RED_SCORE_THRESHOLD",
+    )
     # SARLAFT - Motor interno (operación inusual)
     SARLAFT_UNUSUAL_FREQ_THRESHOLD: int = Field(default=4, ge=2, le=100, env="SARLAFT_UNUSUAL_FREQ_THRESHOLD")
     SARLAFT_UNUSUAL_FREQ_WINDOW_DAYS: int = Field(default=365, ge=1, le=3650, env="SARLAFT_UNUSUAL_FREQ_WINDOW_DAYS")
