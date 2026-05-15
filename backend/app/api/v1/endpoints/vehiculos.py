@@ -723,7 +723,10 @@ def _upsert_sarlaft_en_cobro(
             "alert_messages": alert_messages,
         }
 
-    dataset = (settings.OPENSANCTIONS_MATCH_DATASET or "sanctions").strip() or "sanctions"
+    # Política operativa:
+    # - Flujo automático de recepción/cobro: lista común (default).
+    # - Flujo manual por oficial: lista fuerte (sanctions) desde módulo SARLAFT.
+    dataset = (settings.OPENSANCTIONS_MATCH_DATASET or "default").strip() or "default"
     threshold = float(settings.OPENSANCTIONS_ALERT_SCORE_THRESHOLD or 0.75)
     try:
         screening = open_sanctions_match(
@@ -927,6 +930,58 @@ def calcular_tarifa_por_antiguedad(ano_modelo: int, tipo_vehiculo: str, tenant_i
     return tarifa
 
 
+def _calcular_snapshot_iva_servicio(
+    *,
+    vehiculo: VehiculoProceso,
+    tenant_id: UUID,
+    db: Session,
+    tarifa_referencia: Tarifa | None = None,
+) -> tuple[Decimal, Decimal, Decimal]:
+    """
+    Calcula snapshot contable de servicio para provisión de IVA:
+    - base gravable
+    - IVA causado
+    - valor excluido/no gravado
+    """
+    monto_servicio = Decimal(str(vehiculo.valor_rtm or 0))
+    if monto_servicio <= 0:
+        return (Decimal("0.00"), Decimal("0.00"), Decimal("0.00"))
+
+    if (vehiculo.tipo_vehiculo or "").strip().lower() == "preventiva":
+        return (Decimal("0.00"), Decimal("0.00"), monto_servicio.quantize(Decimal("0.01")))
+
+    tarifa_base = tarifa_referencia
+    if tarifa_base is None:
+        try:
+            t_row = calcular_tarifa_por_antiguedad(
+                vehiculo.ano_modelo,
+                vehiculo.tipo_vehiculo,
+                tenant_id,
+                db,
+            )
+            suma_t = Decimal(str(t_row.valor_rtm or 0)) + Decimal(str(t_row.valor_terceros or 0))
+            if abs(suma_t - monto_servicio) <= Decimal("1"):
+                tarifa_base = t_row
+        except HTTPException:
+            tarifa_base = None
+
+    if tarifa_base is not None:
+        gravado = Decimal(str(tarifa_base.valor_rtm or 0))
+        excluido = Decimal(str(tarifa_base.valor_terceros or 0))
+    else:
+        # Fallback seguro: si no hay desglose confiable, tratar todo como gravado.
+        gravado = monto_servicio
+        excluido = Decimal("0")
+
+    iva_rate = Decimal(str(settings.FACTUS_IVA_PORCENTAJE_GENERAL or 19)) / Decimal("100")
+    if gravado <= 0:
+        return (Decimal("0.00"), Decimal("0.00"), excluido.quantize(Decimal("0.01")))
+    divisor = Decimal("1") + iva_rate
+    base = (gravado / divisor).quantize(Decimal("0.01"))
+    iva = (gravado - base).quantize(Decimal("0.01"))
+    return (base, iva, excluido.quantize(Decimal("0.01")))
+
+
 @router.post("/registrar", response_model=VehiculoResponse, status_code=status.HTTP_201_CREATED)
 def registrar_vehiculo(
     vehiculo_data: VehiculoRegistro,
@@ -1023,6 +1078,7 @@ def registrar_vehiculo(
         cliente_telefono=vehiculo_data.cliente_telefono,
         cliente_email=cliente_email_normalizado,
         cliente_direccion=vehiculo_data.cliente_direccion,
+        cliente_factus_municipality_id=vehiculo_data.cliente_factus_municipality_id,
         valor_rtm=valor_rtm,
         tiene_soat=vehiculo_data.tiene_soat,
         comision_soat=comision_soat,
@@ -1213,6 +1269,7 @@ def editar_vehiculo(
     vehiculo.cliente_telefono = vehiculo_data.cliente_telefono
     vehiculo.cliente_email = str(vehiculo_data.cliente_email).strip().lower()
     vehiculo.cliente_direccion = vehiculo_data.cliente_direccion
+    vehiculo.cliente_factus_municipality_id = vehiculo_data.cliente_factus_municipality_id
     vehiculo.tiene_soat = vehiculo_data.tiene_soat
     vehiculo.observaciones = vehiculo_data.observaciones
     
@@ -1515,6 +1572,7 @@ def cobrar_vehiculo(
             )
         cred_factus_ok = fs is not None and creds_complete_for_active_env(fs) and range_id_cobro is not None
 
+        tarifa_emit: Tarifa | None = None
         if modo_factus:
             if not cred_factus_ok:
                 raise HTTPException(
@@ -1531,7 +1589,6 @@ def cobrar_vehiculo(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=str(ve),
                 ) from ve
-            tarifa_emit: Tarifa | None = None
             if vehiculo.tipo_vehiculo != "preventiva":
                 try:
                     t_row = calcular_tarifa_por_antiguedad(
@@ -1591,6 +1648,17 @@ def cobrar_vehiculo(
             )
         else:
             vehiculo.metodo_pago = MetodoPago(metodo_pago)
+
+        # Snapshot contable de IVA por venta para reportes de provisión.
+        base_iva, valor_iva, valor_excluido = _calcular_snapshot_iva_servicio(
+            vehiculo=vehiculo,
+            tenant_id=current_user.tenant_id,
+            db=db,
+            tarifa_referencia=tarifa_emit,
+        )
+        vehiculo.iva_base_gravable_servicio = base_iva
+        vehiculo.iva_valor_servicio = valor_iva
+        vehiculo.valor_excluido_servicio = valor_excluido
         
         # Crear movimientos en caja
         # IMPORTANTE: Solo el efectivo ingresa físicamente a caja

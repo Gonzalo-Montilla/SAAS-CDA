@@ -81,6 +81,7 @@ class VehiculoRegistro(BaseModel):
     cliente_telefono: str = Field(min_length=7, max_length=30)
     cliente_email: EmailStr
     cliente_direccion: Optional[str] = Field(default=None, max_length=300)
+    cliente_factus_municipality_id: Optional[int] = Field(default=None, ge=1)
     tiene_soat: bool = False
     observaciones: Optional[str] = None
 
@@ -126,6 +127,7 @@ class VehiculoEdicion(BaseModel):
     cliente_telefono: str = Field(min_length=7, max_length=30)
     cliente_email: EmailStr
     cliente_direccion: Optional[str] = Field(default=None, max_length=300)
+    cliente_factus_municipality_id: Optional[int] = Field(default=None, ge=1)
     tiene_soat: bool = False
     observaciones: Optional[str] = None
 
@@ -185,6 +187,10 @@ class VehiculoResponse(BaseModel):
     cliente_telefono: Optional[str]
     cliente_email: Optional[str]
     cliente_direccion: Optional[str] = None
+    cliente_factus_municipality_id: Optional[int] = None
+    iva_base_gravable_servicio: Optional[Decimal] = None
+    iva_valor_servicio: Optional[Decimal] = None
+    valor_excluido_servicio: Optional[Decimal] = None
     valor_rtm: Decimal
     tiene_soat: bool
     comision_soat: Decimal

@@ -54,6 +54,7 @@ class VehiculoProceso(Base):
     cliente_telefono = Column(String(20))
     cliente_email = Column(String(255))
     cliente_direccion = Column(String(300), nullable=True)
+    cliente_factus_municipality_id = Column(Integer, nullable=True)
     
     # Servicio RTM
     valor_rtm = Column(Numeric(10, 2), nullable=False)
@@ -65,6 +66,9 @@ class VehiculoProceso(Base):
     # Total y pago
     total_cobrado = Column(Numeric(10, 2), nullable=False)
     metodo_pago = Column(String(50), nullable=True)  # Cambiado a String para soportar 'mixto' y otros valores
+    iva_base_gravable_servicio = Column(Numeric(12, 2), nullable=True)
+    iva_valor_servicio = Column(Numeric(12, 2), nullable=True)
+    valor_excluido_servicio = Column(Numeric(12, 2), nullable=True)
     
     # Facturación y registros externos
     numero_factura_dian = Column(String(100))

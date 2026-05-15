@@ -112,6 +112,11 @@ interface Movimiento {
   factura_emitida_por?: string | null;
   factura_emitida_en?: string | null;
   factura_pdf_archivado?: boolean;
+  /** Campos solo UI para vista compacta de pagos mixtos. */
+  ui_pago_mixto_compacto?: boolean;
+  ui_desglose_metodos?: Array<{ metodo: string; monto: number }>;
+  ui_concepto_base?: string;
+  ui_subitems_count?: number;
 }
 
 interface Tramite {
@@ -131,9 +136,41 @@ interface Tramite {
   sede?: string | null;
 }
 
+interface ProvisionIvaVenta {
+  vehiculo_id: string;
+  fecha_pago?: string | null;
+  sucursal_id?: string | null;
+  placa: string;
+  cliente_nombre: string;
+  cliente_documento: string;
+  numero_factura_dian?: string | null;
+  metodo_pago: string;
+  base_gravable: number;
+  iva_causado: number;
+  valor_excluido: number;
+  total_servicio: number;
+  fuente_calculo: string;
+  provisionado: boolean;
+  provisionado_lote_id?: string | null;
+  provisionado_en?: string | null;
+}
+
+interface ProvisionIvaData {
+  periodo: string;
+  resumen: {
+    ventas_total: number;
+    base_gravable_total: number;
+    iva_causado_total: number;
+    valor_excluido_total: number;
+    iva_provisionado_total: number;
+    iva_pendiente_total: number;
+  };
+  ventas: ProvisionIvaVenta[];
+}
+
 type ReporteSedeScope = 'activa' | 'todas' | 'sucursal';
 
-type ReportesSeccion = 'resumen' | 'finanzas' | 'operacion' | 'citas' | 'cierres' | 'detalle';
+type ReportesSeccion = 'resumen' | 'finanzas' | 'operacion' | 'citas' | 'cierres' | 'provisiones' | 'detalle';
 
 const REPORTES_SECCIONES: { id: ReportesSeccion; label: string; hint: string }[] = [
   { id: 'resumen', label: 'Resumen', hint: 'KPIs del día, comparativo por sede y tendencia de ingresos' },
@@ -141,6 +178,7 @@ const REPORTES_SECCIONES: { id: ReportesSeccion; label: string; hint: string }[]
   { id: 'operacion', label: 'Operación', hint: 'SLA, colas de atención y casos en riesgo' },
   { id: 'citas', label: 'Citas', hint: 'Métricas de agendamiento del tenant' },
   { id: 'cierres', label: 'Cierres caja', hint: 'Historial de cierres por cajero y sede (auditoría)' },
+  { id: 'provisiones', label: 'Provisiones IVA', hint: 'IVA causado por ventas y control de provisionado por periodo' },
   { id: 'detalle', label: 'Detalle', hint: 'Movimientos y trámites con exportación CSV' },
 ];
 
@@ -173,6 +211,190 @@ function moduloDocumentoSoporteApi(m: Movimiento): 'caja' | 'tesoreria' {
   return m.modulo === 'Caja' ? 'caja' : 'tesoreria';
 }
 
+function formatearMetodoPagoEtiqueta(metodo: string): string {
+  const raw = (metodo || '').replace(/_/g, ' ').trim();
+  if (!raw) return 'N/A';
+  return raw.replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+function esMovimientoElegibleCompactacionMixto(m: Movimiento): boolean {
+  return (
+    m.modulo === 'Caja' &&
+    !!m.vehiculo_id &&
+    m.es_ingreso &&
+    (m.categoria === 'rtm' || m.categoria === 'comision_soat')
+  );
+}
+
+function normalizarConceptoBaseMixto(concepto: string): string {
+  // Remueve "(Método)" justo antes del " - Cliente" para agrupar RTM/SOAT mixtos.
+  return (concepto || '')
+    .replace(/\s*\(([^)]+)\)(?=\s*-\s*)/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+function compactarMovimientosMixtos(rows: Movimiento[]): Movimiento[] {
+  type GroupInfo = {
+    firstIndex: number;
+    rows: Movimiento[];
+    methods: Set<string>;
+  };
+  const groups = new Map<string, GroupInfo>();
+
+  rows.forEach((m, index) => {
+    if (!esMovimientoElegibleCompactacionMixto(m)) return;
+    const baseConcept = normalizarConceptoBaseMixto(m.concepto);
+    const key = [
+      m.modulo,
+      m.vehiculo_id,
+      m.categoria,
+      m.tipo_movimiento,
+      m.turno,
+      m.usuario,
+      m.sede || '',
+      baseConcept,
+    ].join('|');
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, {
+        firstIndex: index,
+        rows: [m],
+        methods: new Set([m.metodo_pago]),
+      });
+      return;
+    }
+    existing.rows.push(m);
+    existing.methods.add(m.metodo_pago);
+  });
+
+  const rendered = new Set<string>();
+  const out: Movimiento[] = [];
+
+  rows.forEach((m, index) => {
+    if (!esMovimientoElegibleCompactacionMixto(m)) {
+      out.push(m);
+      return;
+    }
+    const baseConcept = normalizarConceptoBaseMixto(m.concepto);
+    const key = [
+      m.modulo,
+      m.vehiculo_id,
+      m.categoria,
+      m.tipo_movimiento,
+      m.turno,
+      m.usuario,
+      m.sede || '',
+      baseConcept,
+    ].join('|');
+    const g = groups.get(key);
+    if (!g) {
+      out.push(m);
+      return;
+    }
+    const esMixtoReal = g.rows.length > 1 && g.methods.size > 1;
+    if (!esMixtoReal) {
+      out.push(m);
+      return;
+    }
+    if (rendered.has(key) || g.firstIndex !== index) {
+      return;
+    }
+    rendered.add(key);
+
+    const montoTotal = g.rows.reduce((acc, row) => acc + row.monto, 0);
+    const byMethod = new Map<string, number>();
+    g.rows.forEach((row) => {
+      byMethod.set(row.metodo_pago, (byMethod.get(row.metodo_pago) || 0) + row.monto);
+    });
+
+    const desglose = Array.from(byMethod.entries())
+      .map(([metodo, monto]) => ({ metodo, monto }))
+      .sort((a, b) => b.monto - a.monto);
+
+    const base = g.rows[0];
+    out.push({
+      ...base,
+      id: `mix-${base.id}`,
+      monto: montoTotal,
+      metodo_pago: 'mixto',
+      concepto: `${baseConcept} (Mixto)`,
+      ui_pago_mixto_compacto: true,
+      ui_desglose_metodos: desglose,
+      ui_concepto_base: baseConcept,
+      ui_subitems_count: g.rows.length,
+    });
+  });
+
+  return out;
+}
+
+function anotarMovimientosMixtosParaCsv(rows: Movimiento[]): Array<Movimiento & {
+  pago_mixto: 'si' | 'no';
+  desglose_metodos_mixto: string;
+}> {
+  type GroupInfo = {
+    rows: Movimiento[];
+    methods: Set<string>;
+  };
+  const groups = new Map<string, GroupInfo>();
+
+  rows.forEach((m) => {
+    if (!esMovimientoElegibleCompactacionMixto(m)) return;
+    const baseConcept = normalizarConceptoBaseMixto(m.concepto);
+    const key = [
+      m.modulo,
+      m.vehiculo_id,
+      m.categoria,
+      m.tipo_movimiento,
+      m.turno,
+      m.usuario,
+      m.sede || '',
+      baseConcept,
+    ].join('|');
+    const existing = groups.get(key);
+    if (!existing) {
+      groups.set(key, { rows: [m], methods: new Set([m.metodo_pago]) });
+      return;
+    }
+    existing.rows.push(m);
+    existing.methods.add(m.metodo_pago);
+  });
+
+  return rows.map((m) => {
+    if (!esMovimientoElegibleCompactacionMixto(m)) {
+      return { ...m, pago_mixto: 'no', desglose_metodos_mixto: '' };
+    }
+    const baseConcept = normalizarConceptoBaseMixto(m.concepto);
+    const key = [
+      m.modulo,
+      m.vehiculo_id,
+      m.categoria,
+      m.tipo_movimiento,
+      m.turno,
+      m.usuario,
+      m.sede || '',
+      baseConcept,
+    ].join('|');
+    const g = groups.get(key);
+    if (!g || g.rows.length <= 1 || g.methods.size <= 1) {
+      return { ...m, pago_mixto: 'no', desglose_metodos_mixto: '' };
+    }
+    const byMethod = new Map<string, number>();
+    g.rows.forEach((row) => {
+      byMethod.set(row.metodo_pago, (byMethod.get(row.metodo_pago) || 0) + row.monto);
+    });
+    const desglose = Array.from(byMethod.entries())
+      .map(([metodo, monto]) => `${formatearMetodoPagoEtiqueta(metodo)}: ${formatCOP(monto)}`)
+      .join(' | ');
+    return {
+      ...m,
+      pago_mixto: 'si',
+      desglose_metodos_mixto: desglose,
+    };
+  });
+}
+
 export default function ReportesPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
@@ -200,6 +422,7 @@ export default function ReportesPage() {
   const [filtroTipo, setFiltroTipo] = useState<string>('todos');
   const [filtroMetodo, setFiltroMetodo] = useState<string>('todos');
   const [filtroConcepto, setFiltroConcepto] = useState<string>('');
+  const [verDetalleContable, setVerDetalleContable] = useState<boolean>(false);
   /** Vista previa de PDFs propios (recibo, comprobantes); la factura DIAN sigue en nueva pestaña. */
   const [pdfPreview, setPdfPreview] = useState<{
     blobUrl: string;
@@ -413,6 +636,69 @@ export default function ReportesPage() {
     refetchInterval: reportesSeccion === 'cierres' ? 60000 : false,
   });
 
+  const {
+    data: provisionIvaData,
+    isFetching: isFetchingProvisionIva,
+    isError: isErrorProvisionIva,
+  } = useQuery<ProvisionIvaData>({
+    queryKey: ['reportes-provision-iva', queryParams, reportesSeccion],
+    queryFn: async () => {
+      const response = await apiClient.get(`/reportes/provisiones-iva?${queryParams}`);
+      return response.data as ProvisionIvaData;
+    },
+    enabled: reportesEnabled && reportesSeccion === 'provisiones',
+    refetchInterval: reportesSeccion === 'provisiones' ? 60000 : false,
+  });
+
+  const marcarProvisionIvaMutation = useMutation({
+    mutationFn: async () => {
+      const body: {
+        fecha_inicio: string;
+        fecha_fin: string;
+        sucursal_id?: string;
+        consolidar_todas?: boolean;
+      } = {
+        fecha_inicio: modoVista === 'rango' ? fechaInicio : fechaSeleccionada,
+        fecha_fin: modoVista === 'rango' ? fechaFin : fechaSeleccionada,
+      };
+      if (puedeElegirSedeReporte) {
+        if (reporteSedeScope === 'todas') {
+          body.consolidar_todas = true;
+        } else if (reporteSedeScope === 'sucursal' && reporteSedeId.trim()) {
+          body.sucursal_id = reporteSedeId.trim();
+        }
+      }
+      const response = await apiClient.post('/reportes/provisiones-iva/marcar-rango', body);
+      return response.data as {
+        lote_id?: string | null;
+        ventas_en_rango: number;
+        ventas_marcadas: number;
+        ventas_ya_provisionadas: number;
+        iva_marcado_total: number;
+      };
+    },
+    onSuccess: async (data) => {
+      await queryClient.invalidateQueries({ queryKey: ['reportes-provision-iva'] });
+      const msg = `Marcadas: ${data.ventas_marcadas} · Ya provisionadas: ${data.ventas_ya_provisionadas}`;
+      showToast('success', 'Provisión IVA actualizada', `${msg} · IVA marcado: ${formatCOP(data.iva_marcado_total)}`);
+    },
+    onError: (error: unknown) => {
+      const message =
+        error &&
+        typeof error === 'object' &&
+        'response' in error &&
+        error.response &&
+        typeof error.response === 'object' &&
+        'data' in error.response &&
+        error.response.data &&
+        typeof error.response.data === 'object' &&
+        'detail' in error.response.data
+          ? String((error.response.data as { detail: unknown }).detail)
+          : 'No se pudo marcar la provisión de IVA del rango seleccionado.';
+      showToast('error', 'Provisión IVA', message);
+    },
+  });
+
   // Filtrar movimientos localmente
   const movimientosFiltrados = (movimientosData?.movimientos || []).filter((m: Movimiento) => {
     const cumpleTipo = filtroTipo === 'todos' || m.tipo_movimiento === filtroTipo;
@@ -429,6 +715,10 @@ export default function ReportesPage() {
       (m.numero_comprobante && m.numero_comprobante.toLowerCase().includes(q));
     return cumpleTipo && cumpleMetodo && cumpleTexto;
   });
+  const movimientosMostrados = useMemo(
+    () => (verDetalleContable ? movimientosFiltrados : compactarMovimientosMixtos(movimientosFiltrados)),
+    [movimientosFiltrados, verDetalleContable]
+  );
 
   // Obtener valores únicos para los filtros
   const tiposUnicos: string[] = Array.from(new Set((movimientosData?.movimientos || []).map((m: Movimiento) => m.tipo_movimiento)));
@@ -1592,7 +1882,7 @@ export default function ReportesPage() {
 
         {reportesSeccion === 'cierres' && (
         <div className="card-pos border border-slate-200/90">
-          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+          <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <h3 className="flex items-center gap-2 text-xl font-bold text-slate-900">
                 <Lock className="h-6 w-6 text-primary-600" />
@@ -1713,6 +2003,134 @@ export default function ReportesPage() {
         </div>
         )}
 
+        {reportesSeccion === 'provisiones' && (
+        <div className="card-pos border border-slate-200/90">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 className="flex items-center gap-2 text-xl font-bold text-slate-900">
+                <FileCheck className="h-6 w-6 text-primary-600" />
+                Provisión de IVA causado
+              </h3>
+              <p className="mt-1 max-w-3xl text-sm text-slate-600">
+                Calcula el IVA causado en ventas del periodo seleccionado. Puede marcar el rango como provisionado
+                para control histórico en consultas posteriores.
+              </p>
+            </div>
+            <div className="flex shrink-0 items-center gap-2">
+              <button
+                type="button"
+                disabled={rangoInvalido || (provisionIvaData?.ventas.length || 0) === 0 || marcarProvisionIvaMutation.isLoading}
+                onClick={() => marcarProvisionIvaMutation.mutate()}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <FileCheck className="h-4 w-4" />
+                Marcar provisionado
+              </button>
+              <button
+                type="button"
+                disabled={rangoInvalido || (provisionIvaData?.ventas.length || 0) === 0}
+                onClick={() => exportarCSV(provisionIvaData?.ventas || [], 'provisiones_iva')}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                <Download className="h-4 w-4" />
+                Exportar CSV
+              </button>
+            </div>
+          </div>
+
+          {isErrorProvisionIva && (
+            <p className="mb-3 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-800">
+              No se pudo cargar el reporte de provisiones de IVA para este periodo.
+            </p>
+          )}
+          {isFetchingProvisionIva && (
+            <p className="mb-3 text-sm text-slate-500">Calculando provisiones de IVA…</p>
+          )}
+
+          <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">IVA causado</p>
+              <p className="mt-1 text-xl font-bold text-slate-900">{formatCOP(provisionIvaData?.resumen.iva_causado_total || 0)}</p>
+            </div>
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">IVA provisionado</p>
+              <p className="mt-1 text-xl font-bold text-emerald-800">{formatCOP(provisionIvaData?.resumen.iva_provisionado_total || 0)}</p>
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">IVA pendiente</p>
+              <p className="mt-1 text-xl font-bold text-amber-800">{formatCOP(provisionIvaData?.resumen.iva_pendiente_total || 0)}</p>
+            </div>
+            <div className="rounded-xl border border-sky-200 bg-sky-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">Ventas en periodo</p>
+              <p className="mt-1 text-xl font-bold text-sky-800">{provisionIvaData?.resumen.ventas_total || 0}</p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="px-3 py-3">Fecha pago</th>
+                  <th className="px-3 py-3">Placa</th>
+                  <th className="px-3 py-3">Cliente</th>
+                  <th className="px-3 py-3">Factura</th>
+                  <th className="px-3 py-3 text-right">Base</th>
+                  <th className="px-3 py-3 text-right">IVA</th>
+                  <th className="px-3 py-3 text-right">Excluido</th>
+                  <th className="px-3 py-3">Método</th>
+                  <th className="px-3 py-3">Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(provisionIvaData?.ventas || []).length === 0 && !isFetchingProvisionIva && (
+                  <tr>
+                    <td colSpan={9} className="px-3 py-8 text-center text-slate-500">
+                      No hay ventas para provisión de IVA en el periodo seleccionado.
+                    </td>
+                  </tr>
+                )}
+                {(provisionIvaData?.ventas || []).map((v) => (
+                  <tr key={v.vehiculo_id} className="border-t border-slate-100 hover:bg-slate-50/80">
+                    <td className="px-3 py-2.5 text-slate-700">
+                      {v.fecha_pago
+                        ? new Date(v.fecha_pago).toLocaleString('es-CO', {
+                            dateStyle: 'short',
+                            timeStyle: 'short',
+                          })
+                        : '—'}
+                    </td>
+                    <td className="px-3 py-2.5 font-semibold text-slate-900">{v.placa}</td>
+                    <td className="px-3 py-2.5 text-slate-700">
+                      <span className="block">{v.cliente_nombre}</span>
+                      <span className="text-xs text-slate-500">{v.cliente_documento}</span>
+                    </td>
+                    <td className="px-3 py-2.5 text-slate-700">{v.numero_factura_dian || '—'}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums">{formatCOP(v.base_gravable)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-slate-900">{formatCOP(v.iva_causado)}</td>
+                    <td className="px-3 py-2.5 text-right tabular-nums text-slate-700">{formatCOP(v.valor_excluido)}</td>
+                    <td className="px-3 py-2.5 text-slate-700">{formatearMetodoPagoEtiqueta(v.metodo_pago)}</td>
+                    <td className="px-3 py-2.5">
+                      {v.provisionado ? (
+                        <span className="inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-800">
+                          Provisionado
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                          Pendiente
+                        </span>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-3 text-xs text-slate-500">
+            Fuente: IVA calculado por venta. Use “Marcar rango como provisionado” para registrar oficialmente el periodo provisionado.
+          </p>
+        </div>
+        )}
+
         {reportesSeccion === 'detalle' && (
         <>
         <details className="card-pos mb-4 open:bg-slate-50/80">
@@ -1748,13 +2166,13 @@ export default function ReportesPage() {
               <FileText className="w-6 h-6 text-primary-600" />
               {modoVista === 'dia' ? 'Movimientos del Día' : `Movimientos (${movimientosData?.fecha || ''})`}
               <span className="text-sm text-slate-500 font-normal">
-                ({movimientosFiltrados.length} de {movimientosData?.total_movimientos || 0})
+                ({movimientosMostrados.length} filas visibles · {movimientosFiltrados.length} movimientos filtrados de {movimientosData?.total_movimientos || 0})
               </span>
             </h3>
             <button 
               onClick={() =>
                 exportarCSV(
-                  movimientosFiltrados,
+                  anotarMovimientosMixtosParaCsv(movimientosFiltrados),
                   modoVista === 'rango' ? 'movimientos_rango' : 'movimientos_dia',
                 )
               }
@@ -1762,7 +2180,7 @@ export default function ReportesPage() {
               className="flex items-center gap-2 btn-success-solid disabled:bg-slate-300 disabled:cursor-not-allowed"
             >
               <Download className="w-5 h-5" />
-              Exportar CSV
+              Exportar CSV (detalle)
             </button>
           </div>
           {isFetchingMovimientos && (
@@ -1823,6 +2241,15 @@ export default function ReportesPage() {
               >
                 Limpiar Filtros
               </button>
+              <label className="inline-flex items-center gap-2 text-sm text-slate-700 bg-white border border-slate-200 rounded-lg px-3 py-2">
+                <input
+                  type="checkbox"
+                  checked={verDetalleContable}
+                  onChange={(e) => setVerDetalleContable(e.target.checked)}
+                  className="h-4 w-4 rounded border-slate-300 text-primary-600 focus:ring-primary-500"
+                />
+                Ver detalle contable (sin compactar mixtos)
+              </label>
             </div>
           </div>
 
@@ -1844,14 +2271,14 @@ export default function ReportesPage() {
                 </tr>
               </thead>
               <tbody>
-                {movimientosFiltrados.length === 0 && (
+                {movimientosMostrados.length === 0 && (
                   <tr className="border-t">
                     <td colSpan={11} className="px-3 py-6 text-center text-slate-500">
                       No hay movimientos para los filtros seleccionados.
                     </td>
                   </tr>
                 )}
-                {movimientosFiltrados.map((m: Movimiento) => {
+                {movimientosMostrados.map((m: Movimiento) => {
                   const mostrarDocsCaja = m.modulo === 'Caja' && m.vehiculo_id && m.categoria === 'rtm';
                   const mostrarComprobanteTesoreriaEgreso =
                     m.modulo === 'Tesorería' && !m.es_ingreso && !m.anulado;
@@ -1886,6 +2313,20 @@ export default function ReportesPage() {
                         </>
                       ) : (
                         m.concepto
+                      )}
+                      {m.ui_pago_mixto_compacto && m.ui_desglose_metodos && (
+                        <details className="mt-2 rounded-md border border-sky-100 bg-sky-50 px-2 py-1.5">
+                          <summary className="cursor-pointer list-none text-[11px] font-semibold text-sky-900">
+                            Ver desglose pago mixto ({m.ui_desglose_metodos.length} métodos)
+                          </summary>
+                          <div className="mt-1 space-y-0.5">
+                            {m.ui_desglose_metodos.map((d) => (
+                              <p key={`${m.id}-${d.metodo}`} className="text-[11px] text-sky-800">
+                                {formatearMetodoPagoEtiqueta(d.metodo)}: {formatCOP(d.monto)}
+                              </p>
+                            ))}
+                          </div>
+                        </details>
                       )}
                       {(m.factura_emitida_por ||
                         m.documento_soporte_emitido_por ||
@@ -1948,7 +2389,15 @@ export default function ReportesPage() {
                       )}
                     </td>
                     <td className="px-3 py-2">{m.categoria}</td>
-                    <td className="px-3 py-2">{m.metodo_pago}</td>
+                    <td className="px-3 py-2">
+                      {m.ui_pago_mixto_compacto ? (
+                        <span className="inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2 py-0.5 text-xs font-semibold text-sky-800">
+                          mixto
+                        </span>
+                      ) : (
+                        m.metodo_pago
+                      )}
+                    </td>
                     <td className={`px-3 py-2 text-right font-semibold ${m.es_ingreso ? 'text-green-700' : 'text-red-700'}`}>{formatCOP(m.monto)}</td>
                     <td className="px-3 py-2">{m.usuario}</td>
                     <td className="px-3 py-2 text-center">

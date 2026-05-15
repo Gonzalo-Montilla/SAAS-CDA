@@ -6,8 +6,10 @@ import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import CapturaFotos from '../components/CapturaFotos';
 import ErrorBoundary from '../components/ErrorBoundary';
+import FactusMunicipalitySearchField from '../components/FactusMunicipalitySearchField';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
+import { configApi } from '../api/config';
 import { vehiculosApi, type TarifaCalculada } from '../api/vehiculos';
 import { tarifasApi } from '../api/tarifas';
 import type { VehiculoRegistro, VehiculoConsultaRunt } from '../types';
@@ -44,6 +46,8 @@ export default function Recepcion() {
   const [tarifaError, setTarifaError] = useState<string>('');
   const [fotosVehiculo, setFotosVehiculo] = useState<string[]>([]);
   const [runtSugerencia, setRuntSugerencia] = useState<VehiculoConsultaRunt | null>(null);
+  const [clienteFactusMunicipalityId, setClienteFactusMunicipalityId] = useState('');
+  const [clienteFactusMunicipalityLabel, setClienteFactusMunicipalityLabel] = useState('');
 
   // Estado para edición
   const [modoEdicion, setModoEdicion] = useState(false);
@@ -90,6 +94,19 @@ export default function Recepcion() {
     retry: 1,
     staleTime: 5 * 60 * 1000,
   });
+  const { data: facturacionUbicacion } = useQuery({
+    queryKey: ['facturacion-ubicacion-recepcion'],
+    queryFn: configApi.obtenerFacturacionUbicacion,
+    staleTime: 5 * 60 * 1000,
+    retry: 1,
+  });
+  const defaultClienteFactusMunicipalityId = useMemo(
+    () =>
+      facturacionUbicacion?.factus_municipality_id != null
+        ? String(facturacionUbicacion.factus_municipality_id)
+        : '',
+    [facturacionUbicacion?.factus_municipality_id]
+  );
 
   // Estado para filtros y paginación
   const [buscar, setBuscar] = useState('');
@@ -295,6 +312,14 @@ export default function Recepcion() {
 
   // Calcular tarifa cuando cambia el año del modelo o el tipo de vehículo
   useEffect(() => {
+    if (modoEdicion) return;
+    if (clienteFactusMunicipalityId.trim().length > 0) return;
+    if (defaultClienteFactusMunicipalityId) {
+      setClienteFactusMunicipalityId(defaultClienteFactusMunicipalityId);
+    }
+  }, [modoEdicion, clienteFactusMunicipalityId, defaultClienteFactusMunicipalityId]);
+
+  useEffect(() => {
     const state = location.state as PrefillState | null;
     const prefill = state?.agendamiento_prefill;
     if (!prefill) return;
@@ -402,6 +427,8 @@ export default function Recepcion() {
       tiene_soat: false,
       observaciones: '',
     });
+    setClienteFactusMunicipalityId(defaultClienteFactusMunicipalityId || '');
+    setClienteFactusMunicipalityLabel('');
     setRuntSugerencia(null);
     setConsultaRunt({
       document_type: 'CC',
@@ -450,6 +477,12 @@ export default function Recepcion() {
       tiene_soat: vehiculo.tiene_soat,
       observaciones: textoObservaciones,
     });
+    setClienteFactusMunicipalityId(
+      vehiculo.cliente_factus_municipality_id != null
+        ? String(vehiculo.cliente_factus_municipality_id)
+        : defaultClienteFactusMunicipalityId || ''
+    );
+    setClienteFactusMunicipalityLabel('');
     
     // Scroll al formulario
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -517,6 +550,8 @@ export default function Recepcion() {
       return;
     }
     const dirCliente = (formData.cliente_direccion || '').trim();
+    const midDigits = (clienteFactusMunicipalityId || '').replace(/\D/g, '').trim();
+    const clienteFactusMunicipalityIdParsed = midDigits ? parseInt(midDigits, 10) : undefined;
     // Preparar datos incluyendo fotos en observaciones
     const dataConFotos = {
       ...formData,
@@ -524,6 +559,7 @@ export default function Recepcion() {
       cliente_telefono: telDigits,
       cliente_email: clienteEmailNormalizado,
       cliente_direccion: dirCliente ? dirCliente.slice(0, 300) : undefined,
+      cliente_factus_municipality_id: clienteFactusMunicipalityIdParsed,
       observaciones: JSON.stringify({
         texto: formData.observaciones || '',
         fotos: fotosVehiculo
@@ -961,7 +997,7 @@ export default function Recepcion() {
                 />
               </div>
 
-              <div className="md:col-span-2">
+              <div>
                 <label className="block text-sm font-medium text-slate-700 mb-2">
                   Dirección del cliente (opcional, factura electrónica)
                 </label>
@@ -971,8 +1007,40 @@ export default function Recepcion() {
                   onChange={(e) => handleInputChange('cliente_direccion', e.target.value.toUpperCase())}
                   className="input-pos uppercase"
                   maxLength={300}
-                  placeholder="Si queda vacío, Factus puede emitir sin dirección del adquiriente"
+                  placeholder=""
                 />
+              </div>
+
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <FactusMunicipalitySearchField
+                  value={clienteFactusMunicipalityId}
+                  onChange={(idDigits) => {
+                    setClienteFactusMunicipalityId(idDigits);
+                    if (!idDigits) setClienteFactusMunicipalityLabel('');
+                  }}
+                  onSelectMunicipality={(item) =>
+                    setClienteFactusMunicipalityLabel(
+                      [item.name, item.department].filter(Boolean).join(' - ')
+                    )
+                  }
+                  showIdInput={false}
+                  showTechnicalMetadata={false}
+                  searchLabel="Municipio del cliente para factura electrónica"
+                  searchPlaceholder="Escriba municipio o ciudad..."
+                  helperText="Escriba el municipio y selecciónelo de la lista. No necesita códigos."
+                />
+                {clienteFactusMunicipalityLabel ? (
+                  <div className="mt-2 inline-flex items-center rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800">
+                    Municipio seleccionado: {clienteFactusMunicipalityLabel}
+                  </div>
+                ) : clienteFactusMunicipalityId ? (
+                  <div className="mt-2 inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-800">
+                    Municipio aplicado por defecto (sede/CDA)
+                  </div>
+                ) : null}
+                <p className="mt-2 text-xs text-slate-600">
+                  Si no selecciona municipio, se usa automáticamente el configurado en la sede/CDA.
+                </p>
               </div>
             </div>
 

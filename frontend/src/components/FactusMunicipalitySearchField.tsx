@@ -16,6 +16,13 @@ type Props = {
   searchLabel?: string;
   idInputLabel?: string;
   helperText?: string;
+  searchPlaceholder?: string;
+  /** Oculta input técnico del id y deja solo búsqueda predictiva. */
+  showIdInput?: boolean;
+  /** Muestra/oculta id/código DIAN en resultados. */
+  showTechnicalMetadata?: boolean;
+  /** Callback opcional con municipio seleccionado. */
+  onSelectMunicipality?: (item: FactusMunicipalityItem) => void;
 };
 
 export default function FactusMunicipalitySearchField({
@@ -27,6 +34,10 @@ export default function FactusMunicipalitySearchField({
   searchLabel = '¿En qué ciudad factura esta sede?',
   idInputLabel = 'Id municipio (por si lo pega a mano)',
   helperText = 'Pulse un resultado y listo. (El número que guardamos es el id de Factus, no el código DIAN.)',
+  searchPlaceholder = 'Escriba la ciudad (2 letras o más)…',
+  showIdInput = true,
+  showTechnicalMetadata = true,
+  onSelectMunicipality,
 }: Props) {
   const [q, setQ] = useState('');
   const [debounced, setDebounced] = useState('');
@@ -55,24 +66,26 @@ export default function FactusMunicipalitySearchField({
           className="input w-full text-sm"
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Escriba la ciudad (2 letras o más)…"
+          placeholder={searchPlaceholder}
           disabled={disabled}
           autoComplete="off"
         />
         <p className="text-xs text-slate-500 mt-1">{helperText}</p>
       </div>
-      <div>
-        <label className="block text-xs font-semibold text-slate-700 mb-1">{idInputLabel}</label>
-        <input
-          type="text"
-          inputMode="numeric"
-          className={idInputClassName}
-          value={value}
-          onChange={(e) => onChange(e.target.value.replace(/\D/g, ''))}
-          placeholder="Vacío si aún no aplica"
-          disabled={disabled}
-        />
-      </div>
+      {showIdInput && (
+        <div>
+          <label className="block text-xs font-semibold text-slate-700 mb-1">{idInputLabel}</label>
+          <input
+            type="text"
+            inputMode="numeric"
+            className={idInputClassName}
+            value={value}
+            onChange={(e) => onChange(e.target.value.replace(/\D/g, ''))}
+            placeholder="Vacío si aún no aplica"
+            disabled={disabled}
+          />
+        </div>
+      )}
       {isFetching && debounced.length >= 2 && (
         <div className="flex items-center gap-2 text-xs text-slate-500">
           <Loader2 className="w-3.5 h-3.5 animate-spin shrink-0" />
@@ -94,15 +107,20 @@ export default function FactusMunicipalitySearchField({
                 className="w-full text-left px-2 py-1.5 hover:bg-slate-50 text-slate-800"
                 onClick={() => {
                   onChange(String(m.id));
+                  onSelectMunicipality?.(m);
                   setQ('');
                   setDebounced('');
                 }}
               >
                 <span className="font-medium">{m.name ?? '—'}</span>
                 <span className="text-slate-500"> — {m.department ?? '—'}</span>
-                <span className="text-slate-400 font-mono ml-1">id {m.id}</span>
-                {m.code != null && m.code !== '' && (
-                  <span className="text-slate-400 font-mono ml-1">cód. DIAN {m.code}</span>
+                {showTechnicalMetadata && (
+                  <>
+                    <span className="text-slate-400 font-mono ml-1">id {m.id}</span>
+                    {m.code != null && m.code !== '' && (
+                      <span className="text-slate-400 font-mono ml-1">cód. DIAN {m.code}</span>
+                    )}
+                  </>
                 )}
               </button>
             </li>

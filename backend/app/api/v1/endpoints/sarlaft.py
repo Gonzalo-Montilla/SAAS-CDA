@@ -5,10 +5,12 @@ from datetime import datetime
 from decimal import Decimal
 import hashlib
 import html
-from urllib.parse import quote
+import io
+import csv
+from urllib.parse import quote, urlparse
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.orm import Session
 
@@ -19,6 +21,9 @@ from app.models.sarlaft_case import SarlaftCase
 from app.models.sarlaft_case_party import SarlaftCaseParty
 from app.models.sarlaft_audit_log import SarlaftAuditLog
 from app.models.sarlaft_manual_check import SarlaftManualCheck
+from app.models.sarlaft_sirel_report import SarlaftSirelReport
+from app.models.sarlaft_batch_job import SarlaftBatchJob
+from app.models.sarlaft_batch_row import SarlaftBatchRow
 from app.models.sarlaft_profile import SarlaftProfile
 from app.models.sucursal import Sucursal
 from app.models.tenant import Tenant
@@ -27,6 +32,10 @@ from app.schemas.sarlaft import (
     SarlaftCertificateVerificationResponse,
     SarlaftInternalAlertDecisionRequest,
     SarlaftInternalAlertResponse,
+    SarlaftSirelQueueItem,
+    SarlaftSirelMarkReportedRequest,
+    SarlaftBatchJobResponse,
+    SarlaftBatchRowResponse,
     SarlaftCaseCreate,
     SarlaftCaseResponse,
     SarlaftCaseSummaryResponse,
@@ -41,6 +50,7 @@ from app.schemas.sarlaft import (
 )
 from app.utils.archivo_fiscal_pdf import guardar_pdf_archivo_fiscal, leer_pdf_archivo_fiscal
 from app.utils.sarlaft_certificate_pdf import build_sarlaft_manual_certificate_pdf
+from app.utils.sarlaft_expediente_pdf import build_sarlaft_expediente_template_pdf
 from app.services.sarlaft_audit import log_sarlaft_event
 
 router = APIRouter(dependencies=[Depends(require_sarlaft_enabled_for_tenant)])
@@ -309,6 +319,338 @@ def _build_case_response(
     )
 
 
+def _latest_alert_for_case(db: Session, tenant_id: UUID, case_id: UUID) -> SarlaftAuditLog | None:
+    return (
+        db.query(SarlaftAuditLog)
+        .filter(
+            SarlaftAuditLog.tenant_id == tenant_id,
+            SarlaftAuditLog.action == "internal_alert_generated",
+            SarlaftAuditLog.entity_id == case_id,
+        )
+        .order_by(SarlaftAuditLog.created_at.desc())
+        .first()
+    )
+
+
+def _latest_alert_review(db: Session, tenant_id: UUID, alert_id: UUID | None) -> SarlaftAuditLog | None:
+    if not alert_id:
+        return None
+    return (
+        db.query(SarlaftAuditLog)
+        .filter(
+            SarlaftAuditLog.tenant_id == tenant_id,
+            SarlaftAuditLog.action == "internal_alert_reviewed",
+            SarlaftAuditLog.entity_type == "internal_alert",
+            SarlaftAuditLog.entity_id == alert_id,
+        )
+        .order_by(SarlaftAuditLog.created_at.desc())
+        .first()
+    )
+
+
+def _latest_alerts_map_for_cases(db: Session, tenant_id: UUID, case_ids: list[UUID]) -> dict[UUID, SarlaftAuditLog]:
+    if not case_ids:
+        return {}
+    rows = (
+        db.query(SarlaftAuditLog)
+        .filter(
+            SarlaftAuditLog.tenant_id == tenant_id,
+            SarlaftAuditLog.action == "internal_alert_generated",
+            SarlaftAuditLog.entity_id.in_(case_ids),
+        )
+        .order_by(SarlaftAuditLog.created_at.desc())
+        .all()
+    )
+    out: dict[UUID, SarlaftAuditLog] = {}
+    for row in rows:
+        if row.entity_id and row.entity_id not in out:
+            out[row.entity_id] = row
+    return out
+
+
+def _latest_reviews_map_for_alerts(db: Session, tenant_id: UUID, alert_ids: list[UUID]) -> dict[UUID, SarlaftAuditLog]:
+    if not alert_ids:
+        return {}
+    rows = (
+        db.query(SarlaftAuditLog)
+        .filter(
+            SarlaftAuditLog.tenant_id == tenant_id,
+            SarlaftAuditLog.action == "internal_alert_reviewed",
+            SarlaftAuditLog.entity_type == "internal_alert",
+            SarlaftAuditLog.entity_id.in_(alert_ids),
+        )
+        .order_by(SarlaftAuditLog.created_at.desc())
+        .all()
+    )
+    out: dict[UUID, SarlaftAuditLog] = {}
+    for row in rows:
+        if row.entity_id and row.entity_id not in out:
+            out[row.entity_id] = row
+    return out
+
+
+def _build_pre_ros_text(
+    *,
+    case: SarlaftCase,
+    cliente: SarlaftCaseParty | None,
+    alert_row: SarlaftAuditLog | None,
+    review_row: SarlaftAuditLog | None,
+) -> str:
+    alert_meta = alert_row.after_json if (alert_row and isinstance(alert_row.after_json, dict)) else {}
+    review_meta = review_row.after_json if (review_row and isinstance(review_row.after_json, dict)) else {}
+    metrics = alert_meta.get("metrics") if isinstance(alert_meta.get("metrics"), dict) else {}
+    lines: list[str] = [
+        "PRE-ROS SARLAFT (Borrador para SIREL/UIAF)",
+        f"Caso interno: {case.operacion_ref}",
+        f"Fecha caso: {case.created_at.strftime('%Y-%m-%d %H:%M:%S') if case.created_at else 'N/D'}",
+        f"Clasificación: {str(alert_meta.get('operation_classification') or '').strip() or 'operacion_sospechosa'}",
+        f"Nivel de riesgo: {case.risk_level}",
+        f"Score riesgo: {float(case.risk_score or 0):.2f}",
+        f"Monto operación (COP): {float(case.transaction_amount_cop or 0):,.2f}",
+        f"Monto efectivo (COP): {float(case.cash_amount_cop or 0):,.2f}",
+        f"Método de pago: {case.payment_method}",
+    ]
+    if cliente:
+        lines.extend(
+            [
+                f"Sujeto principal: {cliente.full_name}",
+                f"Documento: {(cliente.doc_type or '').strip()} {(cliente.doc_number or '').strip()}".strip(),
+                f"Correo: {(cliente.email or '').strip() or 'N/D'}",
+                f"Teléfono: {(cliente.phone or '').strip() or 'N/D'}",
+            ]
+        )
+    reason = str(alert_meta.get("reason") or "").strip()
+    if reason:
+        lines.append(f"Motivo de alerta interna: {reason}")
+    rule_code = str(alert_meta.get("rule_code") or "").strip()
+    if rule_code:
+        lines.append(f"Regla interna: {rule_code}")
+    if metrics:
+        lines.append("Métricas relevantes:")
+        for k, v in metrics.items():
+            lines.append(f"- {k}: {v}")
+    decision = str(review_meta.get("decision") or "").strip()
+    if decision:
+        lines.append(f"Decisión oficial: {decision}")
+    notes = str(review_meta.get("notes") or "").strip()
+    if notes:
+        lines.append(f"Notas oficial: {notes}")
+    ddi_fields = [
+        ("Declaración origen de fondos", str(review_meta.get("funds_source_declaration") or "").strip()),
+        ("Soporte actividad económica", str(review_meta.get("economic_activity_support") or "").strip()),
+        ("Entrevista cajero", str(review_meta.get("cashier_interview") or "").strip()),
+    ]
+    for label, value in ddi_fields:
+        if value:
+            lines.append(f"{label}: {value}")
+    refs = review_meta.get("support_refs")
+    if isinstance(refs, list) and refs:
+        lines.append("Referencias de soporte:")
+        for ref in refs:
+            r = str(ref or "").strip()
+            if r:
+                lines.append(f"- {r}")
+    return "\n".join(lines)
+
+
+def _extract_source_urls_from_hits(hits_raw: list[dict] | None) -> list[str]:
+    urls: list[str] = []
+    rows = hits_raw if isinstance(hits_raw, list) else []
+    for hit in rows:
+        if not isinstance(hit, dict):
+            continue
+        props = hit.get("properties")
+        if not isinstance(props, dict):
+            continue
+        source_list = props.get("sourceUrl") or props.get("website")
+        if isinstance(source_list, list):
+            for item in source_list:
+                v = str(item or "").strip()
+                if v:
+                    urls.append(v)
+    return urls
+
+
+def _source_coverage_from_hits(hits_raw: list[dict] | None) -> tuple[list[str], dict[str, bool]]:
+    urls = _extract_source_urls_from_hits(hits_raw)
+    labels: list[str] = ["OpenSanctions (API /match)"]
+    coverage = {
+        "onu": False,
+        "ofac": False,
+        "europea": False,
+        "otras": False,
+    }
+    european_markers = (
+        "europa.eu",
+        "eu sanctions",
+        "european union",
+        "ofsi",
+        "gov.uk",
+        "hmt-sanctions",
+        "fiu.net",
+        "consilium.europa.eu",
+    )
+    for raw in urls:
+        low = raw.lower()
+        if ("un.org" in low or "unitednations" in low) and "ONU (United Nations)" not in labels:
+            labels.append("ONU (United Nations)")
+            coverage["onu"] = True
+            continue
+        if "ofac" in low or "treasury.gov" in low:
+            if "OFAC (Sanctions Search)" not in labels:
+                labels.append("OFAC (Sanctions Search)")
+            coverage["ofac"] = True
+            continue
+        if any(marker in low for marker in european_markers):
+            if "Listas europeas (UE/UK)" not in labels:
+                labels.append("Listas europeas (UE/UK)")
+            coverage["europea"] = True
+            continue
+        coverage["otras"] = True
+        host = (urlparse(raw).netloc or "").replace("www.", "").strip()
+        if host:
+            candidate = f"Fuente externa: {host}"
+            if candidate not in labels:
+                labels.append(candidate)
+    return labels, coverage
+
+
+def _batch_job_response(job: SarlaftBatchJob) -> SarlaftBatchJobResponse:
+    return SarlaftBatchJobResponse.model_validate(job)
+
+
+def _batch_row_response(row: SarlaftBatchRow) -> SarlaftBatchRowResponse:
+    payload = SarlaftBatchRowResponse.model_validate(row).model_dump()
+    payload["source_labels"] = (
+        [str(x) for x in row.source_labels_json if isinstance(x, str)]
+        if isinstance(row.source_labels_json, list)
+        else []
+    )
+    payload["source_coverage"] = (
+        {str(k): bool(v) for k, v in row.source_coverage_json.items()}
+        if isinstance(row.source_coverage_json, dict)
+        else {}
+    )
+    return SarlaftBatchRowResponse(**payload)
+
+
+def _run_batch_job_sync(db: Session, *, job: SarlaftBatchJob, current_user: Usuario) -> None:
+    job.status = "processing"
+    job.started_at = datetime.utcnow()
+    db.flush()
+    rows = (
+        db.query(SarlaftBatchRow)
+        .filter(
+            SarlaftBatchRow.tenant_id == current_user.tenant_id,
+            SarlaftBatchRow.batch_job_id == job.id,
+        )
+        .order_by(SarlaftBatchRow.row_index.asc())
+        .all()
+    )
+    for row in rows:
+        try:
+            payload = SarlaftManualCheckCreate(
+                subject_type=(row.subject_type or "natural"),
+                full_name=(row.full_name or "").strip(),
+                doc_type=(row.doc_type or "").strip() or None,
+                doc_number=(row.doc_number or "").strip() or None,
+                email=(row.email or "").strip() or None,
+                phone=(row.phone or "").strip() or None,
+                dataset=job.dataset if job.dataset in {"default", "sanctions"} else "sanctions",
+                algorithm="best",
+                limit=5,
+            )
+            is_juridica = payload.subject_type == "juridica"
+            doc_type_norm = (payload.doc_type or "").strip().upper()
+            doc_number_norm = (payload.doc_number or "").strip() or None
+            id_number = doc_number_norm if not is_juridica else None
+            tax_number = doc_number_norm if is_juridica else None
+            registration_number = doc_number_norm if is_juridica and doc_type_norm != "NIT" else None
+            screening, hits, _, risk_level, _, alert = _run_opensanctions_screening(
+                schema="Company" if is_juridica else "Person",
+                full_name=payload.full_name,
+                document_number=doc_number_norm,
+                id_number=id_number,
+                tax_number=tax_number,
+                registration_number=registration_number,
+                dataset=payload.dataset,
+                algorithm=payload.algorithm,
+                limit=payload.limit,
+            )
+            max_score = max((h.score or 0.0) for h in hits) if hits else 0.0
+            manual_row = SarlaftManualCheck(
+                tenant_id=current_user.tenant_id,
+                created_by_user_id=current_user.id,
+                subject_type=payload.subject_type,
+                full_name=payload.full_name.strip(),
+                doc_type=doc_type_norm or None,
+                doc_number=doc_number_norm,
+                email=(payload.email or "").strip().lower() or None,
+                phone=(payload.phone or "").strip() or None,
+                dataset=payload.dataset,
+                algorithm=payload.algorithm,
+                risk_level=risk_level,
+                risk_score=Decimal(str(round(max_score * 100, 2))),
+                alert=bool(alert),
+                hits_count=len(hits),
+                hits_json=screening.get("results"),
+            )
+            db.add(manual_row)
+            db.flush()
+            source_labels, source_coverage = _source_coverage_from_hits(
+                manual_row.hits_json if isinstance(manual_row.hits_json, list) else []
+            )
+            row.status = "ok"
+            row.risk_level = risk_level
+            row.hits_count = len(hits)
+            row.alert = bool(alert)
+            row.source_labels_json = source_labels
+            row.source_coverage_json = source_coverage
+            row.error_detail = None
+            row.created_manual_check_id = manual_row.id
+            if risk_level in {"amarillo", "rojo"}:
+                alert_level = "critica" if risk_level == "rojo" else "media"
+                log_sarlaft_event(
+                    db,
+                    tenant_id=current_user.tenant_id,
+                    actor_user=current_user,
+                    action="internal_alert_generated",
+                    entity_type="batch_row",
+                    entity_id=row.id,
+                    after_json={
+                        "source_origin": "lote",
+                        "alert_level": alert_level,
+                        "operation_classification": "operacion_inusual",
+                        "rule_code": "BATCH_SCREENING",
+                        "reason": "resultado_consulta_lote",
+                        "risk_level": risk_level,
+                        "risk_score": str(manual_row.risk_score),
+                        "hits_count": len(hits),
+                        "batch_job_id": str(job.id),
+                        "batch_row_id": str(row.id),
+                        "manual_check_id": str(manual_row.id),
+                        "doc_number": row.doc_number,
+                    },
+                )
+            job.success_records += 1
+            if risk_level == "rojo":
+                job.rojo_records += 1
+            elif risk_level == "amarillo":
+                job.amarillo_records += 1
+            else:
+                job.verde_records += 1
+        except Exception as exc:
+            row.status = "error"
+            row.error_detail = str(exc)[:2000]
+            job.error_records += 1
+        finally:
+            job.processed_records += 1
+            db.flush()
+    job.status = "completed_with_errors" if job.error_records > 0 else "completed"
+    job.finished_at = datetime.utcnow()
+    db.flush()
+
+
 @router.get("/profile", response_model=SarlaftProfileResponse)
 def get_sarlaft_profile(
     db: Session = Depends(get_db),
@@ -545,9 +887,252 @@ def create_sarlaft_manual_check(
             "alert": row.alert,
         },
     )
+    if row.risk_level in {"amarillo", "rojo"}:
+        alert_level = "critica" if row.risk_level == "rojo" else "media"
+        log_sarlaft_event(
+            db,
+            tenant_id=current_user.tenant_id,
+            actor_user=current_user,
+            action="internal_alert_generated",
+            entity_type="manual_check",
+            entity_id=row.id,
+            after_json={
+                "source_origin": "manual",
+                "alert_level": alert_level,
+                "operation_classification": "operacion_inusual",
+                "rule_code": "MANUAL_SCREENING",
+                "reason": "resultado_consulta_manual",
+                "risk_level": row.risk_level,
+                "risk_score": str(row.risk_score),
+                "hits_count": row.hits_count,
+                "manual_check_id": str(row.id),
+                "subject_type": row.subject_type,
+                "doc_number": row.doc_number,
+            },
+        )
     db.commit()
     db.refresh(row)
-    return SarlaftManualCheckResponse.model_validate(row)
+    source_labels, source_coverage = _source_coverage_from_hits(row.hits_json if isinstance(row.hits_json, list) else [])
+    payload = SarlaftManualCheckResponse.model_validate(row).model_dump()
+    payload["source_labels"] = source_labels
+    payload["source_coverage"] = source_coverage
+    return SarlaftManualCheckResponse(**payload)
+
+
+@router.get("/batch/template.csv")
+def download_sarlaft_batch_template_csv(
+    current_user: Usuario = Depends(get_current_user),
+):
+    if current_user.rol != RolEnum.ADMINISTRADOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para descargar plantilla de lote SARLAFT.",
+        )
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["subject_type", "full_name", "doc_type", "doc_number", "email", "phone"])
+    writer.writerow(["natural", "NOMBRE APELLIDO", "CC", "12345678", "correo@ejemplo.com", "3001234567"])
+    writer.writerow(["juridica", "EMPRESA SAS", "NIT", "900123456", "cumplimiento@empresa.com", "6011234567"])
+    content = output.getvalue().encode("utf-8")
+    return Response(
+        content=content,
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="sarlaft_lote_template.csv"'},
+    )
+
+
+@router.post("/batch/jobs", response_model=SarlaftBatchJobResponse, status_code=status.HTTP_201_CREATED)
+def create_sarlaft_batch_job(
+    file: UploadFile = File(...),
+    dataset: str = Form(default="sanctions"),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    if current_user.rol != RolEnum.ADMINISTRADOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para ejecutar lotes SARLAFT.",
+        )
+    ds = (dataset or "sanctions").strip().lower()
+    if ds not in {"default", "sanctions"}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Dataset inválido para lote.")
+    if not file.filename:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Archivo inválido para lote.")
+    file_bytes = file.file.read()
+    text_data = file_bytes.decode("utf-8", errors="replace")
+    reader = csv.DictReader(io.StringIO(text_data))
+    required_cols = {"subject_type", "full_name", "doc_type", "doc_number", "email", "phone"}
+    if not reader.fieldnames or not required_cols.issubset({(c or "").strip() for c in reader.fieldnames}):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Archivo CSV inválido. Usa la plantilla oficial de lote SARLAFT.",
+        )
+    rows = list(reader)
+    if not rows:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El archivo CSV está vacío.")
+    if len(rows) > 2000:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El lote supera el máximo permitido (2000).")
+    job = SarlaftBatchJob(
+        tenant_id=current_user.tenant_id,
+        created_by_user_id=current_user.id,
+        filename=(file.filename or "sarlaft_batch.csv")[:255],
+        dataset=ds,
+        status="queued",
+        total_records=len(rows),
+    )
+    db.add(job)
+    db.flush()
+    for idx, item in enumerate(rows, start=1):
+        row = SarlaftBatchRow(
+            tenant_id=current_user.tenant_id,
+            batch_job_id=job.id,
+            row_index=idx,
+            subject_type=(item.get("subject_type") or "").strip().lower() or None,
+            full_name=(item.get("full_name") or "").strip() or None,
+            doc_type=(item.get("doc_type") or "").strip().upper() or None,
+            doc_number=(item.get("doc_number") or "").strip() or None,
+            email=(item.get("email") or "").strip().lower() or None,
+            phone=(item.get("phone") or "").strip() or None,
+            status="pending",
+        )
+        db.add(row)
+    db.flush()
+    _run_batch_job_sync(db, job=job, current_user=current_user)
+    db.commit()
+    db.refresh(job)
+    return _batch_job_response(job)
+
+
+@router.get("/batch/jobs", response_model=list[SarlaftBatchJobResponse])
+def list_sarlaft_batch_jobs(
+    limit: int = Query(default=20, ge=1, le=200),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    if current_user.rol != RolEnum.ADMINISTRADOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para listar lotes SARLAFT.",
+        )
+    rows = (
+        db.query(SarlaftBatchJob)
+        .filter(SarlaftBatchJob.tenant_id == current_user.tenant_id)
+        .order_by(SarlaftBatchJob.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    return [_batch_job_response(r) for r in rows]
+
+
+@router.get("/batch/jobs/{job_id}/rows", response_model=list[SarlaftBatchRowResponse])
+def list_sarlaft_batch_job_rows(
+    job_id: UUID,
+    limit: int = Query(default=500, ge=1, le=2000),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    if current_user.rol != RolEnum.ADMINISTRADOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para consultar detalle de lote SARLAFT.",
+        )
+    job = (
+        db.query(SarlaftBatchJob)
+        .filter(SarlaftBatchJob.id == job_id, SarlaftBatchJob.tenant_id == current_user.tenant_id)
+        .first()
+    )
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lote SARLAFT no encontrado.")
+    rows = (
+        db.query(SarlaftBatchRow)
+        .filter(
+            SarlaftBatchRow.tenant_id == current_user.tenant_id,
+            SarlaftBatchRow.batch_job_id == job.id,
+        )
+        .order_by(SarlaftBatchRow.row_index.asc())
+        .limit(limit)
+        .all()
+    )
+    return [_batch_row_response(r) for r in rows]
+
+
+@router.get("/batch/jobs/{job_id}/rows.csv")
+def download_sarlaft_batch_job_rows_csv(
+    job_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    if current_user.rol != RolEnum.ADMINISTRADOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para exportar lote SARLAFT.",
+        )
+    job = (
+        db.query(SarlaftBatchJob)
+        .filter(SarlaftBatchJob.id == job_id, SarlaftBatchJob.tenant_id == current_user.tenant_id)
+        .first()
+    )
+    if not job:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lote SARLAFT no encontrado.")
+    rows = (
+        db.query(SarlaftBatchRow)
+        .filter(
+            SarlaftBatchRow.tenant_id == current_user.tenant_id,
+            SarlaftBatchRow.batch_job_id == job.id,
+        )
+        .order_by(SarlaftBatchRow.row_index.asc())
+        .all()
+    )
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(
+        [
+            "row_index",
+            "subject_type",
+            "full_name",
+            "doc_type",
+            "doc_number",
+            "email",
+            "phone",
+            "status",
+            "risk_level",
+            "hits_count",
+            "alert",
+            "onu",
+            "ofac",
+            "europea",
+            "error_detail",
+            "manual_check_id",
+        ]
+    )
+    for r in rows:
+        coverage = r.source_coverage_json if isinstance(r.source_coverage_json, dict) else {}
+        writer.writerow(
+            [
+                r.row_index,
+                r.subject_type or "",
+                r.full_name or "",
+                r.doc_type or "",
+                r.doc_number or "",
+                r.email or "",
+                r.phone or "",
+                r.status,
+                r.risk_level or "",
+                r.hits_count,
+                "si" if r.alert else "no",
+                "si" if bool(coverage.get("onu")) else "no",
+                "si" if bool(coverage.get("ofac")) else "no",
+                "si" if bool(coverage.get("europea")) else "no",
+                r.error_detail or "",
+                str(r.created_manual_check_id) if r.created_manual_check_id else "",
+            ]
+        )
+    filename = f"sarlaft_lote_resultado_{job.id}.csv"
+    return Response(
+        content=output.getvalue().encode("utf-8"),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.get("/manual-checks/{manual_check_id}/certificate")
@@ -734,7 +1319,14 @@ def list_sarlaft_manual_checks(
     if risk_level:
         q = q.filter(SarlaftManualCheck.risk_level == risk_level.strip().lower())
     rows = q.limit(limit).all()
-    return [SarlaftManualCheckResponse.model_validate(r) for r in rows]
+    out: list[SarlaftManualCheckResponse] = []
+    for r in rows:
+        source_labels, source_coverage = _source_coverage_from_hits(r.hits_json if isinstance(r.hits_json, list) else [])
+        payload = SarlaftManualCheckResponse.model_validate(r).model_dump()
+        payload["source_labels"] = source_labels
+        payload["source_coverage"] = source_coverage
+        out.append(SarlaftManualCheckResponse(**payload))
+    return out
 
 
 @public_router.get("/manual-checks/certificate/v/{tenant_slug}/{certificate_code}")
@@ -932,23 +1524,34 @@ def list_sarlaft_internal_alerts(
         if normalized_filter and lv != normalized_filter:
             continue
 
+        source_origin = str(meta.get("source_origin") or "").strip().lower() or "caso"
+        linked_case_id_raw = str(meta.get("linked_case_id") or "").strip() or None
+        resolved_case_id: UUID | None = None
+        if source_origin == "caso":
+            resolved_case_id = row.entity_id
+        elif linked_case_id_raw:
+            try:
+                resolved_case_id = UUID(linked_case_id_raw)
+            except ValueError:
+                resolved_case_id = None
+
         case = None
-        if row.entity_id:
-            case = (
-                db.query(SarlaftCase)
-                .filter(
-                    SarlaftCase.id == row.entity_id,
-                    SarlaftCase.tenant_id == current_user.tenant_id,
+        if resolved_case_id:
+            if source_origin == "caso" or linked_case_id_raw:
+                case = (
+                    db.query(SarlaftCase)
+                    .filter(
+                        SarlaftCase.id == resolved_case_id,
+                        SarlaftCase.tenant_id == current_user.tenant_id,
+                    )
+                    .first()
                 )
-                .first()
-            )
         review = review_by_alert_id.get(row.id)
         review_meta = review.after_json if (review and isinstance(review.after_json, dict)) else {}
         decision_status = str(review_meta.get("decision") or "").strip().lower() or None
         operation_classification = str(meta.get("operation_classification") or "").strip() or None
         rule_code = str(meta.get("rule_code") or "").strip() or None
         reason = str(meta.get("reason") or "").strip() or None
-
         # Higiene de bandeja:
         # ocultar alertas "básicas" históricas sin decisión en casos VERDE
         # (ruido por pago en efectivo/mixto sin inusualidad real por regla).
@@ -966,9 +1569,10 @@ def list_sarlaft_internal_alerts(
         items.append(
             SarlaftInternalAlertResponse(
                 id=row.id,
-                case_id=row.entity_id,
+                case_id=resolved_case_id,
                 operacion_ref=case.operacion_ref if case else None,
                 alert_level=lv or "media",
+                source_origin=source_origin,
                 operation_classification=operation_classification,
                 rule_code=rule_code,
                 reason=reason,
@@ -1011,6 +1615,15 @@ def decide_sarlaft_internal_alert(
     if not alert_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alerta interna SARLAFT no encontrada.")
 
+    source_origin = ""
+    meta = alert_row.after_json if isinstance(alert_row.after_json, dict) else {}
+    source_origin = str(meta.get("source_origin") or "").strip().lower() or "caso"
+    if source_origin != "caso":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Esta alerta no usa decision DDI desde esta bandeja (origen no asociado a caso).",
+        )
+
     case = None
     if alert_row.entity_id:
         case = (
@@ -1049,7 +1662,6 @@ def decide_sarlaft_internal_alert(
     db.commit()
 
     # Respuesta compatible con la bandeja.
-    meta = alert_row.after_json if isinstance(alert_row.after_json, dict) else {}
     operation_classification = str(meta.get("operation_classification") or "").strip() or None
     if payload.decision == "sospechosa":
         operation_classification = "operacion_sospechosa"
@@ -1058,6 +1670,7 @@ def decide_sarlaft_internal_alert(
         case_id=alert_row.entity_id,
         operacion_ref=case.operacion_ref if case else None,
         alert_level=str(meta.get("alert_level") or "media"),
+        source_origin=source_origin,
         operation_classification=operation_classification,
         rule_code=str(meta.get("rule_code") or "").strip() or None,
         reason=str(meta.get("reason") or "").strip() or None,
@@ -1071,6 +1684,155 @@ def decide_sarlaft_internal_alert(
         reviewed_at=datetime.utcnow(),
         created_at=alert_row.created_at,
     )
+
+
+@router.post("/alerts/internal/{alert_id}/create-case", response_model=SarlaftCaseResponse)
+def create_case_from_internal_alert(
+    alert_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    if current_user.rol != RolEnum.ADMINISTRADOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para crear caso desde alerta interna.",
+        )
+    alert_row = (
+        db.query(SarlaftAuditLog)
+        .filter(
+            SarlaftAuditLog.id == alert_id,
+            SarlaftAuditLog.tenant_id == current_user.tenant_id,
+            SarlaftAuditLog.action == "internal_alert_generated",
+        )
+        .first()
+    )
+    if not alert_row:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alerta interna no encontrada.")
+    meta = alert_row.after_json if isinstance(alert_row.after_json, dict) else {}
+    source_origin = str(meta.get("source_origin") or "").strip().lower() or "caso"
+    if source_origin == "caso":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La alerta ya corresponde a un caso existente.",
+        )
+    linked_case_id_raw = str(meta.get("linked_case_id") or "").strip()
+    if linked_case_id_raw:
+        try:
+            linked_case_id = UUID(linked_case_id_raw)
+            existing_case = (
+                db.query(SarlaftCase)
+                .filter(SarlaftCase.id == linked_case_id, SarlaftCase.tenant_id == current_user.tenant_id)
+                .first()
+            )
+            if existing_case:
+                parties = (
+                    db.query(SarlaftCaseParty)
+                    .filter(
+                        SarlaftCaseParty.case_id == existing_case.id,
+                        SarlaftCaseParty.tenant_id == current_user.tenant_id,
+                    )
+                    .all()
+                )
+                return _build_case_response(db, existing_case, parties)
+        except ValueError:
+            pass
+
+    # Resolver fuente y crear parte cliente básica.
+    full_name = "Cliente no identificado"
+    doc_number = None
+    doc_type = "CC"
+    if source_origin == "manual":
+        manual_check_id_raw = str(meta.get("manual_check_id") or "").strip()
+        if manual_check_id_raw:
+            try:
+                manual_row = (
+                    db.query(SarlaftManualCheck)
+                    .filter(
+                        SarlaftManualCheck.id == UUID(manual_check_id_raw),
+                        SarlaftManualCheck.tenant_id == current_user.tenant_id,
+                    )
+                    .first()
+                )
+                if manual_row:
+                    full_name = manual_row.full_name or full_name
+                    doc_number = manual_row.doc_number
+                    doc_type = manual_row.doc_type or doc_type
+            except ValueError:
+                pass
+    elif source_origin == "lote":
+        batch_row_id_raw = str(meta.get("batch_row_id") or "").strip()
+        if batch_row_id_raw:
+            try:
+                batch_row = (
+                    db.query(SarlaftBatchRow)
+                    .filter(
+                        SarlaftBatchRow.id == UUID(batch_row_id_raw),
+                        SarlaftBatchRow.tenant_id == current_user.tenant_id,
+                    )
+                    .first()
+                )
+                if batch_row:
+                    full_name = batch_row.full_name or full_name
+                    doc_number = batch_row.doc_number
+                    doc_type = batch_row.doc_type or doc_type
+            except ValueError:
+                pass
+
+    normalized_doc = (doc_number or "").strip()
+    if not normalized_doc:
+        normalized_doc = f"AUTO-{str(alert_id)[:8].upper()}"
+        doc_type = "OTRO"
+
+    case = SarlaftCase(
+        tenant_id=current_user.tenant_id,
+        sede_id=None,
+        operacion_ref=f"ALT-{datetime.utcnow().strftime('%Y%m%d%H%M%S')}-{str(alert_id)[:8].upper()}",
+        status="in_review",
+        risk_level="rojo" if str(meta.get("risk_level") or "").strip().lower() == "rojo" else "amarillo",
+        risk_score=Decimal(str(meta.get("risk_score") or "0")),
+        transaction_amount_cop=Decimal("0"),
+        cash_amount_cop=Decimal("0"),
+        payment_method="otro",
+        created_by_user_id=current_user.id,
+    )
+    db.add(case)
+    db.flush()
+    party = SarlaftCaseParty(
+        case_id=case.id,
+        tenant_id=current_user.tenant_id,
+        role="cliente",
+        doc_type=(doc_type or "CC").strip()[:20],
+        doc_number=normalized_doc[:40],
+        full_name=(full_name or "Cliente no identificado").strip()[:220],
+        metadata_json={"origen_alerta": source_origin, "internal_alert_id": str(alert_id)},
+    )
+    db.add(party)
+
+    updated_meta = dict(meta)
+    updated_meta["linked_case_id"] = str(case.id)
+    alert_row.after_json = updated_meta
+    alert_row.entity_type = "alert_linked_case"
+
+    log_sarlaft_event(
+        db,
+        tenant_id=current_user.tenant_id,
+        actor_user=current_user,
+        action="case_created_from_internal_alert",
+        entity_type="case",
+        entity_id=case.id,
+        after_json={
+            "source_origin": source_origin,
+            "internal_alert_id": str(alert_id),
+        },
+    )
+    db.commit()
+    db.refresh(case)
+    parties = (
+        db.query(SarlaftCaseParty)
+        .filter(SarlaftCaseParty.case_id == case.id, SarlaftCaseParty.tenant_id == current_user.tenant_id)
+        .all()
+    )
+    return _build_case_response(db, case, parties)
 
 
 @router.post("/cases", response_model=SarlaftCaseResponse, status_code=status.HTTP_201_CREATED)
@@ -1177,3 +1939,499 @@ def get_sarlaft_case(
         .all()
     )
     return _build_case_response(db, case, parties)
+
+
+@router.get("/sirel/queue", response_model=list[SarlaftSirelQueueItem])
+def list_sarlaft_sirel_queue(
+    status_filter: str = Query(default="pending", alias="status"),
+    limit: int = Query(default=100, ge=1, le=500),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    if current_user.rol != RolEnum.ADMINISTRADOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para listar bandeja SIREL.",
+        )
+
+    rows = (
+        db.query(SarlaftCase)
+        .filter(
+            SarlaftCase.tenant_id == current_user.tenant_id,
+            SarlaftCase.status.in_(["sospechosa_ros_pendiente", "sospechosa_ros_reportada"]),
+        )
+        .order_by(SarlaftCase.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+    if not rows:
+        return []
+
+    case_ids = [c.id for c in rows]
+    parties = (
+        db.query(SarlaftCaseParty)
+        .filter(
+            SarlaftCaseParty.tenant_id == current_user.tenant_id,
+            SarlaftCaseParty.case_id.in_(case_ids),
+            SarlaftCaseParty.role == "cliente",
+        )
+        .all()
+    )
+    party_by_case_id: dict[UUID, SarlaftCaseParty] = {p.case_id: p for p in parties}
+    reports = (
+        db.query(SarlaftSirelReport)
+        .filter(
+            SarlaftSirelReport.tenant_id == current_user.tenant_id,
+            SarlaftSirelReport.case_id.in_(case_ids),
+        )
+        .all()
+    )
+    report_by_case_id: dict[UUID, SarlaftSirelReport] = {r.case_id: r for r in reports}
+    alerts_by_case_id = _latest_alerts_map_for_cases(db, current_user.tenant_id, case_ids)
+    alert_ids = [a.id for a in alerts_by_case_id.values() if a and a.id]
+    reviews_by_alert_id = _latest_reviews_map_for_alerts(db, current_user.tenant_id, alert_ids)
+    sender_user_ids = [r.sent_by_user_id for r in reports if r.sent_by_user_id]
+    senders: dict[UUID, str] = {}
+    if sender_user_ids:
+        sender_rows = (
+            db.query(Usuario)
+            .filter(
+                Usuario.tenant_id == current_user.tenant_id,
+                Usuario.id.in_(sender_user_ids),
+            )
+            .all()
+        )
+        senders = {
+            s.id: (s.nombre_completo or s.email or str(s.id))
+            for s in sender_rows
+        }
+
+    out: list[SarlaftSirelQueueItem] = []
+    for case in rows:
+        report = report_by_case_id.get(case.id)
+        sirel_status = "reportado" if report and report.status == "reportado" else "pendiente_envio"
+        norm_filter = (status_filter or "pending").strip().lower()
+        if norm_filter in {"pending", "pendiente"} and sirel_status != "pendiente_envio":
+            continue
+        if norm_filter in {"reported", "reportado"} and sirel_status != "reportado":
+            continue
+        cliente = party_by_case_id.get(case.id)
+        alert_row = alerts_by_case_id.get(case.id)
+        review_row = reviews_by_alert_id.get(alert_row.id) if alert_row else None
+        alert_meta = alert_row.after_json if (alert_row and isinstance(alert_row.after_json, dict)) else {}
+        review_meta = review_row.after_json if (review_row and isinstance(review_row.after_json, dict)) else {}
+        pre_ros_text = (report.pre_ros_text or "").strip() if report else ""
+        if not pre_ros_text:
+            pre_ros_text = _build_pre_ros_text(
+                case=case,
+                cliente=cliente,
+                alert_row=alert_row,
+                review_row=review_row,
+            )
+        meta = cliente.metadata_json if (cliente and isinstance(cliente.metadata_json, dict)) else {}
+        out.append(
+            SarlaftSirelQueueItem(
+                case_id=case.id,
+                operacion_ref=case.operacion_ref,
+                status=case.status,
+                risk_level=case.risk_level,
+                payment_method=case.payment_method,
+                transaction_amount_cop=case.transaction_amount_cop,
+                cash_amount_cop=case.cash_amount_cop,
+                placa=str(meta.get("placa") or "").strip() or None,
+                tipo_vehiculo=str(meta.get("tipo_vehiculo") or "").strip() or None,
+                cliente_doc_type=cliente.doc_type if cliente else None,
+                cliente_doc_number=cliente.doc_number if cliente else None,
+                cliente_full_name=cliente.full_name if cliente else None,
+                operation_classification=str(alert_meta.get("operation_classification") or "").strip() or None,
+                alert_reason=str(alert_meta.get("reason") or "").strip() or None,
+                decision_status=str(review_meta.get("decision") or "").strip() or None,
+                pre_ros_text=pre_ros_text,
+                sirel_status=sirel_status,
+                sirel_reference=(report.sirel_reference if report else None),
+                sirel_sent_at=(report.sent_at if report else None),
+                sirel_sent_by_user_id=(report.sent_by_user_id if report else None),
+                sirel_sent_by_name=(senders.get(report.sent_by_user_id) if (report and report.sent_by_user_id) else None),
+                sirel_notes=(report.notes if report else None),
+                evidence_url=(report.evidence_url if report else None),
+                created_at=case.created_at,
+            )
+        )
+    return out
+
+
+@router.post("/sirel/queue/{case_id}/mark-reported", response_model=SarlaftSirelQueueItem)
+def mark_sarlaft_sirel_reported(
+    case_id: UUID,
+    payload: SarlaftSirelMarkReportedRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    if current_user.rol != RolEnum.ADMINISTRADOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para marcar reporte SIREL.",
+        )
+
+    case = (
+        db.query(SarlaftCase)
+        .filter(SarlaftCase.id == case_id, SarlaftCase.tenant_id == current_user.tenant_id)
+        .first()
+    )
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Caso SARLAFT no encontrado.")
+    if case.status not in {"sospechosa_ros_pendiente", "sospechosa_ros_reportada"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo casos en flujo de revisión SARLAFT pueden registrarse en SIREL.",
+        )
+
+    report = (
+        db.query(SarlaftSirelReport)
+        .filter(
+            SarlaftSirelReport.tenant_id == current_user.tenant_id,
+            SarlaftSirelReport.case_id == case.id,
+        )
+        .first()
+    )
+    alert_row = _latest_alert_for_case(db, current_user.tenant_id, case.id)
+    review_row = _latest_alert_review(db, current_user.tenant_id, alert_row.id if alert_row else None)
+    cliente = (
+        db.query(SarlaftCaseParty)
+        .filter(
+            SarlaftCaseParty.tenant_id == current_user.tenant_id,
+            SarlaftCaseParty.case_id == case.id,
+            SarlaftCaseParty.role == "cliente",
+        )
+        .first()
+    )
+    pre_ros_text = _build_pre_ros_text(
+        case=case,
+        cliente=cliente,
+        alert_row=alert_row,
+        review_row=review_row,
+    )
+    if report is None:
+        report = SarlaftSirelReport(
+            tenant_id=current_user.tenant_id,
+            case_id=case.id,
+            status="reportado",
+            report_type="ros",
+            sirel_reference=payload.sirel_reference.strip(),
+            sent_at=payload.sent_at or datetime.utcnow(),
+            sent_by_user_id=current_user.id,
+            pre_ros_text=pre_ros_text,
+            notes=(payload.notes or "").strip() or None,
+            evidence_url=payload.evidence_url.strip(),
+        )
+        db.add(report)
+    else:
+        before = {
+            "status": report.status,
+            "sirel_reference": report.sirel_reference,
+            "sent_at": report.sent_at.isoformat() if report.sent_at else None,
+            "notes": report.notes,
+            "evidence_url": report.evidence_url,
+        }
+        report.status = "reportado"
+        report.sirel_reference = payload.sirel_reference.strip()
+        report.sent_at = payload.sent_at or datetime.utcnow()
+        report.sent_by_user_id = current_user.id
+        report.pre_ros_text = pre_ros_text
+        report.notes = (payload.notes or "").strip() or None
+        report.evidence_url = payload.evidence_url.strip()
+        log_sarlaft_event(
+            db,
+            tenant_id=current_user.tenant_id,
+            actor_user=current_user,
+            action="sirel_report_updated",
+            entity_type="sirel_report",
+            entity_id=report.id,
+            before_json=before,
+            after_json={
+                "status": report.status,
+                "sirel_reference": report.sirel_reference,
+                "sent_at": report.sent_at.isoformat() if report.sent_at else None,
+                "notes": report.notes,
+                "evidence_url": report.evidence_url,
+                "case_id": str(case.id),
+            },
+        )
+
+    if case.status == "sospechosa_ros_pendiente":
+        case.status = "sospechosa_ros_reportada"
+
+    log_sarlaft_event(
+        db,
+        tenant_id=current_user.tenant_id,
+        actor_user=current_user,
+        action="sirel_report_marked",
+        entity_type="case",
+        entity_id=case.id,
+        after_json={
+            "case_status": case.status,
+            "sirel_reference": payload.sirel_reference.strip(),
+            "sent_at": (payload.sent_at or datetime.utcnow()).isoformat(),
+            "report_type": "ros",
+        },
+    )
+    db.commit()
+    db.refresh(report)
+    db.refresh(case)
+
+    meta = cliente.metadata_json if (cliente and isinstance(cliente.metadata_json, dict)) else {}
+    alert_meta = alert_row.after_json if (alert_row and isinstance(alert_row.after_json, dict)) else {}
+    review_meta = review_row.after_json if (review_row and isinstance(review_row.after_json, dict)) else {}
+    return SarlaftSirelQueueItem(
+        case_id=case.id,
+        operacion_ref=case.operacion_ref,
+        status=case.status,
+        risk_level=case.risk_level,
+        payment_method=case.payment_method,
+        transaction_amount_cop=case.transaction_amount_cop,
+        cash_amount_cop=case.cash_amount_cop,
+        placa=str(meta.get("placa") or "").strip() or None,
+        tipo_vehiculo=str(meta.get("tipo_vehiculo") or "").strip() or None,
+        cliente_doc_type=cliente.doc_type if cliente else None,
+        cliente_doc_number=cliente.doc_number if cliente else None,
+        cliente_full_name=cliente.full_name if cliente else None,
+        operation_classification=str(alert_meta.get("operation_classification") or "").strip() or None,
+        alert_reason=str(alert_meta.get("reason") or "").strip() or None,
+        decision_status=str(review_meta.get("decision") or "").strip() or None,
+        pre_ros_text=(report.pre_ros_text or "").strip(),
+        sirel_status="reportado",
+        sirel_reference=report.sirel_reference,
+        sirel_sent_at=report.sent_at,
+        sirel_sent_by_user_id=report.sent_by_user_id,
+        sirel_sent_by_name=current_user.nombre_completo or current_user.email,
+        sirel_notes=report.notes,
+        evidence_url=report.evidence_url,
+        created_at=case.created_at,
+    )
+
+
+@router.get("/sirel/queue/{case_id}/pre-ros.txt")
+def download_sarlaft_pre_ros_txt(
+    case_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    if current_user.rol != RolEnum.ADMINISTRADOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para descargar pre-ROS.",
+        )
+    case = (
+        db.query(SarlaftCase)
+        .filter(SarlaftCase.id == case_id, SarlaftCase.tenant_id == current_user.tenant_id)
+        .first()
+    )
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Caso SARLAFT no encontrado.")
+    if case.status not in {"sospechosa_ros_pendiente", "sospechosa_ros_reportada"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El pre-ROS aplica para casos sospechosos en flujo ROS.",
+        )
+    cliente = (
+        db.query(SarlaftCaseParty)
+        .filter(
+            SarlaftCaseParty.tenant_id == current_user.tenant_id,
+            SarlaftCaseParty.case_id == case.id,
+            SarlaftCaseParty.role == "cliente",
+        )
+        .first()
+    )
+    alert_row = _latest_alert_for_case(db, current_user.tenant_id, case.id)
+    review_row = _latest_alert_review(db, current_user.tenant_id, alert_row.id if alert_row else None)
+    text_content = _build_pre_ros_text(
+        case=case,
+        cliente=cliente,
+        alert_row=alert_row,
+        review_row=review_row,
+    )
+    filename = f"pre_ros_{case.operacion_ref.replace(' ', '_')}.txt"
+    return Response(
+        content=text_content.encode("utf-8"),
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/sirel/queue/{case_id}/expediente-template.txt")
+def download_sarlaft_expediente_template_txt(
+    case_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    if current_user.rol != RolEnum.ADMINISTRADOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para descargar plantilla de expediente.",
+        )
+    case = (
+        db.query(SarlaftCase)
+        .filter(SarlaftCase.id == case_id, SarlaftCase.tenant_id == current_user.tenant_id)
+        .first()
+    )
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Caso SARLAFT no encontrado.")
+    if case.status not in {"sospechosa_ros_pendiente", "sospechosa_ros_reportada"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La plantilla aplica para casos sospechosos en flujo ROS.",
+        )
+    cliente = (
+        db.query(SarlaftCaseParty)
+        .filter(
+            SarlaftCaseParty.tenant_id == current_user.tenant_id,
+            SarlaftCaseParty.case_id == case.id,
+            SarlaftCaseParty.role == "cliente",
+        )
+        .first()
+    )
+    alert_row = _latest_alert_for_case(db, current_user.tenant_id, case.id)
+    review_row = _latest_alert_review(db, current_user.tenant_id, alert_row.id if alert_row else None)
+    alert_meta = alert_row.after_json if (alert_row and isinstance(alert_row.after_json, dict)) else {}
+    review_meta = review_row.after_json if (review_row and isinstance(review_row.after_json, dict)) else {}
+    template_content = "\n".join(
+        [
+            "PLANTILLA EXPEDIENTE ROS - SARLAFT",
+            "",
+            "=== 01_IDENTIFICACION_CASO ===",
+            f"ID caso: {case.id}",
+            f"Referencia operacion: {case.operacion_ref}",
+            f"Estado caso: {case.status}",
+            f"Nivel riesgo: {case.risk_level}",
+            f"Score riesgo: {float(case.risk_score or 0):.2f}",
+            f"Fecha creacion caso: {case.created_at.strftime('%Y-%m-%d %H:%M:%S') if case.created_at else 'N/D'}",
+            f"Monto operacion COP: {float(case.transaction_amount_cop or 0):,.2f}",
+            f"Monto efectivo COP: {float(case.cash_amount_cop or 0):,.2f}",
+            f"Metodo pago: {case.payment_method}",
+            f"Cliente: {cliente.full_name if cliente else 'N/D'}",
+            f"Documento cliente: {((cliente.doc_type or '') + ' ' + (cliente.doc_number or '')).strip() if cliente else 'N/D'}",
+            "",
+            "=== 02_MOTIVO_SOSPECHA ===",
+            f"Clasificacion operacion: {str(alert_meta.get('operation_classification') or '').strip() or 'N/D'}",
+            f"Regla interna: {str(alert_meta.get('rule_code') or '').strip() or 'N/D'}",
+            f"Motivo alerta: {str(alert_meta.get('reason') or '').strip() or 'N/D'}",
+            "Narrativa oficial (completar): ______________________________________________",
+            "",
+            "=== 03_DDI ===",
+            f"Origen fondos declarado: {str(review_meta.get('funds_source_declaration') or '').strip() or 'N/D'}",
+            f"Soporte actividad economica: {str(review_meta.get('economic_activity_support') or '').strip() or 'N/D'}",
+            f"Entrevista cajero: {str(review_meta.get('cashier_interview') or '').strip() or 'N/D'}",
+            f"Referencias soporte: {', '.join(review_meta.get('support_refs') or []) if isinstance(review_meta.get('support_refs'), list) else 'N/D'}",
+            f"Notas oficial: {str(review_meta.get('notes') or '').strip() or 'N/D'}",
+            "",
+            "=== 04_REPORTE_SIREL ===",
+            "Radicado SIREL: ______________________________________________",
+            "Fecha/hora envio: ____________________________________________",
+            "URL evidencia cargue: ________________________________________",
+            "Usuario responsable: _________________________________________",
+            "",
+            "=== 05_CHECKLIST_CIERRE ===",
+            "[ ] DDI completa y coherente",
+            "[ ] Soportes anexos cargados",
+            "[ ] Pre-ROS adjunto",
+            "[ ] ROS radicado en SIREL",
+            "[ ] Evidencia de cargue archivada",
+            "[ ] Acta de cierre interno firmada",
+            "",
+            "=== ESTRUCTURA CARPETA RECOMENDADA ===",
+            "01_identificacion_caso.pdf",
+            "02_ddi_formulario.pdf",
+            "03_soportes_cliente/",
+            "04_pre_ros.txt",
+            "05_ros_sirel_constancia.pdf",
+            "06_acta_cierre_interno.pdf",
+        ]
+    )
+    filename = f"expediente_ros_template_{case.operacion_ref.replace(' ', '_')}.txt"
+    return Response(
+        content=template_content.encode("utf-8"),
+        media_type="text/plain; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
+
+
+@router.get("/sirel/queue/{case_id}/expediente-template.pdf")
+def download_sarlaft_expediente_template_pdf(
+    case_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    if current_user.rol != RolEnum.ADMINISTRADOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para descargar plantilla de expediente.",
+        )
+    case = (
+        db.query(SarlaftCase)
+        .filter(SarlaftCase.id == case_id, SarlaftCase.tenant_id == current_user.tenant_id)
+        .first()
+    )
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Caso SARLAFT no encontrado.")
+    if case.status not in {"sospechosa_ros_pendiente", "sospechosa_ros_reportada"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La plantilla aplica para casos sospechosos en flujo ROS.",
+        )
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    cliente = (
+        db.query(SarlaftCaseParty)
+        .filter(
+            SarlaftCaseParty.tenant_id == current_user.tenant_id,
+            SarlaftCaseParty.case_id == case.id,
+            SarlaftCaseParty.role == "cliente",
+        )
+        .first()
+    )
+    alert_row = _latest_alert_for_case(db, current_user.tenant_id, case.id)
+    review_row = _latest_alert_review(db, current_user.tenant_id, alert_row.id if alert_row else None)
+    alert_meta = alert_row.after_json if (alert_row and isinstance(alert_row.after_json, dict)) else {}
+    review_meta = review_row.after_json if (review_row and isinstance(review_row.after_json, dict)) else {}
+    pre_ros_text = _build_pre_ros_text(
+        case=case,
+        cliente=cliente,
+        alert_row=alert_row,
+        review_row=review_row,
+    )
+    pdf_buffer = build_sarlaft_expediente_template_pdf(
+        tenant_nombre=(tenant.nombre_comercial or tenant.nombre) if tenant else "CDASOFT",
+        tenant_nit=(tenant.nit_cda if tenant else None),
+        tenant_logo_url=(tenant.logo_url if tenant else None),
+        case_id=str(case.id),
+        operacion_ref=case.operacion_ref,
+        case_status=case.status,
+        risk_level=case.risk_level,
+        risk_score=float(case.risk_score or 0),
+        created_at=case.created_at,
+        transaction_amount_cop=float(case.transaction_amount_cop or 0),
+        cash_amount_cop=float(case.cash_amount_cop or 0),
+        payment_method=case.payment_method,
+        cliente_nombre=(cliente.full_name if cliente else None),
+        cliente_documento=(
+            f"{(cliente.doc_type or '').strip()} {(cliente.doc_number or '').strip()}".strip() if cliente else None
+        ),
+        operation_classification=str(alert_meta.get("operation_classification") or "").strip() or None,
+        rule_code=str(alert_meta.get("rule_code") or "").strip() or None,
+        alert_reason=str(alert_meta.get("reason") or "").strip() or None,
+        funds_source_declaration=str(review_meta.get("funds_source_declaration") or "").strip() or None,
+        economic_activity_support=str(review_meta.get("economic_activity_support") or "").strip() or None,
+        cashier_interview=str(review_meta.get("cashier_interview") or "").strip() or None,
+        support_refs=[str(x).strip() for x in (review_meta.get("support_refs") or []) if str(x).strip()]
+        if isinstance(review_meta.get("support_refs"), list)
+        else [],
+        official_notes=str(review_meta.get("notes") or "").strip() or None,
+        pre_ros_text=pre_ros_text,
+        generated_by=current_user.nombre_completo or current_user.email,
+        generated_at=datetime.utcnow(),
+    )
+    filename = f"expediente_ros_template_{case.operacion_ref.replace(' ', '_')}.pdf"
+    return Response(
+        content=pdf_buffer.getvalue(),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )

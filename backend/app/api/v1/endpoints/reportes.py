@@ -11,6 +11,7 @@ from decimal import Decimal
 from typing import Optional
 from calendar import monthrange
 from uuid import UUID
+import uuid
 from app.core.config import settings
 from app.core.timezone_utils import get_app_timezone, zoneinfo_from_name
 from app.core.deps import get_db, get_contador_or_admin
@@ -19,8 +20,10 @@ from app.models.usuario import Usuario
 from app.models.caja import MovimientoCaja, Caja, EstadoCaja
 from app.models.tesoreria import MovimientoTesoreria, TipoMovimientoTesoreria
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo
+from app.models.tarifa import Tarifa
 from app.models.sucursal import Sucursal
 from app.models.factus import DocumentoSoporteElectronico, FacturaElectronica
+from app.models.iva_provision import IvaProvisionRegistro
 from app.models.appointment import Appointment
 
 router = APIRouter()
@@ -112,6 +115,87 @@ def resolve_report_date_window(
     inicio_dt, fin_dt = _local_day_to_utc_range(fecha_base)
     label = fecha_base.strftime("%Y-%m-%d")
     return inicio_dt, fin_dt, label
+
+
+def _obtener_tarifa_referencia_para_vehiculo(
+    db: Session,
+    *,
+    vehiculo: VehiculoProceso,
+) -> Tarifa | None:
+    if (vehiculo.tipo_vehiculo or "").strip().lower() == "preventiva":
+        return None
+    fecha_ref = (vehiculo.fecha_pago or vehiculo.fecha_registro or datetime.utcnow()).date()
+    ano_ref = (vehiculo.fecha_pago or vehiculo.fecha_registro or datetime.utcnow()).year
+    antiguedad = max(0, ano_ref - int(vehiculo.ano_modelo or ano_ref))
+
+    def _buscar(ant: int) -> Tarifa | None:
+        return (
+            db.query(Tarifa)
+            .filter(
+                and_(
+                    Tarifa.tenant_id == vehiculo.tenant_id,
+                    Tarifa.tipo_vehiculo == vehiculo.tipo_vehiculo,
+                    Tarifa.activa == True,
+                    Tarifa.vigencia_inicio <= fecha_ref,
+                    or_(Tarifa.vigencia_fin >= fecha_ref, Tarifa.vigencia_fin == None),
+                    Tarifa.antiguedad_min <= ant,
+                    or_(Tarifa.antiguedad_max == None, Tarifa.antiguedad_max >= ant),
+                )
+            )
+            .first()
+        )
+
+    tarifa = _buscar(antiguedad)
+    if tarifa is None and antiguedad == 0:
+        tarifa = _buscar(1)
+    return tarifa
+
+
+def _calcular_iva_causado_vehiculo(
+    db: Session,
+    *,
+    vehiculo: VehiculoProceso,
+) -> tuple[Decimal, Decimal, Decimal, str]:
+    base_snap = getattr(vehiculo, "iva_base_gravable_servicio", None)
+    iva_snap = getattr(vehiculo, "iva_valor_servicio", None)
+    excl_snap = getattr(vehiculo, "valor_excluido_servicio", None)
+    if base_snap is not None and iva_snap is not None:
+        return (
+            Decimal(str(base_snap or 0)),
+            Decimal(str(iva_snap or 0)),
+            Decimal(str(excl_snap or 0)),
+            "snapshot_venta",
+        )
+
+    monto_servicio = Decimal(str(vehiculo.valor_rtm or 0))
+    if monto_servicio <= 0:
+        return (Decimal("0"), Decimal("0"), Decimal("0"), "sin_servicio")
+
+    if (vehiculo.tipo_vehiculo or "").strip().lower() == "preventiva":
+        return (Decimal("0"), Decimal("0"), monto_servicio, "preventiva")
+
+    tarifa = _obtener_tarifa_referencia_para_vehiculo(db, vehiculo=vehiculo)
+    if tarifa is not None:
+        suma_t = Decimal(str(tarifa.valor_rtm or 0)) + Decimal(str(tarifa.valor_terceros or 0))
+        if abs(suma_t - monto_servicio) <= Decimal("1"):
+            gravado = Decimal(str(tarifa.valor_rtm or 0))
+            excluido = Decimal(str(tarifa.valor_terceros or 0))
+            fuente = "tarifa_historica"
+        else:
+            gravado = monto_servicio
+            excluido = Decimal("0")
+            fuente = "estimado_total_gravado"
+    else:
+        gravado = monto_servicio
+        excluido = Decimal("0")
+        fuente = "estimado_total_gravado"
+
+    iva_rate = Decimal(str(settings.FACTUS_IVA_PORCENTAJE_GENERAL or 19)) / Decimal("100")
+    if gravado <= 0:
+        return (Decimal("0"), Decimal("0"), excluido, fuente)
+    base = (gravado / (Decimal("1") + iva_rate)).quantize(Decimal("0.01"))
+    iva = (gravado - base).quantize(Decimal("0.01"))
+    return (base, iva, excluido.quantize(Decimal("0.01")), fuente)
 
 
 @router.get("/dashboard-general")
@@ -788,6 +872,220 @@ def obtener_movimientos_detallados(
         "fecha": etiqueta_fecha,
         "total_movimientos": len(todos_movimientos),
         "movimientos": todos_movimientos
+    }
+
+
+class ProvisionIvaMarcarRangoIn(BaseModel):
+    fecha_inicio: date
+    fecha_fin: date
+    sucursal_id: Optional[UUID] = None
+    consolidar_todas: bool = False
+
+
+@router.get("/provisiones-iva")
+def obtener_provisiones_iva(
+    request: Request,
+    fecha: Optional[date] = Query(None, description="Fecha específica (default: hoy)"),
+    fecha_inicio: Optional[date] = Query(None, description="Fecha inicio para rango"),
+    fecha_fin: Optional[date] = Query(None, description="Fecha fin para rango"),
+    sucursal_id: Optional[UUID] = Query(None),
+    consolidar_todas: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """
+    Reporte de provisión de IVA causado por ventas en el periodo.
+    """
+    try:
+        fecha_inicio_dt, fecha_fin_dt, etiqueta_fecha = resolve_report_date_window(
+            fecha=fecha, fecha_inicio=fecha_inicio, fecha_fin=fecha_fin
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=sucursal_id,
+        consolidar_todas=consolidar_todas,
+    )
+    tid = current_user.tenant_id
+
+    ventas = (
+        db.query(VehiculoProceso)
+        .filter(
+            _vp_scope(
+                tid,
+                scope_sid,
+                VehiculoProceso.estado == EstadoVehiculo.PAGADO,
+                VehiculoProceso.fecha_pago.isnot(None),
+                VehiculoProceso.fecha_pago >= fecha_inicio_dt,
+                VehiculoProceso.fecha_pago <= fecha_fin_dt,
+            )
+        )
+        .order_by(VehiculoProceso.fecha_pago.asc())
+        .all()
+    )
+
+    vids = [v.id for v in ventas]
+    marks_map: dict[UUID, IvaProvisionRegistro] = {}
+    if vids:
+        for mk in (
+            db.query(IvaProvisionRegistro)
+            .filter(
+                IvaProvisionRegistro.tenant_id == tid,
+                IvaProvisionRegistro.vehiculo_id.in_(vids),
+            )
+            .all()
+        ):
+            marks_map[mk.vehiculo_id] = mk
+
+    resumen = {
+        "ventas_total": len(ventas),
+        "base_gravable_total": 0.0,
+        "iva_causado_total": 0.0,
+        "valor_excluido_total": 0.0,
+        "iva_provisionado_total": 0.0,
+        "iva_pendiente_total": 0.0,
+    }
+    filas = []
+    for v in ventas:
+        base, iva, excl, fuente = _calcular_iva_causado_vehiculo(db, vehiculo=v)
+        mark = marks_map.get(v.id)
+        provisionado = mark is not None
+        resumen["base_gravable_total"] += float(base)
+        resumen["iva_causado_total"] += float(iva)
+        resumen["valor_excluido_total"] += float(excl)
+        if provisionado:
+            resumen["iva_provisionado_total"] += float(iva)
+        else:
+            resumen["iva_pendiente_total"] += float(iva)
+        filas.append(
+            {
+                "vehiculo_id": str(v.id),
+                "fecha_pago": v.fecha_pago.isoformat() if v.fecha_pago else None,
+                "sucursal_id": str(v.sucursal_id) if v.sucursal_id else None,
+                "placa": v.placa,
+                "cliente_nombre": v.cliente_nombre,
+                "cliente_documento": v.cliente_documento,
+                "numero_factura_dian": v.numero_factura_dian,
+                "metodo_pago": str(v.metodo_pago or "N/A"),
+                "base_gravable": float(base),
+                "iva_causado": float(iva),
+                "valor_excluido": float(excl),
+                "total_servicio": float(Decimal(str(v.valor_rtm or 0))),
+                "fuente_calculo": fuente,
+                "provisionado": provisionado,
+                "provisionado_lote_id": str(mark.lote_id) if mark else None,
+                "provisionado_en": mark.provisionado_en.isoformat() if mark else None,
+            }
+        )
+
+    return {
+        "periodo": etiqueta_fecha,
+        "resumen": resumen,
+        "ventas": filas,
+    }
+
+
+@router.post("/provisiones-iva/marcar-rango")
+def marcar_provisiones_iva_rango(
+    request: Request,
+    body: ProvisionIvaMarcarRangoIn,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """
+    Marca como provisionadas las ventas del rango consultado.
+    No duplica marcas ya existentes.
+    """
+    if body.fecha_inicio > body.fecha_fin:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="fecha_inicio no puede ser mayor que fecha_fin",
+        )
+    fecha_inicio_dt, _, _ = resolve_report_date_window(
+        fecha=None, fecha_inicio=body.fecha_inicio, fecha_fin=body.fecha_fin
+    )
+    _, fecha_fin_dt, _ = resolve_report_date_window(
+        fecha=None, fecha_inicio=body.fecha_inicio, fecha_fin=body.fecha_fin
+    )
+
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=body.sucursal_id,
+        consolidar_todas=body.consolidar_todas,
+    )
+    tid = current_user.tenant_id
+    ventas = (
+        db.query(VehiculoProceso)
+        .filter(
+            _vp_scope(
+                tid,
+                scope_sid,
+                VehiculoProceso.estado == EstadoVehiculo.PAGADO,
+                VehiculoProceso.fecha_pago.isnot(None),
+                VehiculoProceso.fecha_pago >= fecha_inicio_dt,
+                VehiculoProceso.fecha_pago <= fecha_fin_dt,
+            )
+        )
+        .all()
+    )
+    if not ventas:
+        return {
+            "lote_id": None,
+            "ventas_en_rango": 0,
+            "ventas_marcadas": 0,
+            "ventas_ya_provisionadas": 0,
+            "iva_marcado_total": 0.0,
+        }
+
+    vids = [v.id for v in ventas]
+    ya_provisionadas = set(
+        r[0]
+        for r in (
+            db.query(IvaProvisionRegistro.vehiculo_id)
+            .filter(
+                IvaProvisionRegistro.tenant_id == tid,
+                IvaProvisionRegistro.vehiculo_id.in_(vids),
+            )
+            .all()
+        )
+    )
+
+    lote_id = uuid.uuid4()
+    marcadas = 0
+    iva_marcado_total = Decimal("0")
+    for v in ventas:
+        if v.id in ya_provisionadas:
+            continue
+        _base, iva, _excl, _fuente = _calcular_iva_causado_vehiculo(db, vehiculo=v)
+        iva_marcado_total += iva
+        row = IvaProvisionRegistro(
+            tenant_id=tid,
+            lote_id=lote_id,
+            vehiculo_id=v.id,
+            sucursal_id=v.sucursal_id,
+            periodo_desde=body.fecha_inicio,
+            periodo_hasta=body.fecha_fin,
+            iva_causado_cop=iva,
+            provisionado_por=current_user.id,
+        )
+        db.add(row)
+        marcadas += 1
+
+    db.commit()
+    return {
+        "lote_id": str(lote_id),
+        "ventas_en_rango": len(ventas),
+        "ventas_marcadas": marcadas,
+        "ventas_ya_provisionadas": len(ventas) - marcadas,
+        "iva_marcado_total": float(iva_marcado_total.quantize(Decimal("0.01"))),
     }
 
 

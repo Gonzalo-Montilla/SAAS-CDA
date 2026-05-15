@@ -265,6 +265,10 @@ def ensure_tenant_domain_schema(db):
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS tenant_id UUID"))
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS cliente_email VARCHAR(255)"))
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS cliente_direccion VARCHAR(300)"))
+    db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS cliente_factus_municipality_id INTEGER"))
+    db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS iva_base_gravable_servicio NUMERIC(12,2)"))
+    db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS iva_valor_servicio NUMERIC(12,2)"))
+    db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS valor_excluido_servicio NUMERIC(12,2)"))
     db.execute(
         text(
             "ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS cliente_tipo_documento VARCHAR(10) NOT NULL DEFAULT 'CC'"
@@ -1620,6 +1624,37 @@ def ensure_runt_metricas_schema(db):
     )
 
 
+def ensure_iva_provision_schema(db):
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS iva_provision_registros (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id),
+                lote_id UUID NOT NULL,
+                vehiculo_id UUID NOT NULL UNIQUE REFERENCES vehiculos_proceso(id) ON DELETE CASCADE,
+                sucursal_id UUID NULL REFERENCES sucursales(id),
+                periodo_desde DATE NOT NULL,
+                periodo_hasta DATE NOT NULL,
+                iva_causado_cop NUMERIC(14,2) NOT NULL DEFAULT 0,
+                provisionado_por UUID NOT NULL REFERENCES usuarios(id),
+                provisionado_en TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_iva_provision_tenant_fecha ON iva_provision_registros(tenant_id, provisionado_en DESC)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_iva_provision_tenant_vehiculo ON iva_provision_registros(tenant_id, vehiculo_id)"
+        )
+    )
+
+
 def ensure_sarlaft_schema(db):
     """
     Esquema base SARLAFT (Sprint 1).
@@ -1765,6 +1800,79 @@ def ensure_sarlaft_schema(db):
     db.execute(text("ALTER TABLE sarlaft_manual_checks ALTER COLUMN subject_type SET DEFAULT 'natural'"))
     db.execute(
         text(
+            """
+            CREATE TABLE IF NOT EXISTS sarlaft_sirel_reports (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                case_id UUID NOT NULL UNIQUE REFERENCES sarlaft_cases(id) ON DELETE CASCADE,
+                status VARCHAR(30) NOT NULL DEFAULT 'pendiente_envio',
+                report_type VARCHAR(20) NOT NULL DEFAULT 'ros',
+                sirel_reference VARCHAR(120),
+                sent_at TIMESTAMP WITHOUT TIME ZONE,
+                sent_by_user_id UUID REFERENCES usuarios(id),
+                pre_ros_text TEXT,
+                notes TEXT,
+                evidence_url VARCHAR(500),
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS sarlaft_batch_jobs (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                created_by_user_id UUID NOT NULL REFERENCES usuarios(id),
+                filename VARCHAR(255) NOT NULL,
+                dataset VARCHAR(60) NOT NULL DEFAULT 'sanctions',
+                status VARCHAR(30) NOT NULL DEFAULT 'queued',
+                total_records INTEGER NOT NULL DEFAULT 0,
+                processed_records INTEGER NOT NULL DEFAULT 0,
+                success_records INTEGER NOT NULL DEFAULT 0,
+                error_records INTEGER NOT NULL DEFAULT 0,
+                verde_records INTEGER NOT NULL DEFAULT 0,
+                amarillo_records INTEGER NOT NULL DEFAULT 0,
+                rojo_records INTEGER NOT NULL DEFAULT 0,
+                error_message TEXT,
+                started_at TIMESTAMP WITHOUT TIME ZONE,
+                finished_at TIMESTAMP WITHOUT TIME ZONE,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS sarlaft_batch_rows (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                batch_job_id UUID NOT NULL REFERENCES sarlaft_batch_jobs(id) ON DELETE CASCADE,
+                row_index INTEGER NOT NULL,
+                subject_type VARCHAR(20),
+                full_name VARCHAR(220),
+                doc_type VARCHAR(20),
+                doc_number VARCHAR(60),
+                email VARCHAR(255),
+                phone VARCHAR(30),
+                status VARCHAR(20) NOT NULL DEFAULT 'pending',
+                risk_level VARCHAR(20),
+                hits_count INTEGER NOT NULL DEFAULT 0,
+                alert BOOLEAN NOT NULL DEFAULT FALSE,
+                source_labels_json JSONB,
+                source_coverage_json JSONB,
+                error_detail TEXT,
+                created_manual_check_id UUID REFERENCES sarlaft_manual_checks(id),
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
             "CREATE INDEX IF NOT EXISTS idx_sarlaft_cases_tenant_created ON sarlaft_cases(tenant_id, created_at DESC)"
         )
     )
@@ -1791,6 +1899,26 @@ def ensure_sarlaft_schema(db):
     db.execute(
         text(
             "CREATE UNIQUE INDEX IF NOT EXISTS ux_sarlaft_manual_checks_cert_code ON sarlaft_manual_checks(certificate_code) WHERE certificate_code IS NOT NULL"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_sarlaft_sirel_reports_tenant_case ON sarlaft_sirel_reports(tenant_id, case_id)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_sarlaft_sirel_reports_tenant_status ON sarlaft_sirel_reports(tenant_id, status, created_at DESC)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_sarlaft_batch_jobs_tenant_created ON sarlaft_batch_jobs(tenant_id, created_at DESC)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_sarlaft_batch_rows_job ON sarlaft_batch_rows(batch_job_id, row_index)"
         )
     )
     import uuid as uuid_lib
@@ -2278,6 +2406,10 @@ def init_db():
     from app.models.sarlaft_case_party import SarlaftCaseParty  # noqa: F401
     from app.models.sarlaft_audit_log import SarlaftAuditLog  # noqa: F401
     from app.models.sarlaft_manual_check import SarlaftManualCheck  # noqa: F401
+    from app.models.sarlaft_sirel_report import SarlaftSirelReport  # noqa: F401
+    from app.models.sarlaft_batch_job import SarlaftBatchJob  # noqa: F401
+    from app.models.sarlaft_batch_row import SarlaftBatchRow  # noqa: F401
+    from app.models.iva_provision import IvaProvisionRegistro  # noqa: F401
     nomina_available = True
     try:
         from app.models.nomina import (
@@ -2326,6 +2458,7 @@ def init_db():
         ensure_quality_survey_invites_sucursal_schema(db)
         ensure_tenant_documentos_schema(db)
         ensure_runt_metricas_schema(db)
+        ensure_iva_provision_schema(db)
         ensure_sarlaft_schema(db)
         if nomina_available:
             ensure_nomina_schema(db)

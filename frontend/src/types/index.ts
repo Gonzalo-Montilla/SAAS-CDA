@@ -196,6 +196,13 @@ export interface SarlaftManualCheck {
   alert: boolean;
   hits_count: number;
   notes?: string | null;
+  source_labels?: string[];
+  source_coverage?: {
+    onu?: boolean;
+    ofac?: boolean;
+    europea?: boolean;
+    otras?: boolean;
+  };
   certificate_code?: string | null;
   certificate_issued_at?: string | null;
   created_at: string;
@@ -206,6 +213,7 @@ export interface SarlaftInternalAlert {
   case_id?: string | null;
   operacion_ref?: string | null;
   alert_level: 'critica' | 'alta' | 'media' | 'baja' | string;
+  source_origin?: 'caso' | 'manual' | 'lote' | string | null;
   operation_classification?: 'operacion_inusual' | 'operacion_sospechosa' | string | null;
   rule_code?: string | null;
   reason?: string | null;
@@ -217,6 +225,76 @@ export interface SarlaftInternalAlert {
   decision_status?: 'justificada' | 'sospechosa' | string | null;
   decision_notes?: string | null;
   reviewed_at?: string | null;
+  created_at: string;
+}
+
+export interface SarlaftSirelQueueItem {
+  case_id: string;
+  operacion_ref: string;
+  status: string;
+  risk_level: 'verde' | 'amarillo' | 'rojo' | string;
+  payment_method: string;
+  transaction_amount_cop: number;
+  cash_amount_cop: number;
+  placa?: string | null;
+  tipo_vehiculo?: string | null;
+  cliente_doc_type?: string | null;
+  cliente_doc_number?: string | null;
+  cliente_full_name?: string | null;
+  operation_classification?: string | null;
+  alert_reason?: string | null;
+  decision_status?: string | null;
+  pre_ros_text: string;
+  sirel_status: 'pendiente_envio' | 'reportado';
+  sirel_reference?: string | null;
+  sirel_sent_at?: string | null;
+  sirel_sent_by_user_id?: string | null;
+  sirel_sent_by_name?: string | null;
+  sirel_notes?: string | null;
+  evidence_url?: string | null;
+  created_at: string;
+}
+
+export interface SarlaftBatchJob {
+  id: string;
+  filename: string;
+  dataset: string;
+  status: string;
+  total_records: number;
+  processed_records: number;
+  success_records: number;
+  error_records: number;
+  verde_records: number;
+  amarillo_records: number;
+  rojo_records: number;
+  error_message?: string | null;
+  started_at?: string | null;
+  finished_at?: string | null;
+  created_at: string;
+}
+
+export interface SarlaftBatchRow {
+  id: string;
+  row_index: number;
+  subject_type?: string | null;
+  full_name?: string | null;
+  doc_type?: string | null;
+  doc_number?: string | null;
+  email?: string | null;
+  phone?: string | null;
+  status: string;
+  risk_level?: string | null;
+  hits_count: number;
+  alert: boolean;
+  source_labels?: string[];
+  source_coverage?: {
+    onu?: boolean;
+    ofac?: boolean;
+    europea?: boolean;
+    otras?: boolean;
+  };
+  error_detail?: string | null;
+  created_manual_check_id?: string | null;
   created_at: string;
 }
 
@@ -661,6 +739,8 @@ export interface Vehiculo {
   cliente_email?: string;
   /** Dirección del cliente en factura Factus (opcional). */
   cliente_direccion?: string | null;
+  /** Municipio Factus del cliente (id numérico), opcional. */
+  cliente_factus_municipality_id?: number | null;
   valor_rtm: number;
   tiene_soat: boolean;
   comision_soat: number;
@@ -694,6 +774,7 @@ export interface VehiculoRegistro {
   cliente_telefono: string;
   cliente_email: string;
   cliente_direccion?: string | null;
+  cliente_factus_municipality_id?: number | null;
   tiene_soat: boolean;
   observaciones?: string;
 }

@@ -6,6 +6,9 @@ import type {
   SarlaftInternalAlert,
   SarlaftManualCheck,
   SarlaftProfile,
+  SarlaftSirelQueueItem,
+  SarlaftBatchJob,
+  SarlaftBatchRow,
 } from '../types';
 
 export const sarlaftApi = {
@@ -132,6 +135,122 @@ export const sarlaftApi = {
   ): Promise<SarlaftInternalAlert> => {
     const response = await apiClient.post<SarlaftInternalAlert>(`/sarlaft/alerts/internal/${alertId}/decision`, payload);
     return response.data;
+  },
+
+  createCaseFromInternalAlert: async (alertId: string): Promise<SarlaftCase> => {
+    const response = await apiClient.post<SarlaftCase>(`/sarlaft/alerts/internal/${alertId}/create-case`);
+    return response.data;
+  },
+
+  listSirelQueue: async (params?: {
+    status?: 'all' | 'pending' | 'reported';
+    limit?: number;
+  }): Promise<SarlaftSirelQueueItem[]> => {
+    const response = await apiClient.get<SarlaftSirelQueueItem[]>('/sarlaft/sirel/queue', { params });
+    return response.data;
+  },
+
+  markSirelReported: async (
+    caseId: string,
+    payload: {
+      sirel_reference: string;
+      sent_at?: string | null;
+      notes?: string | null;
+      evidence_url: string;
+    }
+  ): Promise<SarlaftSirelQueueItem> => {
+    const response = await apiClient.post<SarlaftSirelQueueItem>(`/sarlaft/sirel/queue/${caseId}/mark-reported`, payload);
+    return response.data;
+  },
+
+  downloadSirelPreRosTxt: async (caseId: string): Promise<{ blob: Blob; filename: string }> => {
+    const response = await apiClient.get(`/sarlaft/sirel/queue/${caseId}/pre-ros.txt`, {
+      responseType: 'blob',
+    });
+    const contentDisposition = response.headers['content-disposition'] as string | undefined;
+    let filename = `pre_ros_${caseId}.txt`;
+    if (contentDisposition) {
+      const m = /filename="([^"]+)"/.exec(contentDisposition) ?? /filename=([^;\s]+)/.exec(contentDisposition);
+      if (m?.[1]) filename = m[1].trim().replace(/^"|"$/g, '');
+    }
+    return {
+      blob: response.data as Blob,
+      filename,
+    };
+  },
+
+  downloadSirelExpedienteTemplateTxt: async (caseId: string): Promise<{ blob: Blob; filename: string }> => {
+    const response = await apiClient.get(`/sarlaft/sirel/queue/${caseId}/expediente-template.txt`, {
+      responseType: 'blob',
+    });
+    const contentDisposition = response.headers['content-disposition'] as string | undefined;
+    let filename = `expediente_ros_template_${caseId}.txt`;
+    if (contentDisposition) {
+      const m = /filename="([^"]+)"/.exec(contentDisposition) ?? /filename=([^;\s]+)/.exec(contentDisposition);
+      if (m?.[1]) filename = m[1].trim().replace(/^"|"$/g, '');
+    }
+    return {
+      blob: response.data as Blob,
+      filename,
+    };
+  },
+
+  downloadSirelExpedienteTemplatePdf: async (caseId: string): Promise<{ blob: Blob; filename: string }> => {
+    const response = await apiClient.get(`/sarlaft/sirel/queue/${caseId}/expediente-template.pdf`, {
+      responseType: 'blob',
+    });
+    const contentDisposition = response.headers['content-disposition'] as string | undefined;
+    let filename = `expediente_ros_template_${caseId}.pdf`;
+    if (contentDisposition) {
+      const m = /filename="([^"]+)"/.exec(contentDisposition) ?? /filename=([^;\s]+)/.exec(contentDisposition);
+      if (m?.[1]) filename = m[1].trim().replace(/^"|"$/g, '');
+    }
+    return {
+      blob: response.data as Blob,
+      filename,
+    };
+  },
+
+  downloadBatchTemplateCsv: async (): Promise<{ blob: Blob; filename: string }> => {
+    const response = await apiClient.get('/sarlaft/batch/template.csv', { responseType: 'blob' });
+    const contentDisposition = response.headers['content-disposition'] as string | undefined;
+    let filename = 'sarlaft_lote_template.csv';
+    if (contentDisposition) {
+      const m = /filename="([^"]+)"/.exec(contentDisposition) ?? /filename=([^;\s]+)/.exec(contentDisposition);
+      if (m?.[1]) filename = m[1].trim().replace(/^"|"$/g, '');
+    }
+    return { blob: response.data as Blob, filename };
+  },
+
+  createBatchJob: async (params: { file: File; dataset: 'default' | 'sanctions' }): Promise<SarlaftBatchJob> => {
+    const formData = new FormData();
+    formData.append('file', params.file);
+    formData.append('dataset', params.dataset);
+    const response = await apiClient.post<SarlaftBatchJob>('/sarlaft/batch/jobs', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+  },
+
+  listBatchJobs: async (params?: { limit?: number }): Promise<SarlaftBatchJob[]> => {
+    const response = await apiClient.get<SarlaftBatchJob[]>('/sarlaft/batch/jobs', { params });
+    return response.data;
+  },
+
+  listBatchRows: async (jobId: string, params?: { limit?: number }): Promise<SarlaftBatchRow[]> => {
+    const response = await apiClient.get<SarlaftBatchRow[]>(`/sarlaft/batch/jobs/${jobId}/rows`, { params });
+    return response.data;
+  },
+
+  downloadBatchRowsCsv: async (jobId: string): Promise<{ blob: Blob; filename: string }> => {
+    const response = await apiClient.get(`/sarlaft/batch/jobs/${jobId}/rows.csv`, { responseType: 'blob' });
+    const contentDisposition = response.headers['content-disposition'] as string | undefined;
+    let filename = `sarlaft_lote_resultado_${jobId}.csv`;
+    if (contentDisposition) {
+      const m = /filename="([^"]+)"/.exec(contentDisposition) ?? /filename=([^;\s]+)/.exec(contentDisposition);
+      if (m?.[1]) filename = m[1].trim().replace(/^"|"$/g, '');
+    }
+    return { blob: response.data as Blob, filename };
   },
 
   downloadManualCheckCertificate: async (

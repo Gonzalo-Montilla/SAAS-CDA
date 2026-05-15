@@ -3,7 +3,15 @@ import { useMutation, useQuery } from '@tanstack/react-query';
 import { BellRing, RefreshCw, Search, ShieldAlert, ShieldCheck, X } from 'lucide-react';
 import Layout from '../components/Layout';
 import { sarlaftApi } from '../api/sarlaft';
-import type { SarlaftCase, SarlaftCasePartyInput, SarlaftInternalAlert, SarlaftManualCheck } from '../types';
+import type {
+  SarlaftBatchJob,
+  SarlaftBatchRow,
+  SarlaftCase,
+  SarlaftCasePartyInput,
+  SarlaftInternalAlert,
+  SarlaftManualCheck,
+  SarlaftSirelQueueItem,
+} from '../types';
 import { useAuth } from '../contexts/AuthContext';
 
 function money(v: number): string {
@@ -14,13 +22,15 @@ function money(v: number): string {
   }).format(v || 0);
 }
 
-type SarlaftSeccion = 'resumen' | 'alertas' | 'casos' | 'consultas' | 'screening';
+type SarlaftSeccion = 'resumen' | 'alertas' | 'casos' | 'consultas' | 'lotes' | 'sirel' | 'screening';
 
 const SARLAFT_SECCIONES: { id: SarlaftSeccion; label: string; hint: string }[] = [
   { id: 'resumen', label: 'Resumen', hint: 'Panorama general de alertas, casos y consultas manuales.' },
   { id: 'alertas', label: 'Alertas internas', hint: 'Seguimiento del motor interno SARLAFT y severidad por operación.' },
   { id: 'casos', label: 'Casos', hint: 'Creación, búsqueda y bandeja de casos SARLAFT.' },
   { id: 'consultas', label: 'Consultas manuales', hint: 'Consultas fuera de recepción con trazabilidad y certificado.' },
+  { id: 'lotes', label: 'Consulta por lotes', hint: 'Carga CSV, ejecución masiva y resultados consolidados SARLAFT.' },
+  { id: 'sirel', label: 'SIREL/UIAF', hint: 'Bandeja de casos para reporte ROS y trazabilidad de radicado SIREL.' },
   // La pestaña de screening técnico se mantiene fuera del flujo visible para evitar ruido operativo.
 ];
 
@@ -79,6 +89,22 @@ export default function Sarlaft() {
   const [decisionEconomicSupport, setDecisionEconomicSupport] = useState('');
   const [decisionCashierInterview, setDecisionCashierInterview] = useState<'normal' | 'nervioso' | 'evasivo' | 'apresurado'>('normal');
   const [decisionSupportRefsRaw, setDecisionSupportRefsRaw] = useState('');
+  const [internalAlertsPage, setInternalAlertsPage] = useState(1);
+  const [internalAlertsPageSize, setInternalAlertsPageSize] = useState(10);
+  const [sirelStatusFilter, setSirelStatusFilter] = useState<'all' | 'pending' | 'reported'>('pending');
+  const [sirelModal, setSirelModal] = useState<{
+    caseId: string;
+    operacionRef: string;
+    preRosText: string;
+  } | null>(null);
+  const [sirelReference, setSirelReference] = useState('');
+  const [sirelNotes, setSirelNotes] = useState('');
+  const [sirelEvidenceUrl, setSirelEvidenceUrl] = useState('');
+  const [manualModalOpen, setManualModalOpen] = useState(false);
+  const [manualViewMode, setManualViewMode] = useState<'operativo' | 'completo'>('operativo');
+  const [batchFile, setBatchFile] = useState<File | null>(null);
+  const [batchDataset, setBatchDataset] = useState<'default' | 'sanctions'>('sanctions');
+  const [selectedBatchJobId, setSelectedBatchJobId] = useState<string | null>(null);
 
   useEffect(() => {
     setManualDocType((prev) => {
@@ -104,6 +130,33 @@ export default function Sarlaft() {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(actionableAlertsStorageKey, onlyActionableAlerts ? '1' : '0');
   }, [actionableAlertsStorageKey, onlyActionableAlerts]);
+  const internalAlertsPageStorageKey = useMemo(
+    () => `sarlaft-internal-alerts-page:${user?.id || user?.email || 'anon'}`,
+    [user?.id, user?.email]
+  );
+  const internalAlertsPageSizeStorageKey = useMemo(
+    () => `sarlaft-internal-alerts-page-size:${user?.id || user?.email || 'anon'}`,
+    [user?.id, user?.email]
+  );
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const rawPage = window.localStorage.getItem(internalAlertsPageStorageKey);
+    const rawSize = window.localStorage.getItem(internalAlertsPageSizeStorageKey);
+    const parsedPage = Number(rawPage || 1);
+    const parsedSize = Number(rawSize || 10);
+    if (Number.isFinite(parsedPage) && parsedPage >= 1) setInternalAlertsPage(Math.floor(parsedPage));
+    if (Number.isFinite(parsedSize) && [10, 20, 50].includes(Math.floor(parsedSize))) {
+      setInternalAlertsPageSize(Math.floor(parsedSize));
+    }
+  }, [internalAlertsPageStorageKey, internalAlertsPageSizeStorageKey]);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(internalAlertsPageStorageKey, String(internalAlertsPage));
+  }, [internalAlertsPage, internalAlertsPageStorageKey]);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(internalAlertsPageSizeStorageKey, String(internalAlertsPageSize));
+  }, [internalAlertsPageSize, internalAlertsPageSizeStorageKey]);
 
   useEffect(() => {
     if (!caseDetailModalOpen) return;
@@ -166,6 +219,22 @@ export default function Sarlaft() {
     setDecisionCashierInterview('normal');
     setDecisionSupportRefsRaw('');
   };
+  const closeSirelModal = (): void => {
+    setSirelModal(null);
+    setSirelReference('');
+    setSirelNotes('');
+    setSirelEvidenceUrl('');
+  };
+  const closeManualModal = (): void => {
+    setManualModalOpen(false);
+  };
+  const manualDocPath = useMemo(
+    () =>
+      manualViewMode === 'operativo'
+        ? '/manuales/sarlaft-modulo-operativo.html'
+        : '/manuales/sarlaft-modulo.html',
+    [manualViewMode]
+  );
 
   const casesQuery = useQuery({
     queryKey: ['sarlaft-cases-list', 20],
@@ -186,6 +255,19 @@ export default function Sarlaft() {
   const profileQuery = useQuery({
     queryKey: ['sarlaft-profile'],
     queryFn: async () => sarlaftApi.getProfile(),
+  });
+  const sirelQueueQuery = useQuery({
+    queryKey: ['sarlaft-sirel-queue', sirelStatusFilter, 80],
+    queryFn: async () => sarlaftApi.listSirelQueue({ status: sirelStatusFilter, limit: 80 }),
+  });
+  const batchJobsQuery = useQuery({
+    queryKey: ['sarlaft-batch-jobs', 20],
+    queryFn: async () => sarlaftApi.listBatchJobs({ limit: 20 }),
+  });
+  const batchRowsQuery = useQuery({
+    queryKey: ['sarlaft-batch-rows', selectedBatchJobId],
+    queryFn: async () => sarlaftApi.listBatchRows(selectedBatchJobId as string, { limit: 1000 }),
+    enabled: Boolean(selectedBatchJobId),
   });
 
   const createMutation = useMutation({
@@ -218,6 +300,7 @@ export default function Sarlaft() {
       setPartyDocType('CC');
       setPartyDocNumber('');
       setPartyName('');
+      setScreeningDataset('default');
     },
     onError: (err: any) => {
       setFeedback(err?.response?.data?.detail || 'No se pudo crear el caso SARLAFT.');
@@ -380,6 +463,145 @@ export default function Sarlaft() {
       setFeedback(err?.response?.data?.detail || 'No se pudo cambiar el estado de API externa SARLAFT.');
     },
   });
+  const createCaseFromAlertMutation = useMutation({
+    mutationFn: async (alertId: string) => sarlaftApi.createCaseFromInternalAlert(alertId),
+    onSuccess: (data) => {
+      setFeedback(`Caso creado desde alerta interna: ${data.operacion_ref}`);
+      setCaseIdLookup(data.id);
+      internalAlertsQuery.refetch();
+      casesQuery.refetch();
+    },
+    onError: (err: any) => {
+      setFeedback(err?.response?.data?.detail || 'No fue posible crear el caso desde la alerta.');
+    },
+  });
+  const markSirelReportedMutation = useMutation({
+    mutationFn: async (payload: {
+      caseId: string;
+      sirel_reference: string;
+      notes?: string | null;
+      evidence_url: string;
+    }) =>
+      sarlaftApi.markSirelReported(payload.caseId, {
+        sirel_reference: payload.sirel_reference,
+        notes: payload.notes || null,
+        evidence_url: payload.evidence_url,
+      }),
+    onSuccess: () => {
+      setFeedback('Caso marcado como reportado en SIREL/UIAF.');
+      closeSirelModal();
+      sirelQueueQuery.refetch();
+      casesQuery.refetch();
+    },
+    onError: (err: any) => {
+      setFeedback(err?.response?.data?.detail || 'No fue posible marcar el reporte SIREL.');
+    },
+  });
+  const downloadSirelPreRosMutation = useMutation({
+    mutationFn: async (caseId: string) => sarlaftApi.downloadSirelPreRosTxt(caseId),
+    onSuccess: ({ blob, filename }) => {
+      saveBlobAsFile(blob, filename);
+      setFeedback('Pre-ROS descargado en TXT.');
+    },
+    onError: (err: any) => {
+      setFeedback(err?.response?.data?.detail || 'No fue posible descargar el pre-ROS.');
+    },
+  });
+  const downloadSirelExpedienteTemplateMutation = useMutation({
+    mutationFn: async (caseId: string) => sarlaftApi.downloadSirelExpedienteTemplateTxt(caseId),
+    onSuccess: ({ blob, filename }) => {
+      saveBlobAsFile(blob, filename);
+      setFeedback('Plantilla de expediente ROS descargada.');
+    },
+    onError: (err: any) => {
+      setFeedback(err?.response?.data?.detail || 'No fue posible descargar la plantilla de expediente ROS.');
+    },
+  });
+  const downloadSirelExpedienteTemplatePdfMutation = useMutation({
+    mutationFn: async (caseId: string) => sarlaftApi.downloadSirelExpedienteTemplatePdf(caseId),
+    onSuccess: ({ blob, filename }) => {
+      saveBlobAsFile(blob, filename);
+      setFeedback('Plantilla de expediente ROS en PDF descargada.');
+    },
+    onError: (err: any) => {
+      setFeedback(err?.response?.data?.detail || 'No fue posible descargar la plantilla de expediente ROS en PDF.');
+    },
+  });
+  const downloadBatchTemplateMutation = useMutation({
+    mutationFn: async () => sarlaftApi.downloadBatchTemplateCsv(),
+    onSuccess: ({ blob, filename }) => {
+      saveBlobAsFile(blob, filename);
+      setFeedback('Plantilla de lote descargada.');
+    },
+    onError: (err: any) => {
+      setFeedback(err?.response?.data?.detail || 'No fue posible descargar la plantilla de lote.');
+    },
+  });
+  const createBatchJobMutation = useMutation({
+    mutationFn: async () => {
+      if (!batchFile) throw new Error('Selecciona un archivo CSV para procesar.');
+      return sarlaftApi.createBatchJob({ file: batchFile, dataset: batchDataset });
+    },
+    onSuccess: (job) => {
+      setFeedback(`Lote procesado: ${job.processed_records}/${job.total_records} registros.`);
+      setBatchFile(null);
+      setSelectedBatchJobId(job.id);
+      batchJobsQuery.refetch();
+      manualChecksQuery.refetch();
+    },
+    onError: (err: any) => {
+      setFeedback(err?.response?.data?.detail || err?.message || 'No fue posible ejecutar el lote.');
+    },
+  });
+  const downloadBatchRowsCsvMutation = useMutation({
+    mutationFn: async (jobId: string) => sarlaftApi.downloadBatchRowsCsv(jobId),
+    onSuccess: ({ blob, filename }) => {
+      saveBlobAsFile(blob, filename);
+      setFeedback('Resultado del lote descargado en CSV.');
+    },
+    onError: (err: any) => {
+      setFeedback(err?.response?.data?.detail || 'No fue posible descargar el resultado del lote.');
+    },
+  });
+  const sirelAgingKpi = useMemo(() => {
+    const rows = (sirelQueueQuery.data || []).filter((r) => r.sirel_status === 'pendiente_envio');
+    const now = Date.now();
+    const ageDays = rows.map((r) => {
+      const base = new Date(r.created_at).getTime();
+      if (!base || Number.isNaN(base)) return 0;
+      return Math.max(0, Math.floor((now - base) / (1000 * 60 * 60 * 24)));
+    });
+    const mayores3 = ageDays.filter((d) => d >= 3).length;
+    const mayores7 = ageDays.filter((d) => d >= 7).length;
+    const maxAge = ageDays.length > 0 ? Math.max(...ageDays) : 0;
+    const reportedRows = (sirelQueueQuery.data || []).filter((r) => r.sirel_status === 'reportado' && r.sirel_sent_at);
+    const promedioReporteDias =
+      reportedRows.length > 0
+        ? reportedRows.reduce((acc, r) => {
+            const created = new Date(r.created_at).getTime();
+            const sent = new Date(r.sirel_sent_at || '').getTime();
+            if (!created || !sent || Number.isNaN(created) || Number.isNaN(sent) || sent < created) return acc;
+            return acc + (sent - created) / (1000 * 60 * 60 * 24);
+          }, 0) / reportedRows.length
+        : 0;
+    return {
+      pendientes: rows.length,
+      mayores3,
+      mayores7,
+      maxAge,
+      promedioReporteDias,
+    };
+  }, [sirelQueueQuery.data]);
+  const sirelReferenceNormalized = useMemo(() => sirelReference.trim().toUpperCase(), [sirelReference]);
+  const sirelReferenceValid = useMemo(
+    () => /^[A-Z0-9][A-Z0-9\-_\/]{5,119}$/.test(sirelReferenceNormalized),
+    [sirelReferenceNormalized]
+  );
+  const sirelEvidenceNormalized = useMemo(() => sirelEvidenceUrl.trim(), [sirelEvidenceUrl]);
+  const sirelEvidenceValid = useMemo(
+    () => /^https?:\/\//i.test(sirelEvidenceNormalized),
+    [sirelEvidenceNormalized]
+  );
 
   const riskBadgeClass = useMemo(
     () => (riskLevel: string) => {
@@ -433,6 +655,22 @@ export default function Sarlaft() {
       });
     return rows;
   }, [internalAlertsQuery.data, onlyActionableAlerts]);
+  const internalAlertsTotalPages = useMemo(
+    () => Math.max(1, Math.ceil(internalAlertsRows.length / internalAlertsPageSize)),
+    [internalAlertsRows.length, internalAlertsPageSize]
+  );
+  const internalAlertsRowsPage = useMemo(() => {
+    const start = (internalAlertsPage - 1) * internalAlertsPageSize;
+    return internalAlertsRows.slice(start, start + internalAlertsPageSize);
+  }, [internalAlertsRows, internalAlertsPage]);
+  useEffect(() => {
+    if (internalAlertsPage > internalAlertsTotalPages) {
+      setInternalAlertsPage(internalAlertsTotalPages);
+    }
+  }, [internalAlertsPage, internalAlertsTotalPages]);
+  useEffect(() => {
+    setInternalAlertsPage(1);
+  }, [internalAlertLevelFilter, onlyActionableAlerts]);
   const internalAlertsKpi = useMemo(() => {
     const rows = internalAlertsRows;
     const total = rows.length;
@@ -471,6 +709,15 @@ export default function Sarlaft() {
     },
     [],
   );
+  const sourceOriginLabel = useMemo(
+    () => (origin?: string | null) => {
+      const v = (origin || '').trim().toLowerCase();
+      if (v === 'manual') return 'MANUAL';
+      if (v === 'lote') return 'LOTE';
+      return 'CASO';
+    },
+    [],
+  );
   const decisionStatusLabel = useMemo(
     () => (decision?: string | null) => {
       const v = (decision || '').trim().toLowerCase();
@@ -506,14 +753,40 @@ export default function Sarlaft() {
     },
     [],
   );
+  const batchRowStatusLabel = useMemo(
+    () => (status: string) => {
+      const v = (status || '').trim().toLowerCase();
+      if (v === 'ok') return 'Procesado';
+      if (v === 'error') return 'Error';
+      if (v === 'pending') return 'Pendiente';
+      return status || 'N/D';
+    },
+    [],
+  );
+  const batchJobStatusLabel = useMemo(
+    () => (status: string) => {
+      const v = (status || '').trim().toLowerCase();
+      if (v === 'completed') return 'Finalizado';
+      if (v === 'completed_with_errors') return 'Finalizado con errores';
+      if (v === 'processing') return 'Procesando';
+      if (v === 'queued') return 'En cola';
+      return status || 'N/D';
+    },
+    [],
+  );
   const resumenKpi = useMemo(
     () => ({
       alertasInternas: internalAlertsKpi.total,
       casosRegistrados: (casesQuery.data || []).length,
       consultasManuales: (manualChecksQuery.data || []).length,
       alertasCriticas: internalAlertsKpi.criticas,
+      sirelPendientes: (sirelQueueQuery.data || []).filter((x) => x.sirel_status === 'pendiente_envio').length,
     }),
-    [internalAlertsKpi, casesQuery.data, manualChecksQuery.data],
+    [internalAlertsKpi, casesQuery.data, manualChecksQuery.data, sirelQueueQuery.data],
+  );
+  const lotesConErrores = useMemo(
+    () => (batchJobsQuery.data || []).filter((j) => (j.error_records || 0) > 0).length,
+    [batchJobsQuery.data]
   );
   const seccionHint = useMemo(
     () => SARLAFT_SECCIONES.find((s) => s.id === sarlaftSeccion)?.hint || '',
@@ -532,6 +805,13 @@ export default function Sarlaft() {
               </p>
             </div>
             <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+              <button
+                type="button"
+                className="btn-corporate-muted px-3 py-1 text-xs"
+                onClick={() => setManualModalOpen(true)}
+              >
+                Manual de uso
+              </button>
               <span className="text-xs font-medium text-slate-600">API externa</span>
               <button
                 type="button"
@@ -577,7 +857,14 @@ export default function Sarlaft() {
                       : 'border-b-2 border-transparent text-slate-600 hover:bg-slate-50 hover:text-slate-900'
                   }`}
                 >
-                  {s.label}
+                  <span className="inline-flex items-center gap-1.5">
+                    {s.label}
+                    {s.id === 'lotes' && lotesConErrores > 0 && (
+                      <span className="inline-flex min-w-[18px] items-center justify-center rounded-full border border-rose-200 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-700">
+                        {lotesConErrores}
+                      </span>
+                    )}
+                  </span>
                 </button>
               );
             })}
@@ -589,7 +876,7 @@ export default function Sarlaft() {
 
         {sarlaftSeccion === 'resumen' && (
           <div className="space-y-4">
-            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
               <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
                 <p className="text-xs text-slate-500">Alertas internas</p>
                 <p className="mt-1 text-2xl font-semibold text-slate-900">{resumenKpi.alertasInternas}</p>
@@ -606,6 +893,10 @@ export default function Sarlaft() {
                 <p className="text-xs text-slate-500">Consultas manuales</p>
                 <p className="mt-1 text-2xl font-semibold text-slate-900">{resumenKpi.consultasManuales}</p>
               </div>
+              <div className="rounded-2xl border border-indigo-200 bg-indigo-50 p-4 shadow-sm">
+                <p className="text-xs text-indigo-700">SIREL pendientes</p>
+                <p className="mt-1 text-2xl font-semibold text-indigo-800">{resumenKpi.sirelPendientes}</p>
+              </div>
             </div>
             <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
               <h3 className="text-base font-semibold text-slate-900">Atajos rápidos</h3>
@@ -619,6 +910,12 @@ export default function Sarlaft() {
                 </button>
                 <button className="btn-corporate-muted px-3 py-1.5 text-xs" onClick={() => setSarlaftSeccion('consultas')}>
                   Registrar consulta manual
+                </button>
+                <button className="btn-corporate-muted px-3 py-1.5 text-xs" onClick={() => setSarlaftSeccion('lotes')}>
+                  Ejecutar consulta por lotes
+                </button>
+                <button className="btn-corporate-muted px-3 py-1.5 text-xs" onClick={() => setSarlaftSeccion('sirel')}>
+                  Gestionar reporte SIREL
                 </button>
                 <button className="btn-corporate-muted px-3 py-1.5 text-xs" onClick={() => setSarlaftSeccion('screening')}>
                   Ejecutar screening
@@ -720,8 +1017,8 @@ export default function Sarlaft() {
               value={manualDataset}
               onChange={(e) => setManualDataset(e.target.value as 'default' | 'sanctions')}
             >
-              <option value="sanctions">sanctions</option>
-              <option value="default">default</option>
+              <option value="sanctions">sanctions (fuerte)</option>
+              <option value="default">default (comun)</option>
             </select>
             <input
               className="input-corporate md:col-span-1"
@@ -843,8 +1140,8 @@ export default function Sarlaft() {
           </div>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <select className="input-corporate" value={screeningDataset} onChange={(e) => setScreeningDataset(e.target.value as 'default' | 'sanctions')}>
-              <option value="sanctions">Dataset sanctions (alerta fuerte)</option>
-              <option value="default">Dataset default (amplio)</option>
+              <option value="default">Dataset default (comun para recepcion/cobro)</option>
+              <option value="sanctions">Dataset sanctions (fuerte para analisis)</option>
             </select>
             <input
               className="input-corporate md:col-span-2"
@@ -1073,6 +1370,7 @@ export default function Sarlaft() {
               <thead className="text-left text-slate-500">
                 <tr>
                   <th className="py-2 pr-3">Nivel alerta</th>
+                  <th className="py-2 pr-3">Origen</th>
                   <th className="py-2 pr-3">Clasificación</th>
                   <th className="py-2 pr-3">Regla</th>
                   <th className="py-2 pr-3">Riesgo caso</th>
@@ -1089,16 +1387,21 @@ export default function Sarlaft() {
               <tbody>
                 {internalAlertsQuery.isLoading && (
                   <tr>
-                    <td className="py-3 text-slate-500" colSpan={12}>
+                    <td className="py-3 text-slate-500" colSpan={13}>
                       Cargando alertas internas...
                     </td>
                   </tr>
                 )}
-                {internalAlertsRows.map((row: SarlaftInternalAlert) => (
+                {internalAlertsRowsPage.map((row: SarlaftInternalAlert) => (
                   <tr key={row.id} className={alertRowClass(row.alert_level)}>
                     <td className="py-2 pr-3">
                       <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${alertBadgeClass(row.alert_level)}`}>
                         {alertLevelLabel(row.alert_level)}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-3">
+                      <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                        {sourceOriginLabel(row.source_origin)}
                       </span>
                     </td>
                     <td className="py-2 pr-3">
@@ -1138,7 +1441,7 @@ export default function Sarlaft() {
                         )}
                       </div>
                     </td>
-                    <td className="py-2 pr-3">
+                    <td className="py-2 pr-3 sticky right-0 z-10 bg-white">
                       <div className="flex flex-col gap-1">
                         <button
                           className="btn-corporate-muted px-2.5 py-1 text-xs disabled:cursor-not-allowed disabled:opacity-50"
@@ -1146,15 +1449,23 @@ export default function Sarlaft() {
                           onClick={() => {
                             if (!row.case_id) return;
                             setCaseIdLookup(row.case_id);
-                            setSarlaftSeccion('casos');
                             findMutation.mutate(row.case_id);
                           }}
                         >
                           Ver caso
                         </button>
+                        {(row.source_origin || 'caso').toLowerCase() !== 'caso' && !row.case_id && (
+                          <button
+                            className="btn-corporate-muted px-2.5 py-1 text-xs disabled:opacity-50"
+                            disabled={createCaseFromAlertMutation.isLoading}
+                            onClick={() => createCaseFromAlertMutation.mutate(row.id)}
+                          >
+                            Crear caso
+                          </button>
+                        )}
                         <button
                           className="btn-corporate-muted px-2.5 py-1 text-xs disabled:opacity-50"
-                          disabled={decideAlertMutation.isLoading}
+                          disabled={decideAlertMutation.isLoading || (row.source_origin || 'caso').toLowerCase() !== 'caso'}
                           onClick={() => {
                             setDecisionModal({ alertId: row.id });
                             setDecisionNotes('');
@@ -1164,7 +1475,7 @@ export default function Sarlaft() {
                             setDecisionSupportRefsRaw('');
                           }}
                         >
-                          Evaluar alerta (DDI)
+                          {(row.source_origin || 'caso').toLowerCase() === 'caso' ? 'Evaluar alerta (DDI)' : 'Solo trazabilidad'}
                         </button>
                       </div>
                     </td>
@@ -1173,14 +1484,14 @@ export default function Sarlaft() {
                 ))}
                 {internalAlertsQuery.isError && (
                   <tr>
-                    <td className="py-3 text-red-600" colSpan={12}>
+                    <td className="py-3 text-red-600" colSpan={13}>
                       No fue posible cargar las alertas internas. Intenta actualizar.
                     </td>
                   </tr>
                 )}
                 {!internalAlertsQuery.isLoading && internalAlertsRows.length === 0 && (
                   <tr>
-                    <td className="py-4" colSpan={12}>
+                    <td className="py-4" colSpan={13}>
                       <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-4 py-4 text-slate-600">
                         <p className="text-sm font-medium text-slate-800">Sin alertas internas para el filtro actual.</p>
                         <p className="mt-1 text-xs">
@@ -1193,11 +1504,405 @@ export default function Sarlaft() {
               </tbody>
             </table>
           </div>
+          {internalAlertsRows.length > 0 && (
+            <div className="mt-3 flex flex-col gap-2 border-t border-slate-100 pt-3 sm:flex-row sm:items-center sm:justify-between">
+              <p className="text-xs text-slate-500">
+                Mostrando {(internalAlertsPage - 1) * internalAlertsPageSize + 1}
+                {' - '}
+                {Math.min(internalAlertsPage * internalAlertsPageSize, internalAlertsRows.length)}
+                {' de '}
+                {internalAlertsRows.length} alertas
+              </p>
+              <div className="flex items-center gap-2">
+                <select
+                  className="input-corporate h-8 w-[90px] py-0 text-xs"
+                  value={internalAlertsPageSize}
+                  onChange={(e) => {
+                    const size = Number(e.target.value || 10);
+                    setInternalAlertsPageSize(size);
+                    setInternalAlertsPage(1);
+                  }}
+                >
+                  <option value={10}>10</option>
+                  <option value={20}>20</option>
+                  <option value={50}>50</option>
+                </select>
+                <button
+                  className="btn-corporate-muted px-2.5 py-1 text-xs disabled:opacity-50"
+                  onClick={() => setInternalAlertsPage((p) => Math.max(1, p - 1))}
+                  disabled={internalAlertsPage <= 1}
+                >
+                  Anterior
+                </button>
+                <span className="text-xs font-semibold text-slate-700">
+                  Pagina {internalAlertsPage} / {internalAlertsTotalPages}
+                </span>
+                <button
+                  className="btn-corporate-muted px-2.5 py-1 text-xs disabled:opacity-50"
+                  onClick={() => setInternalAlertsPage((p) => Math.min(internalAlertsTotalPages, p + 1))}
+                  disabled={internalAlertsPage >= internalAlertsTotalPages}
+                >
+                  Siguiente
+                </button>
+              </div>
+            </div>
+          )}
         </div>
         )}
 
-        {sarlaftSeccion === 'consultas' && (
+        {sarlaftSeccion === 'sirel' && (
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div>
+              <h3 className="text-base font-semibold text-slate-900">Bandeja SIREL/UIAF (ROS)</h3>
+              <p className="text-xs text-slate-500">
+                Casos sospechosos para radicar en portal SIREL. El sistema genera pre-ROS y guarda evidencia de envío.
+              </p>
+              <p className="mt-1 text-[11px] text-slate-500">
+                Flujo recomendado: copiar/descargar pre-ROS {'->'} radicar en SIREL {'->'} registrar radicado y URL de evidencia.
+              </p>
+            </div>
+            <div className="flex gap-2">
+              <select
+                className="input-corporate"
+                value={sirelStatusFilter}
+                onChange={(e) => setSirelStatusFilter(e.target.value as 'all' | 'pending' | 'reported')}
+              >
+                <option value="pending">Pendientes</option>
+                <option value="reported">Reportados</option>
+                <option value="all">Todos</option>
+              </select>
+              <button
+                className="btn-corporate-muted inline-flex items-center gap-2 px-3"
+                onClick={() => sirelQueueQuery.refetch()}
+                disabled={sirelQueueQuery.isFetching}
+              >
+                <RefreshCw className={`h-4 w-4 ${sirelQueueQuery.isFetching ? 'animate-spin' : ''}`} />
+                Actualizar
+              </button>
+            </div>
+          </div>
+
+          <div className="mb-4 grid grid-cols-1 gap-2 md:grid-cols-5">
+            <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-slate-500">Pendientes ROS</p>
+              <p className="text-lg font-semibold text-slate-900">{sirelAgingKpi.pendientes}</p>
+            </div>
+            <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-amber-700">Antigüedad {'>='} 3 días</p>
+              <p className="text-lg font-semibold text-amber-800">{sirelAgingKpi.mayores3}</p>
+            </div>
+            <div className="rounded-lg border border-rose-200 bg-rose-50 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-rose-700">Antigüedad {'>='} 7 días</p>
+              <p className="text-lg font-semibold text-rose-800">{sirelAgingKpi.mayores7}</p>
+            </div>
+            <div className="rounded-lg border border-indigo-200 bg-indigo-50 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-indigo-700">Máxima antigüedad</p>
+              <p className="text-lg font-semibold text-indigo-800">{sirelAgingKpi.maxAge} días</p>
+            </div>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+              <p className="text-[11px] uppercase tracking-wide text-emerald-700">Promedio reporte</p>
+              <p className="text-lg font-semibold text-emerald-800">
+                {sirelAgingKpi.promedioReporteDias > 0 ? sirelAgingKpi.promedioReporteDias.toFixed(1) : '0.0'} días
+              </p>
+            </div>
+          </div>
+
+          <div className="overflow-x-auto">
+            <table className="min-w-full text-sm">
+              <thead className="text-left text-slate-500">
+                <tr>
+                  <th className="py-2 pr-3">Operación</th>
+                  <th className="py-2 pr-3">Cliente</th>
+                  <th className="py-2 pr-3">Documento</th>
+                  <th className="py-2 pr-3">Clasificación</th>
+                  <th className="py-2 pr-3">Estado caso</th>
+                  <th className="py-2 pr-3">Estado SIREL</th>
+                  <th className="py-2 pr-3">Radicado</th>
+                  <th className="py-2 pr-3">Monto</th>
+                  <th className="py-2 pr-3">Acciones</th>
+                </tr>
+              </thead>
+              <tbody>
+                {sirelQueueQuery.isLoading && (
+                  <tr>
+                    <td className="py-3 text-slate-500" colSpan={9}>
+                      Cargando bandeja SIREL...
+                    </td>
+                  </tr>
+                )}
+                {(sirelQueueQuery.data || []).map((row: SarlaftSirelQueueItem) => (
+                  <tr key={row.case_id} className="border-t border-slate-100">
+                    <td className="py-2 pr-3 font-medium text-slate-900">{row.operacion_ref}</td>
+                    <td className="py-2 pr-3 text-slate-700">{row.cliente_full_name || '—'}</td>
+                    <td className="py-2 pr-3 text-slate-700">
+                      {((row.cliente_doc_type || '—') + ' ' + (row.cliente_doc_number || '')).trim()}
+                    </td>
+                    <td className="py-2 pr-3">
+                      <span className="inline-flex rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-xs font-semibold text-indigo-800">
+                        {operationClassLabel(row.operation_classification)}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-3 text-slate-700">{row.status}</td>
+                    <td className="py-2 pr-3">
+                      <span
+                        className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${
+                          row.sirel_status === 'reportado'
+                            ? 'border border-emerald-200 bg-emerald-50 text-emerald-800'
+                            : 'border border-amber-200 bg-amber-50 text-amber-800'
+                        }`}
+                      >
+                        {row.sirel_status === 'reportado' ? 'REPORTADO' : 'PENDIENTE'}
+                      </span>
+                    </td>
+                    <td className="py-2 pr-3 text-slate-700">
+                      {row.sirel_reference ? (
+                        <div className="space-y-0.5">
+                          <p className="font-medium">{row.sirel_reference}</p>
+                          {row.sirel_sent_at && (
+                            <p className="text-[11px] text-slate-500">
+                              {new Date(row.sirel_sent_at).toLocaleString('es-CO')}
+                              {row.sirel_sent_by_name ? ` · ${row.sirel_sent_by_name}` : ''}
+                            </p>
+                          )}
+                        </div>
+                      ) : (
+                        '—'
+                      )}
+                    </td>
+                    <td className="py-2 pr-3 text-slate-700">{money(row.transaction_amount_cop)}</td>
+                    <td className="py-2 pr-3">
+                      <div className="flex flex-wrap gap-2">
+                        <button
+                          className="btn-corporate-muted px-2.5 py-1 text-xs"
+                          onClick={async () => {
+                            const ok = await copyTextToClipboard(row.pre_ros_text || '');
+                            setFeedback(ok ? 'Pre-ROS copiado al portapapeles.' : 'No fue posible copiar el Pre-ROS.');
+                          }}
+                        >
+                          Copiar pre-ROS
+                        </button>
+                        <button
+                          className="btn-corporate-muted px-2.5 py-1 text-xs"
+                          disabled={downloadSirelPreRosMutation.isLoading}
+                          onClick={() => downloadSirelPreRosMutation.mutate(row.case_id)}
+                        >
+                          Descargar TXT
+                        </button>
+                        <button
+                          className="btn-corporate-muted px-2.5 py-1 text-xs"
+                          disabled={downloadSirelExpedienteTemplateMutation.isLoading}
+                          onClick={() => downloadSirelExpedienteTemplateMutation.mutate(row.case_id)}
+                        >
+                          Plantilla expediente
+                        </button>
+                        <button
+                          className="btn-corporate-muted px-2.5 py-1 text-xs"
+                          disabled={downloadSirelExpedienteTemplatePdfMutation.isLoading}
+                          onClick={() => downloadSirelExpedienteTemplatePdfMutation.mutate(row.case_id)}
+                        >
+                          Plantilla PDF
+                        </button>
+                        {row.sirel_status !== 'reportado' && (
+                          <button
+                            className="btn-corporate-primary px-2.5 py-1 text-xs"
+                            onClick={() => {
+                              setSirelModal({
+                                caseId: row.case_id,
+                                operacionRef: row.operacion_ref,
+                                preRosText: row.pre_ros_text || '',
+                              });
+                            }}
+                          >
+                            Marcar reportado
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+                {!sirelQueueQuery.isLoading && (sirelQueueQuery.data || []).length === 0 && (
+                  <tr>
+                    <td className="py-3 text-slate-500" colSpan={9}>
+                      Sin casos para el filtro seleccionado.
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        )}
+
+        {(sarlaftSeccion === 'consultas' || sarlaftSeccion === 'lotes') && (
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          {sarlaftSeccion === 'lotes' && (
+          <>
+          <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4">
+            <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+              <div>
+                <h4 className="text-sm font-semibold text-indigo-900">Carga por lotes (CSV)</h4>
+                <p className="text-xs text-indigo-800">
+                  Para SARLAFT independiente: sube archivo, procesa lote y descarga resultado consolidado.
+                </p>
+              </div>
+              <button
+                className="btn-corporate-muted px-3 py-1.5 text-xs"
+                onClick={() => downloadBatchTemplateMutation.mutate()}
+                disabled={downloadBatchTemplateMutation.isLoading}
+              >
+                {downloadBatchTemplateMutation.isLoading ? 'Descargando...' : 'Descargar plantilla CSV'}
+              </button>
+            </div>
+            <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-4">
+              <select
+                className="input-corporate"
+                value={batchDataset}
+                onChange={(e) => setBatchDataset(e.target.value as 'default' | 'sanctions')}
+              >
+                <option value="sanctions">sanctions (fuerte)</option>
+                <option value="default">default (comun)</option>
+              </select>
+              <input
+                className="input-corporate md:col-span-2"
+                type="file"
+                accept=".csv,text/csv"
+                onChange={(e) => setBatchFile(e.target.files?.[0] || null)}
+              />
+              <button
+                className="btn-corporate-primary px-3 py-1.5 text-xs"
+                onClick={() => createBatchJobMutation.mutate()}
+                disabled={!batchFile || createBatchJobMutation.isLoading}
+              >
+                {createBatchJobMutation.isLoading ? 'Procesando...' : 'Procesar lote'}
+              </button>
+            </div>
+            <p className="mt-2 text-[11px] text-indigo-800">
+              Maximo recomendado: 2000 registros por lote.
+            </p>
+          </div>
+
+          <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <h4 className="text-sm font-semibold text-slate-900">Lotes recientes</h4>
+            <div className="mt-2 overflow-x-auto">
+              <table className="min-w-full text-xs">
+                <thead className="text-left text-slate-500">
+                  <tr>
+                    <th className="py-2 pr-3">Fecha</th>
+                    <th className="py-2 pr-3">Archivo</th>
+                    <th className="py-2 pr-3">Dataset</th>
+                    <th className="py-2 pr-3">Estado</th>
+                    <th className="py-2 pr-3">Procesados</th>
+                    <th className="py-2 pr-3">Verde/Amarillo/Rojo</th>
+                    <th className="py-2 pr-3">Errores</th>
+                    <th className="py-2 pr-3">Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(batchJobsQuery.data || []).map((job: SarlaftBatchJob) => (
+                    <tr
+                      key={job.id}
+                      className={`border-t border-slate-200 ${selectedBatchJobId === job.id ? 'bg-indigo-50/50' : ''}`}
+                    >
+                      <td className="py-2 pr-3 text-slate-700">{new Date(job.created_at).toLocaleString('es-CO')}</td>
+                      <td className="py-2 pr-3 text-slate-700">{job.filename}</td>
+                      <td className="py-2 pr-3 text-slate-700">{job.dataset}</td>
+                      <td className="py-2 pr-3 text-slate-700">{batchJobStatusLabel(job.status)}</td>
+                      <td className="py-2 pr-3 text-slate-700">{job.processed_records}/{job.total_records}</td>
+                      <td className="py-2 pr-3 text-slate-700">{job.verde_records}/{job.amarillo_records}/{job.rojo_records}</td>
+                      <td className="py-2 pr-3 text-slate-700">{job.error_records}</td>
+                      <td className="py-2 pr-3">
+                        <div className="flex gap-2">
+                          <button
+                            className="btn-corporate-muted px-2 py-1 text-[11px]"
+                            onClick={() => {
+                              setSelectedBatchJobId((prev) => (prev === job.id ? null : job.id));
+                            }}
+                          >
+                            {selectedBatchJobId === job.id ? 'Ocultar detalle' : 'Ver detalle'}
+                          </button>
+                          <button
+                            className="btn-corporate-muted px-2 py-1 text-[11px]"
+                            onClick={() => downloadBatchRowsCsvMutation.mutate(job.id)}
+                            disabled={downloadBatchRowsCsvMutation.isLoading}
+                          >
+                            Descargar CSV
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                  {!batchJobsQuery.isLoading && (batchJobsQuery.data || []).length === 0 && (
+                    <tr>
+                      <td className="py-2 text-slate-500" colSpan={8}>Sin lotes ejecutados aun.</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {selectedBatchJobId && (
+            <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4">
+              <h4 className="text-sm font-semibold text-slate-900">Detalle lote seleccionado</h4>
+              <div className="mt-2 overflow-x-auto">
+                <table className="min-w-full text-xs">
+                  <thead className="text-left text-slate-500">
+                    <tr>
+                      <th className="py-2 pr-3">#</th>
+                      <th className="py-2 pr-3">Nombre</th>
+                      <th className="py-2 pr-3">Documento</th>
+                      <th className="py-2 pr-3">Estado</th>
+                      <th className="py-2 pr-3">Riesgo</th>
+                      <th className="py-2 pr-3">Hits</th>
+                      <th className="py-2 pr-3">Cobertura</th>
+                      <th className="py-2 pr-3">Error</th>
+                      <th className="py-2 pr-3">Accion</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(batchRowsQuery.data || []).map((row: SarlaftBatchRow) => (
+                      <tr key={row.id} className="border-t border-slate-100">
+                        <td className="py-2 pr-3 text-slate-700">{row.row_index}</td>
+                        <td className="py-2 pr-3 text-slate-700">{row.full_name || '—'}</td>
+                        <td className="py-2 pr-3 text-slate-700">{`${row.doc_type || ''} ${row.doc_number || ''}`.trim() || '—'}</td>
+                        <td className="py-2 pr-3 text-slate-700">{batchRowStatusLabel(row.status)}</td>
+                        <td className="py-2 pr-3 text-slate-700">{row.risk_level || '—'}</td>
+                        <td className="py-2 pr-3 text-slate-700">{row.hits_count}</td>
+                        <td className="py-2 pr-3 text-slate-700">
+                          ONU:{row.source_coverage?.onu ? 'Si' : 'No'} · OFAC:{row.source_coverage?.ofac ? 'Si' : 'No'} · EU:{row.source_coverage?.europea ? 'Si' : 'No'}
+                        </td>
+                        <td className="py-2 pr-3 text-rose-700">{row.error_detail || 'Sin error'}</td>
+                        <td className="py-2 pr-3">
+                          {row.created_manual_check_id ? (
+                            <button
+                              className="btn-corporate-muted px-2 py-1 text-[11px]"
+                              disabled={downloadCertificateMutation.isLoading}
+                              onClick={() => downloadCertificateMutation.mutate(row.created_manual_check_id as string)}
+                            >
+                              Certificado PDF
+                            </button>
+                          ) : (
+                            <span className="text-slate-400">—</span>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                    {!batchRowsQuery.isLoading && (batchRowsQuery.data || []).length === 0 && (
+                      <tr>
+                        <td className="py-2 text-slate-500" colSpan={9}>Sin filas para este lote.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          </>
+          )}
+
+          {sarlaftSeccion === 'consultas' && (
+          <>
           <h3 className="text-base font-semibold text-slate-900 mb-3">
             Consultas manuales SARLAFT (últimas 20)
           </h3>
@@ -1209,6 +1914,7 @@ export default function Sarlaft() {
                   <th className="py-2 pr-3">Nombre</th>
                   <th className="py-2 pr-3">Documento</th>
                   <th className="py-2 pr-3">Dataset</th>
+                  <th className="py-2 pr-3">Cobertura fuentes</th>
                   <th className="py-2 pr-3">Riesgo</th>
                   <th className="py-2 pr-3">Hits</th>
                   <th className="py-2 pr-3">Estado cert.</th>
@@ -1228,6 +1934,19 @@ export default function Sarlaft() {
                       {(row.doc_type || '—') + (row.doc_number ? ` ${row.doc_number}` : '')}
                     </td>
                     <td className="py-2 pr-3 text-slate-700">{row.dataset}</td>
+                    <td className="py-2 pr-3">
+                      <div className="flex flex-wrap gap-1">
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${row.source_coverage?.onu ? 'border border-emerald-200 bg-emerald-50 text-emerald-800' : 'border border-slate-200 bg-slate-50 text-slate-600'}`}>
+                          ONU {row.source_coverage?.onu ? 'Si' : 'No'}
+                        </span>
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${row.source_coverage?.ofac ? 'border border-emerald-200 bg-emerald-50 text-emerald-800' : 'border border-slate-200 bg-slate-50 text-slate-600'}`}>
+                          OFAC {row.source_coverage?.ofac ? 'Si' : 'No'}
+                        </span>
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${row.source_coverage?.europea ? 'border border-indigo-200 bg-indigo-50 text-indigo-800' : 'border border-slate-200 bg-slate-50 text-slate-600'}`}>
+                          Europea {row.source_coverage?.europea ? 'Si' : 'No'}
+                        </span>
+                      </div>
+                    </td>
                     <td className="py-2 pr-3">
                       <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${riskBadgeClass(row.risk_level)}`}>
                         {row.risk_level.toUpperCase()}
@@ -1255,7 +1974,7 @@ export default function Sarlaft() {
                 ))}
                 {!manualChecksQuery.isLoading && (manualChecksQuery.data || []).length === 0 && (
                   <tr>
-                    <td className="py-3 text-slate-500" colSpan={9}>
+                    <td className="py-3 text-slate-500" colSpan={10}>
                       Sin consultas manuales registradas aún.
                     </td>
                   </tr>
@@ -1263,6 +1982,8 @@ export default function Sarlaft() {
               </tbody>
             </table>
           </div>
+          </>
+          )}
         </div>
         )}
 
@@ -1372,6 +2093,152 @@ export default function Sarlaft() {
                   {decideAlertMutation.isLoading ? 'Guardando...' : 'Guardar como sospechosa'}
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {sirelModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+            <div className="modal-panel glass-card max-h-[90vh] w-full max-w-3xl overflow-y-auto border border-slate-200/80 p-5">
+              <div className="flex items-start justify-between gap-3 border-b border-slate-200 pb-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Reporte SIREL/UIAF</p>
+                  <h3 className="text-base font-semibold text-slate-900">{sirelModal.operacionRef}</h3>
+                </div>
+                <button className="rounded-md border border-slate-200 p-2 text-slate-600 hover:bg-slate-50" onClick={closeSirelModal}>
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="mt-3 space-y-3">
+                <textarea
+                  className="input-corporate min-h-[180px] font-mono text-xs"
+                  value={sirelModal.preRosText}
+                  readOnly
+                />
+                <p className="text-[11px] text-slate-500">
+                  Este texto es un pre-llenado operativo. La declaración oficial se finaliza en SIREL/UIAF.
+                </p>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                  <input
+                    className={`input-corporate ${sirelReferenceNormalized && !sirelReferenceValid ? 'border-rose-300 focus:border-rose-400 focus:ring-rose-100' : ''}`}
+                    placeholder="Radicado/Código SIREL *"
+                    value={sirelReference}
+                    onChange={(e) => setSirelReference(e.target.value.toUpperCase())}
+                  />
+                  <input
+                    className={`input-corporate ${sirelEvidenceNormalized && !sirelEvidenceValid ? 'border-rose-300 focus:border-rose-400 focus:ring-rose-100' : ''}`}
+                    placeholder="URL evidencia (obligatoria) *"
+                    value={sirelEvidenceUrl}
+                    onChange={(e) => setSirelEvidenceUrl(e.target.value)}
+                  />
+                </div>
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                  <p className={`text-[11px] ${sirelReferenceNormalized && !sirelReferenceValid ? 'text-rose-700' : 'text-slate-500'}`}>
+                    Formato radicado: letras/numeros y simbolos - _ /, minimo 6 caracteres.
+                  </p>
+                  <p className={`text-[11px] ${sirelEvidenceNormalized && !sirelEvidenceValid ? 'text-rose-700' : 'text-slate-500'}`}>
+                    Evidencia: enlace del soporte (drive, gestor documental, ticket), inicia con http:// o https://
+                  </p>
+                </div>
+                <textarea
+                  className="input-corporate min-h-[72px]"
+                  placeholder="Observaciones de envío (opcional)"
+                  value={sirelNotes}
+                  onChange={(e) => setSirelNotes(e.target.value)}
+                />
+              </div>
+              <div className="mt-4 flex items-center justify-between gap-2">
+                <button
+                  className="btn-corporate-muted px-4"
+                  onClick={async () => {
+                    const ok = await copyTextToClipboard(sirelModal.preRosText || '');
+                    setFeedback(ok ? 'Pre-ROS copiado al portapapeles.' : 'No fue posible copiar el Pre-ROS.');
+                  }}
+                >
+                  Copiar pre-ROS
+                </button>
+                <div className="flex items-center gap-2">
+                  <button className="btn-corporate-muted px-4" onClick={closeSirelModal}>
+                    Cancelar
+                  </button>
+                  <button
+                    className="btn-corporate-primary px-4 disabled:opacity-50"
+                    disabled={
+                      !sirelReferenceNormalized ||
+                      !sirelEvidenceNormalized ||
+                      !sirelReferenceValid ||
+                      !sirelEvidenceValid ||
+                      markSirelReportedMutation.isLoading
+                    }
+                    onClick={() =>
+                      markSirelReportedMutation.mutate({
+                        caseId: sirelModal.caseId,
+                        sirel_reference: sirelReferenceNormalized,
+                        notes: sirelNotes.trim() || null,
+                        evidence_url: sirelEvidenceNormalized,
+                      })
+                    }
+                  >
+                    {markSirelReportedMutation.isLoading ? 'Guardando...' : 'Confirmar reportado'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {manualModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+            <div className="modal-panel glass-card h-[90vh] w-full max-w-5xl overflow-hidden border border-slate-200/80 p-0">
+              <div className="flex items-center justify-between border-b border-slate-200 bg-white/95 px-4 py-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Ayuda oficial</p>
+                  <h3 className="text-base font-semibold text-slate-900">Manual de uso del modulo SARLAFT</h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+                    <button
+                      className={`rounded-md px-2.5 py-1 text-xs font-semibold ${
+                        manualViewMode === 'operativo'
+                          ? 'bg-white text-slate-900 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                      onClick={() => setManualViewMode('operativo')}
+                    >
+                      Manual corto
+                    </button>
+                    <button
+                      className={`rounded-md px-2.5 py-1 text-xs font-semibold ${
+                        manualViewMode === 'completo'
+                          ? 'bg-white text-slate-900 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                      onClick={() => setManualViewMode('completo')}
+                    >
+                      Manual completo
+                    </button>
+                  </div>
+                  <a
+                    className="btn-corporate-muted px-3 py-1.5 text-xs"
+                    href={manualDocPath}
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    Abrir en nueva pestaña
+                  </a>
+                  <button
+                    className="rounded-md border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
+                    onClick={closeManualModal}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              <iframe
+                title="Manual de uso SARLAFT"
+                src={manualDocPath}
+                className="h-[calc(90vh-64px)] w-full bg-white"
+              />
             </div>
           </div>
         )}

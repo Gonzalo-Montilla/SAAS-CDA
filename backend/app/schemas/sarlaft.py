@@ -5,6 +5,7 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
+import re
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
@@ -226,6 +227,8 @@ class SarlaftManualCheckResponse(BaseModel):
     alert: bool
     hits_count: int
     notes: str | None = None
+    source_labels: list[str] = Field(default_factory=list)
+    source_coverage: dict[str, bool] = Field(default_factory=dict)
     certificate_code: str | None = None
     certificate_issued_at: datetime | None = None
     created_at: datetime
@@ -253,6 +256,7 @@ class SarlaftInternalAlertResponse(BaseModel):
     case_id: UUID | None = None
     operacion_ref: str | None = None
     alert_level: str
+    source_origin: str | None = None
     operation_classification: str | None = None
     rule_code: str | None = None
     reason: str | None = None
@@ -282,3 +286,98 @@ class SarlaftInternalAlertDecisionRequest(BaseModel):
         if len(refs) < 1:
             raise ValueError("Debe registrar al menos un soporte o referencia de respaldo.")
         return self
+
+
+class SarlaftSirelQueueItem(BaseModel):
+    case_id: UUID
+    operacion_ref: str
+    status: str
+    risk_level: str
+    payment_method: str
+    transaction_amount_cop: Decimal
+    cash_amount_cop: Decimal
+    placa: str | None = None
+    tipo_vehiculo: str | None = None
+    cliente_doc_type: str | None = None
+    cliente_doc_number: str | None = None
+    cliente_full_name: str | None = None
+    operation_classification: str | None = None
+    alert_reason: str | None = None
+    decision_status: str | None = None
+    pre_ros_text: str
+    sirel_status: Literal["pendiente_envio", "reportado"]
+    sirel_reference: str | None = None
+    sirel_sent_at: datetime | None = None
+    sirel_sent_by_user_id: UUID | None = None
+    sirel_sent_by_name: str | None = None
+    sirel_notes: str | None = None
+    evidence_url: str | None = None
+    created_at: datetime
+
+
+class SarlaftSirelMarkReportedRequest(BaseModel):
+    sirel_reference: str = Field(min_length=3, max_length=120)
+    sent_at: datetime | None = None
+    notes: str | None = Field(default=None, max_length=4000)
+    evidence_url: str = Field(min_length=10, max_length=500)
+
+    @field_validator("sirel_reference")
+    @classmethod
+    def validate_sirel_reference(cls, value: str) -> str:
+        normalized = (value or "").strip().upper()
+        # Formato flexible pero controlado: alfanumérico con -, _, /.
+        if not re.fullmatch(r"[A-Z0-9][A-Z0-9\-_\/]{5,119}", normalized):
+            raise ValueError(
+                "El radicado SIREL debe usar solo letras, números, guion, guion bajo o slash (mínimo 6 caracteres)."
+            )
+        return normalized
+
+    @field_validator("evidence_url")
+    @classmethod
+    def validate_evidence_url(cls, value: str) -> str:
+        normalized = (value or "").strip()
+        if not normalized.lower().startswith(("http://", "https://")):
+            raise ValueError("La URL de evidencia debe iniciar con http:// o https://.")
+        return normalized
+
+
+class SarlaftBatchRowResponse(BaseModel):
+    id: UUID
+    row_index: int
+    subject_type: str | None = None
+    full_name: str | None = None
+    doc_type: str | None = None
+    doc_number: str | None = None
+    email: str | None = None
+    phone: str | None = None
+    status: str
+    risk_level: str | None = None
+    hits_count: int
+    alert: bool
+    source_labels: list[str] = Field(default_factory=list)
+    source_coverage: dict[str, bool] = Field(default_factory=dict)
+    error_detail: str | None = None
+    created_manual_check_id: UUID | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class SarlaftBatchJobResponse(BaseModel):
+    id: UUID
+    filename: str
+    dataset: str
+    status: str
+    total_records: int
+    processed_records: int
+    success_records: int
+    error_records: int
+    verde_records: int
+    amarillo_records: int
+    rojo_records: int
+    error_message: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)

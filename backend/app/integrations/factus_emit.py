@@ -306,6 +306,15 @@ def _customer_payload(
         email = "cliente@local.invalid"
     phone = _solo_digitos(vehiculo.cliente_telefono or "") or "6000000000"
     addr = (vehiculo.cliente_direccion or "").strip()[:200]
+    customer_municipality_id = municipality_id
+    raw_customer_mid = getattr(vehiculo, "cliente_factus_municipality_id", None)
+    if raw_customer_mid is not None:
+        try:
+            parsed_customer_mid = int(raw_customer_mid)
+            if parsed_customer_mid > 0:
+                customer_municipality_id = parsed_customer_mid
+        except (TypeError, ValueError):
+            pass
     return {
         "identification_document_id": identification_document_id,
         "identification": identification,
@@ -318,7 +327,7 @@ def _customer_payload(
         "phone": phone[:20],
         "legal_organization_id": legal_organization_id,
         "tribute_id": 21,
-        "municipality_id": municipality_id,
+        "municipality_id": customer_municipality_id,
     }
 
 

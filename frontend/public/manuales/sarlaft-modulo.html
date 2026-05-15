@@ -1,0 +1,146 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Manual de uso SARLAFT - CDASOFT</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      margin: 0;
+      padding: 24px;
+      color: #0f172a;
+      background: #f8fafc;
+      line-height: 1.5;
+    }
+    .card {
+      max-width: 980px;
+      margin: 0 auto;
+      background: #ffffff;
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 24px;
+      box-shadow: 0 8px 30px rgba(15, 23, 42, 0.08);
+    }
+    h1, h2 {
+      margin: 0 0 12px;
+      color: #0b2447;
+    }
+    h1 { font-size: 24px; }
+    h2 { font-size: 18px; margin-top: 22px; }
+    p { margin: 0 0 10px; }
+    ul {
+      margin: 0 0 12px 18px;
+      padding: 0;
+    }
+    .note {
+      border-left: 4px solid #1d4ed8;
+      background: #eff6ff;
+      padding: 10px 12px;
+      border-radius: 6px;
+      margin: 10px 0;
+      color: #1e3a8a;
+    }
+    .warn {
+      border-left: 4px solid #b45309;
+      background: #fffbeb;
+      padding: 10px 12px;
+      border-radius: 6px;
+      margin: 10px 0;
+      color: #92400e;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin-top: 10px;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid #cbd5e1;
+      padding: 8px;
+      text-align: left;
+      vertical-align: top;
+    }
+    th {
+      background: #f1f5f9;
+      color: #0f172a;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Manual de uso - Modulo SARLAFT</h1>
+    <p>Este manual orienta al Oficial de Cumplimiento en la operacion diaria del modulo SARLAFT en CDASOFT.</p>
+
+    <h2>1) Objetivo del modulo</h2>
+    <p>Detectar, documentar y gestionar alertas de riesgo LA/FT sin bloquear la operacion comercial del CDA.</p>
+
+    <h2>2) Pestañas del modulo</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Pestaña</th>
+          <th>Uso principal</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>Resumen</td>
+          <td>KPIs y atajos de navegacion.</td>
+        </tr>
+        <tr>
+          <td>Alertas internas</td>
+          <td>Bandeja centralizada de alertas de origen CASO, MANUAL y LOTE.</td>
+        </tr>
+        <tr>
+          <td>Casos</td>
+          <td>Expedientes SARLAFT del flujo operativo diario (recepcion -> cobro).</td>
+        </tr>
+        <tr>
+          <td>Consultas manuales</td>
+          <td>Screening individual de terceros (proveedores, colaboradores, etc.).</td>
+        </tr>
+        <tr>
+          <td>Consulta por lotes</td>
+          <td>Screening masivo por CSV con detalle y exportacion de resultados.</td>
+        </tr>
+        <tr>
+          <td>SIREL/UIAF</td>
+          <td>Gestion de reporte ROS para casos sospechosos.</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>3) Flujo recomendado de gestion</h2>
+    <ul>
+      <li>Revisar alertas en <strong>Alertas internas</strong> y filtrar accionables.</li>
+      <li>Para origen CASO, usar <strong>Evaluar alerta (DDI)</strong> y definir: justificada o sospechosa.</li>
+      <li>Para origen MANUAL/LOTE, crear caso cuando se requiera formalizar seguimiento.</li>
+      <li>Si una alerta queda como sospechosa, gestionar reporte en <strong>SIREL/UIAF</strong>.</li>
+    </ul>
+
+    <div class="note">
+      El motor interno SARLAFT permanece activo de forma continua, independiente de la API externa.
+    </div>
+
+    <h2>4) Reporte SIREL/UIAF</h2>
+    <ul>
+      <li>Usar pre-ROS para preparar informacion.</li>
+      <li>Radicar en SIREL y registrar radicado + URL evidencia obligatoria.</li>
+      <li>Guardar soporte en expediente interno.</li>
+    </ul>
+
+    <h2>5) Checklist de cierre por caso sospechoso</h2>
+    <ul>
+      <li>DDI completa (origen fondos, soporte actividad, entrevista, referencias).</li>
+      <li>Decision oficial registrada.</li>
+      <li>Radicado SIREL documentado cuando aplique ROS.</li>
+      <li>Evidencia de cargue disponible y trazable.</li>
+    </ul>
+
+    <div class="warn">
+      Este modulo apoya la debida diligencia. No reemplaza obligaciones regulatorias externas ni consultas oficiales exigidas por norma.
+    </div>
+  </div>
+</body>
+</html>
