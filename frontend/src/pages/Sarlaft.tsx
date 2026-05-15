@@ -1465,7 +1465,7 @@ export default function Sarlaft() {
                         )}
                         <button
                           className="btn-corporate-muted px-2.5 py-1 text-xs disabled:opacity-50"
-                          disabled={decideAlertMutation.isLoading || (row.source_origin || 'caso').toLowerCase() !== 'caso'}
+                          disabled={decideAlertMutation.isLoading || !row.case_id}
                           onClick={() => {
                             setDecisionModal({ alertId: row.id });
                             setDecisionNotes('');
@@ -1475,7 +1475,7 @@ export default function Sarlaft() {
                             setDecisionSupportRefsRaw('');
                           }}
                         >
-                          {(row.source_origin || 'caso').toLowerCase() === 'caso' ? 'Evaluar alerta (DDI)' : 'Solo trazabilidad'}
+                          {row.case_id ? 'Evaluar alerta (DDI)' : 'Solo trazabilidad'}
                         </button>
                       </div>
                     </td>

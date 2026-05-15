@@ -1615,31 +1615,40 @@ def decide_sarlaft_internal_alert(
     if not alert_row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Alerta interna SARLAFT no encontrada.")
 
-    source_origin = ""
     meta = alert_row.after_json if isinstance(alert_row.after_json, dict) else {}
     source_origin = str(meta.get("source_origin") or "").strip().lower() or "caso"
-    if source_origin != "caso":
+    linked_case_id_raw = str(meta.get("linked_case_id") or "").strip() or None
+    resolved_case_id: UUID | None = None
+    if source_origin == "caso":
+        resolved_case_id = alert_row.entity_id
+    elif linked_case_id_raw:
+        try:
+            resolved_case_id = UUID(linked_case_id_raw)
+        except ValueError:
+            resolved_case_id = None
+    if not resolved_case_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Esta alerta no usa decision DDI desde esta bandeja (origen no asociado a caso).",
+            detail="Esta alerta no tiene caso vinculado para diligenciar DDI.",
         )
 
     case = None
-    if alert_row.entity_id:
-        case = (
-            db.query(SarlaftCase)
-            .filter(
-                SarlaftCase.id == alert_row.entity_id,
-                SarlaftCase.tenant_id == current_user.tenant_id,
-            )
-            .first()
+    case = (
+        db.query(SarlaftCase)
+        .filter(
+            SarlaftCase.id == resolved_case_id,
+            SarlaftCase.tenant_id == current_user.tenant_id,
         )
-    if case:
-        if payload.decision == "justificada":
-            case.status = "inusual_justificada"
-        else:
-            case.status = "sospechosa_ros_pendiente"
-            case.risk_level = "rojo"
+        .first()
+    )
+    if not case:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Caso SARLAFT vinculado no encontrado.")
+
+    if payload.decision == "justificada":
+        case.status = "inusual_justificada"
+    else:
+        case.status = "sospechosa_ros_pendiente"
+        case.risk_level = "rojo"
 
     log_sarlaft_event(
         db,
@@ -1656,7 +1665,7 @@ def decide_sarlaft_internal_alert(
             "cashier_interview": payload.cashier_interview,
             "support_refs": payload.support_refs,
             "alert_log_id": str(alert_row.id),
-            "case_id": str(alert_row.entity_id) if alert_row.entity_id else None,
+            "case_id": str(resolved_case_id),
         },
     )
     db.commit()
@@ -1667,7 +1676,7 @@ def decide_sarlaft_internal_alert(
         operation_classification = "operacion_sospechosa"
     return SarlaftInternalAlertResponse(
         id=alert_row.id,
-        case_id=alert_row.entity_id,
+        case_id=resolved_case_id,
         operacion_ref=case.operacion_ref if case else None,
         alert_level=str(meta.get("alert_level") or "media"),
         source_origin=source_origin,
