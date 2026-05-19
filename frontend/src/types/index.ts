@@ -256,6 +256,74 @@ export interface SarlaftSirelQueueItem {
   created_at: string;
 }
 
+export interface SarlaftSubjectCaseItem {
+  case_id: string;
+  operacion_ref: string;
+  status: string;
+  risk_level: string;
+  payment_method: string;
+  transaction_amount_cop: number;
+  cash_amount_cop: number;
+  placa?: string | null;
+  tipo_vehiculo?: string | null;
+  created_at: string;
+}
+
+export interface SarlaftSubjectManualCheckItem {
+  manual_check_id: string;
+  full_name: string;
+  dataset: string;
+  risk_level: string;
+  risk_score: number;
+  hits_count: number;
+  alert: boolean;
+  source_coverage?: {
+    colombia?: boolean;
+    onu?: boolean;
+    ofac?: boolean;
+    europea?: boolean;
+    otras?: boolean;
+  };
+  certificate_code?: string | null;
+  certificate_issued_at?: string | null;
+  created_at: string;
+}
+
+export interface SarlaftSubjectAlertItem {
+  alert_id: string;
+  source_origin: string;
+  alert_level: string;
+  operation_classification?: string | null;
+  rule_code?: string | null;
+  reason?: string | null;
+  case_id?: string | null;
+  operacion_ref?: string | null;
+  risk_level?: string | null;
+  decision_status?: string | null;
+  reviewed_at?: string | null;
+  created_at: string;
+}
+
+export interface SarlaftSubjectDocumentItem {
+  kind: string;
+  title: string;
+  created_at: string;
+  reference_id?: string | null;
+  url?: string | null;
+  notes?: string | null;
+}
+
+export interface SarlaftSubjectExpediente {
+  doc_type?: string | null;
+  doc_number: string;
+  full_names: string[];
+  current_risk_level?: string | null;
+  cases: SarlaftSubjectCaseItem[];
+  manual_checks: SarlaftSubjectManualCheckItem[];
+  alerts: SarlaftSubjectAlertItem[];
+  documents: SarlaftSubjectDocumentItem[];
+}
+
 export interface SarlaftBatchJob {
   id: string;
   filename: string;

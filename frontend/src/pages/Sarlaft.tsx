@@ -11,6 +11,7 @@ import type {
   SarlaftInternalAlert,
   SarlaftManualCheck,
   SarlaftSirelQueueItem,
+  SarlaftSubjectExpediente,
 } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -22,10 +23,11 @@ function money(v: number): string {
   }).format(v || 0);
 }
 
-type SarlaftSeccion = 'resumen' | 'alertas' | 'casos' | 'consultas' | 'lotes' | 'sirel' | 'screening';
+type SarlaftSeccion = 'resumen' | 'alertas' | 'casos' | 'consultas' | 'lotes' | 'sirel' | 'expediente' | 'screening';
 
 const SARLAFT_SECCIONES: { id: SarlaftSeccion; label: string; hint: string }[] = [
   { id: 'resumen', label: 'Resumen', hint: 'Panorama general de alertas, casos y consultas manuales.' },
+  { id: 'expediente', label: 'Expediente sujeto', hint: 'Hoja de vida SARLAFT por documento: casos, alertas, consultas y soportes.' },
   { id: 'alertas', label: 'Alertas internas', hint: 'Seguimiento del motor interno SARLAFT y severidad por operación.' },
   { id: 'casos', label: 'Casos', hint: 'Creación, búsqueda y bandeja de casos SARLAFT.' },
   { id: 'consultas', label: 'Consultas manuales', hint: 'Consultas fuera de recepción con trazabilidad y certificado.' },
@@ -81,7 +83,6 @@ export default function Sarlaft() {
   const [createdCase, setCreatedCase] = useState<SarlaftCase | null>(null);
   const [foundCase, setFoundCase] = useState<SarlaftCase | null>(null);
   const [createdManualCheck, setCreatedManualCheck] = useState<SarlaftManualCheck | null>(null);
-  const [downloadingCertificateId, setDownloadingCertificateId] = useState<string | null>(null);
   const [copiedManualCheckId, setCopiedManualCheckId] = useState<string | null>(null);
   const [copiedCaseId, setCopiedCaseId] = useState<string | null>(null);
   const [internalAlertLevelFilter, setInternalAlertLevelFilter] = useState<'todas' | 'critica' | 'media' | 'baja'>('todas');
@@ -125,6 +126,15 @@ export default function Sarlaft() {
   const [batchFile, setBatchFile] = useState<File | null>(null);
   const [batchDataset, setBatchDataset] = useState<'default' | 'sanctions'>('sanctions');
   const [selectedBatchJobId, setSelectedBatchJobId] = useState<string | null>(null);
+  const [expedienteDocType, setExpedienteDocType] = useState('CC');
+  const [expedienteDocNumber, setExpedienteDocNumber] = useState('');
+  const [expedienteData, setExpedienteData] = useState<SarlaftSubjectExpediente | null>(null);
+  const [previewingCertificateId, setPreviewingCertificateId] = useState<string | null>(null);
+  const [certificatePreviewModal, setCertificatePreviewModal] = useState<{
+    manualCheckId: string;
+    filename: string;
+    url: string;
+  } | null>(null);
 
   useEffect(() => {
     setManualDocType((prev) => {
@@ -145,6 +155,21 @@ export default function Sarlaft() {
       setOnlyActionableAlerts(false);
     }
   }, [actionableAlertsStorageKey]);
+
+  useEffect(() => {
+    if (sarlaftSeccion !== 'expediente') {
+      setExpedienteDocNumber('');
+      setExpedienteData(null);
+    }
+  }, [sarlaftSeccion]);
+
+  useEffect(() => {
+    return () => {
+      if (certificatePreviewModal?.url) {
+        window.URL.revokeObjectURL(certificatePreviewModal.url);
+      }
+    };
+  }, [certificatePreviewModal]);
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -254,6 +279,12 @@ export default function Sarlaft() {
     setSirelReference('');
     setSirelNotes('');
     setSirelEvidenceUrl('');
+  };
+  const closeCertificatePreviewModal = (): void => {
+    setCertificatePreviewModal((prev) => {
+      if (prev?.url) window.URL.revokeObjectURL(prev.url);
+      return null;
+    });
   };
   const closeManualModal = (): void => {
     setManualModalOpen(false);
@@ -423,25 +454,27 @@ export default function Sarlaft() {
     },
   });
 
-  const downloadCertificateMutation = useMutation({
+  const previewCertificateMutation = useMutation({
     mutationFn: async (manualCheckId: string) => sarlaftApi.downloadManualCheckCertificate(manualCheckId),
     onMutate: (manualCheckId) => {
-      setDownloadingCertificateId(manualCheckId);
+      setPreviewingCertificateId(manualCheckId);
     },
-    onSuccess: ({ blob, filename, certificateCode }) => {
-      saveBlobAsFile(blob, filename);
-      setFeedback(
-        certificateCode
-          ? `Certificado SARLAFT descargado. Codigo: ${certificateCode}.`
-          : 'Certificado SARLAFT descargado correctamente.'
-      );
+    onSuccess: ({ blob, filename }, manualCheckId) => {
+      const url = window.URL.createObjectURL(blob);
+      setCertificatePreviewModal((prev) => {
+        if (prev?.url) window.URL.revokeObjectURL(prev.url);
+        return {
+          manualCheckId,
+          filename,
+          url,
+        };
+      });
     },
     onError: (err: any) => {
-      setFeedback(err?.response?.data?.detail || 'No se pudo generar/descargar el certificado SARLAFT.');
+      setFeedback(err?.response?.data?.detail || 'No se pudo previsualizar el certificado SARLAFT.');
     },
     onSettled: () => {
-      setDownloadingCertificateId(null);
-      manualChecksQuery.refetch();
+      setPreviewingCertificateId(null);
     },
   });
   const decideAlertMutation = useMutation({
@@ -525,6 +558,21 @@ export default function Sarlaft() {
     },
     onError: (err: any) => {
       setFeedback(err?.response?.data?.detail || 'No fue posible crear el caso desde la alerta.');
+    },
+  });
+  const subjectExpedienteMutation = useMutation({
+    mutationFn: async () =>
+      sarlaftApi.getSubjectExpediente({
+        doc_number: expedienteDocNumber.trim(),
+        doc_type: expedienteDocType.trim() || undefined,
+      }),
+    onSuccess: (data) => {
+      setExpedienteData(data);
+      setFeedback('Expediente SARLAFT cargado correctamente.');
+    },
+    onError: (err: any) => {
+      setExpedienteData(null);
+      setFeedback(err?.response?.data?.detail || 'No fue posible consultar el expediente del sujeto.');
     },
   });
   const markSirelReportedMutation = useMutation({
@@ -1389,6 +1437,260 @@ export default function Sarlaft() {
         </>
         )}
 
+        {sarlaftSeccion === 'expediente' && (
+        <>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+          <h3 className="text-base font-semibold text-slate-900 mb-3">Expediente SARLAFT por documento</h3>
+          <div className="grid gap-2 md:grid-cols-[170px_minmax(0,1fr)_auto]">
+            <select
+              className="input-corporate"
+              value={expedienteDocType}
+              onChange={(e) => setExpedienteDocType(e.target.value)}
+            >
+              {['CC', 'CE', 'NIT', 'PAS', 'TI'].map((t) => (
+                <option key={t} value={t}>
+                  {t}
+                </option>
+              ))}
+            </select>
+            <input
+              className="input-corporate"
+              placeholder="Número de documento"
+              value={expedienteDocNumber}
+              onChange={(e) => setExpedienteDocNumber(e.target.value)}
+            />
+            <button
+              className="btn-corporate-primary px-4 flex items-center gap-2"
+              disabled={subjectExpedienteMutation.isLoading || !expedienteDocNumber.trim()}
+              onClick={() => subjectExpedienteMutation.mutate()}
+            >
+              <Search className="h-4 w-4" />
+              {subjectExpedienteMutation.isLoading ? 'Consultando...' : 'Consultar expediente'}
+            </button>
+          </div>
+        </div>
+
+        {expedienteData && (
+          <div className="mt-4 space-y-4">
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Documento</span>
+                <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-700">
+                  {(expedienteData.doc_type || expedienteDocType) + ' ' + expedienteData.doc_number}
+                </span>
+                <span className={`inline-flex rounded-full px-2 py-0.5 text-xs font-semibold ${riskBadgeClass(expedienteData.current_risk_level || 'verde')}`}>
+                  Riesgo actual {(expedienteData.current_risk_level || 'N/D').toUpperCase()}
+                </span>
+              </div>
+              {expedienteData.full_names.length > 0 && (
+                <p className="mt-2 text-sm text-slate-700">
+                  Nombres registrados: <strong>{expedienteData.full_names.slice(0, 3).join(' · ')}</strong>
+                </p>
+              )}
+              <p className="mt-1 text-xs text-slate-500">
+                Casos: {expedienteData.cases.length} · Consultas manuales: {expedienteData.manual_checks.length} · Alertas: {expedienteData.alerts.length} · Documentos: {expedienteData.documents.length}
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h4 className="text-sm font-semibold text-slate-900 mb-2">Casos SARLAFT</h4>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="text-left text-slate-500">
+                    <tr>
+                      <th className="py-2 pr-3">Operación</th>
+                      <th className="py-2 pr-3">Riesgo</th>
+                      <th className="py-2 pr-3">Estado</th>
+                      <th className="py-2 pr-3">Placa</th>
+                      <th className="py-2 pr-3">Monto</th>
+                      <th className="py-2 pr-3">Fecha</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {expedienteData.cases.map((c) => (
+                      <tr key={c.case_id} className="border-t border-slate-100">
+                        <td className="py-2 pr-3 font-medium text-slate-800">{c.operacion_ref}</td>
+                        <td className="py-2 pr-3">
+                          <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${riskBadgeClass(c.risk_level)}`}>{c.risk_level.toUpperCase()}</span>
+                        </td>
+                        <td className="py-2 pr-3 text-slate-700">{c.status}</td>
+                        <td className="py-2 pr-3 text-slate-700">{c.placa || '—'}</td>
+                        <td className="py-2 pr-3 text-slate-700">{money(c.transaction_amount_cop)}</td>
+                        <td className="py-2 pr-3 text-slate-500">{new Date(c.created_at).toLocaleString('es-CO')}</td>
+                      </tr>
+                    ))}
+                    {expedienteData.cases.length === 0 && (
+                      <tr><td className="py-2 text-slate-500" colSpan={6}>Sin casos vinculados.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="grid gap-4 lg:grid-cols-2">
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <h4 className="text-sm font-semibold text-slate-900 mb-2">Consultas manuales</h4>
+                <div className="space-y-2">
+                  {expedienteData.manual_checks.map((m) => (
+                    <div key={m.manual_check_id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs shadow-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="flex items-center gap-2">
+                          <span className="inline-flex rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-800">
+                            {m.dataset.toUpperCase()}
+                          </span>
+                          <p className="font-semibold text-slate-800">{m.full_name}</p>
+                        </div>
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${riskBadgeClass(m.risk_level)}`}>{m.risk_level.toUpperCase()}</span>
+                      </div>
+                      <p className="mt-1 text-slate-600">
+                        Hits: {m.hits_count} · Score: {Number(m.risk_score || 0).toFixed(2)} · {new Date(m.created_at).toLocaleString('es-CO')}
+                      </p>
+                      <div className="mt-1 flex items-center gap-2">
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${m.certificate_code ? 'border border-emerald-200 bg-emerald-50 text-emerald-800' : 'border border-amber-200 bg-amber-50 text-amber-800'}`}>
+                          Certificado {m.certificate_code ? 'Generado' : 'Pendiente'}
+                        </span>
+                        {m.certificate_code && (
+                          <button
+                            className="btn-corporate-muted px-2 py-0.5 text-[11px]"
+                            disabled={previewCertificateMutation.isLoading || previewingCertificateId === m.manual_check_id}
+                            onClick={() => previewCertificateMutation.mutate(m.manual_check_id)}
+                          >
+                            {previewingCertificateId === m.manual_check_id ? 'Abriendo...' : 'Previsualizar PDF'}
+                          </button>
+                        )}
+                      </div>
+                      <div className="mt-2 rounded-xl border border-slate-200 bg-gradient-to-r from-slate-50 to-white px-3 py-2">
+                        {(() => {
+                          type CoverageKey = 'colombia' | 'ofac' | 'onu' | 'europea';
+                          const badges: Array<{ key: CoverageKey; label: string; on: boolean; activeClass: string }> = [
+                            { key: 'colombia', label: 'Colombia', on: Boolean(m.source_coverage?.colombia), activeClass: 'border border-emerald-200 bg-emerald-50 text-emerald-800' },
+                            { key: 'ofac', label: 'OFAC', on: Boolean(m.source_coverage?.ofac), activeClass: 'border border-emerald-200 bg-emerald-50 text-emerald-800' },
+                            { key: 'onu', label: 'ONU', on: Boolean(m.source_coverage?.onu), activeClass: 'border border-emerald-200 bg-emerald-50 text-emerald-800' },
+                            { key: 'europea', label: 'Unión Europea', on: Boolean(m.source_coverage?.europea), activeClass: 'border border-indigo-200 bg-indigo-50 text-indigo-800' },
+                          ];
+                          const priority: Record<CoverageKey, number> = { colombia: 0, ofac: 1, onu: 2, europea: 3 };
+                          const sortedBadges = badges.sort((a, b) => {
+                            if (a.on !== b.on) return a.on ? -1 : 1;
+                            return priority[a.key] - priority[b.key];
+                          });
+                          const positiveCount = sortedBadges.filter((b) => b.on).length;
+                          return (
+                            <>
+                              <div className="mb-2 flex items-center justify-between">
+                                <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                  Cobertura de listas
+                                </p>
+                                <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-[10px] font-semibold text-slate-600">
+                                  {positiveCount}/4 con match
+                                </span>
+                              </div>
+                              <div className="flex flex-wrap gap-1.5">
+                                {sortedBadges.map((badge) => (
+                                  <span
+                                    key={badge.key}
+                                    className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                                      badge.on ? badge.activeClass : 'border border-slate-200 bg-slate-50 text-slate-600'
+                                    }`}
+                                  >
+                                    <span
+                                      className={`h-1.5 w-1.5 rounded-full ${
+                                        badge.on ? 'bg-current' : 'bg-slate-400'
+                                      }`}
+                                    />
+                                    <span>{badge.label}</span>
+                                    <span className="opacity-80">{badge.on ? 'Sí' : 'No'}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            </>
+                          );
+                        })()}
+                      </div>
+                    </div>
+                  ))}
+                  {expedienteData.manual_checks.length === 0 && <p className="text-xs text-slate-500">Sin consultas manuales.</p>}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                <h4 className="text-sm font-semibold text-slate-900 mb-2">Alertas internas</h4>
+                <div className="space-y-2">
+                  {expedienteData.alerts.map((a) => (
+                    <div key={a.alert_id} className="rounded-xl border border-slate-200 bg-slate-50 p-3 text-xs">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="font-semibold text-slate-800">{(a.source_origin || 'caso').toUpperCase()} · {(a.rule_code || 'BASE')}</p>
+                        <span className="rounded-full border border-slate-300 bg-white px-2 py-0.5 text-[11px] text-slate-700">{a.alert_level}</span>
+                      </div>
+                      <p className="mt-1 text-slate-600">{a.reason || 'Sin motivo específico.'}</p>
+                      <p className="mt-1 text-slate-500">Decisión: {decisionStatusLabel(a.decision_status)} · {new Date(a.created_at).toLocaleString('es-CO')}</p>
+                    </div>
+                  ))}
+                  {expedienteData.alerts.length === 0 && <p className="text-xs text-slate-500">Sin alertas internas.</p>}
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <h4 className="text-sm font-semibold text-slate-900 mb-2">Documentos y evidencias</h4>
+              <div className="overflow-x-auto">
+                <table className="min-w-full text-sm">
+                  <thead className="text-left text-slate-500">
+                    <tr>
+                      <th className="py-2 pr-3">Tipo</th>
+                      <th className="py-2 pr-3">Título</th>
+                      <th className="py-2 pr-3">Referencia</th>
+                      <th className="py-2 pr-3">Evidencia</th>
+                      <th className="py-2 pr-3">Fecha</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {expedienteData.documents.map((d, idx) => (
+                      <tr key={`${d.kind}-${d.reference_id || idx}`} className="border-t border-slate-100">
+                        <td className="py-2 pr-3">
+                          <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                            d.kind === 'certificado_manual'
+                              ? 'border border-indigo-200 bg-indigo-50 text-indigo-800'
+                              : 'border border-slate-200 bg-slate-50 text-slate-700'
+                          }`}>
+                            {d.kind === 'certificado_manual' ? 'Certificado manual' : d.kind === 'sirel_reporte' ? 'Reporte SIREL' : d.kind}
+                          </span>
+                        </td>
+                        <td className="py-2 pr-3 text-slate-800">{d.title}</td>
+                        <td className="py-2 pr-3">
+                          <span className="font-mono text-[11px] text-slate-600">{d.reference_id || d.notes || '—'}</span>
+                        </td>
+                        <td className="py-2 pr-3 text-slate-700">
+                          {d.kind === 'certificado_manual' && d.reference_id ? (
+                            <button
+                              className="btn-corporate-muted px-2 py-0.5 text-[11px]"
+                              disabled={previewCertificateMutation.isLoading || previewingCertificateId === d.reference_id}
+                              onClick={() => previewCertificateMutation.mutate(d.reference_id as string)}
+                            >
+                              {previewingCertificateId === d.reference_id ? 'Abriendo...' : 'Previsualizar PDF'}
+                            </button>
+                          ) : d.url ? (
+                            <a className="text-indigo-700 underline" href={d.url} target="_blank" rel="noreferrer">
+                              Abrir enlace
+                            </a>
+                          ) : (
+                            <span className="inline-flex rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-600">
+                              N/D
+                            </span>
+                          )}
+                        </td>
+                        <td className="py-2 pr-3 text-slate-500">{new Date(d.created_at).toLocaleString('es-CO')}</td>
+                      </tr>
+                    ))}
+                    {expedienteData.documents.length === 0 && <tr><td className="py-2 text-slate-500" colSpan={5}>Sin documentos asociados.</td></tr>}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+        </>
+        )}
+
         {sarlaftSeccion === 'alertas' && (
         <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
           <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
@@ -1988,10 +2290,10 @@ export default function Sarlaft() {
                           {row.created_manual_check_id ? (
                             <button
                               className="btn-corporate-muted px-2 py-1 text-[11px]"
-                              disabled={downloadCertificateMutation.isLoading}
-                              onClick={() => downloadCertificateMutation.mutate(row.created_manual_check_id as string)}
+                              disabled={previewCertificateMutation.isLoading || previewingCertificateId === row.created_manual_check_id}
+                              onClick={() => previewCertificateMutation.mutate(row.created_manual_check_id as string)}
                             >
-                              Certificado PDF
+                              {previewingCertificateId === row.created_manual_check_id ? 'Abriendo...' : 'Previsualizar PDF'}
                             </button>
                           ) : (
                             <span className="text-slate-400">—</span>
@@ -2046,19 +2348,46 @@ export default function Sarlaft() {
                     </td>
                     <td className="py-2 pr-3 text-slate-700">{row.dataset}</td>
                     <td className="py-2 pr-3">
-                      <div className="flex flex-wrap gap-1">
-                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${row.source_coverage?.onu ? 'border border-emerald-200 bg-emerald-50 text-emerald-800' : 'border border-slate-200 bg-slate-50 text-slate-600'}`}>
-                          ONU {row.source_coverage?.onu ? 'Si' : 'No'}
-                        </span>
-                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${row.source_coverage?.colombia ? 'border border-emerald-200 bg-emerald-50 text-emerald-800' : 'border border-slate-200 bg-slate-50 text-slate-600'}`}>
-                          Colombia {row.source_coverage?.colombia ? 'Si' : 'No'}
-                        </span>
-                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${row.source_coverage?.ofac ? 'border border-emerald-200 bg-emerald-50 text-emerald-800' : 'border border-slate-200 bg-slate-50 text-slate-600'}`}>
-                          OFAC {row.source_coverage?.ofac ? 'Si' : 'No'}
-                        </span>
-                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${row.source_coverage?.europea ? 'border border-indigo-200 bg-indigo-50 text-indigo-800' : 'border border-slate-200 bg-slate-50 text-slate-600'}`}>
-                          Europea {row.source_coverage?.europea ? 'Si' : 'No'}
-                        </span>
+                      <div className="min-w-[260px] rounded-lg border border-slate-200 bg-gradient-to-r from-slate-50 to-white px-2 py-1.5">
+                        {(() => {
+                          type CoverageKey = 'colombia' | 'ofac' | 'onu' | 'europea';
+                          const badges: Array<{ key: CoverageKey; label: string; on: boolean; activeClass: string }> = [
+                            { key: 'colombia', label: 'Colombia', on: Boolean(row.source_coverage?.colombia), activeClass: 'border border-emerald-200 bg-emerald-50 text-emerald-800' },
+                            { key: 'ofac', label: 'OFAC', on: Boolean(row.source_coverage?.ofac), activeClass: 'border border-emerald-200 bg-emerald-50 text-emerald-800' },
+                            { key: 'onu', label: 'ONU', on: Boolean(row.source_coverage?.onu), activeClass: 'border border-emerald-200 bg-emerald-50 text-emerald-800' },
+                            { key: 'europea', label: 'Unión Europea', on: Boolean(row.source_coverage?.europea), activeClass: 'border border-indigo-200 bg-indigo-50 text-indigo-800' },
+                          ];
+                          const priority: Record<CoverageKey, number> = { colombia: 0, ofac: 1, onu: 2, europea: 3 };
+                          const sortedBadges = badges.sort((a, b) => {
+                            if (a.on !== b.on) return a.on ? -1 : 1;
+                            return priority[a.key] - priority[b.key];
+                          });
+                          const positiveCount = sortedBadges.filter((b) => b.on).length;
+                          return (
+                            <>
+                              <div className="mb-1 flex items-center justify-between">
+                                <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">Listas</span>
+                                <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+                                  {positiveCount}/4
+                                </span>
+                              </div>
+                              <div className="flex flex-wrap gap-1">
+                                {sortedBadges.map((badge) => (
+                                  <span
+                                    key={badge.key}
+                                    className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                      badge.on ? badge.activeClass : 'border border-slate-200 bg-slate-50 text-slate-600'
+                                    }`}
+                                  >
+                                    <span className={`h-1.5 w-1.5 rounded-full ${badge.on ? 'bg-current' : 'bg-slate-400'}`} />
+                                    <span>{badge.label}</span>
+                                    <span className="opacity-80">{badge.on ? 'Sí' : 'No'}</span>
+                                  </span>
+                                ))}
+                              </div>
+                            </>
+                          );
+                        })()}
                       </div>
                     </td>
                     <td className="py-2 pr-3">
@@ -2075,10 +2404,14 @@ export default function Sarlaft() {
                     <td className="py-2 pr-3">
                       <button
                         className="btn-corporate-muted px-3 py-1 text-xs"
-                        disabled={downloadingCertificateId === row.id || downloadCertificateMutation.isLoading}
-                        onClick={() => downloadCertificateMutation.mutate(row.id)}
+                        disabled={previewCertificateMutation.isLoading || previewingCertificateId === row.id}
+                        onClick={() => previewCertificateMutation.mutate(row.id)}
                       >
-                        {downloadingCertificateId === row.id ? 'Generando...' : 'Descargar PDF'}
+                        {previewingCertificateId === row.id
+                          ? 'Abriendo...'
+                          : hasCertificate
+                            ? 'Previsualizar PDF'
+                            : 'Generar y previsualizar'}
                       </button>
                     </td>
                     <td className="py-2 pr-3 text-slate-500">{new Date(row.created_at).toLocaleString('es-CO')}</td>
@@ -2496,6 +2829,39 @@ export default function Sarlaft() {
               <iframe
                 title="Manual de uso SARLAFT"
                 src={manualDocPath}
+                className="h-[calc(90vh-64px)] w-full bg-white"
+              />
+            </div>
+          </div>
+        )}
+
+        {certificatePreviewModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+            <div className="modal-panel glass-card h-[90vh] w-full max-w-5xl overflow-hidden border border-slate-200/80 p-0">
+              <div className="flex items-center justify-between border-b border-slate-200 bg-white/95 px-4 py-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Certificado SARLAFT</p>
+                  <h3 className="text-base font-semibold text-slate-900">Previsualización de certificado PDF</h3>
+                </div>
+                <div className="flex items-center gap-2">
+                  <a
+                    className="btn-corporate-muted px-3 py-1.5 text-xs"
+                    href={certificatePreviewModal.url}
+                    download={certificatePreviewModal.filename}
+                  >
+                    Descargar
+                  </a>
+                  <button
+                    className="rounded-md border border-slate-200 p-2 text-slate-600 hover:bg-slate-50"
+                    onClick={closeCertificatePreviewModal}
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+              </div>
+              <iframe
+                title="Previsualización certificado SARLAFT"
+                src={certificatePreviewModal.url}
                 className="h-[calc(90vh-64px)] w-full bg-white"
               />
             </div>

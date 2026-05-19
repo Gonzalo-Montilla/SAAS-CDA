@@ -400,3 +400,65 @@ class SarlaftBatchJobResponse(BaseModel):
     created_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class SarlaftSubjectCaseItem(BaseModel):
+    case_id: UUID
+    operacion_ref: str
+    status: str
+    risk_level: str
+    payment_method: str
+    transaction_amount_cop: Decimal
+    cash_amount_cop: Decimal
+    placa: str | None = None
+    tipo_vehiculo: str | None = None
+    created_at: datetime
+
+
+class SarlaftSubjectManualCheckItem(BaseModel):
+    manual_check_id: UUID
+    full_name: str
+    dataset: str
+    risk_level: str
+    risk_score: Decimal
+    hits_count: int
+    alert: bool
+    source_coverage: dict[str, bool] = Field(default_factory=dict)
+    certificate_code: str | None = None
+    certificate_issued_at: datetime | None = None
+    created_at: datetime
+
+
+class SarlaftSubjectAlertItem(BaseModel):
+    alert_id: UUID
+    source_origin: str
+    alert_level: str
+    operation_classification: str | None = None
+    rule_code: str | None = None
+    reason: str | None = None
+    case_id: UUID | None = None
+    operacion_ref: str | None = None
+    risk_level: str | None = None
+    decision_status: str | None = None
+    reviewed_at: datetime | None = None
+    created_at: datetime
+
+
+class SarlaftSubjectDocumentItem(BaseModel):
+    kind: str
+    title: str
+    created_at: datetime
+    reference_id: str | None = None
+    url: str | None = None
+    notes: str | None = None
+
+
+class SarlaftSubjectExpedienteResponse(BaseModel):
+    doc_type: str | None = None
+    doc_number: str
+    full_names: list[str] = Field(default_factory=list)
+    current_risk_level: str | None = None
+    cases: list[SarlaftSubjectCaseItem] = Field(default_factory=list)
+    manual_checks: list[SarlaftSubjectManualCheckItem] = Field(default_factory=list)
+    alerts: list[SarlaftSubjectAlertItem] = Field(default_factory=list)
+    documents: list[SarlaftSubjectDocumentItem] = Field(default_factory=list)

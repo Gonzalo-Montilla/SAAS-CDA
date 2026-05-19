@@ -9,6 +9,7 @@ import type {
   SarlaftSirelQueueItem,
   SarlaftBatchJob,
   SarlaftBatchRow,
+  SarlaftSubjectExpediente,
 } from '../types';
 
 export const sarlaftApi = {
@@ -118,6 +119,14 @@ export const sarlaftApi = {
     limit?: number;
   }): Promise<SarlaftManualCheck[]> => {
     const response = await apiClient.get<SarlaftManualCheck[]>('/sarlaft/manual-checks', { params });
+    return response.data;
+  },
+
+  getSubjectExpediente: async (params: {
+    doc_number: string;
+    doc_type?: string | null;
+  }): Promise<SarlaftSubjectExpediente> => {
+    const response = await apiClient.get<SarlaftSubjectExpediente>('/sarlaft/subjects/expediente', { params });
     return response.data;
   },
 

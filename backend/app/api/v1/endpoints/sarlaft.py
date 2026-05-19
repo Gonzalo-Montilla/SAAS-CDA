@@ -47,6 +47,11 @@ from app.schemas.sarlaft import (
     SarlaftScreeningRequest,
     SarlaftScreeningResponse,
     SarlaftScreeningHit,
+    SarlaftSubjectExpedienteResponse,
+    SarlaftSubjectCaseItem,
+    SarlaftSubjectManualCheckItem,
+    SarlaftSubjectAlertItem,
+    SarlaftSubjectDocumentItem,
 )
 from app.utils.archivo_fiscal_pdf import guardar_pdf_archivo_fiscal, leer_pdf_archivo_fiscal
 from app.utils.sarlaft_certificate_pdf import build_sarlaft_manual_certificate_pdf
@@ -1613,6 +1618,251 @@ def list_sarlaft_internal_alerts(
             )
         )
     return items
+
+
+@router.get("/subjects/expediente", response_model=SarlaftSubjectExpedienteResponse)
+def get_sarlaft_subject_expediente(
+    doc_number: str = Query(..., min_length=3, max_length=60),
+    doc_type: str | None = Query(default=None, min_length=1, max_length=20),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    if current_user.rol != RolEnum.ADMINISTRADOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para consultar expedientes SARLAFT.",
+        )
+
+    doc_number_norm = (doc_number or "").strip()
+    if not doc_number_norm:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Documento inválido.")
+    doc_type_norm = (doc_type or "").strip().upper() or None
+
+    parties_q = (
+        db.query(SarlaftCaseParty)
+        .filter(
+            SarlaftCaseParty.tenant_id == current_user.tenant_id,
+            SarlaftCaseParty.doc_number == doc_number_norm,
+        )
+    )
+    if doc_type_norm:
+        parties_q = parties_q.filter(SarlaftCaseParty.doc_type == doc_type_norm)
+    parties = parties_q.order_by(SarlaftCaseParty.created_at.desc()).all()
+
+    party_case_ids = {p.case_id for p in parties if p.case_id}
+    cases: list[SarlaftCase] = []
+    if party_case_ids:
+        cases = (
+            db.query(SarlaftCase)
+            .filter(
+                SarlaftCase.tenant_id == current_user.tenant_id,
+                SarlaftCase.id.in_(party_case_ids),
+            )
+            .order_by(SarlaftCase.created_at.desc())
+            .all()
+        )
+
+    manual_q = (
+        db.query(SarlaftManualCheck)
+        .filter(
+            SarlaftManualCheck.tenant_id == current_user.tenant_id,
+            SarlaftManualCheck.doc_number == doc_number_norm,
+        )
+    )
+    if doc_type_norm:
+        manual_q = manual_q.filter(SarlaftManualCheck.doc_type == doc_type_norm)
+    manual_checks = manual_q.order_by(SarlaftManualCheck.created_at.desc()).all()
+    manual_check_ids = {m.id for m in manual_checks}
+
+    alerts_q = (
+        db.query(SarlaftAuditLog)
+        .filter(
+            SarlaftAuditLog.tenant_id == current_user.tenant_id,
+            SarlaftAuditLog.action == "internal_alert_generated",
+        )
+        .order_by(SarlaftAuditLog.created_at.desc())
+    )
+    alerts = alerts_q.limit(500).all()
+    relevant_alerts: list[SarlaftAuditLog] = []
+    for alert in alerts:
+        meta = alert.after_json if isinstance(alert.after_json, dict) else {}
+        linked_case_id_raw = str(meta.get("linked_case_id") or "").strip()
+        source_origin = str(meta.get("source_origin") or "").strip().lower() or "caso"
+        meta_doc = str(meta.get("doc_number") or "").strip()
+        case_hit = bool(alert.entity_id and alert.entity_id in party_case_ids)
+        linked_case_hit = False
+        if linked_case_id_raw:
+            try:
+                linked_case_hit = UUID(linked_case_id_raw) in party_case_ids
+            except ValueError:
+                linked_case_hit = False
+        manual_hit = False
+        manual_check_id_raw = str(meta.get("manual_check_id") or "").strip()
+        if manual_check_id_raw:
+            try:
+                manual_hit = UUID(manual_check_id_raw) in manual_check_ids
+            except ValueError:
+                manual_hit = False
+        if meta_doc and meta_doc == doc_number_norm:
+            relevant_alerts.append(alert)
+            continue
+        if case_hit or linked_case_hit or manual_hit:
+            relevant_alerts.append(alert)
+            continue
+        if source_origin == "caso" and alert.entity_id in party_case_ids:
+            relevant_alerts.append(alert)
+
+    review_by_alert_id: dict[UUID, SarlaftAuditLog] = {}
+    if relevant_alerts:
+        review_rows = (
+            db.query(SarlaftAuditLog)
+            .filter(
+                SarlaftAuditLog.tenant_id == current_user.tenant_id,
+                SarlaftAuditLog.action == "internal_alert_reviewed",
+                SarlaftAuditLog.entity_type == "internal_alert",
+                SarlaftAuditLog.entity_id.in_([a.id for a in relevant_alerts]),
+            )
+            .order_by(SarlaftAuditLog.created_at.desc())
+            .all()
+        )
+        for rev in review_rows:
+            if rev.entity_id and rev.entity_id not in review_by_alert_id:
+                review_by_alert_id[rev.entity_id] = rev
+
+    case_map = {c.id: c for c in cases}
+    full_names = sorted(
+        {
+            str(v).strip().upper()
+            for v in (
+                [p.full_name for p in parties]
+                + [m.full_name for m in manual_checks]
+            )
+            if str(v or "").strip()
+        }
+    )
+
+    case_items = []
+    for c in cases:
+        cliente_party = next((p for p in parties if p.case_id == c.id and (p.role or "").strip().lower() == "cliente"), None)
+        meta = cliente_party.metadata_json if (cliente_party and isinstance(cliente_party.metadata_json, dict)) else {}
+        case_items.append(
+            SarlaftSubjectCaseItem(
+                case_id=c.id,
+                operacion_ref=c.operacion_ref,
+                status=c.status,
+                risk_level=c.risk_level,
+                payment_method=c.payment_method,
+                transaction_amount_cop=c.transaction_amount_cop,
+                cash_amount_cop=c.cash_amount_cop,
+                placa=str(meta.get("placa") or "").strip() or None,
+                tipo_vehiculo=str(meta.get("tipo_vehiculo") or "").strip() or None,
+                created_at=c.created_at,
+            )
+        )
+
+    manual_items = []
+    for m in manual_checks:
+        _, source_coverage = _source_coverage_from_hits(m.hits_json if isinstance(m.hits_json, list) else [])
+        manual_items.append(
+            SarlaftSubjectManualCheckItem(
+                manual_check_id=m.id,
+                full_name=m.full_name,
+                dataset=m.dataset,
+                risk_level=m.risk_level,
+                risk_score=m.risk_score,
+                hits_count=m.hits_count,
+                alert=bool(m.alert),
+                source_coverage=source_coverage,
+                certificate_code=m.certificate_code,
+                certificate_issued_at=m.certificate_issued_at,
+                created_at=m.created_at,
+            )
+        )
+
+    alert_items = []
+    for alert in relevant_alerts:
+        meta = alert.after_json if isinstance(alert.after_json, dict) else {}
+        source_origin = str(meta.get("source_origin") or "").strip().lower() or "caso"
+        linked_case_id_raw = str(meta.get("linked_case_id") or "").strip()
+        resolved_case_id = alert.entity_id if source_origin == "caso" else None
+        if not resolved_case_id and linked_case_id_raw:
+            try:
+                resolved_case_id = UUID(linked_case_id_raw)
+            except ValueError:
+                resolved_case_id = None
+        case = case_map.get(resolved_case_id) if resolved_case_id else None
+        review = review_by_alert_id.get(alert.id)
+        review_meta = review.after_json if (review and isinstance(review.after_json, dict)) else {}
+        alert_items.append(
+            SarlaftSubjectAlertItem(
+                alert_id=alert.id,
+                source_origin=source_origin,
+                alert_level=str(meta.get("alert_level") or "media"),
+                operation_classification=str(meta.get("operation_classification") or "").strip() or None,
+                rule_code=str(meta.get("rule_code") or "").strip() or None,
+                reason=str(meta.get("reason") or "").strip() or None,
+                case_id=resolved_case_id,
+                operacion_ref=case.operacion_ref if case else None,
+                risk_level=case.risk_level if case else None,
+                decision_status=str(review_meta.get("decision") or "").strip().lower() or None,
+                reviewed_at=review.created_at if review else None,
+                created_at=alert.created_at,
+            )
+        )
+
+    documents: list[SarlaftSubjectDocumentItem] = []
+    for m in manual_checks:
+        if m.certificate_code or m.certificate_issued_at:
+            documents.append(
+                SarlaftSubjectDocumentItem(
+                    kind="certificado_manual",
+                    title=f"Certificado consulta manual ({m.dataset})",
+                    created_at=m.certificate_issued_at or m.created_at,
+                    reference_id=str(m.id),
+                    notes=m.certificate_code,
+                )
+            )
+
+    if cases:
+        case_ids = [c.id for c in cases]
+        sirel_reports = (
+            db.query(SarlaftSirelReport)
+            .filter(
+                SarlaftSirelReport.tenant_id == current_user.tenant_id,
+                SarlaftSirelReport.case_id.in_(case_ids),
+            )
+            .order_by(SarlaftSirelReport.created_at.desc())
+            .all()
+        )
+        for rep in sirel_reports:
+            c = case_map.get(rep.case_id)
+            documents.append(
+                SarlaftSubjectDocumentItem(
+                    kind="sirel_reporte",
+                    title=f"Reporte SIREL ({rep.status})",
+                    created_at=rep.sent_at or rep.created_at,
+                    reference_id=str(rep.case_id),
+                    url=rep.evidence_url,
+                    notes=(c.operacion_ref if c else None),
+                )
+            )
+
+    current_risk_level = None
+    if case_items:
+        current_risk_level = case_items[0].risk_level
+    elif manual_items:
+        current_risk_level = manual_items[0].risk_level
+
+    return SarlaftSubjectExpedienteResponse(
+        doc_type=doc_type_norm or (parties[0].doc_type if parties else (manual_checks[0].doc_type if manual_checks else None)),
+        doc_number=doc_number_norm,
+        full_names=full_names,
+        current_risk_level=current_risk_level,
+        cases=case_items,
+        manual_checks=manual_items,
+        alerts=alert_items,
+        documents=sorted(documents, key=lambda d: d.created_at, reverse=True),
+    )
 
 
 @router.post("/alerts/internal/{alert_id}/decision", response_model=SarlaftInternalAlertResponse)
