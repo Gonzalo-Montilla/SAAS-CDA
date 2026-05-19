@@ -78,6 +78,14 @@ export const sarlaftApi = {
     raw_count: number;
     risk_level: 'verde' | 'amarillo' | 'rojo';
     recommended_action: string;
+    source_labels: string[];
+    source_coverage: {
+      colombia?: boolean;
+      onu?: boolean;
+      ofac?: boolean;
+      europea?: boolean;
+      otras?: boolean;
+    };
     case_id?: string | null;
   }> => {
     const response = await apiClient.post('/sarlaft/screening/opensanctions', payload);
@@ -129,8 +137,18 @@ export const sarlaftApi = {
       notes?: string | null;
       funds_source_declaration: string;
       economic_activity_support: string;
+      customer_profile: string;
+      operation_justification: string;
+      relationship_with_assets: string;
+      acts_on_behalf: 'propia' | 'tercero';
+      pep_status: 'si' | 'no' | 'no_informado';
+      payment_profile_consistency: 'coherente' | 'incoherente' | 'no_aplica';
       cashier_interview: 'normal' | 'nervioso' | 'evasivo' | 'apresurado';
+      unusual_signals: Array<'urgencia' | 'inconsistencia_documental' | 'negativa_informacion' | 'patron_repetitivo' | 'otro'>;
       support_refs: string[];
+      official_conclusion: string;
+      follow_up_required: boolean;
+      follow_up_date?: string | null;
     }
   ): Promise<SarlaftInternalAlert> => {
     const response = await apiClient.post<SarlaftInternalAlert>(`/sarlaft/alerts/internal/${alertId}/decision`, payload);

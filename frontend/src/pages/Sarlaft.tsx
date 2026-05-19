@@ -67,6 +67,14 @@ export default function Sarlaft() {
     recommended_action: string;
     raw_count: number;
     alert: boolean;
+    source_labels: string[];
+    source_coverage?: {
+      colombia?: boolean;
+      onu?: boolean;
+      ofac?: boolean;
+      europea?: boolean;
+      otras?: boolean;
+    };
     hits: Array<{ caption?: string; score?: number; source_url?: string }>;
   } | null>(null);
   const [feedback, setFeedback] = useState<string | null>(null);
@@ -87,8 +95,20 @@ export default function Sarlaft() {
   const [decisionNotes, setDecisionNotes] = useState('');
   const [decisionFundsSource, setDecisionFundsSource] = useState('');
   const [decisionEconomicSupport, setDecisionEconomicSupport] = useState('');
+  const [decisionCustomerProfile, setDecisionCustomerProfile] = useState('');
+  const [decisionOperationJustification, setDecisionOperationJustification] = useState('');
+  const [decisionRelationshipWithAssets, setDecisionRelationshipWithAssets] = useState('');
+  const [decisionActsOnBehalf, setDecisionActsOnBehalf] = useState<'propia' | 'tercero'>('propia');
+  const [decisionPepStatus, setDecisionPepStatus] = useState<'si' | 'no' | 'no_informado'>('no_informado');
+  const [decisionPaymentConsistency, setDecisionPaymentConsistency] = useState<'coherente' | 'incoherente' | 'no_aplica'>('no_aplica');
   const [decisionCashierInterview, setDecisionCashierInterview] = useState<'normal' | 'nervioso' | 'evasivo' | 'apresurado'>('normal');
+  const [decisionUnusualSignals, setDecisionUnusualSignals] = useState<
+    Array<'urgencia' | 'inconsistencia_documental' | 'negativa_informacion' | 'patron_repetitivo' | 'otro'>
+  >([]);
   const [decisionSupportRefsRaw, setDecisionSupportRefsRaw] = useState('');
+  const [decisionOfficialConclusion, setDecisionOfficialConclusion] = useState('');
+  const [decisionFollowUpRequired, setDecisionFollowUpRequired] = useState(false);
+  const [decisionFollowUpDate, setDecisionFollowUpDate] = useState('');
   const [internalAlertsPage, setInternalAlertsPage] = useState(1);
   const [internalAlertsPageSize, setInternalAlertsPageSize] = useState(10);
   const [sirelStatusFilter, setSirelStatusFilter] = useState<'all' | 'pending' | 'reported'>('pending');
@@ -216,8 +236,18 @@ export default function Sarlaft() {
     setDecisionNotes('');
     setDecisionFundsSource('');
     setDecisionEconomicSupport('');
+    setDecisionCustomerProfile('');
+    setDecisionOperationJustification('');
+    setDecisionRelationshipWithAssets('');
+    setDecisionActsOnBehalf('propia');
+    setDecisionPepStatus('no_informado');
+    setDecisionPaymentConsistency('no_aplica');
     setDecisionCashierInterview('normal');
+    setDecisionUnusualSignals([]);
     setDecisionSupportRefsRaw('');
+    setDecisionOfficialConclusion('');
+    setDecisionFollowUpRequired(false);
+    setDecisionFollowUpDate('');
   };
   const closeSirelModal = (): void => {
     setSirelModal(null);
@@ -339,6 +369,8 @@ export default function Sarlaft() {
         recommended_action: data.recommended_action,
         raw_count: data.raw_count,
         alert: data.alert,
+        source_labels: data.source_labels || [],
+        source_coverage: data.source_coverage || {},
         hits: data.hits,
       });
       setFeedback(`Screening ejecutado (${data.dataset}). Nivel: ${data.risk_level.toUpperCase()}.`);
@@ -419,16 +451,36 @@ export default function Sarlaft() {
       notes?: string | null;
       funds_source_declaration: string;
       economic_activity_support: string;
+      customer_profile: string;
+      operation_justification: string;
+      relationship_with_assets: string;
+      acts_on_behalf: 'propia' | 'tercero';
+      pep_status: 'si' | 'no' | 'no_informado';
+      payment_profile_consistency: 'coherente' | 'incoherente' | 'no_aplica';
       cashier_interview: 'normal' | 'nervioso' | 'evasivo' | 'apresurado';
+      unusual_signals: Array<'urgencia' | 'inconsistencia_documental' | 'negativa_informacion' | 'patron_repetitivo' | 'otro'>;
       support_refs: string[];
+      official_conclusion: string;
+      follow_up_required: boolean;
+      follow_up_date?: string | null;
     }) =>
       sarlaftApi.decideInternalAlert(payload.alertId, {
         decision: payload.decision,
         notes: payload.notes || null,
         funds_source_declaration: payload.funds_source_declaration,
         economic_activity_support: payload.economic_activity_support,
+        customer_profile: payload.customer_profile,
+        operation_justification: payload.operation_justification,
+        relationship_with_assets: payload.relationship_with_assets,
+        acts_on_behalf: payload.acts_on_behalf,
+        pep_status: payload.pep_status,
+        payment_profile_consistency: payload.payment_profile_consistency,
         cashier_interview: payload.cashier_interview,
+        unusual_signals: payload.unusual_signals,
         support_refs: payload.support_refs,
+        official_conclusion: payload.official_conclusion,
+        follow_up_required: payload.follow_up_required,
+        follow_up_date: payload.follow_up_date || null,
       }),
     onSuccess: (_, vars) => {
       setFeedback(
@@ -735,15 +787,45 @@ export default function Sarlaft() {
         .filter(Boolean),
     [decisionSupportRefsRaw],
   );
-  const decisionFormValid = useMemo(
+  const decisionFormBaseValid = useMemo(
     () =>
       Boolean(
         decisionFundsSource.trim() &&
           decisionEconomicSupport.trim() &&
+          decisionCustomerProfile.trim() &&
+          decisionOperationJustification.trim() &&
+          decisionRelationshipWithAssets.trim() &&
+          decisionActsOnBehalf &&
+          decisionPepStatus &&
+          decisionPaymentConsistency &&
           decisionCashierInterview &&
-          decisionSupportRefs.length >= 1
+          decisionSupportRefs.length >= 1 &&
+          decisionOfficialConclusion.trim().length >= 10 &&
+          (!decisionFollowUpRequired || decisionFollowUpDate)
       ),
-    [decisionFundsSource, decisionEconomicSupport, decisionCashierInterview, decisionSupportRefs.length],
+    [
+      decisionFundsSource,
+      decisionEconomicSupport,
+      decisionCustomerProfile,
+      decisionOperationJustification,
+      decisionRelationshipWithAssets,
+      decisionActsOnBehalf,
+      decisionPepStatus,
+      decisionPaymentConsistency,
+      decisionCashierInterview,
+      decisionSupportRefs.length,
+      decisionOfficialConclusion,
+      decisionFollowUpRequired,
+      decisionFollowUpDate,
+    ],
+  );
+  const decisionFormSospechosaValid = useMemo(
+    () => decisionFormBaseValid && decisionSupportRefs.length >= 2,
+    [decisionFormBaseValid, decisionSupportRefs.length],
+  );
+  const decisionFormValid = useMemo(
+    () => decisionFormBaseValid,
+    [decisionFormBaseValid],
   );
   const alertRowClass = useMemo(
     () => (level: string) => {
@@ -1169,6 +1251,25 @@ export default function Sarlaft() {
                 <span className="text-xs text-slate-600">Hits: {screeningResult.raw_count} · Alert: {screeningResult.alert ? 'Sí' : 'No'}</span>
               </div>
               <p className="text-sm text-slate-700">{screeningResult.recommended_action}</p>
+              <div className="flex flex-wrap gap-1">
+                <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${screeningResult.source_coverage?.colombia ? 'border border-emerald-200 bg-emerald-50 text-emerald-800' : 'border border-slate-200 bg-slate-50 text-slate-600'}`}>
+                  Colombia {screeningResult.source_coverage?.colombia ? 'Si' : 'No'}
+                </span>
+                <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${screeningResult.source_coverage?.onu ? 'border border-emerald-200 bg-emerald-50 text-emerald-800' : 'border border-slate-200 bg-slate-50 text-slate-600'}`}>
+                  ONU {screeningResult.source_coverage?.onu ? 'Si' : 'No'}
+                </span>
+                <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${screeningResult.source_coverage?.ofac ? 'border border-emerald-200 bg-emerald-50 text-emerald-800' : 'border border-slate-200 bg-slate-50 text-slate-600'}`}>
+                  OFAC {screeningResult.source_coverage?.ofac ? 'Si' : 'No'}
+                </span>
+                <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${screeningResult.source_coverage?.europea ? 'border border-indigo-200 bg-indigo-50 text-indigo-800' : 'border border-slate-200 bg-slate-50 text-slate-600'}`}>
+                  Europea {screeningResult.source_coverage?.europea ? 'Si' : 'No'}
+                </span>
+              </div>
+              {screeningResult.source_labels.length > 0 && (
+                <p className="text-[11px] text-slate-500">
+                  Fuentes: {screeningResult.source_labels.slice(0, 4).join(' · ')}
+                </p>
+              )}
               {screeningResult.hits.length > 0 && (
                 <div className="text-xs text-slate-700 space-y-1">
                   {screeningResult.hits.slice(0, 3).map((h, idx) => (
@@ -1471,8 +1572,18 @@ export default function Sarlaft() {
                             setDecisionNotes('');
                             setDecisionFundsSource('');
                             setDecisionEconomicSupport('');
+                            setDecisionCustomerProfile('');
+                            setDecisionOperationJustification('');
+                            setDecisionRelationshipWithAssets('');
+                            setDecisionActsOnBehalf('propia');
+                            setDecisionPepStatus('no_informado');
+                            setDecisionPaymentConsistency('no_aplica');
                             setDecisionCashierInterview('normal');
+                            setDecisionUnusualSignals([]);
                             setDecisionSupportRefsRaw('');
+                            setDecisionOfficialConclusion('');
+                            setDecisionFollowUpRequired(false);
+                            setDecisionFollowUpDate('');
                           }}
                         >
                           {row.case_id ? 'Evaluar alerta (DDI)' : 'Solo trazabilidad'}
@@ -1870,7 +1981,7 @@ export default function Sarlaft() {
                         <td className="py-2 pr-3 text-slate-700">{row.risk_level || '—'}</td>
                         <td className="py-2 pr-3 text-slate-700">{row.hits_count}</td>
                         <td className="py-2 pr-3 text-slate-700">
-                          ONU:{row.source_coverage?.onu ? 'Si' : 'No'} · OFAC:{row.source_coverage?.ofac ? 'Si' : 'No'} · EU:{row.source_coverage?.europea ? 'Si' : 'No'}
+                          CO:{row.source_coverage?.colombia ? 'Si' : 'No'} · ONU:{row.source_coverage?.onu ? 'Si' : 'No'} · OFAC:{row.source_coverage?.ofac ? 'Si' : 'No'} · EU:{row.source_coverage?.europea ? 'Si' : 'No'}
                         </td>
                         <td className="py-2 pr-3 text-rose-700">{row.error_detail || 'Sin error'}</td>
                         <td className="py-2 pr-3">
@@ -1938,6 +2049,9 @@ export default function Sarlaft() {
                       <div className="flex flex-wrap gap-1">
                         <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${row.source_coverage?.onu ? 'border border-emerald-200 bg-emerald-50 text-emerald-800' : 'border border-slate-200 bg-slate-50 text-slate-600'}`}>
                           ONU {row.source_coverage?.onu ? 'Si' : 'No'}
+                        </span>
+                        <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${row.source_coverage?.colombia ? 'border border-emerald-200 bg-emerald-50 text-emerald-800' : 'border border-slate-200 bg-slate-50 text-slate-600'}`}>
+                          Colombia {row.source_coverage?.colombia ? 'Si' : 'No'}
                         </span>
                         <span className={`inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold ${row.source_coverage?.ofac ? 'border border-emerald-200 bg-emerald-50 text-emerald-800' : 'border border-slate-200 bg-slate-50 text-slate-600'}`}>
                           OFAC {row.source_coverage?.ofac ? 'Si' : 'No'}
@@ -2023,6 +2137,63 @@ export default function Sarlaft() {
                   value={decisionEconomicSupport}
                   onChange={(e) => setDecisionEconomicSupport(e.target.value)}
                 />
+                <textarea
+                  className="input-corporate min-h-[64px]"
+                  placeholder="Perfil del cliente (ocupación/actividad/sector) *"
+                  value={decisionCustomerProfile}
+                  onChange={(e) => setDecisionCustomerProfile(e.target.value)}
+                />
+                <textarea
+                  className="input-corporate min-h-[64px]"
+                  placeholder="Justificación operativa declarada por el cliente *"
+                  value={decisionOperationJustification}
+                  onChange={(e) => setDecisionOperationJustification(e.target.value)}
+                />
+                <input
+                  className="input-corporate"
+                  placeholder="Relación con vehículos o activos involucrados *"
+                  value={decisionRelationshipWithAssets}
+                  onChange={(e) => setDecisionRelationshipWithAssets(e.target.value)}
+                />
+                <div className="grid gap-3 md:grid-cols-3">
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-600">Actúa por *</label>
+                    <select
+                      className="input-corporate"
+                      value={decisionActsOnBehalf}
+                      onChange={(e) => setDecisionActsOnBehalf(e.target.value as 'propia' | 'tercero')}
+                    >
+                      <option value="propia">Cuenta propia</option>
+                      <option value="tercero">Cuenta de tercero</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-600">Condición PEP *</label>
+                    <select
+                      className="input-corporate"
+                      value={decisionPepStatus}
+                      onChange={(e) => setDecisionPepStatus(e.target.value as 'si' | 'no' | 'no_informado')}
+                    >
+                      <option value="no_informado">No informado</option>
+                      <option value="no">No</option>
+                      <option value="si">Sí</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-semibold text-slate-600">Coherencia de pago *</label>
+                    <select
+                      className="input-corporate"
+                      value={decisionPaymentConsistency}
+                      onChange={(e) =>
+                        setDecisionPaymentConsistency(e.target.value as 'coherente' | 'incoherente' | 'no_aplica')
+                      }
+                    >
+                      <option value="no_aplica">No aplica</option>
+                      <option value="coherente">Coherente</option>
+                      <option value="incoherente">Incoherente</option>
+                    </select>
+                  </div>
+                </div>
                 <div>
                   <label className="mb-1 block text-xs font-semibold text-slate-600">Entrevista cajero *</label>
                   <select
@@ -2040,12 +2211,77 @@ export default function Sarlaft() {
                     <option value="apresurado">Apresurado</option>
                   </select>
                 </div>
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                  <p className="text-xs font-semibold text-slate-700">Señales observadas (opcional)</p>
+                  <div className="mt-2 flex flex-wrap gap-3 text-xs text-slate-700">
+                    {[
+                      { id: 'urgencia', label: 'Urgencia injustificada' },
+                      { id: 'inconsistencia_documental', label: 'Inconsistencia documental' },
+                      { id: 'negativa_informacion', label: 'Negativa a informar' },
+                      { id: 'patron_repetitivo', label: 'Patrón repetitivo' },
+                      { id: 'otro', label: 'Otro' },
+                    ].map((signal) => (
+                      <label key={signal.id} className="inline-flex items-center gap-1">
+                        <input
+                          type="checkbox"
+                          checked={decisionUnusualSignals.includes(
+                            signal.id as
+                              | 'urgencia'
+                              | 'inconsistencia_documental'
+                              | 'negativa_informacion'
+                              | 'patron_repetitivo'
+                              | 'otro'
+                          )}
+                          onChange={(e) => {
+                            const key = signal.id as
+                              | 'urgencia'
+                              | 'inconsistencia_documental'
+                              | 'negativa_informacion'
+                              | 'patron_repetitivo'
+                              | 'otro';
+                            setDecisionUnusualSignals((prev) =>
+                              e.target.checked ? Array.from(new Set([...prev, key])) : prev.filter((x) => x !== key)
+                            );
+                          }}
+                        />
+                        <span>{signal.label}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
                 <textarea
                   className="input-corporate min-h-[88px]"
                   placeholder="Referencias de soportes (una por línea) *"
                   value={decisionSupportRefsRaw}
                   onChange={(e) => setDecisionSupportRefsRaw(e.target.value)}
                 />
+                <textarea
+                  className="input-corporate min-h-[88px]"
+                  placeholder="Conclusión técnica del oficial (mínimo 10 caracteres) *"
+                  value={decisionOfficialConclusion}
+                  onChange={(e) => setDecisionOfficialConclusion(e.target.value)}
+                />
+                <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                  <label className="inline-flex items-center gap-2 text-sm font-medium text-slate-700">
+                    <input
+                      type="checkbox"
+                      checked={decisionFollowUpRequired}
+                      onChange={(e) => setDecisionFollowUpRequired(e.target.checked)}
+                    />
+                    Requiere monitoreo reforzado
+                  </label>
+                  {decisionFollowUpRequired && (
+                    <div className="mt-2">
+                      <label className="mb-1 block text-xs font-semibold text-slate-600">Fecha próxima revisión *</label>
+                      <input
+                        type="date"
+                        className="input-corporate"
+                        value={decisionFollowUpDate}
+                        onChange={(e) => setDecisionFollowUpDate(e.target.value)}
+                      />
+                    </div>
+                  )}
+                </div>
                 <textarea
                   className="input-corporate min-h-[72px]"
                   placeholder="Nota del oficial (opcional)"
@@ -2055,6 +2291,9 @@ export default function Sarlaft() {
               </div>
 
               <div className="mt-4 flex items-center justify-end gap-2">
+                <p className="mr-auto text-[11px] text-slate-500">
+                  Para marcar como sospechosa se requieren mínimo 2 referencias de soporte.
+                </p>
                 <button className="btn-corporate-muted px-4" onClick={closeDecisionModal}>
                   Cancelar
                 </button>
@@ -2068,8 +2307,18 @@ export default function Sarlaft() {
                       notes: decisionNotes || null,
                       funds_source_declaration: decisionFundsSource.trim(),
                       economic_activity_support: decisionEconomicSupport.trim(),
+                      customer_profile: decisionCustomerProfile.trim(),
+                      operation_justification: decisionOperationJustification.trim(),
+                      relationship_with_assets: decisionRelationshipWithAssets.trim(),
+                      acts_on_behalf: decisionActsOnBehalf,
+                      pep_status: decisionPepStatus,
+                      payment_profile_consistency: decisionPaymentConsistency,
                       cashier_interview: decisionCashierInterview,
+                      unusual_signals: decisionUnusualSignals,
                       support_refs: decisionSupportRefs,
+                      official_conclusion: decisionOfficialConclusion.trim(),
+                      follow_up_required: decisionFollowUpRequired,
+                      follow_up_date: decisionFollowUpDate || null,
                     })
                   }
                 >
@@ -2077,7 +2326,7 @@ export default function Sarlaft() {
                 </button>
                 <button
                   className="rounded-xl border border-rose-200 bg-rose-600 px-4 py-2 font-semibold text-white hover:bg-rose-700 disabled:opacity-50"
-                  disabled={!decisionFormValid || decideAlertMutation.isLoading}
+                  disabled={!decisionFormSospechosaValid || decideAlertMutation.isLoading}
                   onClick={() =>
                     decideAlertMutation.mutate({
                       alertId: decisionModal.alertId,
@@ -2085,8 +2334,18 @@ export default function Sarlaft() {
                       notes: decisionNotes || null,
                       funds_source_declaration: decisionFundsSource.trim(),
                       economic_activity_support: decisionEconomicSupport.trim(),
+                      customer_profile: decisionCustomerProfile.trim(),
+                      operation_justification: decisionOperationJustification.trim(),
+                      relationship_with_assets: decisionRelationshipWithAssets.trim(),
+                      acts_on_behalf: decisionActsOnBehalf,
+                      pep_status: decisionPepStatus,
+                      payment_profile_consistency: decisionPaymentConsistency,
                       cashier_interview: decisionCashierInterview,
+                      unusual_signals: decisionUnusualSignals,
                       support_refs: decisionSupportRefs,
+                      official_conclusion: decisionOfficialConclusion.trim(),
+                      follow_up_required: decisionFollowUpRequired,
+                      follow_up_date: decisionFollowUpDate || null,
                     })
                   }
                 >

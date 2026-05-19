@@ -1,7 +1,7 @@
 """
 Schemas SARLAFT (Sprint 1).
 """
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Literal
 from uuid import UUID
@@ -150,6 +150,8 @@ class SarlaftScreeningResponse(BaseModel):
     raw_count: int
     risk_level: Literal["verde", "amarillo", "rojo"]
     recommended_action: str
+    source_labels: list[str] = Field(default_factory=list)
+    source_coverage: dict[str, bool] = Field(default_factory=dict)
     case_id: UUID | None = None
 
 
@@ -276,8 +278,21 @@ class SarlaftInternalAlertDecisionRequest(BaseModel):
     notes: str | None = Field(default=None, max_length=2000)
     funds_source_declaration: str = Field(min_length=3, max_length=2000)
     economic_activity_support: str = Field(min_length=3, max_length=2000)
+    customer_profile: str = Field(min_length=3, max_length=2000)
+    operation_justification: str = Field(min_length=3, max_length=2000)
+    relationship_with_assets: str = Field(min_length=3, max_length=1000)
+    acts_on_behalf: Literal["propia", "tercero"]
+    pep_status: Literal["si", "no", "no_informado"]
+    payment_profile_consistency: Literal["coherente", "incoherente", "no_aplica"]
     cashier_interview: Literal["normal", "nervioso", "evasivo", "apresurado"]
+    unusual_signals: list[Literal["urgencia", "inconsistencia_documental", "negativa_informacion", "patron_repetitivo", "otro"]] = Field(
+        default_factory=list,
+        max_length=10,
+    )
     support_refs: list[str] = Field(default_factory=list, max_length=20)
+    official_conclusion: str = Field(min_length=10, max_length=4000)
+    follow_up_required: bool = False
+    follow_up_date: date | None = None
 
     @model_validator(mode="after")
     def validate_support_refs(self):
@@ -285,6 +300,10 @@ class SarlaftInternalAlertDecisionRequest(BaseModel):
         self.support_refs = refs
         if len(refs) < 1:
             raise ValueError("Debe registrar al menos un soporte o referencia de respaldo.")
+        if self.decision == "sospechosa" and len(refs) < 2:
+            raise ValueError("Para marcar como sospechosa debe registrar al menos dos soportes o referencias.")
+        if self.follow_up_required and self.follow_up_date is None:
+            raise ValueError("Debe indicar fecha de seguimiento cuando marca monitoreo reforzado.")
         return self
 
 

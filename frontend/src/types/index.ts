@@ -198,6 +198,7 @@ export interface SarlaftManualCheck {
   notes?: string | null;
   source_labels?: string[];
   source_coverage?: {
+    colombia?: boolean;
     onu?: boolean;
     ofac?: boolean;
     europea?: boolean;
@@ -288,6 +289,7 @@ export interface SarlaftBatchRow {
   alert: boolean;
   source_labels?: string[];
   source_coverage?: {
+    colombia?: boolean;
     onu?: boolean;
     ofac?: boolean;
     europea?: boolean;

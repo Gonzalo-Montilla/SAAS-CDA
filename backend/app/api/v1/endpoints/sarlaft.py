@@ -264,6 +264,7 @@ def _run_opensanctions_screening(
         limit=limit,
     )
     raw_results = screening.get("results") or []
+    source_labels, source_coverage = _source_coverage_from_hits(raw_results if isinstance(raw_results, list) else [])
     hits = _map_screening_hits(raw_results if isinstance(raw_results, list) else [])
     threshold = float(settings.OPENSANCTIONS_ALERT_SCORE_THRESHOLD or 0.75)
     risk_level, recommended_action, alert = _classify_screening(
@@ -475,11 +476,24 @@ def _source_coverage_from_hits(hits_raw: list[dict] | None) -> tuple[list[str], 
     urls = _extract_source_urls_from_hits(hits_raw)
     labels: list[str] = ["OpenSanctions (API /match)"]
     coverage = {
+        "colombia": False,
         "onu": False,
         "ofac": False,
         "europea": False,
         "otras": False,
     }
+    colombia_markers = (
+        ".gov.co",
+        ".co/",
+        "colombia",
+        "policia.gov.co",
+        "procuraduria.gov.co",
+        "fiscalia.gov.co",
+        "ramajudicial.gov.co",
+        "supersociedades.gov.co",
+        "dian.gov.co",
+        "rues.org.co",
+    )
     european_markers = (
         "europa.eu",
         "eu sanctions",
@@ -492,6 +506,11 @@ def _source_coverage_from_hits(hits_raw: list[dict] | None) -> tuple[list[str], 
     )
     for raw in urls:
         low = raw.lower()
+        if any(marker in low for marker in colombia_markers):
+            if "Colombia (fuentes locales/relacionadas)" not in labels:
+                labels.append("Colombia (fuentes locales/relacionadas)")
+            coverage["colombia"] = True
+            continue
         if ("un.org" in low or "unitednations" in low) and "ONU (United Nations)" not in labels:
             labels.append("ONU (United Nations)")
             coverage["onu"] = True
@@ -782,6 +801,8 @@ def screening_opensanctions(
             "alert": alert,
             "risk_level": risk_level,
             "recommended_action": recommended_action,
+            "source_labels": source_labels,
+            "source_coverage": source_coverage,
             "case_id": str(case_id) if case_id else None,
         },
     )
@@ -797,6 +818,8 @@ def screening_opensanctions(
         raw_count=len(raw_results) if isinstance(raw_results, list) else 0,
         risk_level=risk_level,  # verde | amarillo | rojo
         recommended_action=recommended_action,
+        source_labels=source_labels,
+        source_coverage=source_coverage,
         case_id=case_id,
     )
 
@@ -1101,6 +1124,7 @@ def download_sarlaft_batch_job_rows_csv(
             "onu",
             "ofac",
             "europea",
+            "colombia",
             "error_detail",
             "manual_check_id",
         ]
@@ -1123,6 +1147,7 @@ def download_sarlaft_batch_job_rows_csv(
                 "si" if bool(coverage.get("onu")) else "no",
                 "si" if bool(coverage.get("ofac")) else "no",
                 "si" if bool(coverage.get("europea")) else "no",
+                "si" if bool(coverage.get("colombia")) else "no",
                 r.error_detail or "",
                 str(r.created_manual_check_id) if r.created_manual_check_id else "",
             ]
@@ -1662,8 +1687,18 @@ def decide_sarlaft_internal_alert(
             "notes": (payload.notes or "").strip() or None,
             "funds_source_declaration": payload.funds_source_declaration.strip(),
             "economic_activity_support": payload.economic_activity_support.strip(),
+            "customer_profile": payload.customer_profile.strip(),
+            "operation_justification": payload.operation_justification.strip(),
+            "relationship_with_assets": payload.relationship_with_assets.strip(),
+            "acts_on_behalf": payload.acts_on_behalf,
+            "pep_status": payload.pep_status,
+            "payment_profile_consistency": payload.payment_profile_consistency,
             "cashier_interview": payload.cashier_interview,
+            "unusual_signals": payload.unusual_signals,
             "support_refs": payload.support_refs,
+            "official_conclusion": payload.official_conclusion.strip(),
+            "follow_up_required": bool(payload.follow_up_required),
+            "follow_up_date": payload.follow_up_date.isoformat() if payload.follow_up_date else None,
             "alert_log_id": str(alert_row.id),
             "case_id": str(resolved_case_id),
         },
