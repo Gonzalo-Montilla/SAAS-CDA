@@ -464,6 +464,33 @@ export interface SaaSBillingOverviewItem {
   last_payment_log_id?: string | null;
 }
 
+export interface SaaSOpenSanctionsUsageTenantItem {
+  tenant_id: string;
+  tenant_slug: string;
+  tenant_nombre: string;
+  recepcion_calls: number;
+  manual_calls: number;
+  lote_calls: number;
+  total_calls: number;
+  estimated_cost_eur: number;
+  estimated_cost_cop: number;
+}
+
+export interface SaaSOpenSanctionsUsageSummary {
+  from_date: string;
+  to_date: string;
+  trm_cop: number;
+  cost_per_call_eur: number;
+  cost_per_call_cop: number;
+  recepcion_calls: number;
+  manual_calls: number;
+  lote_calls: number;
+  total_calls: number;
+  estimated_cost_eur: number;
+  estimated_cost_cop: number;
+  tenants: SaaSOpenSanctionsUsageTenantItem[];
+}
+
 export interface SaaSPaymentHistoryItem {
   id: string;
   tenant_id: string;

@@ -36,6 +36,8 @@ from app.models.tenant import Tenant
 from app.models.tenant_billing_checkout import TenantBillingCheckoutSession
 from app.models.factus import FacturaElectronica
 from app.models.usuario import Usuario
+from app.models.sarlaft_audit_log import SarlaftAuditLog
+from app.models.sarlaft_batch_row import SarlaftBatchRow
 from app.schemas.auth import Token, RefreshTokenRequest
 from app.schemas.factus import (
     FactusMunicipalityItem,
@@ -367,6 +369,33 @@ class SaaSBillingOverviewItem(BaseModel):
     last_payment_amount: float | None = None
     last_receipt_reference: str | None = None
     last_payment_log_id: str | None = None
+
+
+class SaaSOpenSanctionsUsageTenantItem(BaseModel):
+    tenant_id: str
+    tenant_slug: str
+    tenant_nombre: str
+    recepcion_calls: int
+    manual_calls: int
+    lote_calls: int
+    total_calls: int
+    estimated_cost_eur: float
+    estimated_cost_cop: float
+
+
+class SaaSOpenSanctionsUsageOut(BaseModel):
+    from_date: datetime
+    to_date: datetime
+    trm_cop: float
+    cost_per_call_eur: float
+    cost_per_call_cop: float
+    recepcion_calls: int
+    manual_calls: int
+    lote_calls: int
+    total_calls: int
+    estimated_cost_eur: float
+    estimated_cost_cop: float
+    tenants: list[SaaSOpenSanctionsUsageTenantItem] = Field(default_factory=list)
 
 
 class SaaSPaymentHistoryItem(BaseModel):
@@ -1770,6 +1799,113 @@ def list_billing_overview(
             )
         )
     return items
+
+
+@router.get("/billing/opensanctions/usage", response_model=SaaSOpenSanctionsUsageOut)
+def get_opensanctions_usage_summary(
+    from_date: datetime | None = Query(default=None, description="Fecha inicio (inclusive, UTC)."),
+    to_date: datetime | None = Query(default=None, description="Fecha fin (inclusive, UTC)."),
+    trm_cop: float = Query(default=4379.0, gt=0, description="TRM EUR/COP para estimar costo en COP."),
+    db: Session = Depends(get_db),
+    _: SaaSUser = Depends(require_saas_role(["owner", "finanzas", "comercial", "soporte"])),
+):
+    end_dt = as_naive_utc(to_date) or utcnow_naive()
+    start_dt = as_naive_utc(from_date) or (end_dt - timedelta(days=30))
+    if start_dt > end_dt:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Rango de fechas inválido.")
+
+    cost_per_call_eur = 0.10
+    cost_per_call_cop = round(cost_per_call_eur * trm_cop, 2)
+
+    tenants = db.query(Tenant).all()
+    tenant_meta = {
+        str(t.id): {
+            "slug": t.slug,
+            "name": t.nombre_comercial or t.nombre,
+        }
+        for t in tenants
+    }
+
+    manual_rows = (
+        db.query(SarlaftAuditLog.tenant_id, func.count(SarlaftAuditLog.id))
+        .filter(
+            SarlaftAuditLog.action == "manual_check_created",
+            SarlaftAuditLog.created_at >= start_dt,
+            SarlaftAuditLog.created_at <= end_dt,
+        )
+        .group_by(SarlaftAuditLog.tenant_id)
+        .all()
+    )
+    recepcion_rows = (
+        db.query(SarlaftAuditLog.tenant_id, func.count(SarlaftAuditLog.id))
+        .filter(
+            SarlaftAuditLog.action == "auto_screening_from_recepcion",
+            SarlaftAuditLog.created_at >= start_dt,
+            SarlaftAuditLog.created_at <= end_dt,
+        )
+        .group_by(SarlaftAuditLog.tenant_id)
+        .all()
+    )
+    lote_rows = (
+        db.query(SarlaftBatchRow.tenant_id, func.count(SarlaftBatchRow.id))
+        .filter(
+            SarlaftBatchRow.status == "ok",
+            SarlaftBatchRow.created_manual_check_id.isnot(None),
+            SarlaftBatchRow.created_at >= start_dt,
+            SarlaftBatchRow.created_at <= end_dt,
+        )
+        .group_by(SarlaftBatchRow.tenant_id)
+        .all()
+    )
+
+    manual_by_tenant = {str(tenant_id): int(count or 0) for tenant_id, count in manual_rows}
+    recepcion_by_tenant = {str(tenant_id): int(count or 0) for tenant_id, count in recepcion_rows}
+    lote_by_tenant = {str(tenant_id): int(count or 0) for tenant_id, count in lote_rows}
+
+    tenant_ids = set(manual_by_tenant.keys()) | set(recepcion_by_tenant.keys()) | set(lote_by_tenant.keys())
+    tenant_items: list[SaaSOpenSanctionsUsageTenantItem] = []
+    for tenant_id in tenant_ids:
+        recepcion_calls = recepcion_by_tenant.get(tenant_id, 0)
+        manual_calls = manual_by_tenant.get(tenant_id, 0)
+        lote_calls = lote_by_tenant.get(tenant_id, 0)
+        total_calls = recepcion_calls + manual_calls + lote_calls
+        info = tenant_meta.get(tenant_id, {"slug": "n/d", "name": "Tenant no encontrado"})
+        estimated_cost_eur = round(total_calls * cost_per_call_eur, 4)
+        estimated_cost_cop = round(total_calls * cost_per_call_cop, 2)
+        tenant_items.append(
+            SaaSOpenSanctionsUsageTenantItem(
+                tenant_id=tenant_id,
+                tenant_slug=info["slug"],
+                tenant_nombre=info["name"],
+                recepcion_calls=recepcion_calls,
+                manual_calls=manual_calls,
+                lote_calls=lote_calls,
+                total_calls=total_calls,
+                estimated_cost_eur=estimated_cost_eur,
+                estimated_cost_cop=estimated_cost_cop,
+            )
+        )
+    tenant_items.sort(key=lambda x: (x.total_calls, x.tenant_nombre.lower()), reverse=True)
+
+    recepcion_total = sum(x.recepcion_calls for x in tenant_items)
+    manual_total = sum(x.manual_calls for x in tenant_items)
+    lote_total = sum(x.lote_calls for x in tenant_items)
+    total_calls = recepcion_total + manual_total + lote_total
+
+    return SaaSOpenSanctionsUsageOut(
+        from_date=start_dt,
+        to_date=end_dt,
+        trm_cop=trm_cop,
+        cost_per_call_eur=cost_per_call_eur,
+        cost_per_call_cop=cost_per_call_cop,
+        recepcion_calls=recepcion_total,
+        manual_calls=manual_total,
+        lote_calls=lote_total,
+        total_calls=total_calls,
+        estimated_cost_eur=round(total_calls * cost_per_call_eur, 4),
+        estimated_cost_cop=round(total_calls * cost_per_call_cop, 2),
+        tenants=tenant_items,
+    )
 
 
 @router.get("/billing/tenant/{tenant_id}/payments", response_model=list[SaaSPaymentHistoryItem])

@@ -12,6 +12,7 @@ import type {
   SarlaftManualCheck,
   SarlaftSirelQueueItem,
   SarlaftSubjectExpediente,
+  SucursalBasica,
 } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -42,6 +43,21 @@ export default function Sarlaft() {
   const actionableAlertsStorageKey = useMemo(
     () => `sarlaft-only-actionable-alerts:${user?.id || user?.email || 'anon'}`,
     [user?.id, user?.email]
+  );
+  const sedeFilterStorageKey = useMemo(
+    () => `sarlaft-sede-filter:${user?.id || user?.email || 'anon'}`,
+    [user?.id, user?.email]
+  );
+  const tenantSedes = useMemo(() => {
+    if (!user || !('sucursales' in user) || !Array.isArray(user.sucursales)) return [] as SucursalBasica[];
+    return user.sucursales as SucursalBasica[];
+  }, [user]);
+  const availableSedes = useMemo(
+    () =>
+      tenantSedes
+        .filter((s: SucursalBasica) => s && s.activa)
+        .map((s: SucursalBasica) => ({ id: s.id, nombre: s.nombre || 'Sede' })),
+    [tenantSedes]
   );
   const [operacionRef, setOperacionRef] = useState('');
   const [transactionAmount, setTransactionAmount] = useState('');
@@ -126,6 +142,7 @@ export default function Sarlaft() {
   const [batchFile, setBatchFile] = useState<File | null>(null);
   const [batchDataset, setBatchDataset] = useState<'default' | 'sanctions'>('sanctions');
   const [selectedBatchJobId, setSelectedBatchJobId] = useState<string | null>(null);
+  const [sarlaftSedeFilter, setSarlaftSedeFilter] = useState<string>('all');
   const [expedienteDocType, setExpedienteDocType] = useState('CC');
   const [expedienteDocNumber, setExpedienteDocNumber] = useState('');
   const [expedienteData, setExpedienteData] = useState<SarlaftSubjectExpediente | null>(null);
@@ -155,6 +172,31 @@ export default function Sarlaft() {
       setOnlyActionableAlerts(false);
     }
   }, [actionableAlertsStorageKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const raw = window.localStorage.getItem(sedeFilterStorageKey);
+    if (!raw) return;
+    if (raw === 'all' || availableSedes.some((s) => s.id === raw)) {
+      setSarlaftSedeFilter(raw);
+    }
+  }, [sedeFilterStorageKey, availableSedes]);
+
+  useEffect(() => {
+    if (sarlaftSedeFilter === 'all') return;
+    if (!availableSedes.some((s) => s.id === sarlaftSedeFilter)) {
+      setSarlaftSedeFilter('all');
+    }
+  }, [availableSedes, sarlaftSedeFilter]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem(sedeFilterStorageKey, sarlaftSedeFilter);
+  }, [sedeFilterStorageKey, sarlaftSedeFilter]);
+
+  useEffect(() => {
+    setSelectedBatchJobId(null);
+  }, [sarlaftSedeFilter]);
 
   useEffect(() => {
     if (sarlaftSeccion !== 'expediente') {
@@ -296,21 +338,23 @@ export default function Sarlaft() {
         : '/manuales/sarlaft-modulo.html',
     [manualViewMode]
   );
+  const selectedSedeId = sarlaftSedeFilter !== 'all' ? sarlaftSedeFilter : undefined;
 
   const casesQuery = useQuery({
-    queryKey: ['sarlaft-cases-list', 20],
-    queryFn: async () => sarlaftApi.listCases({ limit: 20 }),
+    queryKey: ['sarlaft-cases-list', 20, selectedSedeId || 'all'],
+    queryFn: async () => sarlaftApi.listCases({ limit: 20, sede_id: selectedSedeId }),
   });
   const manualChecksQuery = useQuery({
-    queryKey: ['sarlaft-manual-checks-list', 20],
-    queryFn: async () => sarlaftApi.listManualChecks({ limit: 20 }),
+    queryKey: ['sarlaft-manual-checks-list', 20, selectedSedeId || 'all'],
+    queryFn: async () => sarlaftApi.listManualChecks({ limit: 20, sede_id: selectedSedeId }),
   });
   const internalAlertsQuery = useQuery({
-    queryKey: ['sarlaft-internal-alerts-list', internalAlertLevelFilter, 30],
+    queryKey: ['sarlaft-internal-alerts-list', internalAlertLevelFilter, 30, selectedSedeId || 'all'],
     queryFn: async () =>
       sarlaftApi.listInternalAlerts({
         limit: 30,
         alert_level: internalAlertLevelFilter === 'todas' ? undefined : internalAlertLevelFilter,
+        sede_id: selectedSedeId,
       }),
   });
   const profileQuery = useQuery({
@@ -318,16 +362,16 @@ export default function Sarlaft() {
     queryFn: async () => sarlaftApi.getProfile(),
   });
   const sirelQueueQuery = useQuery({
-    queryKey: ['sarlaft-sirel-queue', sirelStatusFilter, 80],
-    queryFn: async () => sarlaftApi.listSirelQueue({ status: sirelStatusFilter, limit: 80 }),
+    queryKey: ['sarlaft-sirel-queue', sirelStatusFilter, 80, selectedSedeId || 'all'],
+    queryFn: async () => sarlaftApi.listSirelQueue({ status: sirelStatusFilter, limit: 80, sede_id: selectedSedeId }),
   });
   const batchJobsQuery = useQuery({
-    queryKey: ['sarlaft-batch-jobs', 20],
-    queryFn: async () => sarlaftApi.listBatchJobs({ limit: 20 }),
+    queryKey: ['sarlaft-batch-jobs', 20, selectedSedeId || 'all'],
+    queryFn: async () => sarlaftApi.listBatchJobs({ limit: 20, sede_id: selectedSedeId }),
   });
   const batchRowsQuery = useQuery({
-    queryKey: ['sarlaft-batch-rows', selectedBatchJobId],
-    queryFn: async () => sarlaftApi.listBatchRows(selectedBatchJobId as string, { limit: 1000 }),
+    queryKey: ['sarlaft-batch-rows', selectedBatchJobId, selectedSedeId || 'all'],
+    queryFn: async () => sarlaftApi.listBatchRows(selectedBatchJobId as string, { limit: 1000, sede_id: selectedSedeId }),
     enabled: Boolean(selectedBatchJobId),
   });
 
@@ -565,6 +609,7 @@ export default function Sarlaft() {
       sarlaftApi.getSubjectExpediente({
         doc_number: expedienteDocNumber.trim(),
         doc_type: expedienteDocType.trim() || undefined,
+        sede_id: selectedSedeId || null,
       }),
     onSuccess: (data) => {
       setExpedienteData(data);
@@ -654,7 +699,7 @@ export default function Sarlaft() {
     },
   });
   const downloadBatchRowsCsvMutation = useMutation({
-    mutationFn: async (jobId: string) => sarlaftApi.downloadBatchRowsCsv(jobId),
+    mutationFn: async (jobId: string) => sarlaftApi.downloadBatchRowsCsv(jobId, { sede_id: selectedSedeId }),
     onSuccess: ({ blob, filename }) => {
       saveBlobAsFile(blob, filename);
       setFeedback('Resultado del lote descargado en CSV.');
@@ -934,37 +979,55 @@ export default function Sarlaft() {
                 Monitoreo interno: <strong>Siempre activo</strong>
               </p>
             </div>
-            <div className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
+            <div className="flex flex-wrap items-center justify-end gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
               <button
                 type="button"
-                className="btn-corporate-muted px-3 py-1 text-xs"
+                className="btn-corporate-muted order-1 shrink-0 px-3 py-1 text-xs"
                 onClick={() => setManualModalOpen(true)}
               >
                 Manual de uso
               </button>
-              <span className="text-xs font-medium text-slate-600">API externa</span>
-              <button
-                type="button"
-                className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
-                  (profileQuery.data?.mode || 'manual') === 'api' ? 'bg-primary-600' : 'bg-slate-300'
-                } ${!isAdmin ? 'cursor-not-allowed opacity-60' : ''}`}
-                onClick={() => {
-                  if (!isAdmin || toggleApiMutation.isLoading || profileQuery.isLoading) return;
-                  const current = (profileQuery.data?.mode || 'manual') === 'api';
-                  toggleApiMutation.mutate(!current);
-                }}
-                disabled={!isAdmin || toggleApiMutation.isLoading || profileQuery.isLoading}
-                title={isAdmin ? 'Activar/desactivar API externa' : 'Solo administrador'}
-              >
-                <span
-                  className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
-                    (profileQuery.data?.mode || 'manual') === 'api' ? 'translate-x-5' : 'translate-x-1'
-                  }`}
-                />
-              </button>
-              <span className="text-xs font-semibold text-slate-700">
-                {(profileQuery.data?.mode || 'manual') === 'api' ? 'Activa' : 'Inactiva'}
-              </span>
+              <div className="order-2 inline-flex shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1">
+                <span className="whitespace-nowrap text-xs font-medium text-slate-600">API externa</span>
+                <button
+                  type="button"
+                  className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
+                    (profileQuery.data?.mode || 'manual') === 'api' ? 'bg-primary-600' : 'bg-slate-300'
+                  } ${!isAdmin ? 'cursor-not-allowed opacity-60' : ''}`}
+                  onClick={() => {
+                    if (!isAdmin || toggleApiMutation.isLoading || profileQuery.isLoading) return;
+                    const current = (profileQuery.data?.mode || 'manual') === 'api';
+                    toggleApiMutation.mutate(!current);
+                  }}
+                  disabled={!isAdmin || toggleApiMutation.isLoading || profileQuery.isLoading}
+                  title={isAdmin ? 'Activar/desactivar API externa' : 'Solo administrador'}
+                >
+                  <span
+                    className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${
+                      (profileQuery.data?.mode || 'manual') === 'api' ? 'translate-x-5' : 'translate-x-1'
+                    }`}
+                  />
+                </button>
+                <span className="min-w-[56px] text-right text-xs font-semibold text-slate-700">
+                  {(profileQuery.data?.mode || 'manual') === 'api' ? 'Activa' : 'Inactiva'}
+                </span>
+              </div>
+              <div className="order-3 flex w-full items-center gap-2 border-t border-slate-200/80 pt-2 sm:w-auto sm:border-t-0 sm:pt-0">
+                <div className="hidden h-5 w-px bg-slate-200 md:block" />
+                <span className="text-xs font-medium text-slate-600">Sede</span>
+                <select
+                  className="input-corporate h-8 min-w-0 flex-1 px-2 py-1 text-xs sm:min-w-[170px] sm:max-w-[230px] sm:flex-none"
+                  value={sarlaftSedeFilter}
+                  onChange={(e) => setSarlaftSedeFilter(e.target.value)}
+                >
+                  <option value="all">Todas las sedes</option>
+                  {availableSedes.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.nombre}
+                    </option>
+                  ))}
+                </select>
+              </div>
             </div>
           </div>
           <div

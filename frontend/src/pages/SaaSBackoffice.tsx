@@ -36,6 +36,7 @@ import type {
   SaaSAuditLogListResponse,
   SaaSBillingPlanItem,
   SaaSBillingOverviewItem,
+  SaaSOpenSanctionsUsageSummary,
   SaaSPaymentRegisteredResponse,
   SaaSPaymentHistoryItem,
   SaaSSecuritySummary,
@@ -68,7 +69,16 @@ interface SaaSPermissionsResponse {
   permissions: string[];
 }
 
-type BackofficeModule = 'resumen' | 'tenants' | 'runt_metricas' | 'facturacion' | 'soporte' | 'usuarios' | 'auditoria' | 'seguridad';
+type BackofficeModule =
+  | 'resumen'
+  | 'tenants'
+  | 'runt_metricas'
+  | 'opensanctions_metricas'
+  | 'facturacion'
+  | 'soporte'
+  | 'usuarios'
+  | 'auditoria'
+  | 'seguridad';
 const TABLE_DENSITY_STORAGE_KEY = 'saas_backoffice_table_density';
 type TenantProfileSection = 'brandAccess' | 'sedes' | 'factus' | 'billing' | 'payments' | 'users';
 type CheckoutSessionsViewTab = 'all' | 'pending' | 'paid' | 'fe_issue';
@@ -176,6 +186,10 @@ export default function SaaSBackoffice() {
   );
   const formatUsd = (value: number): string =>
     new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(
+      Number(value || 0),
+    );
+  const formatEur = (value: number): string =>
+    new Intl.NumberFormat('es-ES', { style: 'currency', currency: 'EUR', minimumFractionDigits: 2, maximumFractionDigits: 4 }).format(
       Number(value || 0),
     );
 
@@ -652,6 +666,14 @@ export default function SaaSBackoffice() {
       return response.data;
     },
     enabled: activeModule === 'facturacion',
+  });
+  const opensanctionsUsageQuery = useQuery({
+    queryKey: ['saas-opensanctions-usage-summary'],
+    queryFn: async () => {
+      const response = await apiClient.get<SaaSOpenSanctionsUsageSummary>('/saas/auth/billing/opensanctions/usage');
+      return response.data;
+    },
+    enabled: activeModule === 'facturacion' || activeModule === 'opensanctions_metricas',
   });
 
   const checkoutSessionsQuery = useQuery({
@@ -1430,6 +1452,96 @@ export default function SaaSBackoffice() {
                     </table>
                   </div>
                 </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (activeModule === 'opensanctions_metricas') {
+      return (
+        <div className="space-y-6">
+          <div className="section-card p-6">
+            <BackofficeSectionHeading
+              className="mb-4"
+              icon={Coins}
+              title="Consumo OpenSanctions (API real)"
+              description="Medición global CDASoft y por CDA (incluye todas sus sucursales)"
+            />
+            {opensanctionsUsageQuery.isLoading && <LoadingBlock lines={3} />}
+            {opensanctionsUsageQuery.isError && (
+              <p className="text-sm text-red-600">No fue posible cargar el consumo de OpenSanctions.</p>
+            )}
+            {opensanctionsUsageQuery.data && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50/70 p-2 text-xs md:grid-cols-6">
+                  <div className="rounded-lg bg-white px-2 py-1.5">
+                    <p className="text-slate-500">Total llamadas</p>
+                    <p className="font-semibold text-slate-900">{opensanctionsUsageQuery.data.total_calls.toLocaleString('es-CO')}</p>
+                  </div>
+                  <div className="rounded-lg bg-white px-2 py-1.5">
+                    <p className="text-slate-500">Recepción</p>
+                    <p className="font-semibold text-indigo-700">{opensanctionsUsageQuery.data.recepcion_calls.toLocaleString('es-CO')}</p>
+                  </div>
+                  <div className="rounded-lg bg-white px-2 py-1.5">
+                    <p className="text-slate-500">Manual</p>
+                    <p className="font-semibold text-emerald-700">{opensanctionsUsageQuery.data.manual_calls.toLocaleString('es-CO')}</p>
+                  </div>
+                  <div className="rounded-lg bg-white px-2 py-1.5">
+                    <p className="text-slate-500">Lote</p>
+                    <p className="font-semibold text-violet-700">{opensanctionsUsageQuery.data.lote_calls.toLocaleString('es-CO')}</p>
+                  </div>
+                  <div className="rounded-lg bg-white px-2 py-1.5">
+                    <p className="text-slate-500">Costo estimado EUR</p>
+                    <p className="font-semibold text-slate-900">{formatEur(opensanctionsUsageQuery.data.estimated_cost_eur)}</p>
+                  </div>
+                  <div className="rounded-lg bg-white px-2 py-1.5">
+                    <p className="text-slate-500">Costo estimado COP</p>
+                    <p className="font-semibold text-slate-900">{formatCurrency(opensanctionsUsageQuery.data.estimated_cost_cop)}</p>
+                  </div>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Periodo: {new Date(opensanctionsUsageQuery.data.from_date).toLocaleDateString()} -{' '}
+                  {new Date(opensanctionsUsageQuery.data.to_date).toLocaleDateString()} · TRM usada:{' '}
+                  {opensanctionsUsageQuery.data.trm_cop.toLocaleString('es-CO')} · Costo proveedor por llamada:{' '}
+                  {formatEur(opensanctionsUsageQuery.data.cost_per_call_eur)}
+                </p>
+                {opensanctionsUsageQuery.data.tenants.length > 0 ? (
+                  <div className="table-shell">
+                    <table className="table-enterprise">
+                      <thead>
+                        <tr>
+                          <th>CDA</th>
+                          <th>Recepción</th>
+                          <th>Manual</th>
+                          <th>Lote</th>
+                          <th>Total</th>
+                          <th>Costo EUR</th>
+                          <th>Costo COP</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {opensanctionsUsageQuery.data.tenants.map((item) => (
+                          <tr key={item.tenant_id}>
+                            <td className="font-semibold text-slate-900">
+                              {item.tenant_nombre}
+                              <span className="ml-1 text-[11px] font-normal text-slate-500">/{item.tenant_slug}</span>
+                            </td>
+                            <td>{item.recepcion_calls.toLocaleString('es-CO')}</td>
+                            <td>{item.manual_calls.toLocaleString('es-CO')}</td>
+                            <td>{item.lote_calls.toLocaleString('es-CO')}</td>
+                            <td className="font-semibold text-slate-900">{item.total_calls.toLocaleString('es-CO')}</td>
+                            <td>{formatEur(item.estimated_cost_eur)}</td>
+                            <td>{formatCurrency(item.estimated_cost_cop)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <EmptyState message="No hay consumo OpenSanctions en el periodo seleccionado." />
+                )}
               </div>
             )}
           </div>
@@ -2831,6 +2943,14 @@ export default function SaaSBackoffice() {
       icon: Activity,
       color: 'text-fuchsia-600',
       count: runtMetricasQuery.data?.total_consultas,
+    },
+    {
+      id: 'opensanctions_metricas',
+      title: 'Métricas OpenSanctions',
+      subtitle: 'Consumo API global y por CDA',
+      icon: Coins,
+      color: 'text-sky-600',
+      count: opensanctionsUsageQuery.data?.total_calls,
     },
     {
       id: 'facturacion',

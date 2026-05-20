@@ -43,6 +43,7 @@ export const sarlaftApi = {
   listCases: async (params?: {
     risk_level?: 'verde' | 'amarillo' | 'rojo';
     status?: string;
+    sede_id?: string;
     limit?: number;
   }): Promise<SarlaftCaseSummary[]> => {
     const response = await apiClient.get<SarlaftCaseSummary[]>('/sarlaft/cases', { params });
@@ -116,6 +117,7 @@ export const sarlaftApi = {
   listManualChecks: async (params?: {
     subject_type?: 'natural' | 'juridica';
     risk_level?: 'verde' | 'amarillo' | 'rojo';
+    sede_id?: string;
     limit?: number;
   }): Promise<SarlaftManualCheck[]> => {
     const response = await apiClient.get<SarlaftManualCheck[]>('/sarlaft/manual-checks', { params });
@@ -125,6 +127,7 @@ export const sarlaftApi = {
   getSubjectExpediente: async (params: {
     doc_number: string;
     doc_type?: string | null;
+    sede_id?: string | null;
   }): Promise<SarlaftSubjectExpediente> => {
     const response = await apiClient.get<SarlaftSubjectExpediente>('/sarlaft/subjects/expediente', { params });
     return response.data;
@@ -133,6 +136,7 @@ export const sarlaftApi = {
   listInternalAlerts: async (params?: {
     alert_level?: 'critica' | 'alta' | 'media' | 'baja';
     case_id?: string;
+    sede_id?: string;
     limit?: number;
   }): Promise<SarlaftInternalAlert[]> => {
     const response = await apiClient.get<SarlaftInternalAlert[]>('/sarlaft/alerts/internal', { params });
@@ -171,6 +175,7 @@ export const sarlaftApi = {
 
   listSirelQueue: async (params?: {
     status?: 'all' | 'pending' | 'reported';
+    sede_id?: string;
     limit?: number;
   }): Promise<SarlaftSirelQueueItem[]> => {
     const response = await apiClient.get<SarlaftSirelQueueItem[]>('/sarlaft/sirel/queue', { params });
@@ -259,18 +264,21 @@ export const sarlaftApi = {
     return response.data;
   },
 
-  listBatchJobs: async (params?: { limit?: number }): Promise<SarlaftBatchJob[]> => {
+  listBatchJobs: async (params?: { sede_id?: string; limit?: number }): Promise<SarlaftBatchJob[]> => {
     const response = await apiClient.get<SarlaftBatchJob[]>('/sarlaft/batch/jobs', { params });
     return response.data;
   },
 
-  listBatchRows: async (jobId: string, params?: { limit?: number }): Promise<SarlaftBatchRow[]> => {
+  listBatchRows: async (jobId: string, params?: { sede_id?: string; limit?: number }): Promise<SarlaftBatchRow[]> => {
     const response = await apiClient.get<SarlaftBatchRow[]>(`/sarlaft/batch/jobs/${jobId}/rows`, { params });
     return response.data;
   },
 
-  downloadBatchRowsCsv: async (jobId: string): Promise<{ blob: Blob; filename: string }> => {
-    const response = await apiClient.get(`/sarlaft/batch/jobs/${jobId}/rows.csv`, { responseType: 'blob' });
+  downloadBatchRowsCsv: async (jobId: string, params?: { sede_id?: string }): Promise<{ blob: Blob; filename: string }> => {
+    const response = await apiClient.get(`/sarlaft/batch/jobs/${jobId}/rows.csv`, {
+      params,
+      responseType: 'blob',
+    });
     const contentDisposition = response.headers['content-disposition'] as string | undefined;
     let filename = `sarlaft_lote_resultado_${jobId}.csv`;
     if (contentDisposition) {

@@ -1033,6 +1033,7 @@ def create_sarlaft_batch_job(
 
 @router.get("/batch/jobs", response_model=list[SarlaftBatchJobResponse])
 def list_sarlaft_batch_jobs(
+    sede_id: UUID | None = Query(default=None),
     limit: int = Query(default=20, ge=1, le=200),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
@@ -1042,19 +1043,17 @@ def list_sarlaft_batch_jobs(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para listar lotes SARLAFT.",
         )
-    rows = (
-        db.query(SarlaftBatchJob)
-        .filter(SarlaftBatchJob.tenant_id == current_user.tenant_id)
-        .order_by(SarlaftBatchJob.created_at.desc())
-        .limit(limit)
-        .all()
-    )
+    q = db.query(SarlaftBatchJob).filter(SarlaftBatchJob.tenant_id == current_user.tenant_id)
+    if sede_id:
+        q = q.join(Usuario, Usuario.id == SarlaftBatchJob.created_by_user_id).filter(Usuario.sucursal_id == sede_id)
+    rows = q.order_by(SarlaftBatchJob.created_at.desc()).limit(limit).all()
     return [_batch_job_response(r) for r in rows]
 
 
 @router.get("/batch/jobs/{job_id}/rows", response_model=list[SarlaftBatchRowResponse])
 def list_sarlaft_batch_job_rows(
     job_id: UUID,
+    sede_id: UUID | None = Query(default=None),
     limit: int = Query(default=500, ge=1, le=2000),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
@@ -1071,6 +1070,17 @@ def list_sarlaft_batch_job_rows(
     )
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lote SARLAFT no encontrado.")
+    if sede_id:
+        job_creator = (
+            db.query(Usuario)
+            .filter(
+                Usuario.id == job.created_by_user_id,
+                Usuario.tenant_id == current_user.tenant_id,
+            )
+            .first()
+        )
+        if not job_creator or job_creator.sucursal_id != sede_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lote SARLAFT no encontrado.")
     rows = (
         db.query(SarlaftBatchRow)
         .filter(
@@ -1087,6 +1097,7 @@ def list_sarlaft_batch_job_rows(
 @router.get("/batch/jobs/{job_id}/rows.csv")
 def download_sarlaft_batch_job_rows_csv(
     job_id: UUID,
+    sede_id: UUID | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
@@ -1102,6 +1113,17 @@ def download_sarlaft_batch_job_rows_csv(
     )
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lote SARLAFT no encontrado.")
+    if sede_id:
+        job_creator = (
+            db.query(Usuario)
+            .filter(
+                Usuario.id == job.created_by_user_id,
+                Usuario.tenant_id == current_user.tenant_id,
+            )
+            .first()
+        )
+        if not job_creator or job_creator.sucursal_id != sede_id:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lote SARLAFT no encontrado.")
     rows = (
         db.query(SarlaftBatchRow)
         .filter(
@@ -1330,6 +1352,7 @@ def download_sarlaft_manual_check_certificate(
 def list_sarlaft_manual_checks(
     subject_type: str | None = Query(default=None),
     risk_level: str | None = Query(default=None),
+    sede_id: UUID | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
@@ -1339,11 +1362,10 @@ def list_sarlaft_manual_checks(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para listar consultas manuales SARLAFT.",
         )
-    q = (
-        db.query(SarlaftManualCheck)
-        .filter(SarlaftManualCheck.tenant_id == current_user.tenant_id)
-        .order_by(SarlaftManualCheck.created_at.desc())
-    )
+    q = db.query(SarlaftManualCheck).filter(SarlaftManualCheck.tenant_id == current_user.tenant_id)
+    if sede_id:
+        q = q.join(Usuario, Usuario.id == SarlaftManualCheck.created_by_user_id).filter(Usuario.sucursal_id == sede_id)
+    q = q.order_by(SarlaftManualCheck.created_at.desc())
     if subject_type:
         q = q.filter(SarlaftManualCheck.subject_type == subject_type.strip().lower())
     if risk_level:
@@ -1437,6 +1459,7 @@ def verify_sarlaft_manual_certificate_by_path(
 def list_sarlaft_cases(
     risk_level: str | None = Query(default=None),
     status_filter: str | None = Query(default=None, alias="status"),
+    sede_id: UUID | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
@@ -1455,6 +1478,8 @@ def list_sarlaft_cases(
         q = q.filter(SarlaftCase.risk_level == risk_level.strip().lower())
     if status_filter:
         q = q.filter(SarlaftCase.status == status_filter.strip().lower())
+    if sede_id:
+        q = q.filter(SarlaftCase.sede_id == sede_id)
     rows = q.limit(limit).all()
     case_ids = [r.id for r in rows]
     parties = []
@@ -1503,6 +1528,7 @@ def list_sarlaft_cases(
 def list_sarlaft_internal_alerts(
     alert_level: str | None = Query(default=None),
     case_id: UUID | None = Query(default=None),
+    sede_id: UUID | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
@@ -1576,6 +1602,68 @@ def list_sarlaft_internal_alerts(
                     )
                     .first()
                 )
+        if sede_id:
+            matches_sede = bool(case and case.sede_id == sede_id)
+            if not matches_sede:
+                if source_origin == "manual":
+                    manual_check_id_raw = str(meta.get("manual_check_id") or "").strip()
+                    if manual_check_id_raw:
+                        try:
+                            manual_row = (
+                                db.query(SarlaftManualCheck)
+                                .filter(
+                                    SarlaftManualCheck.id == UUID(manual_check_id_raw),
+                                    SarlaftManualCheck.tenant_id == current_user.tenant_id,
+                                )
+                                .first()
+                            )
+                            if manual_row:
+                                creator = (
+                                    db.query(Usuario)
+                                    .filter(
+                                        Usuario.id == manual_row.created_by_user_id,
+                                        Usuario.tenant_id == current_user.tenant_id,
+                                    )
+                                    .first()
+                                )
+                                matches_sede = bool(creator and creator.sucursal_id == sede_id)
+                        except ValueError:
+                            matches_sede = False
+                elif source_origin == "lote":
+                    batch_row_id_raw = str(meta.get("batch_row_id") or "").strip()
+                    if batch_row_id_raw:
+                        try:
+                            batch_row = (
+                                db.query(SarlaftBatchRow)
+                                .filter(
+                                    SarlaftBatchRow.id == UUID(batch_row_id_raw),
+                                    SarlaftBatchRow.tenant_id == current_user.tenant_id,
+                                )
+                                .first()
+                            )
+                            if batch_row:
+                                batch_job = (
+                                    db.query(SarlaftBatchJob)
+                                    .filter(
+                                        SarlaftBatchJob.id == batch_row.batch_job_id,
+                                        SarlaftBatchJob.tenant_id == current_user.tenant_id,
+                                    )
+                                    .first()
+                                )
+                                if batch_job:
+                                    creator = (
+                                        db.query(Usuario)
+                                        .filter(
+                                            Usuario.id == batch_job.created_by_user_id,
+                                            Usuario.tenant_id == current_user.tenant_id,
+                                        )
+                                        .first()
+                                    )
+                                    matches_sede = bool(creator and creator.sucursal_id == sede_id)
+                        except ValueError:
+                            matches_sede = False
+            if not matches_sede:
+                continue
         review = review_by_alert_id.get(row.id)
         review_meta = review.after_json if (review and isinstance(review.after_json, dict)) else {}
         decision_status = str(review_meta.get("decision") or "").strip().lower() or None
@@ -1624,6 +1712,7 @@ def list_sarlaft_internal_alerts(
 def get_sarlaft_subject_expediente(
     doc_number: str = Query(..., min_length=3, max_length=60),
     doc_type: str | None = Query(default=None, min_length=1, max_length=20),
+    sede_id: UUID | None = Query(default=None),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
@@ -1652,15 +1741,19 @@ def get_sarlaft_subject_expediente(
     party_case_ids = {p.case_id for p in parties if p.case_id}
     cases: list[SarlaftCase] = []
     if party_case_ids:
-        cases = (
+        cases_q = (
             db.query(SarlaftCase)
             .filter(
                 SarlaftCase.tenant_id == current_user.tenant_id,
                 SarlaftCase.id.in_(party_case_ids),
             )
             .order_by(SarlaftCase.created_at.desc())
-            .all()
         )
+        if sede_id:
+            cases_q = cases_q.filter(SarlaftCase.sede_id == sede_id)
+        cases = cases_q.all()
+    filtered_case_ids = {c.id for c in cases}
+    filtered_parties = parties if not sede_id else [p for p in parties if p.case_id in filtered_case_ids]
 
     manual_q = (
         db.query(SarlaftManualCheck)
@@ -1671,6 +1764,8 @@ def get_sarlaft_subject_expediente(
     )
     if doc_type_norm:
         manual_q = manual_q.filter(SarlaftManualCheck.doc_type == doc_type_norm)
+    if sede_id:
+        manual_q = manual_q.join(Usuario, Usuario.id == SarlaftManualCheck.created_by_user_id).filter(Usuario.sucursal_id == sede_id)
     manual_checks = manual_q.order_by(SarlaftManualCheck.created_at.desc()).all()
     manual_check_ids = {m.id for m in manual_checks}
 
@@ -1689,11 +1784,11 @@ def get_sarlaft_subject_expediente(
         linked_case_id_raw = str(meta.get("linked_case_id") or "").strip()
         source_origin = str(meta.get("source_origin") or "").strip().lower() or "caso"
         meta_doc = str(meta.get("doc_number") or "").strip()
-        case_hit = bool(alert.entity_id and alert.entity_id in party_case_ids)
+        case_hit = bool(alert.entity_id and alert.entity_id in filtered_case_ids)
         linked_case_hit = False
         if linked_case_id_raw:
             try:
-                linked_case_hit = UUID(linked_case_id_raw) in party_case_ids
+                linked_case_hit = UUID(linked_case_id_raw) in filtered_case_ids
             except ValueError:
                 linked_case_hit = False
         manual_hit = False
@@ -1709,7 +1804,7 @@ def get_sarlaft_subject_expediente(
         if case_hit or linked_case_hit or manual_hit:
             relevant_alerts.append(alert)
             continue
-        if source_origin == "caso" and alert.entity_id in party_case_ids:
+        if source_origin == "caso" and alert.entity_id in filtered_case_ids:
             relevant_alerts.append(alert)
 
     review_by_alert_id: dict[UUID, SarlaftAuditLog] = {}
@@ -1734,7 +1829,7 @@ def get_sarlaft_subject_expediente(
         {
             str(v).strip().upper()
             for v in (
-                [p.full_name for p in parties]
+                [p.full_name for p in filtered_parties]
                 + [m.full_name for m in manual_checks]
             )
             if str(v or "").strip()
@@ -1743,7 +1838,7 @@ def get_sarlaft_subject_expediente(
 
     case_items = []
     for c in cases:
-        cliente_party = next((p for p in parties if p.case_id == c.id and (p.role or "").strip().lower() == "cliente"), None)
+        cliente_party = next((p for p in filtered_parties if p.case_id == c.id and (p.role or "").strip().lower() == "cliente"), None)
         meta = cliente_party.metadata_json if (cliente_party and isinstance(cliente_party.metadata_json, dict)) else {}
         case_items.append(
             SarlaftSubjectCaseItem(
@@ -2238,6 +2333,7 @@ def get_sarlaft_case(
 @router.get("/sirel/queue", response_model=list[SarlaftSirelQueueItem])
 def list_sarlaft_sirel_queue(
     status_filter: str = Query(default="pending", alias="status"),
+    sede_id: UUID | None = Query(default=None),
     limit: int = Query(default=100, ge=1, le=500),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
@@ -2248,16 +2344,17 @@ def list_sarlaft_sirel_queue(
             detail="No tienes permisos para listar bandeja SIREL.",
         )
 
-    rows = (
+    rows_q = (
         db.query(SarlaftCase)
         .filter(
             SarlaftCase.tenant_id == current_user.tenant_id,
             SarlaftCase.status.in_(["sospechosa_ros_pendiente", "sospechosa_ros_reportada"]),
         )
         .order_by(SarlaftCase.created_at.desc())
-        .limit(limit)
-        .all()
     )
+    if sede_id:
+        rows_q = rows_q.filter(SarlaftCase.sede_id == sede_id)
+    rows = rows_q.limit(limit).all()
     if not rows:
         return []
 
