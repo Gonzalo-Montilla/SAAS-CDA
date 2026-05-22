@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   CheckCircle2,
@@ -115,6 +115,11 @@ export default function Calidad() {
   const [rtmStatusFilter, setRtmStatusFilter] = useState<string>('todos');
   const [rtmSearch, setRtmSearch] = useState('');
   const [rtmNotesDraft, setRtmNotesDraft] = useState<Record<string, string>>({});
+  const [showTopEncuestasScroll, setShowTopEncuestasScroll] = useState(false);
+  const topEncuestasScrollRef = useRef<HTMLDivElement | null>(null);
+  const topEncuestasInnerRef = useRef<HTMLDivElement | null>(null);
+  const bottomEncuestasScrollRef = useRef<HTMLDivElement | null>(null);
+  const syncingEncuestasScrollRef = useRef(false);
 
   const calidadSedeApiParam = useMemo(() => {
     if (!puedeElegirSedeCalidad) return undefined;
@@ -331,6 +336,53 @@ export default function Calidad() {
     });
   };
 
+  useEffect(() => {
+    const refreshTopScrollMetrics = () => {
+      const bottom = bottomEncuestasScrollRef.current;
+      if (!bottom) return;
+      const topInner = topEncuestasInnerRef.current;
+      const contentWidth = bottom.scrollWidth;
+      const viewportWidth = bottom.clientWidth;
+      if (topInner) topInner.style.width = `${contentWidth}px`;
+      setShowTopEncuestasScroll(contentWidth > viewportWidth + 2);
+      const top = topEncuestasScrollRef.current;
+      if (top) top.scrollLeft = bottom.scrollLeft;
+    };
+
+    refreshTopScrollMetrics();
+    window.addEventListener('resize', refreshTopScrollMetrics);
+    const observer = new ResizeObserver(() => refreshTopScrollMetrics());
+    if (bottomEncuestasScrollRef.current) observer.observe(bottomEncuestasScrollRef.current);
+    const table = bottomEncuestasScrollRef.current?.querySelector('table');
+    if (table) observer.observe(table);
+    return () => {
+      window.removeEventListener('resize', refreshTopScrollMetrics);
+      observer.disconnect();
+    };
+  }, [rows, encuestasPorPagina, statusFilter, searchDebounced, calidadSedeApiParam]);
+
+  const handleTopEncuestasScroll = () => {
+    const top = topEncuestasScrollRef.current;
+    const bottom = bottomEncuestasScrollRef.current;
+    if (!top || !bottom || syncingEncuestasScrollRef.current) return;
+    syncingEncuestasScrollRef.current = true;
+    bottom.scrollLeft = top.scrollLeft;
+    requestAnimationFrame(() => {
+      syncingEncuestasScrollRef.current = false;
+    });
+  };
+
+  const handleBottomEncuestasScroll = () => {
+    const top = topEncuestasScrollRef.current;
+    const bottom = bottomEncuestasScrollRef.current;
+    if (!top || !bottom || syncingEncuestasScrollRef.current) return;
+    syncingEncuestasScrollRef.current = true;
+    top.scrollLeft = bottom.scrollLeft;
+    requestAnimationFrame(() => {
+      syncingEncuestasScrollRef.current = false;
+    });
+  };
+
   return (
     <Layout title="Calidad">
       <div className="space-y-6">
@@ -461,8 +513,17 @@ export default function Calidad() {
             </div>
           </div>
 
+          <div
+            ref={topEncuestasScrollRef}
+            onScroll={handleTopEncuestasScroll}
+            className={`${showTopEncuestasScroll ? 'mb-2' : 'hidden'} overflow-x-auto overflow-y-hidden rounded-lg border border-slate-200 bg-white`}
+            aria-label="Desplazamiento horizontal superior de encuestas"
+          >
+            <div ref={topEncuestasInnerRef} className="h-3" />
+          </div>
           <div className="table-shell">
-            <table className="table-enterprise">
+            <div ref={bottomEncuestasScrollRef} onScroll={handleBottomEncuestasScroll} className="overflow-x-auto">
+            <table className="table-enterprise min-w-[1180px]">
               <thead>
                 <tr>
                   <th>Fecha</th>
@@ -474,7 +535,7 @@ export default function Calidad() {
                   <th>Exp. global</th>
                   <th>Comentario</th>
                   <th>Estado</th>
-                  <th>Acciones</th>
+                  <th className="sticky right-0 z-20 bg-slate-50 shadow-[-8px_0_8px_-10px_rgba(15,23,42,0.35)]">Acciones</th>
                 </tr>
               </thead>
               <tbody>
@@ -508,7 +569,7 @@ export default function Calidad() {
                         '-'
                       )}
                     </td>
-                    <td className="max-w-[260px] truncate" title={row.comentario || ''}>{row.comentario || '-'}</td>
+                    <td className="max-w-[220px] truncate" title={row.comentario || ''}>{row.comentario || '-'}</td>
                     <td>
                       <span className={statusClass(row.status)}>{statusLabel(row.status)}</span>
                       {row.status === 'pending' && row.cliente_email && (
@@ -517,8 +578,8 @@ export default function Calidad() {
                         </p>
                       )}
                     </td>
-                    <td>
-                      <div className="flex flex-wrap gap-1">
+                    <td className="sticky right-0 z-10 bg-white shadow-[-8px_0_8px_-10px_rgba(15,23,42,0.35)]">
+                      <div className="flex flex-col gap-1 min-w-[156px]">
                         {canRegisterInPerson(row) && (
                           <button
                             type="button"
@@ -566,6 +627,7 @@ export default function Calidad() {
                 ))}
               </tbody>
             </table>
+            </div>
           </div>
 
           <div className="flex flex-col sm:flex-row sm:flex-wrap items-stretch sm:items-center justify-between gap-3 mt-4 pt-4 border-t border-slate-100">
