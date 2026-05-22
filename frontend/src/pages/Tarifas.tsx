@@ -21,6 +21,7 @@ import {
   Bike
 } from 'lucide-react';
 import { formatCurrency, formatCOP } from '../utils/formatNumber';
+import { useToast } from '../contexts/ToastContext';
 
 function parsePositiveInt(value: string): number {
   const parsed = parseInt(value, 10);
@@ -32,6 +33,14 @@ function parseTerceroInput(value: string): number {
   const t = value.trim();
   if (t === '') return 0;
   return parsePositiveInt(t);
+}
+
+/**
+ * Evita cambios accidentales con la rueda del mouse en inputs numéricos.
+ * Se desenfoca el campo para que el scroll siga desplazando la pantalla.
+ */
+function preventNumberWheelChange(e: React.WheelEvent<HTMLInputElement>): void {
+  e.currentTarget.blur();
 }
 
 export default function TarifasPage() {
@@ -314,6 +323,7 @@ function TarifasRTM({
 // Modal para crear tarifa
 function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial: number }) {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const [formError, setFormError] = useState('');
   const [formData, setFormData] = useState({
     ano_vigencia: anoInicial,
@@ -333,7 +343,15 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
     mutationFn: tarifasApi.crear,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tarifas-todas'] });
+      showToast('success', 'Tarifa creada', 'La tarifa RTM fue creada exitosamente.');
       onClose();
+    },
+    onError: (error: any) => {
+      showToast(
+        'error',
+        'Error al crear tarifa',
+        error?.response?.data?.detail || 'No fue posible crear la tarifa. Intenta nuevamente.'
+      );
     },
   });
 
@@ -398,14 +416,6 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
             </button>
           </div>
 
-          {crearMutation.isError && (
-            <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6">
-              <p className="text-red-800 font-semibold text-center flex items-center justify-center gap-2">
-                <XCircle className="w-5 h-5" />
-                {(crearMutation.error as any)?.response?.data?.detail || 'No fue posible crear la tarifa. Intenta nuevamente.'}
-              </p>
-            </div>
-          )}
           {formError && (
             <div className="bg-amber-50 border-2 border-amber-200 rounded-lg p-4 mb-6">
               <p className="text-amber-800 font-semibold text-center flex items-center justify-center gap-2">
@@ -425,6 +435,7 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
               <input
                 type="number"
                 value={formData.ano_vigencia}
+                onWheel={preventNumberWheelChange}
                   onChange={(e) => {
                     setFormError('');
                     setFormData({ ...formData, ano_vigencia: parsePositiveInt(e.target.value) });
@@ -499,6 +510,7 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
                 <input
                   type="number"
                   value={formData.antiguedad_min}
+                  onWheel={preventNumberWheelChange}
                   onChange={(e) => {
                     setFormError('');
                     const nuevoMin = parsePositiveInt(e.target.value);
@@ -520,6 +532,7 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
                 <input
                   type="number"
                   value={formData.antiguedad_max}
+                  onWheel={preventNumberWheelChange}
                   onChange={(e) => {
                     setFormError('');
                     setFormData({ ...formData, antiguedad_max: parsePositiveInt(e.target.value) });
@@ -544,6 +557,7 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
                 <input
                   type="number"
                   value={formData.valor_rtm}
+                  onWheel={preventNumberWheelChange}
                   onChange={(e) => {
                     setFormError('');
                     setFormData({ ...formData, valor_rtm: parsePositiveInt(e.target.value) });
@@ -573,6 +587,7 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
                       <input
                         type="number"
                         value={formData[key] === 0 ? '' : formData[key]}
+                        onWheel={preventNumberWheelChange}
                         onChange={(e) => {
                           setFormError('');
                           setFormData({ ...formData, [key]: parseTerceroInput(e.target.value) });
@@ -643,6 +658,7 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
 // Modal para editar tarifa
 function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () => void }) {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const [formError, setFormError] = useState('');
   const [formData, setFormData] = useState({
     valor_rtm: tarifa.valor_rtm,
@@ -657,7 +673,15 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
     mutationFn: (data: typeof formData) => tarifasApi.actualizar(tarifa.id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['tarifas-todas'] });
+      showToast('success', 'Tarifa actualizada', 'La tarifa RTM se actualizó correctamente.');
       onClose();
+    },
+    onError: (error: any) => {
+      showToast(
+        'error',
+        'Error al actualizar tarifa',
+        error?.response?.data?.detail || 'No fue posible actualizar la tarifa. Intenta nuevamente.'
+      );
     },
   });
 
@@ -667,6 +691,12 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
     formData.valor_terceros_bancarizacion +
     formData.valor_terceros_ansv;
   const totalCliente = formData.valor_rtm + sumaTerceros;
+  const sumaTercerosOriginal =
+    (tarifa.valor_terceros_runt ?? 0) +
+    (tarifa.valor_terceros_sicov ?? 0) +
+    (tarifa.valor_terceros_bancarizacion ?? 0) +
+    (tarifa.valor_terceros_ansv ?? 0);
+  const totalClienteOriginal = Number(tarifa.valor_rtm) + sumaTercerosOriginal;
 
   const validateForm = (): string | null => {
     if (formData.valor_rtm <= 0 || sumaTerceros <= 0) {
@@ -683,6 +713,29 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
       setFormError(validationError);
       return;
     }
+
+    const cambiosCriticos: string[] = [];
+    if (Number(formData.valor_rtm) !== Number(tarifa.valor_rtm)) {
+      cambiosCriticos.push(`RTM: ${formatCOP(Number(tarifa.valor_rtm))} -> ${formatCOP(formData.valor_rtm)}`);
+    }
+    if (Number(sumaTercerosOriginal) !== Number(sumaTerceros)) {
+      cambiosCriticos.push(`Terceros: ${formatCOP(sumaTercerosOriginal)} -> ${formatCOP(sumaTerceros)}`);
+    }
+    if (Number(totalClienteOriginal) !== Number(totalCliente)) {
+      cambiosCriticos.push(`Total cliente: ${formatCOP(totalClienteOriginal)} -> ${formatCOP(totalCliente)}`);
+    }
+    if (formData.activa !== tarifa.activa) {
+      cambiosCriticos.push(`Estado: ${tarifa.activa ? 'Activa' : 'Inactiva'} -> ${formData.activa ? 'Activa' : 'Inactiva'}`);
+    }
+
+    if (cambiosCriticos.length > 0) {
+      const resumen = cambiosCriticos.map((item) => `- ${item}`).join('\n');
+      const confirmed = window.confirm(
+        `Vas a aplicar cambios críticos en la tarifa:\n\n${resumen}\n\n¿Confirmas guardar estos cambios?`
+      );
+      if (!confirmed) return;
+    }
+
     editarMutation.mutate({
       valor_rtm: formData.valor_rtm,
       valor_terceros_runt: formData.valor_terceros_runt,
@@ -712,14 +765,6 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
             </button>
           </div>
 
-          {editarMutation.isError && (
-            <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6">
-              <p className="text-red-800 font-semibold text-center flex items-center justify-center gap-2">
-                <XCircle className="w-5 h-5" />
-                {(editarMutation.error as any)?.response?.data?.detail || 'No fue posible actualizar la tarifa. Intenta nuevamente.'}
-              </p>
-            </div>
-          )}
           {formError && (
             <div className="bg-amber-50 border-2 border-amber-200 rounded-lg p-4 mb-6">
               <p className="text-amber-800 font-semibold text-center flex items-center justify-center gap-2">
@@ -738,6 +783,7 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
               <input
                 type="number"
                 value={formData.valor_rtm}
+                onWheel={preventNumberWheelChange}
                   onChange={(e) => {
                     setFormError('');
                     setFormData({ ...formData, valor_rtm: parsePositiveInt(e.target.value) });
@@ -766,6 +812,7 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
                     <input
                       type="number"
                       value={formData[key] === 0 ? '' : formData[key]}
+                      onWheel={preventNumberWheelChange}
                       onChange={(e) => {
                         setFormError('');
                         setFormData({ ...formData, [key]: parseTerceroInput(e.target.value) });
@@ -856,6 +903,7 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
 // Componente de Comisiones SOAT
 function ComisionesSOAT() {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const [comisionEditar, setComisionEditar] = useState<any>(null);
   
   const { data: comisiones, isLoading } = useQuery({
@@ -867,6 +915,14 @@ function ComisionesSOAT() {
     mutationFn: tarifasApi.eliminarComisionSOAT,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['comisiones-soat'] });
+      showToast('success', 'Comisión eliminada', 'La comisión SOAT se eliminó correctamente.');
+    },
+    onError: (error: any) => {
+      showToast(
+        'error',
+        'Error al eliminar comisión',
+        error?.response?.data?.detail || 'No fue posible eliminar la comisión SOAT.'
+      );
     },
   });
 
@@ -999,6 +1055,7 @@ function ComisionesSOAT() {
 // Modal para crear/editar comisión SOAT
 function ModalEditarComisionSOAT({ comision, onClose }: { comision: any; onClose: () => void }) {
   const queryClient = useQueryClient();
+  const { showToast } = useToast();
   const esNuevo = !comision.id;
   
   const [formData, setFormData] = useState({
@@ -1018,7 +1075,22 @@ function ModalEditarComisionSOAT({ comision, onClose }: { comision: any; onClose
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['comisiones-soat'] });
+      showToast(
+        'success',
+        esNuevo ? 'Comisión creada' : 'Comisión actualizada',
+        esNuevo
+          ? 'La comisión SOAT fue creada correctamente.'
+          : 'La comisión SOAT fue actualizada correctamente.'
+      );
       onClose();
+    },
+    onError: (error: any) => {
+      showToast(
+        'error',
+        esNuevo ? 'Error al crear comisión' : 'Error al actualizar comisión',
+        error?.response?.data?.detail ||
+          `No fue posible ${esNuevo ? 'crear' : 'actualizar'} la comisión. Intenta nuevamente.`
+      );
     },
   });
 
@@ -1050,15 +1122,6 @@ function ModalEditarComisionSOAT({ comision, onClose }: { comision: any; onClose
               <span aria-hidden>×</span>
             </button>
           </div>
-
-          {mutation.isError && (
-            <div className="bg-red-50 border-2 border-red-200 rounded-lg p-4 mb-6">
-              <p className="text-red-800 font-semibold text-center flex items-center justify-center gap-2">
-                <XCircle className="w-5 h-5" />
-                No fue posible {esNuevo ? 'crear' : 'actualizar'} la comisión. Intenta nuevamente.
-              </p>
-            </div>
-          )}
 
           <form onSubmit={handleSubmit} className="space-y-6">
             {/* Tipo de Vehículo - solo en crear */}
@@ -1107,6 +1170,7 @@ function ModalEditarComisionSOAT({ comision, onClose }: { comision: any; onClose
                 <input
                   type="number"
                   value={formData.valor_comision}
+                  onWheel={preventNumberWheelChange}
                   onChange={(e) => {
                     const valor = parseInt(e.target.value);
                     setFormData({ ...formData, valor_comision: isNaN(valor) ? 0 : valor });

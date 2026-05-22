@@ -5,6 +5,7 @@ import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import apiClient from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import type { Usuario as TenantProfileUser } from '../types';
 
 interface UsuarioListItem {
@@ -49,6 +50,13 @@ const ROLE_PERMISSION_MATRIX: Array<{
     permisos: 'Acceso total: recepción, caja, agendamiento, calidad, tarifas, tesorería, reportes y usuarios.',
   },
   {
+    rol: 'Oficial de Cumplimiento',
+    colorClass: 'bg-amber-100 text-amber-800',
+    cardClass: 'border-amber-200 bg-gradient-to-br from-amber-50 to-white',
+    icon: '🔎',
+    permisos: 'Cumplimiento SARLAFT: análisis de alertas, debida diligencia y trazabilidad del proceso de riesgo.',
+  },
+  {
     rol: 'Recepcionista',
     colorClass: 'bg-green-100 text-green-800',
     cardClass: 'border-green-200 bg-gradient-to-br from-green-50 to-white',
@@ -90,6 +98,7 @@ const validatePasswordPolicy = (password: string): string | null => {
 export default function UsuariosPage({ embedded = false }: { embedded?: boolean } = {}) {
   const queryClient = useQueryClient();
   const { user: authProfile } = useAuth();
+  const { showToast } = useToast();
   const tenantAuth = authProfile && 'tenant_slug' in authProfile ? (authProfile as TenantProfileUser) : null;
   const sedesFormOptions = tenantAuth?.sucursales ?? [];
 
@@ -100,7 +109,6 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
   const [mostrarFormulario, setMostrarFormulario] = useState(false);
   const [usuarioEditando, setUsuarioEditando] = useState<UsuarioListItem | null>(null);
   const [mostrarCambiarPassword, setMostrarCambiarPassword] = useState<string | null>(null);
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   // Form states
   const [formData, setFormData] = useState({
@@ -172,13 +180,11 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
       queryClient.invalidateQueries({ queryKey: ['usuarios-estadisticas'] });
       setMostrarFormulario(false);
       resetForm();
-      setFeedback({ type: 'success', message: 'Usuario creado exitosamente.' });
+      showToast('success', 'Usuario creado', 'El usuario fue creado exitosamente.');
     },
     onError: (error: any) => {
-      setFeedback({
-        type: 'error',
-        message: error.response?.data?.detail || 'No fue posible crear el usuario. Intenta nuevamente.',
-      });
+      const message = error.response?.data?.detail || 'No fue posible crear el usuario. Intenta nuevamente.';
+      showToast('error', 'Error al crear', message);
     },
   });
 
@@ -199,13 +205,11 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
       setMostrarFormulario(false);
       setUsuarioEditando(null);
       resetForm();
-      setFeedback({ type: 'success', message: 'Usuario actualizado exitosamente.' });
+      showToast('success', 'Usuario actualizado', 'Los datos del usuario se actualizaron correctamente.');
     },
     onError: (error: any) => {
-      setFeedback({
-        type: 'error',
-        message: error.response?.data?.detail || 'No fue posible actualizar el usuario. Intenta nuevamente.',
-      });
+      const message = error.response?.data?.detail || 'No fue posible actualizar el usuario. Intenta nuevamente.';
+      showToast('error', 'Error al actualizar', message);
     },
   });
 
@@ -218,13 +222,11 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
     onSuccess: () => {
       setMostrarCambiarPassword(null);
       setPasswordData({ password: '' });
-      setFeedback({ type: 'success', message: 'Contraseña actualizada exitosamente.' });
+      showToast('success', 'Contraseña actualizada', 'La contraseña del usuario se actualizó correctamente.');
     },
     onError: (error: any) => {
-      setFeedback({
-        type: 'error',
-        message: error.response?.data?.detail || 'No fue posible cambiar la contraseña. Intenta nuevamente.',
-      });
+      const message = error.response?.data?.detail || 'No fue posible cambiar la contraseña. Intenta nuevamente.';
+      showToast('error', 'Error al cambiar contraseña', message);
     },
   });
 
@@ -234,15 +236,21 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
       const response = await apiClient.patch(`/usuarios/${id}/toggle-estado`);
       return response.data;
     },
-    onSuccess: () => {
+    onSuccess: (data: { activo?: boolean; nombre_completo?: string }) => {
       queryClient.invalidateQueries({ queryKey: ['usuarios'] });
       queryClient.invalidateQueries({ queryKey: ['usuarios-estadisticas'] });
+      const activo = Boolean(data?.activo);
+      showToast(
+        'success',
+        activo ? 'Usuario activado' : 'Usuario desactivado',
+        data?.nombre_completo
+          ? `${data.nombre_completo} fue ${activo ? 'activado' : 'desactivado'} correctamente.`
+          : `El usuario fue ${activo ? 'activado' : 'desactivado'} correctamente.`
+      );
     },
     onError: (error: any) => {
-      setFeedback({
-        type: 'error',
-        message: error.response?.data?.detail || 'No fue posible actualizar el estado del usuario.',
-      });
+      const message = error.response?.data?.detail || 'No fue posible actualizar el estado del usuario.';
+      showToast('error', 'Error al cambiar estado', message);
     },
   });
 
@@ -255,13 +263,11 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['usuarios'] });
       queryClient.invalidateQueries({ queryKey: ['usuarios-estadisticas'] });
-      setFeedback({ type: 'success', message: 'Usuario eliminado exitosamente.' });
+      showToast('success', 'Usuario eliminado', 'El usuario fue eliminado exitosamente.');
     },
     onError: (error: any) => {
-      setFeedback({
-        type: 'error',
-        message: error.response?.data?.detail || 'No fue posible eliminar el usuario. Intenta nuevamente.',
-      });
+      const message = error.response?.data?.detail || 'No fue posible eliminar el usuario. Intenta nuevamente.';
+      showToast('error', 'Error al eliminar', message);
     },
   });
 
@@ -315,12 +321,12 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
     } else {
       // Crear (con password)
       if (!formData.password) {
-        setFeedback({ type: 'error', message: 'La contraseña es obligatoria para crear el usuario.' });
+        showToast('error', 'Contraseña requerida', 'La contraseña es obligatoria para crear el usuario.');
         return;
       }
       const passwordError = validatePasswordPolicy(formData.password);
       if (passwordError) {
-        setFeedback({ type: 'error', message: passwordError });
+        showToast('error', 'Contraseña inválida', passwordError);
         return;
       }
       crearMutation.mutate(formData);
@@ -332,12 +338,12 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
     if (!mostrarCambiarPassword) return;
     
     if (!passwordData.password) {
-      setFeedback({ type: 'error', message: 'La nueva contraseña no puede estar vacía.' });
+      showToast('error', 'Contraseña requerida', 'La nueva contraseña no puede estar vacía.');
       return;
     }
     const passwordError = validatePasswordPolicy(passwordData.password);
     if (passwordError) {
-      setFeedback({ type: 'error', message: passwordError });
+      showToast('error', 'Contraseña inválida', passwordError);
       return;
     }
     
@@ -359,6 +365,7 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
   const getRolLabel = (rol: string) => {
     const labels: Record<string, string> = {
       'administrador': 'Administrador',
+      'oficial_cumplimiento': 'Oficial de Cumplimiento',
       'cajero': 'Cajero',
       'recepcionista': 'Recepcionista',
       'contador': 'Contador',
@@ -370,6 +377,7 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
   const getRolColor = (rol: string) => {
     const colors: Record<string, string> = {
       'administrador': 'bg-red-100 text-red-800',
+      'oficial_cumplimiento': 'bg-amber-100 text-amber-800',
       'cajero': 'bg-blue-100 text-blue-800',
       'recepcionista': 'bg-green-100 text-green-800',
       'contador': 'bg-purple-100 text-purple-800',
@@ -403,18 +411,6 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
 
   const body = (
       <div className="space-y-6">
-        {feedback && (
-          <div
-            className={`rounded-lg border p-3 text-sm ${
-              feedback.type === 'success'
-                ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-                : 'bg-red-50 border-red-200 text-red-800'
-            }`}
-          >
-            {feedback.message}
-          </div>
-        )}
-
         {isError && (
           <div className="rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-800">
             No se pudo cargar la lista de usuarios.{' '}
@@ -530,6 +526,7 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
               >
                 <option value="">Todos</option>
                 <option value="administrador">Administrador</option>
+                <option value="oficial_cumplimiento">Oficial de Cumplimiento</option>
                 <option value="cajero">Cajero</option>
                 <option value="recepcionista">Recepcionista</option>
                 <option value="contador">Contador</option>
@@ -773,10 +770,12 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
                       <option value="recepcionista">Recepcionista</option>
                       <option value="contador">Contador</option>
                       <option value="comercial">Comercial</option>
+                      <option value="oficial_cumplimiento">Oficial de Cumplimiento</option>
                       <option value="administrador">Administrador</option>
                     </select>
                     <p className="text-xs text-slate-500 mt-2">
                       {formData.rol === 'administrador' && 'Acceso total al sistema'}
+                      {formData.rol === 'oficial_cumplimiento' && 'Acceso al proceso de cumplimiento SARLAFT'}
                       {formData.rol === 'cajero' && 'Acceso a caja y cobros'}
                       {formData.rol === 'recepcionista' && 'Acceso a recepción y registro'}
                       {formData.rol === 'contador' && 'Acceso a reportes y finanzas'}

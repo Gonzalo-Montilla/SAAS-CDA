@@ -204,6 +204,9 @@ def generar_habeas_autorizacion_pdf(
         "procesos judiciales o administrativos.",
         "<b>Historial del vehículo:</b> Mantener un registro del historial de revisiones del vehículo para "
         "consultas futuras del titular.",
+        "<b>Gestión de riesgo LA/FT/FPADM (SARLAFT):</b> Realizar actividades de identificación, validación y "
+        "conocimiento del cliente, consulta en listas vinculantes/restrictivas legalmente habilitadas, "
+        "generación y análisis de alertas internas y debida diligencia reforzada cuando aplique.",
     ]
     for line in fines:
         flowables.append(Paragraph(f"• {line}", body))
@@ -223,6 +226,8 @@ def generar_habeas_autorizacion_pdf(
         "<b>Historial del servicio:</b> Resultados de revisiones técnico-mecánicas anteriores y actuales.",
         "<b>Datos de transacción:</b> Información relacionada con los pagos y la facturación de los servicios "
         "prestados.",
+        "<b>Datos de cumplimiento:</b> Información asociada a verificaciones en listas, alertas internas, "
+        "soportes y trazabilidad documental de cumplimiento SARLAFT, cuando aplique.",
     ]
     for line in datos:
         flowables.append(Paragraph(f"• {line}", body))
@@ -242,7 +247,7 @@ def generar_habeas_autorizacion_pdf(
         f"Presentar consultas y reclamos ante {nc} o, en última instancia, ante la Superintendencia de "
         "Industria y Comercio (SIC).",
         "Revocar la autorización y/o solicitar la supresión de sus datos, siempre que no exista un deber "
-        "legal o contractual que impida hacerlo.",
+        "legal, contractual o regulatorio que impida hacerlo.",
     ]
     for line in der:
         flowables.append(Paragraph(f"• {line}", body))
@@ -259,13 +264,31 @@ def generar_habeas_autorizacion_pdf(
     flowables.append(Paragraph(f"<b>Teléfono/WhatsApp:</b> {cel}", body))
     flowables.append(Paragraph(f"<b>Dirección física:</b> {dir_f}", body))
 
-    flowables.append(Paragraph("5. VIGENCIA:", sec))
+    flowables.append(Paragraph("5. REPORTE A AUTORIDADES COMPETENTES (UIAF / SIREL) Y BASE LEGAL:", sec))
+    flowables.append(
+        Paragraph(
+            f"En desarrollo de obligaciones legales y regulatorias en materia de prevención LA/FT/FPADM, {nc} "
+            "podrá reportar y/o suministrar información a la UIAF y demás autoridades competentes, a través de "
+            "canales oficiales (incluido SIREL), cuando haya lugar conforme a la normativa vigente.",
+            body,
+        )
+    )
+    flowables.append(
+        Paragraph(
+            "El titular reconoce que, en los eventos previstos por la ley, el tratamiento y circulación de datos "
+            "para cumplimiento normativo y reporte a autoridades podrá realizarse con fundamento en obligación "
+            "legal, sin perjuicio de la presente autorización para las demás finalidades aquí descritas.",
+            body,
+        )
+    )
+
+    flowables.append(Paragraph("6. VIGENCIA:", sec))
     flowables.append(
         Paragraph(
             "La presente autorización tendrá una vigencia de diez (10) años, contados a partir de la fecha de "
             "su firma, o durante el tiempo que sea necesario para cumplir con las finalidades descritas y las "
             "obligaciones legales aplicables. Cumplido este plazo, sus datos serán eliminados de nuestras bases "
-            "de datos de manera segura.",
+            "de datos de manera segura, salvo que exista obligación legal de conservación por término superior.",
             body,
         )
     )

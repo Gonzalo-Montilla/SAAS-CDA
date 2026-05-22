@@ -13,6 +13,7 @@ import {
   type FactusNumberingRangeItem,
 } from '../api/factus';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import type { SucursalAdminRow, Usuario } from '../types';
 import UsuariosPage from './Usuarios';
 
@@ -27,6 +28,7 @@ export default function OrganizacionPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const tab: TabKey = tabFromSearch(searchParams.get('tab'));
   const { user, refreshTenantUser } = useAuth();
+  const { showToast } = useToast();
   const tenantUser = user && 'tenant_id' in user ? (user as Usuario) : null;
   const queryClient = useQueryClient();
 
@@ -87,14 +89,15 @@ export default function OrganizacionPage() {
     },
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['config-facturacion-ubicacion'] });
-      setFeedback({
-        type: 'success',
-        message: 'Datos de facturación de la matriz guardados. Se usarán como respaldo si una sede no tiene municipio propio.',
-      });
+      showToast(
+        'success',
+        'Matriz actualizada',
+        'Datos de facturación de la matriz guardados. Se usarán como respaldo si una sede no tiene municipio propio.'
+      );
     },
     onError: (e: unknown) => {
       const msg = e instanceof Error ? e.message : 'No se pudo guardar.';
-      setFeedback({ type: 'error', message: msg });
+      showToast('error', 'Error al guardar matriz', msg);
     },
   });
 
@@ -108,20 +111,22 @@ export default function OrganizacionPage() {
     mutationFn: (payload: { modo: 'manual' | 'factus' }) => factusApi.patchModo(payload),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['factus-settings'] });
-      setFeedback({
-        type: 'success',
-        message: 'Modo de facturación actualizado. En caja se aplicará al cargar o al abrir de nuevo la pantalla.',
-      });
+      showToast(
+        'success',
+        'Modo de facturación actualizado',
+        'En caja se aplicará al cargar o al abrir de nuevo la pantalla.'
+      );
     },
     onError: (e: unknown) => {
       const detail =
         typeof e === 'object' && e !== null && 'response' in e
           ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
           : undefined;
-      setFeedback({
-        type: 'error',
-        message: typeof detail === 'string' ? detail : 'No se pudo cambiar el modo de facturación.',
-      });
+      showToast(
+        'error',
+        'Error al cambiar modo',
+        typeof detail === 'string' ? detail : 'No se pudo cambiar el modo de facturación.'
+      );
     },
   });
 
@@ -130,21 +135,22 @@ export default function OrganizacionPage() {
       factusApi.patchDocumentoSoporteNotificaciones(payload),
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['factus-settings'] });
-      setFeedback({
-        type: 'success',
-        message:
-          'Notificaciones de documento soporte guardadas. Factus puede enviar al proveedor; el correo interno recibe copia vía CDASOFT al validar.',
-      });
+      showToast(
+        'success',
+        'Notificaciones guardadas',
+        'Notificaciones de documento soporte guardadas. Factus puede enviar al proveedor; el correo interno recibe copia vía CDASOFT al validar.'
+      );
     },
     onError: (e: unknown) => {
       const detail =
         typeof e === 'object' && e !== null && 'response' in e
           ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
           : undefined;
-      setFeedback({
-        type: 'error',
-        message: typeof detail === 'string' ? detail : 'No se pudieron guardar las preferencias.',
-      });
+      showToast(
+        'error',
+        'Error al guardar preferencias',
+        typeof detail === 'string' ? detail : 'No se pudieron guardar las preferencias.'
+      );
     },
   });
 
@@ -154,43 +160,42 @@ export default function OrganizacionPage() {
     mutationFn: () => factusApi.listNumberingRanges(),
     onSuccess: (rows) => {
       setRangesPreviewSede(rows);
-      setFeedback({
-        type: 'success',
-        message:
-          rows.length === 0
-            ? 'Factus no devolvió rangos. Revisa credenciales y ambiente en CDASOFT.'
-            : `${rows.length} rango(s) disponibles. Usa el id de «Factura de Venta» (documento 01).`,
-      });
+      showToast(
+        rows.length === 0 ? 'warning' : 'success',
+        'Consulta de rangos Factus',
+        rows.length === 0
+          ? 'Factus no devolvió rangos. Revisa credenciales y ambiente en CDASOFT.'
+          : `${rows.length} rango(s) disponibles. Usa el id de «Factura de Venta» (documento 01).`
+      );
     },
     onError: (e: unknown) => {
       const detail =
         typeof e === 'object' && e !== null && 'response' in e
           ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
           : undefined;
-      setFeedback({
-        type: 'error',
-        message: typeof detail === 'string' ? detail : 'No se pudieron consultar los rangos en Factus.',
-      });
+      showToast(
+        'error',
+        'Error consultando rangos',
+        typeof detail === 'string' ? detail : 'No se pudieron consultar los rangos en Factus.'
+      );
     },
   });
 
   const testFactusMutation = useMutation({
     mutationFn: () => factusApi.testConnection(),
     onSuccess: (data) => {
-      setFeedback({
-        type: 'success',
-        message: data.message || 'Conexión con Factus correcta.',
-      });
+      showToast('success', 'Conexión Factus', data.message || 'Conexión con Factus correcta.');
     },
     onError: (e: unknown) => {
       const detail =
         typeof e === 'object' && e !== null && 'response' in e
           ? (e as { response?: { data?: { detail?: string } } }).response?.data?.detail
           : undefined;
-      setFeedback({
-        type: 'error',
-        message: typeof detail === 'string' ? detail : 'No se pudo probar la conexión con Factus.',
-      });
+      showToast(
+        'error',
+        'Error en conexión Factus',
+        typeof detail === 'string' ? detail : 'No se pudo probar la conexión con Factus.'
+      );
     },
   });
 
@@ -206,7 +211,6 @@ export default function OrganizacionPage() {
   const countSedes = sedesLista?.length ?? sedesActuales;
   const puedeCrearMas = limitePlan == null || countSedes < limitePlan;
 
-  const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [modalCrear, setModalCrear] = useState(false);
   const [editando, setEditando] = useState<SucursalAdminRow | null>(null);
   const [form, setForm] = useState({
@@ -265,22 +269,22 @@ export default function OrganizacionPage() {
         factus_numbering_range_id: '',
       });
       setRangesPreviewSede(null);
-      setFeedback({ type: 'success', message: 'Sede creada correctamente.' });
+      showToast('success', 'Sede creada', 'Sede creada correctamente.');
     },
     onError: (e: unknown) => {
       const msg =
         e && typeof e === 'object' && 'message' in e && typeof (e as Error).message === 'string'
           ? (e as Error).message
           : '';
-      setFeedback({
-        type: 'error',
-        message:
-          msg ||
+      showToast(
+        'error',
+        'Error al crear sede',
+        msg ||
           (typeof e === 'object' && e !== null && 'response' in e
             ? String((e as { response?: { data?: { detail?: string } } }).response?.data?.detail)
             : '') ||
-          'No se pudo crear la sede.',
-      });
+          'No se pudo crear la sede.'
+      );
     },
   });
 
@@ -317,22 +321,22 @@ export default function OrganizacionPage() {
       await refreshTenantUser();
       setEditando(null);
       setRangesPreviewSede(null);
-      setFeedback({ type: 'success', message: 'Sede actualizada.' });
+      showToast('success', 'Sede actualizada', 'Sede actualizada.');
     },
     onError: (e: unknown) => {
       const msg =
         e && typeof e === 'object' && 'message' in e && typeof (e as Error).message === 'string'
           ? (e as Error).message
           : '';
-      setFeedback({
-        type: 'error',
-        message:
-          msg ||
+      showToast(
+        'error',
+        'Error al guardar sede',
+        msg ||
           (typeof e === 'object' && e !== null && 'response' in e
             ? String((e as { response?: { data?: { detail?: string } } }).response?.data?.detail)
             : '') ||
-          'No se pudo guardar.',
-      });
+          'No se pudo guardar.'
+      );
     },
   });
 
@@ -343,13 +347,14 @@ export default function OrganizacionPage() {
     onSuccess: async () => {
       await queryClient.invalidateQueries({ queryKey: ['sucursales-admin'] });
       await refreshTenantUser();
-      setFeedback({ type: 'success', message: 'Sede principal actualizada.' });
+      showToast('success', 'Sede principal actualizada', 'Sede principal actualizada.');
     },
     onError: (e: any) => {
-      setFeedback({
-        type: 'error',
-        message: e?.response?.data?.detail || 'No se pudo cambiar la sede principal.',
-      });
+      showToast(
+        'error',
+        'Error al cambiar sede principal',
+        e?.response?.data?.detail || 'No se pudo cambiar la sede principal.'
+      );
     },
   });
 
@@ -363,18 +368,6 @@ export default function OrganizacionPage() {
   return (
     <Layout title={layoutTitle}>
       <div className="space-y-6">
-        {feedback && (
-          <div
-            className={`rounded-xl border p-4 text-sm ${
-              feedback.type === 'success'
-                ? 'bg-emerald-50 border-emerald-200 text-emerald-900'
-                : 'bg-red-50 border-red-200 text-red-900'
-            }`}
-          >
-            {feedback.message}
-          </div>
-        )}
-
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <h2 className="text-2xl font-bold text-slate-900 flex items-center gap-2">
@@ -450,7 +443,6 @@ export default function OrganizacionPage() {
                   className="btn-primary-solid px-4 text-sm disabled:opacity-50"
                   disabled={saveMatrizMutation.isLoading}
                   onClick={() => {
-                    setFeedback(null);
                     saveMatrizMutation.mutate();
                   }}
                 >
@@ -477,7 +469,6 @@ export default function OrganizacionPage() {
                   className="btn-primary-solid px-4 py-2 text-sm disabled:opacity-50"
                   disabled={testFactusMutation.isLoading || factusSettings?.modo !== 'factus'}
                   onClick={() => {
-                    setFeedback(null);
                     testFactusMutation.mutate();
                   }}
                   title={factusSettings?.modo !== 'factus' ? 'Solo aplica con modo Factus activo (backoffice)' : undefined}
@@ -513,7 +504,6 @@ export default function OrganizacionPage() {
                       }`}
                       disabled={patchFactusModoMutation.isLoading || factusSettings?.modo === 'manual'}
                       onClick={() => {
-                        setFeedback(null);
                         patchFactusModoMutation.mutate({ modo: 'manual' });
                       }}
                     >
@@ -528,7 +518,6 @@ export default function OrganizacionPage() {
                       }`}
                       disabled={patchFactusModoMutation.isLoading || factusSettings?.modo === 'factus'}
                       onClick={() => {
-                        setFeedback(null);
                         patchFactusModoMutation.mutate({ modo: 'factus' });
                       }}
                     >
@@ -589,7 +578,6 @@ export default function OrganizacionPage() {
                         loadingFactusModo
                       }
                       onClick={() => {
-                        setFeedback(null);
                         patchDocSoporteNotifMutation.mutate({
                           documento_soporte_notificar_proveedor_factus: dsNotificarProveedor,
                           documento_soporte_correo_notificacion_cda: dsCorreoCda.trim() || null,
@@ -613,7 +601,6 @@ export default function OrganizacionPage() {
                 type="button"
                 disabled={!puedeCrearMas}
                 onClick={() => {
-                  setFeedback(null);
                   setForm({
                     nombre: '',
                     codigo: '',
@@ -740,7 +727,6 @@ export default function OrganizacionPage() {
                             type="button"
                             className="inline-flex items-center gap-1 text-primary-600 font-semibold hover:underline"
                             onClick={() => {
-                              setFeedback(null);
                               setEditando(s);
                               setForm({
                                 nombre: s.nombre,
@@ -890,7 +876,6 @@ export default function OrganizacionPage() {
                       : undefined
                   }
                   onClick={() => {
-                    setFeedback(null);
                     rangesFactusMutation.mutate();
                   }}
                 >
@@ -1067,7 +1052,6 @@ export default function OrganizacionPage() {
                       : undefined
                   }
                   onClick={() => {
-                    setFeedback(null);
                     rangesFactusMutation.mutate();
                   }}
                 >

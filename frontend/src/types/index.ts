@@ -49,7 +49,7 @@ export interface Usuario {
   tenant_slug?: string;
   email: string;
   nombre_completo: string;
-  rol: 'administrador' | 'cajero' | 'recepcionista' | 'contador' | 'comercial';
+  rol: 'administrador' | 'oficial_cumplimiento' | 'cajero' | 'recepcionista' | 'contador' | 'comercial';
   rol_global?: 'owner' | 'finanzas' | 'comercial' | 'soporte';
   activo: boolean;
   created_at: string;

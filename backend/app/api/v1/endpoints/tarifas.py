@@ -8,7 +8,7 @@ from datetime import date
 from decimal import Decimal
 from typing import List, Optional
 
-from app.core.deps import get_db, get_current_user, get_admin
+from app.core.deps import get_db, get_current_user, get_contador_or_admin
 from app.models.usuario import Usuario
 from app.models.tarifa import Tarifa, ComisionSOAT
 from app.schemas.tarifa import (
@@ -88,7 +88,7 @@ def obtener_tarifas_por_ano(
 def crear_tarifa(
     tarifa_data: TarifaCreate,
     db: Session = Depends(get_db),
-    admin: Usuario = Depends(get_admin)
+    admin: Usuario = Depends(get_contador_or_admin)
 ):
     if tarifa_data.antiguedad_max is not None and tarifa_data.antiguedad_max < tarifa_data.antiguedad_min:
         raise HTTPException(
@@ -182,7 +182,7 @@ def actualizar_tarifa(
     tarifa_id: str,
     tarifa_data: TarifaUpdate,
     db: Session = Depends(get_db),
-    admin: Usuario = Depends(get_admin)
+    admin: Usuario = Depends(get_contador_or_admin)
 ):
     """
     Actualizar tarifa existente (solo administrador)
@@ -197,6 +197,48 @@ def actualizar_tarifa(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Tarifa no encontrada"
         )
+
+    # Si se reactiva una tarifa, validamos que no colisione con otra tarifa activa
+    # del mismo tenant/tipo/año en rango de fechas + antigüedad.
+    activar_solicitado = tarifa_data.activa is True and tarifa.activa is False
+    if activar_solicitado:
+        candidatas = db.query(Tarifa).filter(
+            and_(
+                Tarifa.tenant_id == admin.tenant_id,
+                Tarifa.id != tarifa.id,
+                Tarifa.ano_vigencia == tarifa.ano_vigencia,
+                Tarifa.tipo_vehiculo == tarifa.tipo_vehiculo,
+                Tarifa.activa == True,
+            )
+        ).all()
+
+        conflicto = next(
+            (
+                existente
+                for existente in candidatas
+                if _dates_overlap(
+                    existente.vigencia_inicio,
+                    existente.vigencia_fin,
+                    tarifa.vigencia_inicio,
+                    tarifa.vigencia_fin,
+                )
+                and _ranges_overlap(
+                    existente.antiguedad_min,
+                    existente.antiguedad_max,
+                    tarifa.antiguedad_min,
+                    tarifa.antiguedad_max,
+                )
+            ),
+            None,
+        )
+        if conflicto:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "No se puede activar esta tarifa porque se solapa con otra tarifa activa "
+                    f"(rango existente: {conflicto.antiguedad_min}-{conflicto.antiguedad_max or '∞'} años)."
+                ),
+            )
     
     runt = (
         tarifa_data.valor_terceros_runt
@@ -274,7 +316,7 @@ def obtener_comisiones_soat(
 def crear_comision_soat(
     comision_data: ComisionSOATCreate,
     db: Session = Depends(get_db),
-    admin: Usuario = Depends(get_admin)
+    admin: Usuario = Depends(get_contador_or_admin)
 ):
     """
     Crear nueva comisión SOAT (solo administrador)
@@ -301,7 +343,7 @@ def actualizar_comision_soat(
     comision_id: str,
     comision_data: ComisionSOATUpdate,
     db: Session = Depends(get_db),
-    admin: Usuario = Depends(get_admin)
+    admin: Usuario = Depends(get_contador_or_admin)
 ):
     """
     Actualizar comisión SOAT existente (solo administrador)
@@ -339,7 +381,7 @@ def actualizar_comision_soat(
 def eliminar_comision_soat(
     comision_id: str,
     db: Session = Depends(get_db),
-    admin: Usuario = Depends(get_admin)
+    admin: Usuario = Depends(get_contador_or_admin)
 ):
     """
     Eliminar comisión SOAT (solo administrador)
@@ -364,7 +406,7 @@ def eliminar_comision_soat(
 @router.get("/", response_model=List[TarifaResponse])
 def listar_todas_tarifas(
     db: Session = Depends(get_db),
-    admin: Usuario = Depends(get_admin)
+    admin: Usuario = Depends(get_contador_or_admin)
 ):
     """
     Listar todas las tarifas (solo administrador)

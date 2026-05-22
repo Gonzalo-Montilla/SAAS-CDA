@@ -39,7 +39,7 @@ const SARLAFT_SECCIONES: { id: SarlaftSeccion; label: string; hint: string }[] =
 
 export default function Sarlaft() {
   const { user } = useAuth();
-  const isAdmin = user?.rol === 'administrador';
+  const canManageSarlaft = user?.rol === 'administrador' || user?.rol === 'oficial_cumplimiento';
   const actionableAlertsStorageKey = useMemo(
     () => `sarlaft-only-actionable-alerts:${user?.id || user?.email || 'anon'}`,
     [user?.id, user?.email]
@@ -993,14 +993,14 @@ export default function Sarlaft() {
                   type="button"
                   className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                     (profileQuery.data?.mode || 'manual') === 'api' ? 'bg-primary-600' : 'bg-slate-300'
-                  } ${!isAdmin ? 'cursor-not-allowed opacity-60' : ''}`}
+                  } ${!canManageSarlaft ? 'cursor-not-allowed opacity-60' : ''}`}
                   onClick={() => {
-                    if (!isAdmin || toggleApiMutation.isLoading || profileQuery.isLoading) return;
+                    if (!canManageSarlaft || toggleApiMutation.isLoading || profileQuery.isLoading) return;
                     const current = (profileQuery.data?.mode || 'manual') === 'api';
                     toggleApiMutation.mutate(!current);
                   }}
-                  disabled={!isAdmin || toggleApiMutation.isLoading || profileQuery.isLoading}
-                  title={isAdmin ? 'Activar/desactivar API externa' : 'Solo administrador'}
+                  disabled={!canManageSarlaft || toggleApiMutation.isLoading || profileQuery.isLoading}
+                  title={canManageSarlaft ? 'Activar/desactivar API externa' : 'Solo administrador u oficial'}
                 >
                   <span
                     className={`inline-block h-5 w-5 transform rounded-full bg-white transition-transform ${

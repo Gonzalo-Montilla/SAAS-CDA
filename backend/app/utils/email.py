@@ -386,6 +386,17 @@ def generar_email_bienvenida_recepcion_cliente(
             "punto de atención o solicitar el canal habilitado por el CDA."
         )
 
+    sarlaft_disclaimer_html = """
+        <p style="font-size:14px; line-height:1.6; color:#334155; margin:0 0 12px 0;">
+            En el marco de nuestras obligaciones de cumplimiento <strong>SARLAFT</strong>, la información podrá ser
+            utilizada para validaciones en listas vinculantes/restrictivas y análisis de señales de alerta.
+        </p>
+        <p style="font-size:14px; line-height:1.6; color:#334155; margin:0;">
+            Cuando exista obligación legal o requerimiento de autoridad competente, la información podrá ser
+            reportada o suministrada a la <strong>UIAF</strong> y demás autoridades, a través de los canales oficiales.
+        </p>
+    """
+
     habeas_html = f"""
     <div style="margin-top:22px; padding-top:18px; border-top:1px solid #e2e8f0;">
         <p style="font-size:14px; line-height:1.6; color:#334155; margin:0 0 12px 0;">
@@ -393,6 +404,7 @@ def generar_email_bienvenida_recepcion_cliente(
             <strong>expresa, informada y previa</strong> el tratamiento de sus datos personales conforme a la
             <strong>Ley 1581 de 2012</strong> y demás normas aplicables.
         </p>
+        {sarlaft_disclaimer_html}
         <p style="font-size:14px; line-height:1.6; color:#334155; margin:0 0 12px 0;">
             Adjunto encontrará la <strong>política de tratamiento de datos personales</strong> (documento PDF).
         </p>

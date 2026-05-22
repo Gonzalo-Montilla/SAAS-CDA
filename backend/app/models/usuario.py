@@ -14,6 +14,7 @@ from app.db.database import Base
 class RolEnum(str, enum.Enum):
     """Roles de usuario"""
     ADMINISTRADOR = "administrador"
+    OFICIAL_CUMPLIMIENTO = "oficial_cumplimiento"
     CAJERO = "cajero"
     RECEPCIONISTA = "recepcionista"
     CONTADOR = "contador"

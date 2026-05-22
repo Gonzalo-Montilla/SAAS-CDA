@@ -644,7 +644,13 @@ def ensure_usuario_roles_schema(db):
     ).scalar()
 
     if enum_type_name:
+        # Compatibilidad histórica: algunos entornos quedaron con valores en minúscula
+        # por ALTER manual. SQLAlchemy persiste usando nombres del Enum (mayúsculas),
+        # así que garantizamos ambos labels para evitar DataError al insertar usuarios.
+        db.execute(text(f"ALTER TYPE {enum_type_name} ADD VALUE IF NOT EXISTS 'COMERCIAL'"))
+        db.execute(text(f"ALTER TYPE {enum_type_name} ADD VALUE IF NOT EXISTS 'OFICIAL_CUMPLIMIENTO'"))
         db.execute(text(f"ALTER TYPE {enum_type_name} ADD VALUE IF NOT EXISTS 'comercial'"))
+        db.execute(text(f"ALTER TYPE {enum_type_name} ADD VALUE IF NOT EXISTS 'oficial_cumplimiento'"))
 
 
 def ensure_appointments_schema(db):

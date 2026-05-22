@@ -4,6 +4,7 @@ Endpoints de Gestión de Usuarios
 from fastapi import APIRouter, Depends, HTTPException, status, Request
 from sqlalchemy.orm import Session
 from sqlalchemy import func, or_
+from sqlalchemy.exc import DataError, IntegrityError
 from typing import List, Optional
 from datetime import datetime, timezone
 
@@ -194,13 +195,12 @@ def crear_usuario(
     """
     # Verificar que el email no exista
     existing_user = db.query(Usuario).filter(
-        Usuario.email == usuario_data.email,
-        Usuario.tenant_id == current_user.tenant_id
+        Usuario.email == usuario_data.email
     ).first()
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Ya existe un usuario con este email"
+            detail="Ya existe un usuario con este email en la plataforma"
         )
     
     try:
@@ -226,7 +226,14 @@ def crear_usuario(
     )
     
     db.add(nuevo_usuario)
-    db.commit()
+    try:
+        db.commit()
+    except (IntegrityError, DataError):
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se pudo crear el usuario. Verifica email, rol y vuelve a intentar.",
+        )
     db.refresh(nuevo_usuario)
     
     # Auditar creación de usuario
@@ -282,13 +289,12 @@ def actualizar_usuario(
     # Verificar email único si se está cambiando
     if usuario_data.email and usuario_data.email != usuario.email:
         existing_user = db.query(Usuario).filter(
-            Usuario.email == usuario_data.email,
-            Usuario.tenant_id == current_user.tenant_id
+            Usuario.email == usuario_data.email
         ).first()
         if existing_user:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Ya existe un usuario con este email"
+                detail="Ya existe un usuario con este email en la plataforma"
             )
         usuario.email = usuario_data.email
     
@@ -308,7 +314,14 @@ def actualizar_usuario(
     
     usuario.updated_at = datetime.now(timezone.utc)
     
-    db.commit()
+    try:
+        db.commit()
+    except (IntegrityError, DataError):
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se pudo actualizar el usuario. Verifica email/rol y vuelve a intentar.",
+        )
     db.refresh(usuario)
     
     # Auditar actualización

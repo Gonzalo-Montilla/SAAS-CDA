@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, type FormEvent } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ClipboardList, DollarSign, CheckCircle2, RotateCcw, Search, X, Calendar, CalendarDays, CalendarRange, BarChart3, Camera, Car, Edit, AlertTriangle } from 'lucide-react';
+import { ClipboardList, DollarSign, CheckCircle2, RotateCcw, Search, X, Calendar, CalendarDays, CalendarRange, BarChart3, Camera, Car, Edit, AlertTriangle, Download } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -113,6 +113,7 @@ export default function Recepcion() {
   const [filtroFecha, setFiltroFecha] = useState<'hoy' | 'semana' | 'mes' | 'personalizado'>('hoy');
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
+  const [exportandoListado, setExportandoListado] = useState(false);
   const [paginaActual, setPaginaActual] = useState(1);
   const registrosPorPagina = 12;
 
@@ -618,6 +619,103 @@ export default function Recepcion() {
     }
   };
 
+  const escaparCsv = (value: unknown): string => {
+    const text = String(value ?? '');
+    if (text.includes('"') || text.includes(',') || text.includes('\n')) {
+      return `"${text.replace(/"/g, '""')}"`;
+    }
+    return text;
+  };
+
+  const exportarVehiculosFiltradosCsv = async () => {
+    if (exportandoListado) return;
+    setExportandoListado(true);
+    try {
+      const paramsBase = {
+        buscar: buscar || undefined,
+        fecha_desde: desde || undefined,
+        fecha_hasta: hasta || undefined,
+      };
+      const total = await vehiculosApi.contarTotal(paramsBase);
+      if (!total || total <= 0) {
+        showToast('warning', 'Sin datos para exportar', 'No hay vehículos en el rango/filtro seleccionado.');
+        return;
+      }
+
+      const rows: Awaited<ReturnType<typeof vehiculosApi.listar>> = [];
+      const batchSize = 200;
+      for (let skipExport = 0; skipExport < total; skipExport += batchSize) {
+        const chunk = await vehiculosApi.listar({ ...paramsBase, skip: skipExport, limit: batchSize });
+        rows.push(...chunk);
+      }
+
+      const headers = [
+        'id',
+        'fecha_registro',
+        'placa',
+        'tipo_vehiculo',
+        'estado',
+        'cliente_nombre',
+        'cliente_documento',
+        'cliente_telefono',
+        'cliente_email',
+        'cliente_direccion',
+        'total_cobrado',
+        'fotos_count',
+        'foto_1',
+        'foto_2',
+        'foto_3',
+        'foto_4',
+        'foto_5',
+      ];
+      const lines = [headers.join(',')];
+
+      for (const vehiculo of rows) {
+        const fotos = extraerFotosDeObservaciones(vehiculo.observaciones).slice(0, 5);
+        const line = [
+          escaparCsv(vehiculo.id),
+          escaparCsv(vehiculo.fecha_registro ? new Date(vehiculo.fecha_registro).toISOString() : ''),
+          escaparCsv(vehiculo.placa),
+          escaparCsv(vehiculo.tipo_vehiculo),
+          escaparCsv(vehiculo.estado),
+          escaparCsv(vehiculo.cliente_nombre),
+          escaparCsv(vehiculo.cliente_documento),
+          escaparCsv(vehiculo.cliente_telefono),
+          escaparCsv(vehiculo.cliente_email),
+          escaparCsv(vehiculo.cliente_direccion),
+          escaparCsv(vehiculo.total_cobrado),
+          escaparCsv(fotos.length),
+          escaparCsv(fotos[0] || ''),
+          escaparCsv(fotos[1] || ''),
+          escaparCsv(fotos[2] || ''),
+          escaparCsv(fotos[3] || ''),
+          escaparCsv(fotos[4] || ''),
+        ];
+        lines.push(line.join(','));
+      }
+
+      const csvContent = lines.join('\n');
+      const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      const safeDesde = (desde || 'NA').replace(/[^0-9-]/g, '');
+      const safeHasta = (hasta || 'NA').replace(/[^0-9-]/g, '');
+      anchor.href = url;
+      anchor.download = `vehiculos_recepcion_${safeDesde}_${safeHasta}.csv`;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+
+      showToast('success', 'Exportación completada', `Se exportaron ${rows.length} vehículo(s) en CSV.`);
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail || 'No fue posible exportar el listado.';
+      showToast('error', 'Error al exportar', typeof detail === 'string' ? detail : JSON.stringify(detail));
+    } finally {
+      setExportandoListado(false);
+    }
+  };
+
   return (
     <Layout title="Módulo de Recepción">
       {/* Toast ahora es GLOBAL - está en ToastProvider */}
@@ -1064,7 +1162,7 @@ export default function Recepcion() {
             <CapturaFotos 
               fotos={fotosVehiculo}
               onFotosChange={setFotosVehiculo}
-              maxFotos={4}
+              maxFotos={5}
             />
 
             {/* Botones */}
@@ -1276,7 +1374,7 @@ export default function Recepcion() {
         <div className="section-card p-5 mb-6">
           <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
             {/* Barra de búsqueda */}
-            <div className="lg:col-span-5">
+            <div className="lg:col-span-3 xl:col-span-4">
               <div className="relative">
                 <div className="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
                   <Search className="h-5 w-5 text-slate-400" />
@@ -1306,13 +1404,13 @@ export default function Recepcion() {
             </div>
 
             {/* Filtros rápidos de fecha */}
-            <div className="lg:col-span-7 flex flex-wrap gap-2">
+            <div className="lg:col-span-9 xl:col-span-8 flex flex-wrap lg:flex-nowrap gap-2">
               <button
                 onClick={() => {
                   setFiltroFecha('hoy');
                   setPaginaActual(1);
                 }}
-                className={`px-4 py-2 rounded-lg font-semibold transition ${
+                className={`px-3 xl:px-4 py-2 rounded-lg font-semibold transition whitespace-nowrap shrink-0 ${
                   filtroFecha === 'hoy'
                   ? 'bg-primary-600 text-white shadow-md'
                   : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
@@ -1326,7 +1424,7 @@ export default function Recepcion() {
                   setFiltroFecha('semana');
                   setPaginaActual(1);
                 }}
-                className={`px-4 py-2 rounded-lg font-semibold transition ${
+                className={`px-3 xl:px-4 py-2 rounded-lg font-semibold transition whitespace-nowrap shrink-0 ${
                   filtroFecha === 'semana'
                     ? 'bg-primary-600 text-white shadow-md'
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
@@ -1340,7 +1438,7 @@ export default function Recepcion() {
                   setFiltroFecha('mes');
                   setPaginaActual(1);
                 }}
-                className={`px-4 py-2 rounded-lg font-semibold transition ${
+                className={`px-3 xl:px-4 py-2 rounded-lg font-semibold transition whitespace-nowrap shrink-0 ${
                   filtroFecha === 'mes'
                     ? 'bg-primary-600 text-white shadow-md'
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
@@ -1351,7 +1449,7 @@ export default function Recepcion() {
               </button>
               <button
                 onClick={() => setFiltroFecha('personalizado')}
-                className={`px-4 py-2 rounded-lg font-semibold transition ${
+                className={`px-3 xl:px-4 py-2 rounded-lg font-semibold transition whitespace-nowrap shrink-0 ${
                   filtroFecha === 'personalizado'
                     ? 'bg-primary-600 text-white shadow-md'
                     : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
@@ -1359,6 +1457,15 @@ export default function Recepcion() {
               >
                 <BarChart3 className="w-4 h-4 inline mr-2" />
                 Personalizado
+              </button>
+              <button
+                onClick={exportarVehiculosFiltradosCsv}
+                disabled={exportandoListado}
+                className="px-3 xl:px-4 py-2 rounded-lg font-semibold transition bg-emerald-100 text-emerald-800 hover:bg-emerald-200 disabled:opacity-60 whitespace-nowrap shrink-0"
+                title="Exportar listado filtrado a CSV"
+              >
+                <Download className="w-4 h-4 inline mr-2" />
+                {exportandoListado ? 'Exportando...' : 'Exportar'}
               </button>
             </div>
           </div>

@@ -8,7 +8,13 @@ import ErrorBoundary from './components/ErrorBoundary';
 import TenantBillingOverlays from './components/TenantBillingOverlays';
 import type { AuthScope } from './types';
 
-type TenantRole = 'administrador' | 'cajero' | 'recepcionista' | 'contador' | 'comercial';
+type TenantRole =
+  | 'administrador'
+  | 'oficial_cumplimiento'
+  | 'cajero'
+  | 'recepcionista'
+  | 'contador'
+  | 'comercial';
 
 const Login = lazy(() => import('./pages/Login'));
 const Dashboard = lazy(() => import('./pages/Dashboard'));
@@ -152,7 +158,7 @@ function App() {
             <Route
               path="/tarifas"
               element={
-                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador']}>
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador', 'contador']}>
                   <Tarifas />
                 </ProtectedRoute>
               }
@@ -160,7 +166,7 @@ function App() {
             <Route
               path="/proveedores-catalogo"
               element={
-                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador']}>
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador', 'contador']}>
                   <ProveedoresCatalogo />
                 </ProtectedRoute>
               }
@@ -168,7 +174,7 @@ function App() {
             <Route
               path="/tesoreria"
               element={
-                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador']}>
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador', 'contador']}>
                   <Tesoreria />
                 </ProtectedRoute>
               }
@@ -227,7 +233,7 @@ function App() {
               element={
                 <ProtectedRoute
                   requiredScope="tenant"
-                  requiredTenantRoles={['administrador']}
+                  requiredTenantRoles={['administrador', 'oficial_cumplimiento']}
                   requireSarlaftEnabled
                 >
                   <Sarlaft />
@@ -239,7 +245,7 @@ function App() {
               element={
                 <ProtectedRoute
                   requiredScope="tenant"
-                  requiredTenantRoles={['administrador']}
+                  requiredTenantRoles={['administrador', 'contador']}
                   requireNominaEnabled
                 >
                   <Nomina />
@@ -249,7 +255,7 @@ function App() {
             <Route
               path="/calidad"
               element={
-                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador', 'comercial']}>
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador', 'contador', 'comercial']}>
                   <Calidad />
                 </ProtectedRoute>
               }

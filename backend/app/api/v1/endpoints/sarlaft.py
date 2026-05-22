@@ -80,9 +80,7 @@ def _ensure_profile(db: Session, tenant_id: UUID) -> SarlaftProfile:
 
 
 def _assert_sarlaft_editor(current_user: Usuario) -> None:
-    # Nota: por política temporal, SARLAFT queda restringido a ADMINISTRADOR
-    # hasta crear el rol OFICIAL_CUMPLIMIENTO.
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para configurar SARLAFT.",
@@ -744,7 +742,7 @@ def screening_opensanctions(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para ejecutar screening SARLAFT.",
@@ -835,7 +833,7 @@ def create_sarlaft_manual_check(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para registrar consultas manuales SARLAFT.",
@@ -951,7 +949,7 @@ def create_sarlaft_manual_check(
 def download_sarlaft_batch_template_csv(
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para descargar plantilla de lote SARLAFT.",
@@ -976,7 +974,7 @@ def create_sarlaft_batch_job(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para ejecutar lotes SARLAFT.",
@@ -1038,7 +1036,7 @@ def list_sarlaft_batch_jobs(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para listar lotes SARLAFT.",
@@ -1058,7 +1056,7 @@ def list_sarlaft_batch_job_rows(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para consultar detalle de lote SARLAFT.",
@@ -1101,7 +1099,7 @@ def download_sarlaft_batch_job_rows_csv(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para exportar lote SARLAFT.",
@@ -1193,7 +1191,7 @@ def download_sarlaft_manual_check_certificate(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para emitir certificados SARLAFT.",
@@ -1357,7 +1355,7 @@ def list_sarlaft_manual_checks(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para listar consultas manuales SARLAFT.",
@@ -1464,7 +1462,7 @@ def list_sarlaft_cases(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para listar casos SARLAFT.",
@@ -1533,7 +1531,7 @@ def list_sarlaft_internal_alerts(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para listar alertas internas SARLAFT.",
@@ -1716,7 +1714,7 @@ def get_sarlaft_subject_expediente(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para consultar expedientes SARLAFT.",
@@ -1967,7 +1965,7 @@ def decide_sarlaft_internal_alert(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para decidir alertas SARLAFT.",
@@ -2081,7 +2079,7 @@ def create_case_from_internal_alert(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para crear caso desde alerta interna.",
@@ -2230,7 +2228,7 @@ def create_sarlaft_case(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para crear casos SARLAFT.",
@@ -2308,7 +2306,7 @@ def get_sarlaft_case(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para consultar casos SARLAFT.",
@@ -2338,7 +2336,7 @@ def list_sarlaft_sirel_queue(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para listar bandeja SIREL.",
@@ -2458,7 +2456,7 @@ def mark_sarlaft_sirel_reported(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para marcar reporte SIREL.",
@@ -2607,7 +2605,7 @@ def download_sarlaft_pre_ros_txt(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para descargar pre-ROS.",
@@ -2655,7 +2653,7 @@ def download_sarlaft_expediente_template_txt(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para descargar plantilla de expediente.",
@@ -2752,7 +2750,7 @@ def download_sarlaft_expediente_template_pdf(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para descargar plantilla de expediente.",
