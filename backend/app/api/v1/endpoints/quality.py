@@ -17,6 +17,7 @@ from app.models.rtm_reminder import RTMRenewalReminder
 from app.models.sucursal import Sucursal
 from app.models.tenant import Tenant
 from app.models.usuario import RolEnum, Usuario
+from app.models.vehiculo import EstadoVehiculo, VehiculoProceso
 from app.utils.quality import process_due_quality_invites, utcnow_naive
 from app.utils.rtm_reminders import process_due_rtm_renewal_reminders
 from app.utils.email import enviar_email, generar_email_recordatorio_proxima_rtm
@@ -95,6 +96,8 @@ class QualityInviteItem(BaseModel):
     expires_at: datetime
     experiencia_global: int | None = None
     comentario: str | None = None
+    certificado_entregado_at: datetime | None = None
+    certificado_entregado_por: str | None = None
     created_at: datetime
 
 
@@ -192,6 +195,14 @@ class RTMReminderManualSendResponse(BaseModel):
     message: str
 
 
+class MarkCertificateDeliveredResponse(BaseModel):
+    success: bool
+    vehiculo_id: str
+    certificado_entregado_at: datetime
+    certificado_entregado_por: str
+    message: str
+
+
 class RTMReminderTouchManagementRequest(BaseModel):
     channel: str = Field(min_length=3, max_length=30)
     auto_status: str | None = Field(default=None, max_length=30)
@@ -227,7 +238,12 @@ def _persist_quality_survey_response(
     invite.updated_at = now
 
 
-def _invite_to_item(invite: QualitySurveyInvite, response: QualitySurveyResponse | None) -> QualityInviteItem:
+def _invite_to_item(
+    invite: QualitySurveyInvite,
+    response: QualitySurveyResponse | None,
+    vehiculo: VehiculoProceso | None = None,
+    entregador_nombre: str | None = None,
+) -> QualityInviteItem:
     return QualityInviteItem(
         id=str(invite.id),
         cliente_nombre=invite.cliente_nombre,
@@ -244,6 +260,8 @@ def _invite_to_item(invite: QualitySurveyInvite, response: QualitySurveyResponse
         expires_at=invite.expires_at,
         experiencia_global=response.experiencia_global if response else None,
         comentario=response.comentario if response else None,
+        certificado_entregado_at=(vehiculo.certificado_entregado_at if vehiculo else None),
+        certificado_entregado_por=entregador_nombre,
         created_at=invite.created_at,
     )
 
@@ -409,6 +427,7 @@ def list_quality_invites(
         query.order_by(QualitySurveyInvite.created_at.desc()).offset(skip).limit(limit).all()
     )
     invite_ids = [invite.id for invite in invites]
+    vehiculo_ids = [invite.vehiculo_id for invite in invites if invite.vehiculo_id is not None]
     responses = (
         db.query(QualitySurveyResponse)
         .filter(QualitySurveyResponse.invite_id.in_(invite_ids))
@@ -416,8 +435,37 @@ def list_quality_invites(
         if invite_ids
         else []
     )
+    vehiculos = (
+        db.query(VehiculoProceso)
+        .filter(VehiculoProceso.tenant_id == current_user.tenant_id, VehiculoProceso.id.in_(vehiculo_ids))
+        .all()
+        if vehiculo_ids
+        else []
+    )
     response_map = {str(resp.invite_id): resp for resp in responses}
-    items = [_invite_to_item(invite, response_map.get(str(invite.id))) for invite in invites]
+    vehiculo_map = {str(v.id): v for v in vehiculos}
+    entregador_ids = {
+        v.certificado_entregado_por
+        for v in vehiculos
+        if getattr(v, "certificado_entregado_por", None) is not None
+    }
+    entregador_map: dict[str, str] = {}
+    if entregador_ids:
+        users = db.query(Usuario).filter(Usuario.id.in_(list(entregador_ids))).all()
+        entregador_map = {str(u.id): u.nombre_completo for u in users}
+
+    items = [
+        _invite_to_item(
+            invite,
+            response_map.get(str(invite.id)),
+            vehiculo_map.get(str(invite.vehiculo_id)) if invite.vehiculo_id else None,
+            entregador_map.get(str(vehiculo_map.get(str(invite.vehiculo_id)).certificado_entregado_por))
+            if invite.vehiculo_id and vehiculo_map.get(str(invite.vehiculo_id))
+            and vehiculo_map.get(str(invite.vehiculo_id)).certificado_entregado_por
+            else None,
+        )
+        for invite in invites
+    ]
     return QualityInviteListResponse(items=items, total=total)
 
 
@@ -439,7 +487,22 @@ def get_quality_invite_detail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitación no encontrada")
 
     response = db.query(QualitySurveyResponse).filter(QualitySurveyResponse.invite_id == invite.id).first()
-    base = _invite_to_item(invite, response)
+    vehiculo = None
+    entregador_nombre = None
+    if invite.vehiculo_id:
+        vehiculo = (
+            db.query(VehiculoProceso)
+            .filter(
+                VehiculoProceso.id == invite.vehiculo_id,
+                VehiculoProceso.tenant_id == current_user.tenant_id,
+            )
+            .first()
+        )
+        if vehiculo and vehiculo.certificado_entregado_por:
+            entregador = db.query(Usuario).filter(Usuario.id == vehiculo.certificado_entregado_por).first()
+            entregador_nombre = entregador.nombre_completo if entregador else None
+
+    base = _invite_to_item(invite, response, vehiculo, entregador_nombre)
     return QualityInviteDetailResponse(
         **base.model_dump(),
         facilidad_agendar_cita=response.facilidad_agendar_cita if response else None,
@@ -555,6 +618,75 @@ def submit_in_person_quality_survey(
     _persist_quality_survey_response(db, invite, payload, now)
     db.commit()
     return {"success": True, "message": "Encuesta registrada. No se enviará correo si aún estaba pendiente."}
+
+
+@router.post("/invites/{invite_id}/mark-certificate-delivered", response_model=MarkCertificateDeliveredResponse)
+def mark_certificate_delivered(
+    invite_id: str,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    try:
+        invite_uuid = uuid.UUID(invite_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Identificador inválido") from exc
+
+    invite = (
+        db.query(QualitySurveyInvite)
+        .filter(QualitySurveyInvite.id == invite_uuid, QualitySurveyInvite.tenant_id == current_user.tenant_id)
+        .first()
+    )
+    if not invite:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitación no encontrada")
+    if not _calidad_invite_visible_for_user(invite, current_user):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitación no encontrada")
+    if not invite.vehiculo_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invitación sin vehículo asociado")
+
+    vehiculo = (
+        db.query(VehiculoProceso)
+        .filter(
+            VehiculoProceso.id == invite.vehiculo_id,
+            VehiculoProceso.tenant_id == current_user.tenant_id,
+        )
+        .first()
+    )
+    if not vehiculo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehículo no encontrado")
+
+    if vehiculo.certificado_entregado_at is not None:
+        entregador_nombre = "Usuario"
+        if vehiculo.certificado_entregado_por:
+            entregador = db.query(Usuario).filter(Usuario.id == vehiculo.certificado_entregado_por).first()
+            if entregador and entregador.nombre_completo:
+                entregador_nombre = entregador.nombre_completo
+        return MarkCertificateDeliveredResponse(
+            success=True,
+            vehiculo_id=str(vehiculo.id),
+            certificado_entregado_at=vehiculo.certificado_entregado_at,
+            certificado_entregado_por=entregador_nombre,
+            message="Este certificado ya estaba marcado como entregado.",
+        )
+
+    if vehiculo.estado == EstadoVehiculo.REGISTRADO:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El vehículo aún no está cobrado; no se puede marcar entrega de certificado.",
+        )
+
+    now = _now_naive()
+    vehiculo.certificado_entregado_at = now
+    vehiculo.certificado_entregado_por = current_user.id
+    db.commit()
+    db.refresh(vehiculo)
+
+    return MarkCertificateDeliveredResponse(
+        success=True,
+        vehiculo_id=str(vehiculo.id),
+        certificado_entregado_at=now,
+        certificado_entregado_por=current_user.nombre_completo,
+        message="Certificado RTM marcado como entregado.",
+    )
 
 
 @router.get("/rtm-reminders/summary", response_model=RTMReminderSummary)

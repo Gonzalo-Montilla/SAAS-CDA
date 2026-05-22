@@ -269,6 +269,8 @@ def ensure_tenant_domain_schema(db):
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS iva_base_gravable_servicio NUMERIC(12,2)"))
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS iva_valor_servicio NUMERIC(12,2)"))
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS valor_excluido_servicio NUMERIC(12,2)"))
+    db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS certificado_entregado_at TIMESTAMP WITHOUT TIME ZONE"))
+    db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS certificado_entregado_por UUID"))
     db.execute(
         text(
             "ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS cliente_tipo_documento VARCHAR(10) NOT NULL DEFAULT 'CC'"

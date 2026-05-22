@@ -652,6 +652,8 @@ export interface QualityInviteItem {
   expires_at: string;
   experiencia_global?: number | null;
   comentario?: string | null;
+  certificado_entregado_at?: string | null;
+  certificado_entregado_por?: string | null;
   created_at: string;
 }
 

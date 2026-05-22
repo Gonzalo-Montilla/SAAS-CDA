@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  CheckCircle2,
   CalendarCheck2,
   ChevronLeft,
   ChevronRight,
@@ -92,6 +93,8 @@ export default function Calidad() {
   const [encuestasPorPagina, setEncuestasPorPagina] = useState(25);
   const [selectedInviteId, setSelectedInviteId] = useState<string | null>(null);
   const [manualInviteId, setManualInviteId] = useState<string | null>(null);
+  const [confirmEntregaInvite, setConfirmEntregaInvite] = useState<QualityInviteItem | null>(null);
+  const [markingInviteId, setMarkingInviteId] = useState<string | null>(null);
   const [inPersonRatings, setInPersonRatings] = useState<Record<QualitySurveyRatingKey, number>>(
     emptyQualitySurveyRatings
   );
@@ -183,6 +186,29 @@ export default function Calidad() {
     },
     onError: (error: unknown) => {
       let message = 'No fue posible guardar la encuesta.';
+      if (axios.isAxiosError(error)) {
+        const d = error.response?.data?.detail;
+        if (typeof d === 'string') message = d;
+      } else if (error instanceof Error) {
+        message = error.message;
+      }
+      showToast('error', 'Error', message);
+    },
+  });
+
+  const markCertificateDeliveredMutation = useMutation({
+    mutationFn: (inviteId: string) => qualityApi.markCertificateDelivered(inviteId),
+    onSuccess: (data) => {
+      setConfirmEntregaInvite(null);
+      setMarkingInviteId(null);
+      showToast('success', 'Certificado entregado', data.message);
+      queryClient.invalidateQueries({ queryKey: ['quality-invites'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-operativo'] });
+      queryClient.invalidateQueries({ queryKey: ['quality-invite-detail'] });
+    },
+    onError: (error: unknown) => {
+      setMarkingInviteId(null);
+      let message = 'No fue posible marcar el certificado como entregado.';
       if (axios.isAxiosError(error)) {
         const d = error.response?.data?.detail;
         if (typeof d === 'string') message = d;
@@ -511,6 +537,29 @@ export default function Calidad() {
                           <Eye className="w-3.5 h-3.5" />
                           Ver detalle
                         </button>
+                        {!row.certificado_entregado_at ? (
+                          <button
+                            type="button"
+                            onClick={() => setConfirmEntregaInvite(row)}
+                            disabled={markCertificateDeliveredMutation.isLoading && markingInviteId === row.id}
+                            className="px-3 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            {markCertificateDeliveredMutation.isLoading && markingInviteId === row.id
+                              ? 'Marcando...'
+                              : 'Certificado entregado'}
+                          </button>
+                        ) : (
+                          <span
+                            className="badge badge-success text-xs inline-flex items-center gap-1"
+                            title={`Entregado: ${new Date(row.certificado_entregado_at).toLocaleString()}${
+                              row.certificado_entregado_por ? ` · ${row.certificado_entregado_por}` : ''
+                            }`}
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            Entregado
+                          </span>
+                        )}
                       </div>
                     </td>
                   </tr>
@@ -906,6 +955,48 @@ export default function Calidad() {
                   </p>
                 </>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmEntregaInvite && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md section-card p-6 shadow-2xl">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="mt-0.5">
+                <CheckCircle2 className="w-6 h-6 text-emerald-600" />
+              </div>
+              <div>
+                <p className="text-base font-semibold text-slate-900">Confirmar entrega de certificado</p>
+                <p className="text-sm text-slate-600 mt-1">
+                  Vas a marcar como entregado el certificado RTM de la placa{' '}
+                  <span className="font-semibold text-slate-800">{confirmEntregaInvite.placa}</span>.
+                </p>
+                <p className="text-xs text-slate-500 mt-1">Esta acción no se puede deshacer.</p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmEntregaInvite(null)}
+                className="btn-corporate-muted px-4 py-2 rounded-lg"
+                disabled={markCertificateDeliveredMutation.isLoading}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setMarkingInviteId(confirmEntregaInvite.id);
+                  markCertificateDeliveredMutation.mutate(confirmEntregaInvite.id);
+                }}
+                className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-60 inline-flex items-center gap-2"
+                disabled={markCertificateDeliveredMutation.isLoading}
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                {markCertificateDeliveredMutation.isLoading ? 'Marcando...' : 'Confirmar entrega'}
+              </button>
             </div>
           </div>
         </div>

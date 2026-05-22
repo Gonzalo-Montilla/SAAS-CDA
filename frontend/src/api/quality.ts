@@ -28,6 +28,14 @@ export interface RTMReminderUpdatePayload {
   next_contact_at?: string;
 }
 
+export interface MarkCertificateDeliveredResponse {
+  success: boolean;
+  vehiculo_id: string;
+  certificado_entregado_at: string;
+  certificado_entregado_por: string;
+  message: string;
+}
+
 export const qualityApi = {
   getSummary: async (params?: { sucursal_id?: string }): Promise<QualitySummary> => {
     const response = await apiClient.get<QualitySummary>('/quality/summary', {
@@ -67,6 +75,13 @@ export const qualityApi = {
     const response = await apiClient.post<{ success: boolean; message: string }>(
       `/quality/invites/${inviteId}/submit-in-person`,
       payload
+    );
+    return response.data;
+  },
+
+  markCertificateDelivered: async (inviteId: string): Promise<MarkCertificateDeliveredResponse> => {
+    const response = await apiClient.post<MarkCertificateDeliveredResponse>(
+      `/quality/invites/${inviteId}/mark-certificate-delivered`
     );
     return response.data;
   },

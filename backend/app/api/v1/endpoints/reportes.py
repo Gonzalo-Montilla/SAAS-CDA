@@ -522,10 +522,20 @@ def obtener_dashboard_operativo(
         _vp_scope(tid, scope_sid, VehiculoProceso.estado == EstadoVehiculo.REGISTRADO)
     )
     cola_pagado_q = db.query(VehiculoProceso).filter(
-        _vp_scope(tid, scope_sid, VehiculoProceso.estado == EstadoVehiculo.PAGADO)
+        _vp_scope(
+            tid,
+            scope_sid,
+            VehiculoProceso.estado == EstadoVehiculo.PAGADO,
+            VehiculoProceso.certificado_entregado_at.is_(None),
+        )
     )
     cola_en_pista_q = db.query(VehiculoProceso).filter(
-        _vp_scope(tid, scope_sid, VehiculoProceso.estado == EstadoVehiculo.EN_PISTA)
+        _vp_scope(
+            tid,
+            scope_sid,
+            VehiculoProceso.estado == EstadoVehiculo.EN_PISTA,
+            VehiculoProceso.certificado_entregado_at.is_(None),
+        )
     )
 
     pendientes_caja = cola_registrado_q.count()
