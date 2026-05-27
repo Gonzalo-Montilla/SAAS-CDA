@@ -1,6 +1,14 @@
-import { useState, useEffect, useMemo, type FormEvent } from 'react';
+import {
+  useState,
+  useEffect,
+  useMemo,
+  useRef,
+  type FormEvent,
+  type MouseEvent as ReactMouseEvent,
+  type TouchEvent as ReactTouchEvent,
+} from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ClipboardList, DollarSign, CheckCircle2, RotateCcw, Search, X, Calendar, CalendarDays, CalendarRange, BarChart3, Camera, Car, Edit, AlertTriangle, Download } from 'lucide-react';
+import { ClipboardList, DollarSign, CheckCircle2, RotateCcw, Search, X, Calendar, CalendarDays, CalendarRange, BarChart3, Camera, Car, Edit, AlertTriangle, Download, ChevronDown, ChevronUp, FileText, CircleDot } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -14,6 +22,314 @@ import { vehiculosApi, type TarifaCalculada } from '../api/vehiculos';
 import { tarifasApi } from '../api/tarifas';
 import type { VehiculoRegistro, VehiculoConsultaRunt } from '../types';
 import { formatCOP } from '../utils/formatNumber';
+
+type SnNoNa = 'si' | 'no' | 'na' | '';
+type SnNo = 'si' | 'no' | '';
+
+type PresionLlantaItem = {
+  posicion_id: string;
+  posicion_label: string;
+  psi: string;
+  is_repuesto: boolean;
+};
+
+type RecepcionDatosTecnicos = {
+  clase_vehiculo: string;
+  marca: string;
+  linea: string;
+  modelo: string;
+  color: string;
+  servicio: string;
+  tipo_combustible: string;
+  carga_pasajeros: string;
+  ensenanza: SnNo;
+  kilometraje: string;
+  blindado: SnNoNa;
+  polarizado: SnNoNa;
+  cilindraje: string;
+  presion_inflado: string;
+  presion_llantas: PresionLlantaItem[];
+  observaciones_tecnicas: string;
+};
+
+type RecepcionPreparacionChecklist = {
+  limpieza_descargado: SnNoNa;
+  licencia_y_confrontacion_datos: SnNoNa;
+  conversion_gas_vigente: SnNoNa;
+  presion_llantas_adecuada_cda: SnNoNa;
+  tapa_o_capuchones_valvula: SnNoNa;
+  niveles_fluidos_visibles: SnNoNa;
+  sin_accesorios_que_impidan_acople: SnNoNa;
+  retiro_elementos_cabina_carga: SnNoNa;
+  liberacion_carga_para_inspeccion: SnNoNa;
+  tablero_instrumentos_ok: SnNoNa;
+  cinturones_sillas_accesos_ok: SnNoNa;
+  combustible_suficiente: SnNoNa;
+  placa_identificacion_legible: SnNoNa;
+  llanta_repuesto_accesible: SnNoNa;
+  luces_funcionales: SnNoNa;
+  extintor_central_funcional_moto: SnNoNa;
+  adaptaciones_discapacidad: SnNoNa;
+  viable_ingreso_linea: SnNo;
+};
+
+type RecepcionAutorizacionesDatos = {
+  contacto_fuerza_comercial: SnNo;
+  contacto_encuestas_confirmacion: SnNo;
+  contacto_recordatorio_rtm_soat: SnNo;
+};
+
+type FirmaDigital = {
+  data_url: string;
+  signed_at: string;
+  signer_name: string;
+};
+
+type RecepcionFormatoExtra = {
+  version: string;
+  fecha_formato: string;
+  no_inspeccion: string;
+  tipo_vehiculo_formato: string;
+  datos_tecnicos: {
+    clase_vehiculo: string;
+    marca: string;
+    linea: string;
+    modelo: string;
+    color: string;
+    servicio: string;
+    tipo_combustible: string;
+    carga_pasajeros: string;
+    ensenanza: SnNo;
+    kilometraje: string;
+    blindado: SnNoNa;
+    polarizado: SnNoNa;
+    cilindraje: string;
+    presion_inflado: string;
+    presion_llantas: PresionLlantaItem[];
+    observaciones_tecnicas: string;
+  };
+  preparacion_checklist: {
+    limpieza_descargado: SnNoNa;
+    licencia_y_confrontacion_datos: SnNoNa;
+    conversion_gas_vigente: SnNoNa;
+    presion_llantas_adecuada_cda: SnNoNa;
+    tapa_o_capuchones_valvula: SnNoNa;
+    niveles_fluidos_visibles: SnNoNa;
+    sin_accesorios_que_impidan_acople: SnNoNa;
+    retiro_elementos_cabina_carga: SnNoNa;
+    liberacion_carga_para_inspeccion: SnNoNa;
+    tablero_instrumentos_ok: SnNoNa;
+    cinturones_sillas_accesos_ok: SnNoNa;
+    combustible_suficiente: SnNoNa;
+    placa_identificacion_legible: SnNoNa;
+    llanta_repuesto_accesible: SnNoNa;
+    luces_funcionales: SnNoNa;
+    extintor_central_funcional_moto: SnNoNa;
+    adaptaciones_discapacidad: SnNoNa;
+    viable_ingreso_linea: SnNo;
+  };
+  titular_datos: {
+    nombre_apellidos: string;
+    numero_documento: string;
+    celular_telefono: string;
+    email: string;
+    ciudad_direccion: string;
+  };
+  pre_revision: {
+    firma_operario: FirmaDigital | null;
+  };
+  autorizaciones_datos: {
+    contacto_fuerza_comercial: SnNo;
+    contacto_encuestas_confirmacion: SnNo;
+    contacto_recordatorio_rtm_soat: SnNo;
+  };
+  firma_titular: FirmaDigital | null;
+};
+
+const createDefaultFormatoExtra = (): RecepcionFormatoExtra => ({
+  version: 'RTM-01-FR v13',
+  fecha_formato: '',
+  no_inspeccion: '',
+  tipo_vehiculo_formato: '',
+  datos_tecnicos: {
+    clase_vehiculo: '',
+    marca: '',
+    linea: '',
+    modelo: '',
+    color: '',
+    servicio: '',
+    tipo_combustible: '',
+    carga_pasajeros: '',
+    ensenanza: '',
+    cilindraje: '',
+    kilometraje: '',
+    blindado: '',
+    polarizado: '',
+    presion_inflado: '',
+    presion_llantas: [],
+    observaciones_tecnicas: '',
+  },
+  preparacion_checklist: {
+    limpieza_descargado: '',
+    licencia_y_confrontacion_datos: '',
+    conversion_gas_vigente: '',
+    presion_llantas_adecuada_cda: '',
+    tapa_o_capuchones_valvula: '',
+    niveles_fluidos_visibles: '',
+    sin_accesorios_que_impidan_acople: '',
+    retiro_elementos_cabina_carga: '',
+    liberacion_carga_para_inspeccion: '',
+    tablero_instrumentos_ok: '',
+    cinturones_sillas_accesos_ok: '',
+    combustible_suficiente: '',
+    placa_identificacion_legible: '',
+    llanta_repuesto_accesible: '',
+    luces_funcionales: '',
+    extintor_central_funcional_moto: '',
+    adaptaciones_discapacidad: '',
+    viable_ingreso_linea: '',
+  },
+  titular_datos: {
+    nombre_apellidos: '',
+    numero_documento: '',
+    celular_telefono: '',
+    email: '',
+    ciudad_direccion: '',
+  },
+  pre_revision: {
+    firma_operario: null,
+  },
+  autorizaciones_datos: {
+    contacto_fuerza_comercial: '',
+    contacto_encuestas_confirmacion: '',
+    contacto_recordatorio_rtm_soat: '',
+  },
+  firma_titular: null,
+});
+
+const PREPARACION_ITEMS: Array<{ key: keyof RecepcionPreparacionChecklist; label: string }> = [
+  { key: 'limpieza_descargado', label: 'Estado de limpieza adecuado y vehículo descargado' },
+  { key: 'licencia_y_confrontacion_datos', label: 'Licencia de tránsito y confrontación de datos (placa/marca/línea/servicio/color)' },
+  { key: 'conversion_gas_vigente', label: 'Conversión a gas vigente (si aplica)' },
+  { key: 'presion_llantas_adecuada_cda', label: '¿La presión de inflado de las llantas es adecuada según las disposiciones del CDA?' },
+  { key: 'tapa_o_capuchones_valvula', label: 'Sin copas o tapacubos que cubran rin/pernos/tuercas' },
+  { key: 'niveles_fluidos_visibles', label: 'Niveles de fluidos visibles y sin alteraciones' },
+  { key: 'sin_accesorios_que_impidan_acople', label: 'Sin accesorios que impidan ubicación de acople o introducción de sonda' },
+  { key: 'retiro_elementos_cabina_carga', label: 'Retiro de accesorios/elementos que afecten visibilidad o ingreso a línea' },
+  { key: 'liberacion_carga_para_inspeccion', label: 'Se libera carga para pruebas y verificación en inspección' },
+  { key: 'tablero_instrumentos_ok', label: 'Tablero de instrumentos con indicadores visibles' },
+  { key: 'cinturones_sillas_accesos_ok', label: 'Cinturones/sillas/asientos de fácil acceso para inspección' },
+  { key: 'combustible_suficiente', label: 'Combustible suficiente para el desarrollo de la inspección' },
+  { key: 'placa_identificacion_legible', label: 'Placa e identificación en buen estado y posicionamiento' },
+  { key: 'llanta_repuesto_accesible', label: 'Llanta de repuesto accesible (si aplica)' },
+  { key: 'luces_funcionales', label: 'Al menos una luz funcional' },
+  { key: 'extintor_central_funcional_moto', label: 'Extintor central funcional en motocicleta (si aplica)' },
+  { key: 'adaptaciones_discapacidad', label: 'Adaptaciones para discapacidad (si aplica)' },
+  { key: 'viable_ingreso_linea', label: '¿Vehículo preparado para inspección e ingreso a línea?' },
+];
+
+const AUTORIZACION_ITEMS: Array<{ key: keyof RecepcionAutorizacionesDatos; label: string }> = [
+  { key: 'contacto_fuerza_comercial', label: 'Autoriza contacto de fuerza comercial / investigación de mercados' },
+  { key: 'contacto_encuestas_confirmacion', label: 'Autoriza contacto para encuestas y confirmación de datos' },
+  { key: 'contacto_recordatorio_rtm_soat', label: 'Autoriza recordatorio de RTM y SOAT' },
+];
+
+const SERVICIO_OPTIONS = ['PARTICULAR', 'PUBLICO', 'OFICIAL', 'EXTRANJERO', 'DIPLOMATICO', 'TEMPORAL'] as const;
+const TIPO_LLAYOUT = {
+  moto: [
+    { id: 'moto_delantera', label: 'Delantera', is_repuesto: false },
+    { id: 'moto_trasera', label: 'Trasera', is_repuesto: false },
+  ],
+  liviano: [
+    { id: 'liv_del_izq', label: 'Delantera izquierda', is_repuesto: false },
+    { id: 'liv_del_der', label: 'Delantera derecha', is_repuesto: false },
+    { id: 'liv_tra_izq', label: 'Trasera izquierda', is_repuesto: false },
+    { id: 'liv_tra_der', label: 'Trasera derecha', is_repuesto: false },
+    { id: 'liv_rep_1', label: 'Repuesto', is_repuesto: true },
+  ],
+  pesado: [
+    { id: 'pes_e1_izq', label: 'Eje 1 izquierda', is_repuesto: false },
+    { id: 'pes_e1_der', label: 'Eje 1 derecha', is_repuesto: false },
+    { id: 'pes_e2_izq_ext', label: 'Eje 2 izquierda externa', is_repuesto: false },
+    { id: 'pes_e2_izq_int', label: 'Eje 2 izquierda interna', is_repuesto: false },
+    { id: 'pes_e2_der_int', label: 'Eje 2 derecha interna', is_repuesto: false },
+    { id: 'pes_e2_der_ext', label: 'Eje 2 derecha externa', is_repuesto: false },
+    { id: 'pes_e3_izq_ext', label: 'Eje 3 izquierda externa', is_repuesto: false },
+    { id: 'pes_e3_izq_int', label: 'Eje 3 izquierda interna', is_repuesto: false },
+    { id: 'pes_e3_der_int', label: 'Eje 3 derecha interna', is_repuesto: false },
+    { id: 'pes_e3_der_ext', label: 'Eje 3 derecha externa', is_repuesto: false },
+    { id: 'pes_e4_izq_ext', label: 'Eje 4 izquierda externa', is_repuesto: false },
+    { id: 'pes_e4_der_ext', label: 'Eje 4 derecha externa', is_repuesto: false },
+    { id: 'pes_rep_1', label: 'Repuesto 1', is_repuesto: true },
+    { id: 'pes_rep_2', label: 'Repuesto 2', is_repuesto: true },
+  ],
+} as const;
+
+const formatTodayYmd = (): string => {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+const mapTipoVehiculoFormato = (tipo: string): string => {
+  const t = (tipo || '').toLowerCase();
+  if (t === 'moto') return 'MOTOCICLETA 4T';
+  if (t.includes('pesado')) return 'PESADO';
+  return 'LIVIANO';
+};
+
+const buildNoInspeccionProvisional = (placa: string): string => {
+  const stamp = formatTodayYmd().replace(/-/g, '');
+  const p = (placa || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase().slice(-4) || 'SNPL';
+  return `PR-${stamp}-${p}`;
+};
+
+const resolveTipoLlantasKey = (tipoVehiculo: string): keyof typeof TIPO_LLAYOUT => {
+  const t = (tipoVehiculo || '').toLowerCase();
+  if (t === 'moto') return 'moto';
+  if (t.includes('pesado')) return 'pesado';
+  return 'liviano';
+};
+
+const buildPresionResumen = (items: PresionLlantaItem[]): string => {
+  const parts = items
+    .map((it) => ({
+      label: (it.posicion_label || '').trim(),
+      psi: (it.psi || '').trim(),
+    }))
+    .filter((it) => it.psi.length > 0)
+    .map((it) => `${it.label}: ${it.psi} PSI`);
+  return parts.join(', ');
+};
+
+const countTecnicosDiligenciados = (dt: RecepcionFormatoExtra['datos_tecnicos']): number => {
+  const scalarKeys: Array<keyof RecepcionFormatoExtra['datos_tecnicos']> = [
+    'clase_vehiculo',
+    'marca',
+    'linea',
+    'modelo',
+    'color',
+    'servicio',
+    'tipo_combustible',
+    'carga_pasajeros',
+    'ensenanza',
+    'kilometraje',
+    'blindado',
+    'polarizado',
+    'cilindraje',
+    'presion_inflado',
+    'observaciones_tecnicas',
+  ];
+  const scalarCount = scalarKeys.filter((k) => String(dt[k] || '').trim().length > 0).length;
+  const psiCount = (dt.presion_llantas || []).filter((x) => String(x.psi || '').trim().length > 0).length;
+  return scalarCount + psiCount;
+};
+
+const countPreRevisionDiligenciada = (preRevision: RecepcionFormatoExtra['pre_revision']): number => {
+  return preRevision.firma_operario?.data_url ? 1 : 0;
+};
 
 export default function Recepcion() {
   const normalizarDocumentoCliente = (
@@ -69,6 +385,14 @@ export default function Recepcion() {
     tiene_soat: false,
     observaciones: '',
   });
+  const [mostrarFormatoExtra, setMostrarFormatoExtra] = useState(false);
+  const [formatoExtra, setFormatoExtra] = useState<RecepcionFormatoExtra>(createDefaultFormatoExtra());
+  const firmaCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const firmaOperarioCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [firmaDibujando, setFirmaDibujando] = useState(false);
+  const [firmaOperarioDibujando, setFirmaOperarioDibujando] = useState(false);
+  const [firmaTrazoPendiente, setFirmaTrazoPendiente] = useState(false);
+  const [firmaOperarioTrazoPendiente, setFirmaOperarioTrazoPendiente] = useState(false);
   const [consultaRunt, setConsultaRunt] = useState<{
     document_type: 'CC' | 'CE' | 'PA' | 'NIT';
     document_number: string;
@@ -76,6 +400,33 @@ export default function Recepcion() {
     document_type: 'CC',
     document_number: '',
   });
+
+  const formatoExtraResumen = useMemo(() => {
+    const tecnicoCount = countTecnicosDiligenciados(formatoExtra.datos_tecnicos);
+    const checklistCount = Object.values(formatoExtra.preparacion_checklist).filter((v) => v === 'si' || v === 'no' || v === 'na').length;
+    const preRevisionCount = countPreRevisionDiligenciada(formatoExtra.pre_revision);
+    const total = tecnicoCount + checklistCount + preRevisionCount;
+    if (total === 0) return { estado: 'Sin diligenciar', className: 'bg-slate-100 text-slate-700' };
+    if (checklistCount === PREPARACION_ITEMS.length) {
+      return { estado: 'Completo', className: 'bg-emerald-100 text-emerald-700' };
+    }
+    return { estado: 'Parcial', className: 'bg-amber-100 text-amber-700' };
+  }, [formatoExtra]);
+
+  const requiereFirmaFormato = useMemo(() => {
+    const tecnicoCount = countTecnicosDiligenciados(formatoExtra.datos_tecnicos);
+    const checklistCount = Object.values(formatoExtra.preparacion_checklist).filter((v) => v === 'si' || v === 'no' || v === 'na').length;
+    const preRevisionCount = countPreRevisionDiligenciada(formatoExtra.pre_revision);
+    return tecnicoCount + checklistCount + preRevisionCount > 0;
+  }, [formatoExtra]);
+
+  const firmaCapturada = Boolean(formatoExtra.firma_titular?.data_url);
+  const firmaOperarioCapturada = Boolean(formatoExtra.pre_revision.firma_operario?.data_url);
+  const bloqueoFirmaRegistro = requiereFirmaFormato && (!firmaCapturada || !firmaOperarioCapturada);
+  const layoutLlantas = useMemo(() => {
+    const key = resolveTipoLlantasKey(formData.tipo_vehiculo);
+    return TIPO_LLAYOUT[key];
+  }, [formData.tipo_vehiculo]);
 
   type PrefillState = {
     agendamiento_prefill?: {
@@ -114,6 +465,12 @@ export default function Recepcion() {
   const [fechaDesde, setFechaDesde] = useState('');
   const [fechaHasta, setFechaHasta] = useState('');
   const [exportandoListado, setExportandoListado] = useState(false);
+  const [descargandoFormatoVehiculoId, setDescargandoFormatoVehiculoId] = useState<string | null>(null);
+  const [pdfPreview, setPdfPreview] = useState<{
+    blobUrl: string;
+    title: string;
+    fileName: string;
+  } | null>(null);
   const [paginaActual, setPaginaActual] = useState(1);
   const registrosPorPagina = 12;
 
@@ -280,6 +637,19 @@ export default function Recepcion() {
           cliente_nombre: data.titular_nombre ? String(data.titular_nombre).toUpperCase() : prev.cliente_nombre,
         };
       });
+      setFormatoExtra((prev) => ({
+        ...prev,
+        datos_tecnicos: {
+          ...prev.datos_tecnicos,
+          clase_vehiculo: data.clase_vehiculo || prev.datos_tecnicos.clase_vehiculo,
+          marca: data.marca || prev.datos_tecnicos.marca || formData.marca || '',
+          linea: data.linea || prev.datos_tecnicos.linea,
+          modelo: data.modelo || prev.datos_tecnicos.modelo || formData.modelo || '',
+          servicio: data.tipo_servicio || prev.datos_tecnicos.servicio,
+          color: data.color || prev.datos_tecnicos.color,
+          cilindraje: data.cilindraje || prev.datos_tecnicos.cilindraje,
+        },
+      }));
       if (!data.encontrado) {
         showToast(
           'warning',
@@ -431,6 +801,8 @@ export default function Recepcion() {
     setClienteFactusMunicipalityId(defaultClienteFactusMunicipalityId || '');
     setClienteFactusMunicipalityLabel('');
     setRuntSugerencia(null);
+    setFormatoExtra(createDefaultFormatoExtra());
+    setMostrarFormatoExtra(false);
     setConsultaRunt({
       document_type: 'CC',
       document_number: '',
@@ -484,6 +856,14 @@ export default function Recepcion() {
         : defaultClienteFactusMunicipalityId || ''
     );
     setClienteFactusMunicipalityLabel('');
+    const formatoGuardado = hidratarFormatoExtra(vehiculo.recepcion_formato_extra_json);
+    setFormatoExtra(formatoGuardado);
+    const tecnicoCountGuardado = countTecnicosDiligenciados(formatoGuardado.datos_tecnicos);
+    const tieneFormatoGuardado =
+      tecnicoCountGuardado > 0 ||
+      Object.values(formatoGuardado.preparacion_checklist).some((v) => v === 'si' || v === 'no' || v === 'na') ||
+      countPreRevisionDiligenciada(formatoGuardado.pre_revision) > 0;
+    setMostrarFormatoExtra(tieneFormatoGuardado);
     
     // Scroll al formulario
     window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -537,6 +917,218 @@ export default function Recepcion() {
     });
   };
 
+  const construirFormatoExtraPayload = (): RecepcionFormatoExtra | undefined => {
+    const titularAuto = {
+      nombre_apellidos: (formData.cliente_nombre || '').trim(),
+      numero_documento: (formData.cliente_documento || '').trim(),
+      celular_telefono: (formData.cliente_telefono || '').trim(),
+      email: (formData.cliente_email || '').trim().toLowerCase(),
+      ciudad_direccion: (formData.cliente_direccion || '').trim(),
+    };
+    const payload: RecepcionFormatoExtra = {
+      version: (formatoExtra.version || 'RTM-01-FR v13').trim(),
+      fecha_formato: (formatoExtra.fecha_formato || formatTodayYmd()).trim(),
+      no_inspeccion: (formatoExtra.no_inspeccion || buildNoInspeccionProvisional(formData.placa)).trim(),
+      tipo_vehiculo_formato: (formatoExtra.tipo_vehiculo_formato || mapTipoVehiculoFormato(formData.tipo_vehiculo)).trim(),
+      datos_tecnicos: {
+        clase_vehiculo: (formatoExtra.datos_tecnicos.clase_vehiculo || '').trim(),
+        marca: (formatoExtra.datos_tecnicos.marca || formData.marca || '').trim(),
+        linea: (formatoExtra.datos_tecnicos.linea || '').trim(),
+        modelo: (formatoExtra.datos_tecnicos.modelo || formData.modelo || '').trim(),
+        color: (formatoExtra.datos_tecnicos.color || '').trim(),
+        servicio: (formatoExtra.datos_tecnicos.servicio || '').trim(),
+        tipo_combustible: (formatoExtra.datos_tecnicos.tipo_combustible || '').trim(),
+        carga_pasajeros: (formatoExtra.datos_tecnicos.carga_pasajeros || '').trim(),
+        ensenanza: formatoExtra.datos_tecnicos.ensenanza || '',
+        kilometraje: (formatoExtra.datos_tecnicos.kilometraje || '').trim(),
+        blindado: formatoExtra.datos_tecnicos.blindado || '',
+        polarizado: formatoExtra.datos_tecnicos.polarizado || '',
+        cilindraje: (formatoExtra.datos_tecnicos.cilindraje || '').trim(),
+        presion_inflado: (formatoExtra.datos_tecnicos.presion_inflado || '').trim(),
+        presion_llantas: (formatoExtra.datos_tecnicos.presion_llantas || [])
+          .map((item) => ({
+            posicion_id: String(item.posicion_id || '').trim(),
+            posicion_label: String(item.posicion_label || '').trim(),
+            psi: String(item.psi || '').trim(),
+            is_repuesto: Boolean(item.is_repuesto),
+          }))
+          .filter((item) => item.posicion_id.length > 0),
+        observaciones_tecnicas: (formatoExtra.datos_tecnicos.observaciones_tecnicas || formData.observaciones || '').trim(),
+      },
+      preparacion_checklist: { ...formatoExtra.preparacion_checklist },
+      titular_datos: titularAuto,
+      pre_revision: {
+        firma_operario: formatoExtra.pre_revision.firma_operario?.data_url
+          ? {
+              data_url: formatoExtra.pre_revision.firma_operario.data_url,
+              signed_at: formatoExtra.pre_revision.firma_operario.signed_at || new Date().toISOString(),
+              signer_name:
+                formatoExtra.pre_revision.firma_operario.signer_name ||
+                (user?.nombre_completo || '').trim() ||
+                'Operario pre-revision',
+            }
+          : null,
+      },
+      autorizaciones_datos: {
+        // Fuente: módulo Habeas Data / consentimiento general del flujo.
+        contacto_fuerza_comercial: 'si',
+        contacto_encuestas_confirmacion: 'si',
+        contacto_recordatorio_rtm_soat: 'si',
+      },
+      firma_titular: formatoExtra.firma_titular?.data_url
+        ? {
+            data_url: formatoExtra.firma_titular.data_url,
+            signed_at: formatoExtra.firma_titular.signed_at || new Date().toISOString(),
+            signer_name: formatoExtra.firma_titular.signer_name || (formData.cliente_nombre || '').trim(),
+          }
+        : null,
+    };
+    const hasPsi = (payload.datos_tecnicos.presion_llantas || []).some((x) => String(x.psi || '').trim().length > 0);
+    const hasScalarTecnico =
+      [
+        payload.datos_tecnicos.clase_vehiculo,
+        payload.datos_tecnicos.marca,
+        payload.datos_tecnicos.linea,
+        payload.datos_tecnicos.modelo,
+        payload.datos_tecnicos.color,
+        payload.datos_tecnicos.servicio,
+        payload.datos_tecnicos.tipo_combustible,
+        payload.datos_tecnicos.carga_pasajeros,
+        payload.datos_tecnicos.ensenanza,
+        payload.datos_tecnicos.kilometraje,
+        payload.datos_tecnicos.blindado,
+        payload.datos_tecnicos.polarizado,
+        payload.datos_tecnicos.cilindraje,
+        payload.datos_tecnicos.presion_inflado,
+        payload.datos_tecnicos.observaciones_tecnicas,
+      ].some((v) => String(v || '').trim().length > 0);
+    const hasValues =
+      hasScalarTecnico ||
+      hasPsi ||
+      Object.values(payload.preparacion_checklist).some((v) => v === 'si' || v === 'no' || v === 'na') ||
+      Boolean(payload.pre_revision.firma_operario?.data_url);
+    return hasValues ? payload : undefined;
+  };
+
+  const hidratarFormatoExtra = (raw: unknown): RecepcionFormatoExtra => {
+    const base = createDefaultFormatoExtra();
+    if (!raw || typeof raw !== 'object') return base;
+    const input = raw as Record<string, unknown>;
+    const dt = (input.datos_tecnicos as Record<string, unknown>) || {};
+    const ck = ((input.preparacion_checklist as Record<string, unknown>) || (input.checklist as Record<string, unknown>) || {});
+    const titular = (input.titular_datos as Record<string, unknown>) || {};
+    const preRevision = (input.pre_revision as Record<string, unknown>) || {};
+    const auth = (input.autorizaciones_datos as Record<string, unknown>) || {};
+    const firma = (input.firma_titular as Record<string, unknown>) || {};
+    const pickSn = (value: unknown): SnNoNa => {
+      const v = String(value || '').toLowerCase();
+      if (v === 'si' || v === 'no' || v === 'na') return v as SnNoNa;
+      return '';
+    };
+    const pickSnNo = (value: unknown): SnNo => {
+      const v = String(value || '').toLowerCase();
+      if (v === 'si' || v === 'no') return v as SnNo;
+      return '';
+    };
+    return {
+      version: String(input.version || base.version),
+      fecha_formato: String(input.fecha_formato || ''),
+      no_inspeccion: String(input.no_inspeccion || ''),
+      tipo_vehiculo_formato: String(input.tipo_vehiculo_formato || ''),
+      datos_tecnicos: {
+        clase_vehiculo: String(dt.clase_vehiculo || ''),
+        marca: String(dt.marca || ''),
+        linea: String(dt.linea || ''),
+        modelo: String(dt.modelo || ''),
+        color: String(dt.color || ''),
+        servicio: String(dt.servicio || dt.tipo_servicio || ''),
+        tipo_combustible: String(dt.tipo_combustible || ''),
+        carga_pasajeros: String(dt.carga_pasajeros || ''),
+        ensenanza: pickSnNo(dt.ensenanza),
+        kilometraje: String(dt.kilometraje || ''),
+        blindado: pickSn(dt.blindado),
+        polarizado: pickSn(dt.polarizado),
+        cilindraje: String(dt.cilindraje || ''),
+        presion_inflado: String(dt.presion_inflado || ''),
+        presion_llantas: Array.isArray(dt.presion_llantas)
+          ? dt.presion_llantas
+              .filter((x) => typeof x === 'object' && x !== null)
+              .map((x) => {
+                const item = x as Record<string, unknown>;
+                return {
+                  posicion_id: String(item.posicion_id || ''),
+                  posicion_label: String(item.posicion_label || ''),
+                  psi: String(item.psi || ''),
+                  is_repuesto: Boolean(item.is_repuesto),
+                };
+              })
+          : [],
+        observaciones_tecnicas: String(dt.observaciones_tecnicas || ''),
+      },
+      preparacion_checklist: {
+        limpieza_descargado: pickSn(ck.limpieza_descargado || ck.estado_limpieza_preinspeccion),
+        licencia_y_confrontacion_datos: pickSn(ck.licencia_y_confrontacion_datos),
+        conversion_gas_vigente: pickSn(ck.conversion_gas_vigente),
+        presion_llantas_adecuada_cda: pickSn(ck.presion_llantas_adecuada_cda),
+        tapa_o_capuchones_valvula: pickSn(ck.tapa_o_capuchones_valvula),
+        niveles_fluidos_visibles: pickSn(ck.niveles_fluidos_visibles),
+        sin_accesorios_que_impidan_acople: pickSn(ck.sin_accesorios_que_impidan_acople),
+        retiro_elementos_cabina_carga: pickSn(ck.retiro_elementos_cabina_carga),
+        liberacion_carga_para_inspeccion: pickSn(ck.liberacion_carga_para_inspeccion),
+        tablero_instrumentos_ok: pickSn(ck.tablero_instrumentos_ok),
+        cinturones_sillas_accesos_ok: pickSn(ck.cinturones_sillas_accesos_ok || ck.cinturones_visibles),
+        combustible_suficiente: pickSn(ck.combustible_suficiente),
+        placa_identificacion_legible: pickSn(ck.placa_identificacion_legible),
+        llanta_repuesto_accesible: pickSn(ck.llanta_repuesto_accesible),
+        luces_funcionales: pickSn(ck.luces_funcionales),
+        extintor_central_funcional_moto: pickSn(ck.extintor_central_funcional_moto),
+        adaptaciones_discapacidad: pickSn(ck.adaptaciones_discapacidad),
+        viable_ingreso_linea: pickSnNo(ck.viable_ingreso_linea),
+      },
+      titular_datos: {
+        nombre_apellidos: String(titular.nombre_apellidos || ''),
+        numero_documento: String(titular.numero_documento || ''),
+        celular_telefono: String(titular.celular_telefono || ''),
+        email: String(titular.email || ''),
+        ciudad_direccion: String(titular.ciudad_direccion || ''),
+      },
+      pre_revision: {
+        firma_operario: (() => {
+          const firmaOperarioRaw =
+            (preRevision.firma_operario as Record<string, unknown>) ||
+            (input.firma_operario_pre_revision as Record<string, unknown>) ||
+            {};
+          if (typeof firmaOperarioRaw.data_url !== 'string' || String(firmaOperarioRaw.data_url).trim().length === 0) {
+            return null;
+          }
+          return {
+            data_url: String(firmaOperarioRaw.data_url),
+            signed_at: String(firmaOperarioRaw.signed_at || ''),
+            signer_name: String(
+              firmaOperarioRaw.signer_name ||
+              preRevision.operario_pre_revision ||
+              user?.nombre_completo ||
+              ''
+            ),
+          };
+        })(),
+      },
+      autorizaciones_datos: {
+        contacto_fuerza_comercial: pickSnNo(auth.contacto_fuerza_comercial),
+        contacto_encuestas_confirmacion: pickSnNo(auth.contacto_encuestas_confirmacion),
+        contacto_recordatorio_rtm_soat: pickSnNo(auth.contacto_recordatorio_rtm_soat),
+      },
+      firma_titular:
+        typeof firma.data_url === 'string' && String(firma.data_url).trim().length > 0
+          ? {
+              data_url: String(firma.data_url),
+              signed_at: String(firma.signed_at || ''),
+              signer_name: String(firma.signer_name || ''),
+            }
+          : null,
+    };
+  };
+
   const handleSubmit = (e: FormEvent) => {
     e.preventDefault();
     
@@ -553,6 +1145,23 @@ export default function Recepcion() {
     const dirCliente = (formData.cliente_direccion || '').trim();
     const midDigits = (clienteFactusMunicipalityId || '').replace(/\D/g, '').trim();
     const clienteFactusMunicipalityIdParsed = midDigits ? parseInt(midDigits, 10) : undefined;
+    const recepcionFormatoExtra = construirFormatoExtraPayload();
+    if (recepcionFormatoExtra && !recepcionFormatoExtra.firma_titular?.data_url) {
+      showToast(
+        'warning',
+        'Firma requerida',
+        'Si diligencias el Formato Prerevision debes capturar y guardar la firma del titular antes de registrar.'
+      );
+      return;
+    }
+    if (recepcionFormatoExtra && !recepcionFormatoExtra.pre_revision.firma_operario?.data_url) {
+      showToast(
+        'warning',
+        'Firma requerida',
+        'Si diligencias el Formato Prerevision debes capturar y guardar la firma del operario antes de registrar.'
+      );
+      return;
+    }
     // Preparar datos incluyendo fotos en observaciones
     const dataConFotos = {
       ...formData,
@@ -561,6 +1170,7 @@ export default function Recepcion() {
       cliente_email: clienteEmailNormalizado,
       cliente_direccion: dirCliente ? dirCliente.slice(0, 300) : undefined,
       cliente_factus_municipality_id: clienteFactusMunicipalityIdParsed,
+      recepcion_formato_extra: recepcionFormatoExtra,
       observaciones: JSON.stringify({
         texto: formData.observaciones || '',
         fotos: fotosVehiculo
@@ -576,6 +1186,333 @@ export default function Recepcion() {
 
   const handleInputChange = (field: keyof VehiculoRegistro, value: string | number | boolean) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  const handleFormatoTecnicoChange = (
+    field: Exclude<keyof RecepcionFormatoExtra['datos_tecnicos'], 'presion_llantas'>,
+    value: string
+  ) => {
+    setFormatoExtra((prev) => ({
+      ...prev,
+      datos_tecnicos: {
+        ...prev.datos_tecnicos,
+        [field]: value,
+      },
+    }));
+  };
+
+  const handlePresionLlantaChange = (posicionId: string, posicionLabel: string, isRepuesto: boolean, psiRaw: string) => {
+    const psi = (psiRaw || '').replace(/[^0-9.,]/g, '').slice(0, 8);
+    setFormatoExtra((prev) => {
+      const existingById = new Map(
+        (prev.datos_tecnicos.presion_llantas || []).map((item) => [item.posicion_id, item])
+      );
+      const nextItems: PresionLlantaItem[] = layoutLlantas.map((slot) => {
+        const current = existingById.get(slot.id);
+        if (slot.id === posicionId) {
+          return {
+            posicion_id: posicionId,
+            posicion_label: posicionLabel,
+            psi,
+            is_repuesto: isRepuesto,
+          };
+        }
+        return {
+          posicion_id: slot.id,
+          posicion_label: slot.label,
+          psi: (current?.psi || '').trim(),
+          is_repuesto: Boolean(slot.is_repuesto),
+        };
+      });
+      return {
+        ...prev,
+        datos_tecnicos: {
+          ...prev.datos_tecnicos,
+          presion_llantas: nextItems,
+          presion_inflado: buildPresionResumen(nextItems),
+        },
+      };
+    });
+  };
+
+  const handleFormatoEncabezadoChange = (
+    field: 'fecha_formato' | 'no_inspeccion' | 'tipo_vehiculo_formato',
+    value: string
+  ) => {
+    setFormatoExtra((prev) => ({
+      ...prev,
+      [field]: value,
+    }));
+  };
+
+  const getFirmaCanvasPos = (
+    canvas: HTMLCanvasElement | null,
+    event: MouseEvent | ReactMouseEvent<HTMLCanvasElement> | TouchEvent | ReactTouchEvent<HTMLCanvasElement>
+  ) => {
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    if ('touches' in event && event.touches.length > 0) {
+      return {
+        x: event.touches[0].clientX - rect.left,
+        y: event.touches[0].clientY - rect.top,
+      };
+    }
+    if ('changedTouches' in event && event.changedTouches.length > 0) {
+      return {
+        x: event.changedTouches[0].clientX - rect.left,
+        y: event.changedTouches[0].clientY - rect.top,
+      };
+    }
+    const mouseEvt = event as MouseEvent | ReactMouseEvent<HTMLCanvasElement>;
+    return {
+      x: mouseEvt.clientX - rect.left,
+      y: mouseEvt.clientY - rect.top,
+    };
+  };
+
+  const iniciarTrazoFirma = (event: ReactMouseEvent<HTMLCanvasElement> | ReactTouchEvent<HTMLCanvasElement>) => {
+    const canvas = firmaCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const { x, y } = getFirmaCanvasPos(canvas, event);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    setFirmaDibujando(true);
+    setFirmaTrazoPendiente(true);
+  };
+
+  const moverTrazoFirma = (event: ReactMouseEvent<HTMLCanvasElement> | ReactTouchEvent<HTMLCanvasElement>) => {
+    if (!firmaDibujando) return;
+    const canvas = firmaCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const { x, y } = getFirmaCanvasPos(canvas, event);
+    ctx.lineTo(x, y);
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+    if ('preventDefault' in event) event.preventDefault();
+  };
+
+  const terminarTrazoFirma = () => {
+    setFirmaDibujando(false);
+  };
+
+  const limpiarFirmaCanvas = () => {
+    const canvas = firmaCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setFirmaTrazoPendiente(false);
+    setFormatoExtra((prev) => ({
+      ...prev,
+      firma_titular: null,
+    }));
+  };
+
+  const iniciarTrazoFirmaOperario = (event: ReactMouseEvent<HTMLCanvasElement> | ReactTouchEvent<HTMLCanvasElement>) => {
+    const canvas = firmaOperarioCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const { x, y } = getFirmaCanvasPos(canvas, event);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    setFirmaOperarioDibujando(true);
+    setFirmaOperarioTrazoPendiente(true);
+  };
+
+  const moverTrazoFirmaOperario = (event: ReactMouseEvent<HTMLCanvasElement> | ReactTouchEvent<HTMLCanvasElement>) => {
+    if (!firmaOperarioDibujando) return;
+    const canvas = firmaOperarioCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const { x, y } = getFirmaCanvasPos(canvas, event);
+    ctx.lineTo(x, y);
+    ctx.strokeStyle = '#0f172a';
+    ctx.lineWidth = 2.2;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    ctx.stroke();
+    if ('preventDefault' in event) event.preventDefault();
+  };
+
+  const terminarTrazoFirmaOperario = () => {
+    setFirmaOperarioDibujando(false);
+  };
+
+  const limpiarFirmaCanvasOperario = () => {
+    const canvas = firmaOperarioCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    setFirmaOperarioTrazoPendiente(false);
+    setFormatoExtra((prev) => ({
+      ...prev,
+      pre_revision: {
+        ...prev.pre_revision,
+        firma_operario: null,
+      },
+    }));
+  };
+
+  const guardarFirmaCanvas = () => {
+    const canvas = firmaCanvasRef.current;
+    if (!canvas) return;
+    if (!firmaTrazoPendiente && !firmaCapturada) {
+      showToast('warning', 'Firma vacía', 'Realiza la firma en el recuadro antes de guardar.');
+      return;
+    }
+    const dataUrl = canvas.toDataURL('image/png');
+    setFormatoExtra((prev) => ({
+      ...prev,
+      firma_titular: {
+        data_url: dataUrl,
+        signed_at: new Date().toISOString(),
+        signer_name: (formData.cliente_nombre || '').trim() || 'Titular',
+      },
+    }));
+    setFirmaTrazoPendiente(false);
+    showToast('success', 'Firma guardada', 'La firma quedó registrada para este formulario.');
+  };
+
+  const guardarFirmaCanvasOperario = () => {
+    const canvas = firmaOperarioCanvasRef.current;
+    if (!canvas) return;
+    if (!firmaOperarioTrazoPendiente && !firmaOperarioCapturada) {
+      showToast('warning', 'Firma vacía', 'Realiza la firma del operario en el recuadro antes de guardar.');
+      return;
+    }
+    const dataUrl = canvas.toDataURL('image/png');
+    setFormatoExtra((prev) => ({
+      ...prev,
+      pre_revision: {
+        ...prev.pre_revision,
+        firma_operario: {
+          data_url: dataUrl,
+          signed_at: new Date().toISOString(),
+          signer_name: (user?.nombre_completo || '').trim() || 'Operario pre-revision',
+        },
+      },
+    }));
+    setFirmaOperarioTrazoPendiente(false);
+    showToast('success', 'Firma guardada', 'La firma del operario quedó registrada para este formulario.');
+  };
+
+  useEffect(() => {
+    const canvas = firmaCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const ratio = window.devicePixelRatio || 1;
+    const cssWidth = canvas.clientWidth || 640;
+    const cssHeight = 160;
+    canvas.width = Math.floor(cssWidth * ratio);
+    canvas.height = Math.floor(cssHeight * ratio);
+    canvas.style.height = `${cssHeight}px`;
+    canvas.style.touchAction = 'none';
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+    if (formatoExtra.firma_titular?.data_url) {
+      const img = new Image();
+      img.onload = () => {
+        ctx.clearRect(0, 0, cssWidth, cssHeight);
+        ctx.drawImage(img, 0, 0, cssWidth, cssHeight);
+      };
+      img.src = formatoExtra.firma_titular.data_url;
+    }
+  }, [formatoExtra.firma_titular?.data_url, mostrarFormatoExtra, requiereFirmaFormato]);
+
+  useEffect(() => {
+    const canvas = firmaOperarioCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const ratio = window.devicePixelRatio || 1;
+    const cssWidth = canvas.clientWidth || 640;
+    const cssHeight = 160;
+    canvas.width = Math.floor(cssWidth * ratio);
+    canvas.height = Math.floor(cssHeight * ratio);
+    canvas.style.height = `${cssHeight}px`;
+    canvas.style.touchAction = 'none';
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+    if (formatoExtra.pre_revision.firma_operario?.data_url) {
+      const img = new Image();
+      img.onload = () => {
+        ctx.clearRect(0, 0, cssWidth, cssHeight);
+        ctx.drawImage(img, 0, 0, cssWidth, cssHeight);
+      };
+      img.src = formatoExtra.pre_revision.firma_operario.data_url;
+    }
+  }, [formatoExtra.pre_revision.firma_operario?.data_url, mostrarFormatoExtra, requiereFirmaFormato]);
+
+  useEffect(() => {
+    if (requiereFirmaFormato) return;
+    setFormatoExtra((prev) => ({
+      ...prev,
+      firma_titular: null,
+      pre_revision: {
+        ...prev.pre_revision,
+        firma_operario: null,
+      },
+    }));
+    setFirmaTrazoPendiente(false);
+    setFirmaOperarioTrazoPendiente(false);
+  }, [requiereFirmaFormato]);
+
+  useEffect(() => {
+    setFormatoExtra((prev) => {
+      const existingById = new Map(
+        (prev.datos_tecnicos.presion_llantas || []).map((item) => [item.posicion_id, item])
+      );
+      const normalized: PresionLlantaItem[] = layoutLlantas.map((slot) => {
+        const cur = existingById.get(slot.id);
+        return {
+          posicion_id: slot.id,
+          posicion_label: slot.label,
+          psi: (cur?.psi || '').trim(),
+          is_repuesto: Boolean(slot.is_repuesto),
+        };
+      });
+      const nextResumen = buildPresionResumen(normalized);
+      const prevResumen = (prev.datos_tecnicos.presion_inflado || '').trim();
+      const changedArray =
+        JSON.stringify(normalized) !== JSON.stringify(prev.datos_tecnicos.presion_llantas || []);
+      const changedResumen = nextResumen !== prevResumen && nextResumen.length > 0;
+      if (!changedArray && !changedResumen) {
+        return prev;
+      }
+      return {
+        ...prev,
+        datos_tecnicos: {
+          ...prev.datos_tecnicos,
+          presion_llantas: normalized,
+          presion_inflado: nextResumen || prevResumen,
+        },
+      };
+    });
+  }, [layoutLlantas]);
+
+  const handleFormatoChecklistChange = (field: keyof RecepcionFormatoExtra['preparacion_checklist'], value: SnNoNa | SnNo) => {
+    setFormatoExtra((prev) => ({
+      ...prev,
+      preparacion_checklist: {
+        ...prev.preparacion_checklist,
+        [field]: value,
+      },
+    }));
   };
 
   // Mapear tipo de vehículo a tipo de comisión SOAT
@@ -713,6 +1650,49 @@ export default function Recepcion() {
       showToast('error', 'Error al exportar', typeof detail === 'string' ? detail : JSON.stringify(detail));
     } finally {
       setExportandoListado(false);
+    }
+  };
+
+  const cerrarPdfPreview = () => {
+    setPdfPreview((prev) => {
+      if (prev) URL.revokeObjectURL(prev.blobUrl);
+      return null;
+    });
+  };
+
+  useEffect(() => {
+    if (!pdfPreview) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') cerrarPdfPreview();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [pdfPreview]);
+
+  const generarFormatoRecepcionPdf = async (vehiculoId: string, placa: string) => {
+    if (descargandoFormatoVehiculoId) return;
+    setDescargandoFormatoVehiculoId(vehiculoId);
+    try {
+      const { blob, filename } = await vehiculosApi.descargarFormatoRecepcionPdf(vehiculoId);
+      if (!blob || blob.size === 0) {
+        showToast('error', 'PDF vacío', 'No se pudo generar el PDF del formato de recepción.');
+        return;
+      }
+      const blobUrl = URL.createObjectURL(blob);
+      setPdfPreview((prev) => {
+        if (prev) URL.revokeObjectURL(prev.blobUrl);
+        return {
+          blobUrl,
+          title: `Formato recepción ${placa}`,
+          fileName: filename || `recepcion_formato_${placa}.pdf`,
+        };
+      });
+      showToast('success', 'PDF generado', `Se abrió la previsualización del formato para ${placa}.`);
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail || 'No fue posible generar el PDF del formato.';
+      showToast('error', 'Error al generar PDF', typeof detail === 'string' ? detail : JSON.stringify(detail));
+    } finally {
+      setDescargandoFormatoVehiculoId(null);
     }
   };
 
@@ -979,6 +1959,473 @@ export default function Recepcion() {
                 </p>
               </div>
 
+              {/* Formato adicional recepción (opcional, colapsable) */}
+              <div className="md:col-span-2 mt-1 rounded-lg border border-slate-200 bg-white">
+                <button
+                  type="button"
+                  onClick={() => setMostrarFormatoExtra((prev) => !prev)}
+                  className="w-full flex items-center justify-between px-4 py-3 text-left"
+                >
+                  <div>
+                    <p className="text-base font-semibold text-slate-900">Formato Prerevision (Opcional)</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${formatoExtraResumen.className}`}>
+                      {formatoExtraResumen.estado}
+                    </span>
+                    {mostrarFormatoExtra ? <ChevronUp className="w-4 h-4 text-slate-600" /> : <ChevronDown className="w-4 h-4 text-slate-600" />}
+                  </div>
+                </button>
+                {mostrarFormatoExtra && (
+                  <div className="px-4 pb-4 border-t border-slate-200 space-y-4">
+                    <div>
+                      <p className="text-xs font-semibold text-slate-700 mb-2 mt-3">Encabezado operativo</p>
+                      <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1 flex items-center justify-between">
+                            <span>Fecha formato</span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${formatoExtra.fecha_formato ? 'bg-slate-200 text-slate-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                              {formatoExtra.fecha_formato ? 'Manual' : 'Auto'}
+                            </span>
+                          </label>
+                          <input
+                            type="date"
+                            className="input-pos"
+                            value={formatoExtra.fecha_formato || formatTodayYmd()}
+                            onChange={(e) => handleFormatoEncabezadoChange('fecha_formato', e.target.value)}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1 flex items-center justify-between">
+                            <span>No. inspección</span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${formatoExtra.no_inspeccion ? 'bg-slate-200 text-slate-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                              {formatoExtra.no_inspeccion ? 'Manual' : 'Auto'}
+                            </span>
+                          </label>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="text"
+                              className="input-pos uppercase"
+                              value={formatoExtra.no_inspeccion || buildNoInspeccionProvisional(formData.placa)}
+                              onChange={(e) => handleFormatoEncabezadoChange('no_inspeccion', e.target.value.toUpperCase())}
+                            />
+                            <button
+                              type="button"
+                              onClick={() => handleFormatoEncabezadoChange('no_inspeccion', '')}
+                              className="px-2 py-2 rounded-md border border-slate-300 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                              title="Volver a valor autogenerado"
+                            >
+                              Auto
+                            </button>
+                          </div>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1 flex items-center justify-between">
+                            <span>Tipo vehículo (formato)</span>
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${formatoExtra.tipo_vehiculo_formato ? 'bg-slate-200 text-slate-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                              {formatoExtra.tipo_vehiculo_formato ? 'Manual' : 'Auto'}
+                            </span>
+                          </label>
+                          <input
+                            type="text"
+                            className="input-pos uppercase"
+                            value={formatoExtra.tipo_vehiculo_formato || mapTipoVehiculoFormato(formData.tipo_vehiculo)}
+                            onChange={(e) => handleFormatoEncabezadoChange('tipo_vehiculo_formato', e.target.value.toUpperCase())}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1 flex items-center justify-between">
+                            <span>Versión</span>
+                            <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Fija</span>
+                          </label>
+                          <div className="input-pos bg-slate-50 text-slate-700 flex items-center">{formatoExtra.version || 'RTM-01-FR v13'}</div>
+                        </div>
+                      </div>
+                      <p className="mt-2 text-[11px] text-slate-500">
+                        Los campos marcados como Auto se calculan por sistema y puedes ajustarlos cuando aplique.
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-slate-700 mb-2">Datos técnicos del vehículo</p>
+                      <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">Clase de vehículo</label>
+                          <input type="text" className="input-pos uppercase" value={formatoExtra.datos_tecnicos.clase_vehiculo} onChange={(e) => handleFormatoTecnicoChange('clase_vehiculo', e.target.value.toUpperCase())} placeholder="MOTOCICLETA" />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">Marca</label>
+                          <input type="text" className="input-pos uppercase" value={formatoExtra.datos_tecnicos.marca} onChange={(e) => handleFormatoTecnicoChange('marca', e.target.value.toUpperCase())} placeholder="BAJAJ" />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">Línea</label>
+                          <input type="text" className="input-pos uppercase" value={formatoExtra.datos_tecnicos.linea} onChange={(e) => handleFormatoTecnicoChange('linea', e.target.value.toUpperCase())} placeholder="PLATINO 125" />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">Modelo</label>
+                          <input type="text" className="input-pos uppercase" value={formatoExtra.datos_tecnicos.modelo} onChange={(e) => handleFormatoTecnicoChange('modelo', e.target.value.toUpperCase())} placeholder="2021" />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">Color</label>
+                          <input type="text" className="input-pos uppercase" value={formatoExtra.datos_tecnicos.color} onChange={(e) => handleFormatoTecnicoChange('color', e.target.value.toUpperCase())} placeholder="NEGRO" />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">Servicio</label>
+                          <select
+                            className="input-pos uppercase"
+                            value={formatoExtra.datos_tecnicos.servicio}
+                            onChange={(e) => handleFormatoTecnicoChange('servicio', e.target.value)}
+                          >
+                            <option value="">Seleccione...</option>
+                            {SERVICIO_OPTIONS.map((opt) => (
+                              <option key={opt} value={opt}>
+                                {opt}
+                              </option>
+                            ))}
+                            {formatoExtra.datos_tecnicos.servicio &&
+                              !SERVICIO_OPTIONS.includes(formatoExtra.datos_tecnicos.servicio as (typeof SERVICIO_OPTIONS)[number]) && (
+                                <option value={formatoExtra.datos_tecnicos.servicio}>
+                                  {formatoExtra.datos_tecnicos.servicio}
+                                </option>
+                              )}
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">Tipo de combustible</label>
+                          <select
+                            className="input-pos uppercase"
+                            value={formatoExtra.datos_tecnicos.tipo_combustible}
+                            onChange={(e) => handleFormatoTecnicoChange('tipo_combustible', e.target.value)}
+                          >
+                            <option value="">Seleccione...</option>
+                            <option value="GASOLINA">Gasolina</option>
+                            <option value="DIESEL">Diésel</option>
+                            <option value="GAS">Gas</option>
+                            <option value="ELECTRICO">Electrico</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">Carga/Pasajeros</label>
+                          <input
+                            type="text"
+                            className="input-pos uppercase"
+                            value={formatoExtra.datos_tecnicos.carga_pasajeros}
+                            onChange={(e) => handleFormatoTecnicoChange('carga_pasajeros', e.target.value.toUpperCase())}
+                            placeholder="TON / PAS"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">Enseñanza</label>
+                          <select
+                            className="input-pos"
+                            value={formatoExtra.datos_tecnicos.ensenanza}
+                            onChange={(e) => handleFormatoTecnicoChange('ensenanza', e.target.value)}
+                          >
+                            <option value="">Seleccione...</option>
+                            <option value="si">SI</option>
+                            <option value="no">NO</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">Blindado</label>
+                          <select
+                            className="input-pos"
+                            value={formatoExtra.datos_tecnicos.blindado}
+                            onChange={(e) => handleFormatoTecnicoChange('blindado', e.target.value)}
+                          >
+                            <option value="">Seleccione...</option>
+                            <option value="si">SI</option>
+                            <option value="no">NO</option>
+                            <option value="na">N/A</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">Polarizado</label>
+                          <select
+                            className="input-pos"
+                            value={formatoExtra.datos_tecnicos.polarizado}
+                            onChange={(e) => handleFormatoTecnicoChange('polarizado', e.target.value)}
+                          >
+                            <option value="">Seleccione...</option>
+                            <option value="si">SI</option>
+                            <option value="no">NO</option>
+                            <option value="na">N/A</option>
+                          </select>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">Kilometraje</label>
+                          <input
+                            type="text"
+                            className="input-pos uppercase"
+                            value={formatoExtra.datos_tecnicos.kilometraje}
+                            onChange={(e) => handleFormatoTecnicoChange('kilometraje', e.target.value.toUpperCase())}
+                            placeholder="12345"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">Cilindraje</label>
+                          <input type="text" className="input-pos uppercase" value={formatoExtra.datos_tecnicos.cilindraje} onChange={(e) => handleFormatoTecnicoChange('cilindraje', e.target.value.toUpperCase())} placeholder="150" />
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">Presión de inflado</label>
+                          <div className="input-pos bg-slate-50 text-slate-700 min-h-[44px] max-h-[148px] overflow-y-auto leading-6 whitespace-normal">
+                            {(formatoExtra.datos_tecnicos.presion_inflado || '').trim() || 'Sin detalle aún'}
+                          </div>
+                          <p className="mt-1 text-[11px] text-slate-500">Se autogenera desde el detalle por llanta.</p>
+                        </div>
+                        <div className="md:col-span-3 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                          <p className="text-xs font-semibold text-slate-700 mb-2">Detalle de presión por llanta (PSI)</p>
+                          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+                            {layoutLlantas.map((slot) => {
+                              const current = (formatoExtra.datos_tecnicos.presion_llantas || []).find(
+                                (x) => x.posicion_id === slot.id
+                              );
+                              return (
+                                <div key={slot.id} className="rounded-md border border-slate-200 bg-white px-2.5 py-2">
+                                  <div className="text-[11px] font-semibold text-slate-600 flex items-center gap-1">
+                                    <CircleDot className="h-3.5 w-3.5 text-slate-500" />
+                                    <span>{slot.label}</span>
+                                    {slot.is_repuesto ? (
+                                      <span className="ml-1 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
+                                        Repuesto
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <div className="mt-1.5 flex items-center gap-1.5">
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      className="input-pos h-9"
+                                      value={current?.psi || ''}
+                                      onChange={(e) =>
+                                        handlePresionLlantaChange(
+                                          slot.id,
+                                          slot.label,
+                                          Boolean(slot.is_repuesto),
+                                          e.target.value
+                                        )
+                                      }
+                                      placeholder="PSI"
+                                    />
+                                    <span className="text-xs text-slate-500">PSI</span>
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <p className="mt-2 text-[11px] text-slate-500">
+                            Captura opcional por llanta. Si dejas campos vacíos, el registro continúa sin bloqueo.
+                          </p>
+                        </div>
+                        <div className="md:col-span-3">
+                          <label className="block text-xs text-slate-600 mb-1">Observaciones técnicas</label>
+                          <div className="input-pos min-h-[80px] h-auto bg-slate-50 text-slate-700 whitespace-pre-wrap">
+                            {(formData.observaciones || '').trim() || 'Se toma del campo Observaciones principal.'}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-slate-700 mb-2">Preparación del vehículo para inspección (SI / NO / N/A)</p>
+                      <div className="space-y-2">
+                        {PREPARACION_ITEMS.map((item) => (
+                          <div key={item.key} className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 rounded-md border border-slate-200 px-3 py-2">
+                            <p className="text-sm text-slate-700">{item.label}</p>
+                            <div className="flex items-center gap-2">
+                              {(['si', 'no', 'na'] as const).map((value) => (
+                                <button
+                                  key={`${item.key}-${value}`}
+                                  type="button"
+                                  onClick={() => handleFormatoChecklistChange(item.key, value)}
+                                  className={`px-2.5 py-1 rounded-md text-xs font-semibold border ${
+                                    formatoExtra.preparacion_checklist[item.key] === value
+                                      ? 'border-primary-500 bg-primary-50 text-primary-700'
+                                      : 'border-slate-300 text-slate-600 hover:bg-slate-50'
+                                  }`}
+                                >
+                                  {value === 'si' ? 'SI' : value === 'no' ? 'NO' : 'N/A'}
+                                </button>
+                              ))}
+                              <button
+                                type="button"
+                                onClick={() => handleFormatoChecklistChange(item.key, '')}
+                                className="px-2.5 py-1 rounded-md text-xs font-semibold border border-slate-300 text-slate-500 hover:bg-slate-50"
+                              >
+                                Limpiar
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-slate-700 mb-2">Datos del titular de datos personales</p>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">Nombre y apellidos</label>
+                          <div className="input-pos bg-slate-50 text-slate-700 flex items-center">{(formData.cliente_nombre || '').toUpperCase() || '-'}</div>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">Número de cédula</label>
+                          <div className="input-pos bg-slate-50 text-slate-700 flex items-center">{formData.cliente_documento || '-'}</div>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">Celular / teléfono</label>
+                          <div className="input-pos bg-slate-50 text-slate-700 flex items-center">{formData.cliente_telefono || '-'}</div>
+                        </div>
+                        <div>
+                          <label className="block text-xs text-slate-600 mb-1">Email</label>
+                          <div className="input-pos bg-slate-50 text-slate-700 flex items-center">{formData.cliente_email || '-'}</div>
+                        </div>
+                        <div className="md:col-span-2">
+                          <label className="block text-xs text-slate-600 mb-1">Ciudad / dirección</label>
+                          <div className="input-pos bg-slate-50 text-slate-700 flex items-center">{formData.cliente_direccion || '-'}</div>
+                        </div>
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-xs font-semibold text-slate-700 mb-2">Pre-revisión</p>
+                    </div>
+                    {requiereFirmaFormato && (
+                      <div>
+                        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
+                          <div className="rounded-xl border border-slate-200 bg-gradient-to-b from-white to-slate-50 p-3 shadow-sm">
+                            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                              <p className="text-sm font-semibold text-slate-800">
+                                Firma del titular (obligatoria)
+                              </p>
+                              <span
+                                className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-semibold ${
+                                  firmaCapturada
+                                    ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                                    : 'bg-amber-100 text-amber-700 border border-amber-200'
+                                }`}
+                              >
+                                <span className={`inline-block h-1.5 w-1.5 rounded-full ${firmaCapturada ? 'bg-emerald-600' : 'bg-amber-600'}`} />
+                                {firmaCapturada ? 'Firma guardada' : 'Pendiente de firma'}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-500 mb-2">
+                              Firma con dedo (móvil/tablet) o mouse (PC). Pulsa <span className="font-semibold">Guardar firma</span> para habilitar el registro.
+                            </p>
+                            <canvas
+                              ref={firmaCanvasRef}
+                              className="w-full rounded-lg border border-slate-300 bg-white"
+                              style={{
+                                backgroundImage:
+                                  'linear-gradient(to bottom, rgba(148,163,184,0.08) 1px, transparent 1px), linear-gradient(to right, rgba(148,163,184,0.06) 1px, transparent 1px)',
+                                backgroundSize: '24px 24px, 24px 24px',
+                              }}
+                              onMouseDown={iniciarTrazoFirma}
+                              onMouseMove={moverTrazoFirma}
+                              onMouseUp={terminarTrazoFirma}
+                              onMouseLeave={terminarTrazoFirma}
+                              onTouchStart={iniciarTrazoFirma}
+                              onTouchMove={moverTrazoFirma}
+                              onTouchEnd={terminarTrazoFirma}
+                            />
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={limpiarFirmaCanvas}
+                                className="px-3 py-1.5 rounded-md border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                              >
+                                Limpiar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={guardarFirmaCanvas}
+                                className="px-3 py-1.5 rounded-md border border-primary-500 bg-primary-600 text-xs font-semibold text-white hover:bg-primary-700"
+                              >
+                                Guardar firma
+                              </button>
+                              {firmaCapturada && (
+                                <span className="text-xs text-slate-600">
+                                  Firmante: <span className="font-semibold">{(formatoExtra.firma_titular?.signer_name || formData.cliente_nombre || 'Titular').toUpperCase()}</span>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="rounded-xl border border-slate-200 bg-gradient-to-b from-white to-slate-50 p-3 shadow-sm">
+                            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                              <p className="text-sm font-semibold text-slate-800">
+                                Firma de operario pre-revisión (obligatoria)
+                              </p>
+                              <span
+                                className={`inline-flex items-center gap-1 text-xs px-2.5 py-1 rounded-full font-semibold ${
+                                  firmaOperarioCapturada
+                                    ? 'bg-emerald-100 text-emerald-700 border border-emerald-200'
+                                    : 'bg-amber-100 text-amber-700 border border-amber-200'
+                                }`}
+                              >
+                                <span className={`inline-block h-1.5 w-1.5 rounded-full ${firmaOperarioCapturada ? 'bg-emerald-600' : 'bg-amber-600'}`} />
+                                {firmaOperarioCapturada ? 'Firma guardada' : 'Pendiente de firma'}
+                              </span>
+                            </div>
+                            <p className="text-xs text-slate-500 mb-2">
+                              Firma del operario responsable de la pre-revisión. También debe guardarse antes de registrar.
+                            </p>
+                            <canvas
+                              ref={firmaOperarioCanvasRef}
+                              className="w-full rounded-lg border border-slate-300 bg-white"
+                              style={{
+                                backgroundImage:
+                                  'linear-gradient(to bottom, rgba(148,163,184,0.08) 1px, transparent 1px), linear-gradient(to right, rgba(148,163,184,0.06) 1px, transparent 1px)',
+                                backgroundSize: '24px 24px, 24px 24px',
+                              }}
+                              onMouseDown={iniciarTrazoFirmaOperario}
+                              onMouseMove={moverTrazoFirmaOperario}
+                              onMouseUp={terminarTrazoFirmaOperario}
+                              onMouseLeave={terminarTrazoFirmaOperario}
+                              onTouchStart={iniciarTrazoFirmaOperario}
+                              onTouchMove={moverTrazoFirmaOperario}
+                              onTouchEnd={terminarTrazoFirmaOperario}
+                            />
+                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={limpiarFirmaCanvasOperario}
+                                className="px-3 py-1.5 rounded-md border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                              >
+                                Limpiar
+                              </button>
+                              <button
+                                type="button"
+                                onClick={guardarFirmaCanvasOperario}
+                                className="px-3 py-1.5 rounded-md border border-primary-500 bg-primary-600 text-xs font-semibold text-white hover:bg-primary-700"
+                              >
+                                Guardar firma
+                              </button>
+                              {firmaOperarioCapturada && (
+                                <span className="text-xs text-slate-600">
+                                  Firmante: <span className="font-semibold">{(formatoExtra.pre_revision.firma_operario?.signer_name || user?.nombre_completo || 'Operario pre-revision').toUpperCase()}</span>
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                    <div>
+                      <p className="text-xs font-semibold text-slate-700 mb-2">Autorizaciones de protección de datos (SI / NO)</p>
+                      <p className="text-xs text-slate-500 mb-2">Tomado del flujo de Habeas Data existente.</p>
+                      <div className="space-y-2">
+                        {AUTORIZACION_ITEMS.map((item) => (
+                          <div key={item.key} className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 rounded-md border border-slate-200 px-3 py-2">
+                            <p className="text-sm text-slate-700">{item.label}</p>
+                            <div className="flex items-center gap-2">
+                              <span className="px-2.5 py-1 rounded-md text-xs font-semibold border border-emerald-300 bg-emerald-50 text-emerald-700">
+                                SI
+                              </span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
               {/* SOAT */}
               <div className="md:col-span-2 mt-1">
                 <label className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 cursor-pointer">
@@ -1166,10 +2613,15 @@ export default function Recepcion() {
             />
 
             {/* Botones */}
+            {bloqueoFirmaRegistro && (
+              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+                Debes capturar y guardar las firmas del titular y del operario para registrar cuando diligencias el Formato Prerevision.
+              </div>
+            )}
             <div className="flex gap-4 mt-6">
               <button
                 type="submit"
-                disabled={registrarMutation.isLoading || editarMutation.isLoading}
+                disabled={registrarMutation.isLoading || editarMutation.isLoading || bloqueoFirmaRegistro}
                 className="flex-1 btn-pos btn-primary disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {(registrarMutation.isLoading || editarMutation.isLoading) ? (
@@ -1517,6 +2969,10 @@ export default function Recepcion() {
               {vehiculos.map((vehiculo) => {
               const fotos = extraerFotosDeObservaciones(vehiculo.observaciones);
               const primeraFoto = fotos[0];
+              const tieneFormatoExtra =
+                !!vehiculo.recepcion_formato_extra_json &&
+                typeof vehiculo.recepcion_formato_extra_json === 'object' &&
+                Object.keys(vehiculo.recepcion_formato_extra_json).length > 0;
               
               return (
                 <div key={vehiculo.id} className="vehicle-card relative overflow-hidden">
@@ -1573,6 +3029,18 @@ export default function Recepcion() {
                       {formatCOP(vehiculo.total_cobrado)}
                     </p>
                   </div>
+
+                  {tieneFormatoExtra && (
+                    <button
+                      type="button"
+                      onClick={() => generarFormatoRecepcionPdf(vehiculo.id, vehiculo.placa)}
+                      disabled={descargandoFormatoVehiculoId === vehiculo.id}
+                      className="w-full mt-3 px-3 py-2 rounded-lg border border-primary-300 text-primary-700 bg-primary-50 hover:bg-primary-100 disabled:opacity-60 disabled:cursor-not-allowed text-sm font-semibold flex items-center justify-center gap-2"
+                    >
+                      <Download className="w-4 h-4" />
+                      {descargandoFormatoVehiculoId === vehiculo.id ? 'Generando PDF...' : 'Generar formato'}
+                    </button>
+                  )}
 
                   {/* Botón editar (solo si estado = registrado) */}
                   {vehiculo.estado === 'registrado' && (
@@ -1696,6 +3164,56 @@ export default function Recepcion() {
         )}
         </ErrorBoundary>
       </div>
+
+      {pdfPreview && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="pdf-preview-recepcion-titulo"
+          onClick={cerrarPdfPreview}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-2xl w-full max-w-6xl h-[86vh] overflow-hidden border border-slate-200 flex flex-col"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="px-4 py-3 border-b border-slate-200 flex items-center justify-between gap-3">
+              <h4
+                id="pdf-preview-recepcion-titulo"
+                className="font-bold text-slate-900 flex items-center gap-2 text-sm sm:text-base min-w-0 pr-2"
+              >
+                <FileText className="w-5 h-5 text-primary-600 shrink-0" />
+                <span className="truncate">{pdfPreview.title}</span>
+              </h4>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={pdfPreview.blobUrl}
+                  download={pdfPreview.fileName}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-100"
+                >
+                  <Download className="w-4 h-4" />
+                  Descargar
+                </a>
+                <button
+                  type="button"
+                  onClick={cerrarPdfPreview}
+                  className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
+                >
+                  <X className="w-4 h-4" />
+                  Cerrar
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 bg-slate-100 flex flex-col">
+              <iframe
+                title={pdfPreview.title}
+                src={pdfPreview.blobUrl}
+                className="w-full flex-1 min-h-[70vh] border-0"
+              />
+            </div>
+          </div>
+        </div>
+      )}
     </Layout>
   );
 }
