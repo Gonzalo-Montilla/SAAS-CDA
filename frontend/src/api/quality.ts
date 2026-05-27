@@ -3,6 +3,7 @@ import type {
   QualityInviteDetail,
   QualityInviteListResponse,
   QualityPublicSurveyInfo,
+  QualityTenantLogoSettings,
   RTMReminderItem,
   RTMReminderSummary,
   QualitySummary,
@@ -36,11 +37,48 @@ export interface MarkCertificateDeliveredResponse {
   message: string;
 }
 
+export interface QualityLogoUpdatePayload {
+  logoUrl?: string;
+  logoFile?: File | null;
+  formatoPrerevisionVersion?: string;
+}
+
 export const qualityApi = {
   getSummary: async (params?: { sucursal_id?: string }): Promise<QualitySummary> => {
     const response = await apiClient.get<QualitySummary>('/quality/summary', {
       params: params?.sucursal_id ? { sucursal_id: params.sucursal_id } : undefined,
     });
+    return response.data;
+  },
+
+  getTenantLogoCalidad: async (): Promise<QualityTenantLogoSettings> => {
+    const response = await apiClient.get<QualityTenantLogoSettings>('/quality/logo-calidad');
+    return response.data;
+  },
+
+  upsertTenantLogoCalidad: async (payload: QualityLogoUpdatePayload): Promise<QualityTenantLogoSettings> => {
+    const form = new FormData();
+    const hasVersionPayload = payload.formatoPrerevisionVersion !== undefined;
+    if (payload.logoFile) {
+      form.append('logo_file', payload.logoFile);
+    } else if (payload.logoUrl?.trim()) {
+      form.append('logo_url', payload.logoUrl.trim());
+    } else if (!hasVersionPayload) {
+      throw new Error('Debes indicar URL del logo, subir un archivo o actualizar la versión del formato');
+    }
+    if (hasVersionPayload) {
+      form.append('formato_prerevision_version', payload.formatoPrerevisionVersion || '');
+    }
+    const response = await apiClient.put<QualityTenantLogoSettings>('/quality/logo-calidad', form);
+    return response.data;
+  },
+
+  updateFormatoPrerevisionVersion: async (version: string): Promise<QualityTenantLogoSettings> => {
+    return qualityApi.upsertTenantLogoCalidad({ formatoPrerevisionVersion: version });
+  },
+
+  clearTenantLogoCalidad: async (): Promise<QualityTenantLogoSettings> => {
+    const response = await apiClient.delete<QualityTenantLogoSettings>('/quality/logo-calidad');
     return response.data;
   },
 

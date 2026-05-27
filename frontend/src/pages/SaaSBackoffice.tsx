@@ -102,6 +102,9 @@ export default function SaaSBackoffice() {
   const [activeModule, setActiveModule] = useState<BackofficeModule>('resumen');
   const [runtMetricasDays, setRuntMetricasDays] = useState<number>(30);
   const [runtMetricasTenantId, setRuntMetricasTenantId] = useState<string>('');
+  const [opensanctionsDays, setOpensanctionsDays] = useState<number>(30);
+  const [opensanctionsTenantId, setOpensanctionsTenantId] = useState<string>('');
+  const [opensanctionsTrm, setOpensanctionsTrm] = useState<number>(4379);
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
   const [tableDensity, setTableDensity] = useState<'comfortable' | 'compact'>(() => {
     if (typeof window === 'undefined') {
@@ -668,9 +671,23 @@ export default function SaaSBackoffice() {
     enabled: activeModule === 'facturacion',
   });
   const opensanctionsUsageQuery = useQuery({
-    queryKey: ['saas-opensanctions-usage-summary'],
+    queryKey: ['saas-opensanctions-usage-summary', opensanctionsDays, opensanctionsTenantId, opensanctionsTrm],
     queryFn: async () => {
-      const response = await apiClient.get<SaaSOpenSanctionsUsageSummary>('/saas/auth/billing/opensanctions/usage');
+      const params = new URLSearchParams();
+      const now = new Date();
+      const from =
+        opensanctionsDays === 0
+          ? new Date(now.getFullYear(), now.getMonth(), now.getDate())
+          : new Date(now.getTime() - opensanctionsDays * 24 * 60 * 60 * 1000);
+      params.set('from_date', from.toISOString());
+      params.set('to_date', now.toISOString());
+      params.set('trm_cop', String(opensanctionsTrm));
+      if (opensanctionsTenantId) {
+        params.set('tenant_id', opensanctionsTenantId);
+      }
+      const response = await apiClient.get<SaaSOpenSanctionsUsageSummary>(
+        `/saas/auth/billing/opensanctions/usage?${params.toString()}`,
+      );
       return response.data;
     },
     enabled: activeModule === 'facturacion' || activeModule === 'opensanctions_metricas',
@@ -1277,6 +1294,8 @@ export default function SaaSBackoffice() {
                   value={runtMetricasDays}
                   onChange={(e) => setRuntMetricasDays(Number(e.target.value))}
                 >
+                  <option value={0}>Hoy (desde 00:00)</option>
+                  <option value={1}>1 día (últimas 24h)</option>
                   <option value={7}>7 días</option>
                   <option value={30}>30 días</option>
                   <option value={90}>90 días</option>
@@ -1469,6 +1488,51 @@ export default function SaaSBackoffice() {
               title="Consumo OpenSanctions (API real)"
               description="Medición global CDASoft y por CDA (incluye todas sus sucursales)"
             />
+            <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+              <label className="text-sm text-slate-700">
+                Ventana
+                <select
+                  className="input mt-1 w-full"
+                  value={opensanctionsDays}
+                  onChange={(e) => setOpensanctionsDays(Number(e.target.value))}
+                >
+                  <option value={0}>Hoy (desde 00:00)</option>
+                  <option value={1}>1 día (últimas 24h)</option>
+                  <option value={30}>30 días</option>
+                  <option value={90}>90 días</option>
+                  <option value={365}>365 días</option>
+                </select>
+              </label>
+              <label className="text-sm text-slate-700">
+                Tenant (opcional)
+                <select
+                  className="input mt-1 w-full"
+                  value={opensanctionsTenantId}
+                  onChange={(e) => setOpensanctionsTenantId(e.target.value)}
+                >
+                  <option value="">Todos</option>
+                  {(tenantsQuery.data || []).map((tenant) => (
+                    <option key={tenant.id} value={tenant.id}>
+                      {tenant.nombre_comercial || tenant.nombre} / {tenant.slug}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="text-sm text-slate-700">
+                TRM (EUR/COP)
+                <input
+                  type="number"
+                  min={1}
+                  step={0.01}
+                  className="input mt-1 w-full"
+                  value={Number.isFinite(opensanctionsTrm) ? opensanctionsTrm : 4379}
+                  onChange={(e) => {
+                    const n = Number(e.target.value);
+                    setOpensanctionsTrm(Number.isFinite(n) && n > 0 ? n : 4379);
+                  }}
+                />
+              </label>
+            </div>
             {opensanctionsUsageQuery.isLoading && <LoadingBlock lines={3} />}
             {opensanctionsUsageQuery.isError && (
               <p className="text-sm text-red-600">No fue posible cargar el consumo de OpenSanctions.</p>
@@ -1507,6 +1571,17 @@ export default function SaaSBackoffice() {
                   {opensanctionsUsageQuery.data.trm_cop.toLocaleString('es-CO')} · Costo proveedor por llamada:{' '}
                   {formatEur(opensanctionsUsageQuery.data.cost_per_call_eur)}
                 </p>
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-medium text-sky-800">
+                    Modelo: {opensanctionsUsageQuery.data.pricing_model}
+                  </span>
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">
+                    Precio prepago por consulta: {formatCurrency(opensanctionsUsageQuery.data.prepaid_unit_price_cop)}
+                  </span>
+                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 font-medium text-amber-800">
+                    Vigencia paquete: {opensanctionsUsageQuery.data.prepaid_package_expires_days} días
+                  </span>
+                </div>
                 {opensanctionsUsageQuery.data.tenants.length > 0 ? (
                   <div className="table-shell">
                     <table className="table-enterprise">

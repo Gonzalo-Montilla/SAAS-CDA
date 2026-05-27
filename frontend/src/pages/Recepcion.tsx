@@ -25,6 +25,7 @@ import { formatCOP } from '../utils/formatNumber';
 
 type SnNoNa = 'si' | 'no' | 'na' | '';
 type SnNo = 'si' | 'no' | '';
+const DEFAULT_FORMAT_VERSION = 'RTM-01-FR v13';
 
 type PresionLlantaItem = {
   posicion_id: string;
@@ -147,7 +148,7 @@ type RecepcionFormatoExtra = {
 };
 
 const createDefaultFormatoExtra = (): RecepcionFormatoExtra => ({
-  version: 'RTM-01-FR v13',
+  version: DEFAULT_FORMAT_VERSION,
   fecha_formato: '',
   no_inspeccion: '',
   tipo_vehiculo_formato: '',
@@ -207,25 +208,25 @@ const createDefaultFormatoExtra = (): RecepcionFormatoExtra => ({
   firma_titular: null,
 });
 
-const PREPARACION_ITEMS: Array<{ key: keyof RecepcionPreparacionChecklist; label: string }> = [
-  { key: 'limpieza_descargado', label: 'Estado de limpieza adecuado y vehículo descargado' },
-  { key: 'licencia_y_confrontacion_datos', label: 'Licencia de tránsito y confrontación de datos (placa/marca/línea/servicio/color)' },
-  { key: 'conversion_gas_vigente', label: 'Conversión a gas vigente (si aplica)' },
-  { key: 'presion_llantas_adecuada_cda', label: '¿La presión de inflado de las llantas es adecuada según las disposiciones del CDA?' },
-  { key: 'tapa_o_capuchones_valvula', label: 'Sin copas o tapacubos que cubran rin/pernos/tuercas' },
-  { key: 'niveles_fluidos_visibles', label: 'Niveles de fluidos visibles y sin alteraciones' },
-  { key: 'sin_accesorios_que_impidan_acople', label: 'Sin accesorios que impidan ubicación de acople o introducción de sonda' },
-  { key: 'retiro_elementos_cabina_carga', label: 'Retiro de accesorios/elementos que afecten visibilidad o ingreso a línea' },
-  { key: 'liberacion_carga_para_inspeccion', label: 'Se libera carga para pruebas y verificación en inspección' },
-  { key: 'tablero_instrumentos_ok', label: 'Tablero de instrumentos con indicadores visibles' },
-  { key: 'cinturones_sillas_accesos_ok', label: 'Cinturones/sillas/asientos de fácil acceso para inspección' },
-  { key: 'combustible_suficiente', label: 'Combustible suficiente para el desarrollo de la inspección' },
-  { key: 'placa_identificacion_legible', label: 'Placa e identificación en buen estado y posicionamiento' },
-  { key: 'llanta_repuesto_accesible', label: 'Llanta de repuesto accesible (si aplica)' },
-  { key: 'luces_funcionales', label: 'Al menos una luz funcional' },
-  { key: 'extintor_central_funcional_moto', label: 'Extintor central funcional en motocicleta (si aplica)' },
-  { key: 'adaptaciones_discapacidad', label: 'Adaptaciones para discapacidad (si aplica)' },
-  { key: 'viable_ingreso_linea', label: '¿Vehículo preparado para inspección e ingreso a línea?' },
+const buildPreparacionItems = (tenantDisplayName: string): Array<{ key: keyof RecepcionPreparacionChecklist; label: string }> => [
+  { key: 'limpieza_descargado', label: '¿El vehículo se encuentra en un estado de limpieza adecuado y descargado? (peso adicional que no hace parte del vehículo) y, si aplica, con la alarma desactivada?' },
+  { key: 'licencia_y_confrontacion_datos', label: '¿Se presenta la licencia de tránsito (tarjeta de propiedad) del vehículo? ¿La confrontación de los datos: Placa – Marca - Clase – Modelo – Servicio – Color con el vehículo, ¿es correcto?' },
+  { key: 'conversion_gas_vigente', label: 'El vehículo (si aplica), cuenta con certificado de conversión a gas VIGENTE (registrar fecha en el evento que aplique)' },
+  { key: 'tapa_o_capuchones_valvula', label: '¿El vehículo se presenta sin copas o tapacubos ( o slider) que cubran el rin y/o los pernos o tuercas?' },
+  { key: 'presion_llantas_adecuada_cda', label: `¿La presión de inflado de las llantas son adecuadas de acuerdo con las disposiciones de ${tenantDisplayName.toUpperCase()} (ver procedimiento de pre-revisión y post-revisión RTM-04-PR)` },
+  { key: 'sin_accesorios_que_impidan_acople', label: '¿La motocicleta NO cuenta con accesorios que impida la ubicación adecuada del acople (si aplica) y la introducción de la sonda de muestreo?' },
+  { key: 'niveles_fluidos_visibles', label: 'Los depósitos de los niveles de líquido de frenos son visibles (que no presenten alteraciones que no permitan inspeccionar el nivel en las líneas de inspección).' },
+  { key: 'liberacion_carga_para_inspeccion', label: 'Si aplica, se deja libre la carpa con el objetivo de verificar las puertas y compuertas de carga para brindar las condiciones necesarias para realizar la inspección a conformidad.' },
+  { key: 'retiro_elementos_cabina_carga', label: 'Se retiran candados (o dejarlos abiertos) o seguros de la(s) cubierta(s) de la(s) batería(s), puertas, compuertas, cabina basculante (cuando aplique), tapa de combustible y el brazo utilizado como soporte exterior de la llanta de repuesto (si aplica), así como amarres, cintas, forros, fundas, los protectores o tapas de las exploradoras y demás elementos que protejan parte del vehículo para asegurarse que se tenga acceso a los mismos y brindar las condiciones necesarias para realizar la inspección a conformidad.' },
+  { key: 'viable_ingreso_linea', label: '¿El vehículo se presenta sin fugas de combustible, aceite, líquidos de frenos, líquido refrigerante (si aplica), con la tapa del combustible y no cuenta con otras condiciones que impidan que se realicen las pruebas de manera segura (ver procedimiento de pre-revisión y post-revisión RTM-04-PR)' },
+  { key: 'tablero_instrumentos_ok', label: 'El tablero de instrumentos se encuentra en un estado tal que permita visualizar los indicadores de falla del motor, presión de aceite y temperatura.' },
+  { key: 'cinturones_sillas_accesos_ok', label: '¿Los cinturones de seguridad, las sillas / asientos son de fácil acceso, para permitir su verificación en las líneas de inspección?' },
+  { key: 'combustible_suficiente', label: 'El vehículo cuenta con el combustible suficiente para el desarrollo de la inspección' },
+  { key: 'placa_identificacion_legible', label: '¿La placa del vehículo está en buen estado y posicionamiento que garantice su plena identificación?' },
+  { key: 'llanta_repuesto_accesible', label: 'En vehículos en los que la llanta de repuesto vaya fijada en el soporte exterior, se retira el protector, seguro o forro de la llanta de repuesto. En vehículos tipo sedán/coupé se deja libre la llanta de repuesto para que sea accesible a los inspectores durante la inspección.' },
+  { key: 'luces_funcionales', label: '¿El vehículo cuenta con al menos una luz funcional?' },
+  { key: 'extintor_central_funcional_moto', label: '¿Si es una motocicleta automática, ¿cuenta con el soporte central funcional?' },
+  { key: 'adaptaciones_discapacidad', label: '¿El vehículo cuenta con adaptaciones para personas con discapacidad?' },
 ];
 
 const AUTORIZACION_ITEMS: Array<{ key: keyof RecepcionAutorizacionesDatos; label: string }> = [
@@ -400,6 +401,12 @@ export default function Recepcion() {
     document_type: 'CC',
     document_number: '',
   });
+  const versionFormatoTenant =
+    (user?.tenant_branding?.formato_prerevision_version || '').trim() || DEFAULT_FORMAT_VERSION;
+  const preparacionItems = useMemo(
+    () => buildPreparacionItems((user?.tenant_branding?.nombre_comercial || 'CDASOFT').trim() || 'CDASOFT'),
+    [user?.tenant_branding?.nombre_comercial]
+  );
 
   const formatoExtraResumen = useMemo(() => {
     const tecnicoCount = countTecnicosDiligenciados(formatoExtra.datos_tecnicos);
@@ -407,11 +414,11 @@ export default function Recepcion() {
     const preRevisionCount = countPreRevisionDiligenciada(formatoExtra.pre_revision);
     const total = tecnicoCount + checklistCount + preRevisionCount;
     if (total === 0) return { estado: 'Sin diligenciar', className: 'bg-slate-100 text-slate-700' };
-    if (checklistCount === PREPARACION_ITEMS.length) {
+    if (checklistCount === preparacionItems.length) {
       return { estado: 'Completo', className: 'bg-emerald-100 text-emerald-700' };
     }
     return { estado: 'Parcial', className: 'bg-amber-100 text-amber-700' };
-  }, [formatoExtra]);
+  }, [formatoExtra, preparacionItems.length]);
 
   const requiereFirmaFormato = useMemo(() => {
     const tecnicoCount = countTecnicosDiligenciados(formatoExtra.datos_tecnicos);
@@ -427,6 +434,17 @@ export default function Recepcion() {
     const key = resolveTipoLlantasKey(formData.tipo_vehiculo);
     return TIPO_LLAYOUT[key];
   }, [formData.tipo_vehiculo]);
+
+  useEffect(() => {
+    if (!mostrarFormatoExtra) return;
+    setFormatoExtra((prev) => {
+      const current = (prev.version || '').trim();
+      if (!current || current === DEFAULT_FORMAT_VERSION) {
+        return { ...prev, version: versionFormatoTenant };
+      }
+      return prev;
+    });
+  }, [mostrarFormatoExtra, versionFormatoTenant]);
 
   type PrefillState = {
     agendamiento_prefill?: {
@@ -926,7 +944,7 @@ export default function Recepcion() {
       ciudad_direccion: (formData.cliente_direccion || '').trim(),
     };
     const payload: RecepcionFormatoExtra = {
-      version: (formatoExtra.version || 'RTM-01-FR v13').trim(),
+      version: (formatoExtra.version || DEFAULT_FORMAT_VERSION).trim(),
       fecha_formato: (formatoExtra.fecha_formato || formatTodayYmd()).trim(),
       no_inspeccion: (formatoExtra.no_inspeccion || buildNoInspeccionProvisional(formData.placa)).trim(),
       tipo_vehiculo_formato: (formatoExtra.tipo_vehiculo_formato || mapTipoVehiculoFormato(formData.tipo_vehiculo)).trim(),
@@ -1270,6 +1288,29 @@ export default function Recepcion() {
     };
   };
 
+  const prepareFirmaCanvas = (canvas: HTMLCanvasElement | null, dataUrl?: string | null) => {
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    const ratio = window.devicePixelRatio || 1;
+    const cssWidth = canvas.clientWidth || 640;
+    const cssHeight = window.innerWidth < 640 ? 140 : 160;
+    canvas.width = Math.floor(cssWidth * ratio);
+    canvas.height = Math.floor(cssHeight * ratio);
+    canvas.style.height = `${cssHeight}px`;
+    canvas.style.touchAction = 'none';
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
+    if (dataUrl) {
+      const img = new Image();
+      img.onload = () => {
+        ctx.clearRect(0, 0, cssWidth, cssHeight);
+        ctx.drawImage(img, 0, 0, cssWidth, cssHeight);
+      };
+      img.src = dataUrl;
+    }
+  };
+
   const iniciarTrazoFirma = (event: ReactMouseEvent<HTMLCanvasElement> | ReactTouchEvent<HTMLCanvasElement>) => {
     const canvas = firmaCanvasRef.current;
     if (!canvas) return;
@@ -1295,7 +1336,6 @@ export default function Recepcion() {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.stroke();
-    if ('preventDefault' in event) event.preventDefault();
   };
 
   const terminarTrazoFirma = () => {
@@ -1340,7 +1380,6 @@ export default function Recepcion() {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     ctx.stroke();
-    if ('preventDefault' in event) event.preventDefault();
   };
 
   const terminarTrazoFirmaOperario = () => {
@@ -1407,55 +1446,17 @@ export default function Recepcion() {
   };
 
   useEffect(() => {
-    const canvas = firmaCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const ratio = window.devicePixelRatio || 1;
-    const cssWidth = canvas.clientWidth || 640;
-    const cssHeight = 160;
-    canvas.width = Math.floor(cssWidth * ratio);
-    canvas.height = Math.floor(cssHeight * ratio);
-    canvas.style.height = `${cssHeight}px`;
-    canvas.style.touchAction = 'none';
-    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    ctx.clearRect(0, 0, cssWidth, cssHeight);
-
-    if (formatoExtra.firma_titular?.data_url) {
-      const img = new Image();
-      img.onload = () => {
-        ctx.clearRect(0, 0, cssWidth, cssHeight);
-        ctx.drawImage(img, 0, 0, cssWidth, cssHeight);
-      };
-      img.src = formatoExtra.firma_titular.data_url;
-    }
+    const repaint = () => prepareFirmaCanvas(firmaCanvasRef.current, formatoExtra.firma_titular?.data_url);
+    repaint();
+    window.addEventListener('resize', repaint);
+    return () => window.removeEventListener('resize', repaint);
   }, [formatoExtra.firma_titular?.data_url, mostrarFormatoExtra, requiereFirmaFormato]);
 
   useEffect(() => {
-    const canvas = firmaOperarioCanvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-
-    const ratio = window.devicePixelRatio || 1;
-    const cssWidth = canvas.clientWidth || 640;
-    const cssHeight = 160;
-    canvas.width = Math.floor(cssWidth * ratio);
-    canvas.height = Math.floor(cssHeight * ratio);
-    canvas.style.height = `${cssHeight}px`;
-    canvas.style.touchAction = 'none';
-    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
-    ctx.clearRect(0, 0, cssWidth, cssHeight);
-
-    if (formatoExtra.pre_revision.firma_operario?.data_url) {
-      const img = new Image();
-      img.onload = () => {
-        ctx.clearRect(0, 0, cssWidth, cssHeight);
-        ctx.drawImage(img, 0, 0, cssWidth, cssHeight);
-      };
-      img.src = formatoExtra.pre_revision.firma_operario.data_url;
-    }
+    const repaint = () => prepareFirmaCanvas(firmaOperarioCanvasRef.current, formatoExtra.pre_revision.firma_operario?.data_url);
+    repaint();
+    window.addEventListener('resize', repaint);
+    return () => window.removeEventListener('resize', repaint);
   }, [formatoExtra.pre_revision.firma_operario?.data_url, mostrarFormatoExtra, requiereFirmaFormato]);
 
   useEffect(() => {
@@ -2038,7 +2039,7 @@ export default function Recepcion() {
                             <span>Versión</span>
                             <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-amber-100 text-amber-700">Fija</span>
                           </label>
-                          <div className="input-pos bg-slate-50 text-slate-700 flex items-center">{formatoExtra.version || 'RTM-01-FR v13'}</div>
+                          <div className="input-pos bg-slate-50 text-slate-700 flex items-center">{formatoExtra.version || DEFAULT_FORMAT_VERSION}</div>
                         </div>
                       </div>
                       <p className="mt-2 text-[11px] text-slate-500">
@@ -2227,7 +2228,7 @@ export default function Recepcion() {
                     <div>
                       <p className="text-xs font-semibold text-slate-700 mb-2">Preparación del vehículo para inspección (SI / NO / N/A)</p>
                       <div className="space-y-2">
-                        {PREPARACION_ITEMS.map((item) => (
+                        {preparacionItems.map((item) => (
                           <div key={item.key} className="flex flex-col md:flex-row md:items-center md:justify-between gap-2 rounded-md border border-slate-200 px-3 py-2">
                             <p className="text-sm text-slate-700">{item.label}</p>
                             <div className="flex items-center gap-2">
@@ -2314,6 +2315,7 @@ export default function Recepcion() {
                                 backgroundImage:
                                   'linear-gradient(to bottom, rgba(148,163,184,0.08) 1px, transparent 1px), linear-gradient(to right, rgba(148,163,184,0.06) 1px, transparent 1px)',
                                 backgroundSize: '24px 24px, 24px 24px',
+                                touchAction: 'none',
                               }}
                               onMouseDown={iniciarTrazoFirma}
                               onMouseMove={moverTrazoFirma}
@@ -2323,18 +2325,18 @@ export default function Recepcion() {
                               onTouchMove={moverTrazoFirma}
                               onTouchEnd={terminarTrazoFirma}
                             />
-                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <div className="mt-3 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
                               <button
                                 type="button"
                                 onClick={limpiarFirmaCanvas}
-                                className="px-3 py-1.5 rounded-md border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                className="w-full sm:w-auto min-h-10 px-3 py-1.5 rounded-md border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
                               >
                                 Limpiar
                               </button>
                               <button
                                 type="button"
                                 onClick={guardarFirmaCanvas}
-                                className="px-3 py-1.5 rounded-md border border-primary-500 bg-primary-600 text-xs font-semibold text-white hover:bg-primary-700"
+                                className="w-full sm:w-auto min-h-10 px-3 py-1.5 rounded-md border border-primary-500 bg-primary-600 text-xs font-semibold text-white hover:bg-primary-700"
                               >
                                 Guardar firma
                               </button>
@@ -2372,6 +2374,7 @@ export default function Recepcion() {
                                 backgroundImage:
                                   'linear-gradient(to bottom, rgba(148,163,184,0.08) 1px, transparent 1px), linear-gradient(to right, rgba(148,163,184,0.06) 1px, transparent 1px)',
                                 backgroundSize: '24px 24px, 24px 24px',
+                                touchAction: 'none',
                               }}
                               onMouseDown={iniciarTrazoFirmaOperario}
                               onMouseMove={moverTrazoFirmaOperario}
@@ -2381,18 +2384,18 @@ export default function Recepcion() {
                               onTouchMove={moverTrazoFirmaOperario}
                               onTouchEnd={terminarTrazoFirmaOperario}
                             />
-                            <div className="mt-3 flex flex-wrap items-center gap-2">
+                            <div className="mt-3 flex flex-col sm:flex-row sm:flex-wrap sm:items-center gap-2">
                               <button
                                 type="button"
                                 onClick={limpiarFirmaCanvasOperario}
-                                className="px-3 py-1.5 rounded-md border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                                className="w-full sm:w-auto min-h-10 px-3 py-1.5 rounded-md border border-slate-300 bg-white text-xs font-semibold text-slate-700 hover:bg-slate-50"
                               >
                                 Limpiar
                               </button>
                               <button
                                 type="button"
                                 onClick={guardarFirmaCanvasOperario}
-                                className="px-3 py-1.5 rounded-md border border-primary-500 bg-primary-600 text-xs font-semibold text-white hover:bg-primary-700"
+                                className="w-full sm:w-auto min-h-10 px-3 py-1.5 rounded-md border border-primary-500 bg-primary-600 text-xs font-semibold text-white hover:bg-primary-700"
                               >
                                 Guardar firma
                               </button>

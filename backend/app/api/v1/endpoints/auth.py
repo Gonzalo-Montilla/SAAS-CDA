@@ -314,6 +314,7 @@ def get_current_user_info(
         nombre_comercial=(tenant.nombre_comercial or tenant.nombre or settings.APP_NAME).strip()
         or settings.APP_NAME,
         logo_url=tenant.logo_url,
+        formato_prerevision_version=(tenant.formato_prerevision_version or "").strip() or None,
         color_primario=(tenant.color_primario or "#2563eb").strip() or "#2563eb",
         color_secundario=(tenant.color_secundario or "#0f172a").strip() or "#0f172a",
     )

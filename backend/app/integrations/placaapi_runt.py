@@ -140,8 +140,21 @@ def consultar_placaapi_por_placa(placa: str) -> dict[str, Any]:
         "RegistrationNumber": placa_norm,
         "username": username,
     }
-    with httpx.Client(timeout=timeout) as client:
-        resp = client.get(url, params=params, headers={"Accept": "application/xml,text/xml;q=0.9,*/*;q=0.8"})
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.get(
+                url,
+                params=params,
+                headers={"Accept": "application/xml,text/xml;q=0.9,*/*;q=0.8"},
+            )
+    except httpx.HTTPError as exc:
+        # Importante: envolver errores de red/DNS para que el endpoint pueda
+        # aplicar fallback a Verifik y no responda 500 crudo.
+        raise PlacaApiRuntError(
+            "No fue posible conectar con PlacaAPI (error de red o DNS).",
+            status_code=503,
+            body=str(exc),
+        ) from exc
     if resp.status_code >= 400:
         body_text = (resp.text or "").strip()
         # Este proveedor responde 500 + "Array empty" cuando no hay datos para la placa.

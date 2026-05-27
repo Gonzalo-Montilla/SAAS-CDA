@@ -2,6 +2,7 @@
 export interface TenantBranding {
   nombre_comercial: string;
   logo_url?: string | null;
+  formato_prerevision_version?: string | null;
   color_primario: string;
   color_secundario: string;
 }
@@ -482,6 +483,9 @@ export interface SaaSOpenSanctionsUsageSummary {
   trm_cop: number;
   cost_per_call_eur: number;
   cost_per_call_cop: number;
+  pricing_model: string;
+  prepaid_unit_price_cop: number;
+  prepaid_package_expires_days: number;
   recepcion_calls: number;
   manual_calls: number;
   lote_calls: number;
@@ -634,6 +638,12 @@ export interface QualitySummary {
   total_pendientes: number;
   promedio_general: number;
   tasa_respuesta: number;
+}
+
+export interface QualityTenantLogoSettings {
+  logo_calidad_url?: string | null;
+  logo_general_url?: string | null;
+  formato_prerevision_version?: string | null;
 }
 
 export interface QualityInviteItem {
@@ -852,6 +862,7 @@ export interface Vehiculo {
   fecha_pago?: string;
   estado: 'registrado' | 'pagado' | 'en_pista' | 'aprobado' | 'rechazado' | 'completado';
   observaciones?: string;
+  recepcion_formato_extra_json?: Record<string, unknown> | null;
   fecha_registro: string;
   /** Nombre del usuario que cobró (solo en detalle GET). */
   cajero_nombre?: string | null;
@@ -876,6 +887,7 @@ export interface VehiculoRegistro {
   cliente_factus_municipality_id?: number | null;
   tiene_soat: boolean;
   observaciones?: string;
+  recepcion_formato_extra?: Record<string, unknown> | null;
 }
 
 export interface VehiculoConsultaRunt {

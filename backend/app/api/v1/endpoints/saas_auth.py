@@ -389,6 +389,9 @@ class SaaSOpenSanctionsUsageOut(BaseModel):
     trm_cop: float
     cost_per_call_eur: float
     cost_per_call_cop: float
+    pricing_model: str = "prepago_por_consulta"
+    prepaid_unit_price_cop: float
+    prepaid_package_expires_days: int
     recepcion_calls: int
     manual_calls: int
     lote_calls: int
@@ -1806,6 +1809,7 @@ def get_opensanctions_usage_summary(
     from_date: datetime | None = Query(default=None, description="Fecha inicio (inclusive, UTC)."),
     to_date: datetime | None = Query(default=None, description="Fecha fin (inclusive, UTC)."),
     trm_cop: float = Query(default=4379.0, gt=0, description="TRM EUR/COP para estimar costo en COP."),
+    tenant_id: UUID | None = Query(default=None, description="Filtrar por tenant específico (opcional)."),
     db: Session = Depends(get_db),
     _: SaaSUser = Depends(require_saas_role(["owner", "finanzas", "comercial", "soporte"])),
 ):
@@ -1814,8 +1818,10 @@ def get_opensanctions_usage_summary(
     if start_dt > end_dt:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Rango de fechas inválido.")
 
-    cost_per_call_eur = 0.10
+    cost_per_call_eur = float(settings.OPENSANCTIONS_COST_PER_CALL_EUR or 0.10)
     cost_per_call_cop = round(cost_per_call_eur * trm_cop, 2)
+    prepaid_unit_price_cop = round(float(settings.OPENSANCTIONS_PREPAID_UNIT_PRICE_COP or 0), 2)
+    prepaid_package_expires_days = int(settings.OPENSANCTIONS_PREPAID_PACKAGE_EXPIRES_DAYS or 365)
 
     tenants = db.query(Tenant).all()
     tenant_meta = {
@@ -1863,6 +1869,8 @@ def get_opensanctions_usage_summary(
     lote_by_tenant = {str(tenant_id): int(count or 0) for tenant_id, count in lote_rows}
 
     tenant_ids = set(manual_by_tenant.keys()) | set(recepcion_by_tenant.keys()) | set(lote_by_tenant.keys())
+    if tenant_id is not None:
+        tenant_ids = {tid for tid in tenant_ids if tid == str(tenant_id)}
     tenant_items: list[SaaSOpenSanctionsUsageTenantItem] = []
     for tenant_id in tenant_ids:
         recepcion_calls = recepcion_by_tenant.get(tenant_id, 0)
@@ -1898,6 +1906,9 @@ def get_opensanctions_usage_summary(
         trm_cop=trm_cop,
         cost_per_call_eur=cost_per_call_eur,
         cost_per_call_cop=cost_per_call_cop,
+        pricing_model="prepago_por_consulta",
+        prepaid_unit_price_cop=prepaid_unit_price_cop,
+        prepaid_package_expires_days=prepaid_package_expires_days,
         recepcion_calls=recepcion_total,
         manual_calls=manual_total,
         lote_calls=lote_total,

@@ -10,6 +10,7 @@ from uuid import UUID
 class TenantBrandingResponse(BaseModel):
     nombre_comercial: str
     logo_url: Optional[str] = None
+    formato_prerevision_version: Optional[str] = None
     color_primario: str
     color_secundario: str
 

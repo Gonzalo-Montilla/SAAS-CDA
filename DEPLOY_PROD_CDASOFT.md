@@ -18,6 +18,18 @@ Usar **solo estas rutas y dominios** para no mezclar con otras apps del mismo VP
 
 ---
 
+## Regla obligatoria (frontend)
+
+Si el commit toca cualquier archivo de `frontend/src` o `frontend/public`, el deploy **debe** incluir:
+
+1. `npm run build` en local con `VITE_API_URL` de producción.
+2. `scp` del contenido de `frontend/dist/*` al VPS.
+
+No basta con hacer `git pull` + reinicio de backend.  
+Sin `build + scp`, en producción se seguirá viendo el frontend anterior.
+
+---
+
 ## 1. En tu PC (Windows, PowerShell)
 
 ### 1.1 Build del frontend
@@ -123,7 +135,7 @@ Luego: `sudo systemctl daemon-reload` y `sudo systemctl restart cdasoft-backend`
 - [ ] `git pull` en `/var/www/cdasoft/repo`.
 - [ ] `pip install -r requirements.txt` en `repo/backend` (como `www-data`).
 - [ ] `systemctl restart cdasoft-backend` (no confundir con `cda-backend`).
-- [ ] `npm run build` con `VITE_API_URL` de **`.com.co`**.
-- [ ] `scp` de `dist/*` a **`/var/www/cdasoft/repo/frontend/dist/`**.
+- [ ] Si hubo cambios en frontend: `npm run build` con `VITE_API_URL` de **`.com.co`**.
+- [ ] Si hubo cambios en frontend: `scp` de `dist/*` a **`/var/www/cdasoft/repo/frontend/dist/`**.
 - [ ] `chown` + `reload nginx` si hace falta.
 - [ ] Probar en navegador con caché limpia.

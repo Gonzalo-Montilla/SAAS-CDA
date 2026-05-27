@@ -45,7 +45,10 @@ from app.models.sarlaft_case import SarlaftCase
 from app.models.sarlaft_case_party import SarlaftCaseParty
 from app.integrations.opensanctions import OpenSanctionsError, open_sanctions_match
 from app.services.sarlaft_audit import log_sarlaft_event
-from app.services.sarlaft_internal_alert_engine import evaluate_unusual_operation_rules
+from app.services.sarlaft_internal_alert_engine import (
+    evaluate_unusual_operation_rules,
+)
+from app.services.sarlaft_intercda_async import enqueue_intercda_job
 from app.utils.email import (
     enviar_email,
     enviar_email_con_adjuntos,
@@ -57,6 +60,7 @@ from app.utils.quality import create_quality_survey_invite
 from app.utils.rtm_reminders import schedule_rtm_renewal_reminder_for_vehicle
 from app.utils.comprobantes import generar_recibo_pago_vehiculo_pdf
 from app.utils.habeas_autorizacion_pdf import generar_habeas_autorizacion_pdf
+from app.utils.recepcion_formato_extra_pdf import generar_recepcion_formato_extra_pdf
 
 
 def _try_download_factura_pdf_desde_url_publica(url: str, max_bytes: int = 8 * 1024 * 1024) -> bytes | None:
@@ -708,6 +712,35 @@ def _upsert_sarlaft_en_cobro(
             },
         )
 
+    if bool(settings.SARLAFT_INTERCDA_ASYNC_ENABLED):
+        enqueue_intercda_job(
+            db,
+            tenant_id=current_user.tenant_id,
+            source_case_id=case.id,
+        )
+        log_sarlaft_event(
+            db,
+            tenant_id=current_user.tenant_id,
+            actor_user=current_user,
+            action="intercda_signal_enqueued",
+            entity_type="intercda_job",
+            entity_id=case.id,
+            after_json={
+                "source_case_id": str(case.id),
+                "async_enabled": True,
+            },
+        )
+    else:
+        log_sarlaft_event(
+            db,
+            tenant_id=current_user.tenant_id,
+            actor_user=current_user,
+            action="intercda_signal_skipped_async_disabled",
+            entity_type="intercda_job",
+            entity_id=case.id,
+            after_json={"source_case_id": str(case.id)},
+        )
+
     # Si no está en modo API, dejamos el caso para revisión manual posterior.
     if (profile.mode or "").strip().lower() != "api":
         return {
@@ -1106,6 +1139,7 @@ def registrar_vehiculo(
         total_cobrado=total_cobrado,
         estado=EstadoVehiculo.REGISTRADO,
         observaciones=vehiculo_data.observaciones,
+        recepcion_formato_extra_json=vehiculo_data.recepcion_formato_extra,
         registrado_por=current_user.id
     )
     
@@ -1293,6 +1327,7 @@ def editar_vehiculo(
     vehiculo.cliente_factus_municipality_id = vehiculo_data.cliente_factus_municipality_id
     vehiculo.tiene_soat = vehiculo_data.tiene_soat
     vehiculo.observaciones = vehiculo_data.observaciones
+    vehiculo.recepcion_formato_extra_json = vehiculo_data.recepcion_formato_extra
     
     # Actualizar tarifas (RECALCULADAS)
     vehiculo.valor_rtm = valor_rtm
@@ -2355,6 +2390,74 @@ def descargar_recibo_pago_pdf(
         cliente_telefono=vehiculo.cliente_telefono,
     )
     filename = f"recibo_pago_{vehiculo.placa}.pdf"
+    return StreamingResponse(
+        BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+@router.get("/{vehiculo_id}/recepcion-formato-pdf")
+def descargar_recepcion_formato_extra_pdf(
+    vehiculo_id: str,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
+):
+    """
+    PDF del formato adicional de recepción (opcional), personalizado con marca del tenant.
+    """
+    try:
+        vid = UUID(vehiculo_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID de vehículo inválido")
+
+    vehiculo = _filtro_vehiculo_sede(
+        db.query(VehiculoProceso),
+        current_user.tenant_id,
+        active_sucursal_id,
+    ).filter(VehiculoProceso.id == vid).first()
+
+    if not vehiculo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehículo no encontrado")
+
+    formato_extra = vehiculo.recepcion_formato_extra_json
+    if not isinstance(formato_extra, dict) or not formato_extra:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El vehículo no tiene formato adicional de recepción diligenciado.",
+        )
+
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    tenant_nombre = (
+        tenant.nombre_comercial
+        if tenant and tenant.nombre_comercial
+        else (tenant.nombre if tenant else "CDASOFT")
+    )
+
+    pdf_bytes = generar_recepcion_formato_extra_pdf(
+        tenant_nombre=tenant_nombre,
+        tenant_nit=tenant.nit_cda if tenant else None,
+        tenant_logo_url=(tenant.logo_calidad_url if tenant and tenant.logo_calidad_url else (tenant.logo_url if tenant else None)),
+        tenant_color_primario=tenant.color_primario if tenant else None,
+        tenant_color_secundario=tenant.color_secundario if tenant else None,
+        placa=vehiculo.placa,
+        tipo_vehiculo=vehiculo.tipo_vehiculo,
+        cliente_nombre=vehiculo.cliente_nombre,
+        cliente_documento=vehiculo.cliente_documento,
+        cliente_telefono=vehiculo.cliente_telefono,
+        cliente_email=vehiculo.cliente_email,
+        fecha_registro=vehiculo.fecha_registro,
+        formato_extra={
+            **formato_extra,
+            "version": (
+                (str((formato_extra or {}).get("version", "")).strip())
+                or (tenant.formato_prerevision_version.strip() if tenant and tenant.formato_prerevision_version else "")
+                or "RTM-01-FR v13"
+            ),
+        },
+    )
+    filename = f"recepcion_formato_{vehiculo.placa}.pdf"
     return StreamingResponse(
         BytesIO(pdf_bytes),
         media_type="application/pdf",

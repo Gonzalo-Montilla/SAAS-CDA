@@ -57,6 +57,7 @@ from app.utils.archivo_fiscal_pdf import guardar_pdf_archivo_fiscal, leer_pdf_ar
 from app.utils.sarlaft_certificate_pdf import build_sarlaft_manual_certificate_pdf
 from app.utils.sarlaft_expediente_pdf import build_sarlaft_expediente_template_pdf
 from app.services.sarlaft_audit import log_sarlaft_event
+from app.services.sarlaft_intercda_async import process_due_intercda_jobs
 
 router = APIRouter(dependencies=[Depends(require_sarlaft_enabled_for_tenant)])
 public_router = APIRouter()
@@ -1183,6 +1184,30 @@ def download_sarlaft_batch_job_rows_csv(
         media_type="text/csv; charset=utf-8",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.post("/intercda/process-pending")
+def process_pending_intercda_signals(
+    limit: int = Query(default=int(settings.SARLAFT_INTERCDA_ASYNC_BATCH_LIMIT or 200), ge=1, le=5000),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permisos para procesar la cola inter-CDA.",
+        )
+    processed = process_due_intercda_jobs(db, limit=limit)
+    log_sarlaft_event(
+        db,
+        tenant_id=current_user.tenant_id,
+        actor_user=current_user,
+        action="intercda_queue_processed_manual",
+        entity_type="intercda_job",
+        after_json={"processed": int(processed), "limit": int(limit)},
+    )
+    db.commit()
+    return {"success": True, "processed": int(processed), "limit": int(limit)}
 
 
 @router.get("/manual-checks/{manual_check_id}/certificate")

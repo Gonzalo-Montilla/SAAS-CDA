@@ -37,6 +37,11 @@ interface EnvioReciboResponse {
   factura_adjunto_pdf?: boolean;
 }
 
+interface VehiculoPdfDownload {
+  blob: Blob;
+  filename: string;
+}
+
 export const vehiculosApi = {
   // Registrar un nuevo vehículo (Recepción)
   registrar: async (data: VehiculoRegistro): Promise<Vehiculo> => {
@@ -101,6 +106,24 @@ export const vehiculosApi = {
     formData.append('receipt_file', pdfFile);
     const response = await apiClient.post<EnvioReciboResponse>(`/vehiculos/${vehiculoId}/enviar-recibo-email`, formData);
     return response.data;
+  },
+
+  descargarFormatoRecepcionPdf: async (vehiculoId: string): Promise<VehiculoPdfDownload> => {
+    const response = await apiClient.get(`/vehiculos/${vehiculoId}/recepcion-formato-pdf`, {
+      responseType: 'blob',
+    });
+    const blob = response.data as Blob;
+    const contentDisposition = response.headers['content-disposition'] as string | undefined;
+    let filename = `recepcion_formato_${vehiculoId}.pdf`;
+    if (contentDisposition) {
+      const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i);
+      const simpleMatch = contentDisposition.match(/filename="?([^"]+)"?/i);
+      const rawName = utf8Match?.[1] || simpleMatch?.[1];
+      if (rawName) {
+        filename = decodeURIComponent(rawName).replace(/[\\/:*?"<>|]/g, '_');
+      }
+    }
+    return { blob, filename };
   },
 
   // Venta solo de comisión SOAT (sin revisión)

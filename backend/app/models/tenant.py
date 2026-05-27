@@ -24,6 +24,8 @@ class Tenant(Base):
     celular = Column(String(30), nullable=True)
     nombre_comercial = Column(String(200), nullable=False, default="CDASOFT")
     logo_url = Column(String(500), nullable=True)
+    logo_calidad_url = Column(String(500), nullable=True)
+    formato_prerevision_version = Column(String(50), nullable=True)
     color_primario = Column(String(20), nullable=False, default="#2563eb")
     color_secundario = Column(String(20), nullable=False, default="#0f172a")
     plan_actual = Column(String(30), nullable=False, default="demo")

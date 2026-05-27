@@ -3,6 +3,7 @@ Automatizaciones SaaS operativas:
 - Sincroniza tenants demo vencidos / pagos vencidos.
 - Procesa recordatorios de citas (agendamiento).
 - Procesa invitaciones pendientes de calidad.
+- Procesa cola asíncrona de señal SARLAFT inter-CDA.
 
 Uso:
     python scripts/run_saas_automation.py
@@ -36,17 +37,20 @@ from app.models.appointment import Appointment  # noqa: F401
 from app.models.rtm_reminder import RTMRenewalReminder  # noqa: F401
 from app.models.saas_user import SaaSUser  # noqa: F401
 from app.models.support_ticket import SaaSSupportTicket  # noqa: F401
+from app.models.sarlaft_intercda_job import SarlaftIntercdaJob  # noqa: F401
 from app.api.v1.endpoints.saas_auth import sync_expired_demo_tenants
 from app.api.v1.endpoints.appointments import process_due_appointment_reminders
 from app.utils.quality import process_due_quality_invites
 from app.utils.rtm_reminders import process_due_rtm_renewal_reminders
+from app.services.sarlaft_intercda_async import process_due_intercda_jobs
+from app.core.config import settings
 
 
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat()
 
 
-def run_automation(appointments_limit: int, quality_limit: int, rtm_limit: int) -> int:
+def run_automation(appointments_limit: int, quality_limit: int, rtm_limit: int, intercda_limit: int) -> int:
     print(f"[AUTOMATION] Inicio: {_utc_now_iso()}")
     db = SessionLocal()
     try:
@@ -67,6 +71,12 @@ def run_automation(appointments_limit: int, quality_limit: int, rtm_limit: int) 
         if rtm_limit > 0:
             rtm_processed = process_due_rtm_renewal_reminders(db, limit=rtm_limit)
         print(f"[AUTOMATION] Recordatorios próxima RTM procesados: {rtm_processed}")
+
+        intercda_processed = 0
+        if bool(settings.SARLAFT_INTERCDA_ASYNC_ENABLED) and intercda_limit > 0:
+            intercda_processed = process_due_intercda_jobs(db, limit=intercda_limit)
+        print(f"[AUTOMATION] Jobs inter-CDA procesados: {intercda_processed}")
+        db.commit()
 
         print(f"[AUTOMATION] Fin OK: {_utc_now_iso()}")
         return 0
@@ -99,12 +109,24 @@ def main() -> int:
         default=100,
         help="Máximo de recordatorios de próxima RTM a procesar por ejecución (0 = omitir).",
     )
+    parser.add_argument(
+        "--intercda-limit",
+        type=int,
+        default=int(settings.SARLAFT_INTERCDA_ASYNC_BATCH_LIMIT or 200),
+        help="Máximo de jobs asíncronos inter-CDA a procesar por ejecución (0 = omitir).",
+    )
     args = parser.parse_args()
 
     appointments_limit = max(int(args.appointments_limit), 0)
     quality_limit = max(int(args.quality_limit), 0)
     rtm_limit = max(int(args.rtm_limit), 0)
-    return run_automation(appointments_limit=appointments_limit, quality_limit=quality_limit, rtm_limit=rtm_limit)
+    intercda_limit = max(int(args.intercda_limit), 0)
+    return run_automation(
+        appointments_limit=appointments_limit,
+        quality_limit=quality_limit,
+        rtm_limit=rtm_limit,
+        intercda_limit=intercda_limit,
+    )
 
 
 if __name__ == "__main__":

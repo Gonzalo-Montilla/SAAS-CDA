@@ -6,7 +6,7 @@ import re
 from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator
 from decimal import Decimal
 from datetime import datetime
-from typing import Optional, Literal
+from typing import Optional, Literal, Any
 from uuid import UUID
 from app.utils.factus_validators import (
     digito_verificacion_nit_colombia,
@@ -84,6 +84,7 @@ class VehiculoRegistro(BaseModel):
     cliente_factus_municipality_id: Optional[int] = Field(default=None, ge=1)
     tiene_soat: bool = False
     observaciones: Optional[str] = None
+    recepcion_formato_extra: Optional[dict[str, Any]] = None
 
     @field_validator("cliente_telefono", mode="before")
     @classmethod
@@ -130,6 +131,7 @@ class VehiculoEdicion(BaseModel):
     cliente_factus_municipality_id: Optional[int] = Field(default=None, ge=1)
     tiene_soat: bool = False
     observaciones: Optional[str] = None
+    recepcion_formato_extra: Optional[dict[str, Any]] = None
 
     @field_validator("cliente_telefono", mode="before")
     @classmethod
@@ -203,6 +205,7 @@ class VehiculoResponse(BaseModel):
     fecha_pago: Optional[datetime]
     estado: str
     observaciones: Optional[str]
+    recepcion_formato_extra_json: Optional[dict[str, Any]] = None
     fecha_registro: datetime
     
     # Campos calculados

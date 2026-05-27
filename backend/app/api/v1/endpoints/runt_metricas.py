@@ -20,13 +20,16 @@ router = APIRouter()
 
 def _window(days: int) -> tuple[datetime, datetime]:
     end = datetime.now(timezone.utc).replace(tzinfo=None)
-    start = end - timedelta(days=days)
+    if int(days) == 0:
+        start = end.replace(hour=0, minute=0, second=0, microsecond=0)
+    else:
+        start = end - timedelta(days=days)
     return start, end
 
 
 @router.get("/summary")
 def resumen_metricas_runt(
-    days: int = Query(default=30, ge=1, le=365),
+    days: int = Query(default=30, ge=0, le=365),
     tenant_id: Optional[UUID] = Query(default=None),
     sucursal_id: Optional[UUID] = Query(default=None),
     db: Session = Depends(get_db),

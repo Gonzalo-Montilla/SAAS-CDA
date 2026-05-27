@@ -4,6 +4,7 @@ Generador PDF para el formato adicional de recepción (opcional).
 from __future__ import annotations
 
 import base64
+import glob
 import os
 import re
 from datetime import datetime, timezone
@@ -196,10 +197,12 @@ class TirePressureDiagramFlowable(Flowable):
             dx, dy = self.offsets_by_pos.get(pos_id, (8.0, 8.0))
             bx = min(max(px + dx, 0), w - bubble_w)
             by = min(max(py + dy, 0), h - bubble_h)
+            line_end_x = bx if px <= (bx + bubble_w / 2.0) else (bx + bubble_w)
+            line_end_y = by + bubble_h / 2.0
 
             c.setStrokeColor(colors.HexColor("#94a3b8"))
             c.setLineWidth(0.8)
-            c.line(px, py, bx, by + bubble_h / 2.0)
+            c.line(px, py, line_end_x, line_end_y)
 
             c.setFillColor(colors.white)
             c.setStrokeColor(colors.HexColor("#334155"))
@@ -215,16 +218,34 @@ def _resolve_vehicle_diagram_path(tipo_vehiculo: str | None) -> str | None:
     base_dir_fallback = os.path.join(os.path.dirname(__file__), "assets")
     tipo = (tipo_vehiculo or "").strip().lower()
     if tipo == "moto":
-        candidates = ["moto_base.png", "moto_base.png.png"]
+        base_name = "moto_base"
     elif "pesado" in tipo:
-        candidates = ["pesado_base.png", "pesado_base.png.png"]
+        base_name = "pesado_base"
     else:
-        candidates = ["liviano_base.png", "liviano_base.png.png"]
+        base_name = "liviano_base"
 
     for base_dir in (base_dir_primary, base_dir_fallback):
-        for file_name in candidates:
+        if not os.path.isdir(base_dir):
+            continue
+        # 1) Prioridad: nombre exacto histórico.
+        exact_candidates = (
+            f"{base_name}.png",
+            f"{base_name}.PNG",
+            f"{base_name}.jpg",
+            f"{base_name}.JPG",
+            f"{base_name}.jpeg",
+            f"{base_name}.JPEG",
+            f"{base_name}.webp",
+            f"{base_name}.WEBP",
+        )
+        for file_name in exact_candidates:
             target = os.path.join(base_dir, file_name)
             if os.path.exists(target):
+                return target
+        # 2) Fallback robusto: cualquier archivo que empiece por base_name.
+        wildcard_hits = sorted(glob.glob(os.path.join(base_dir, f"{base_name}*")))
+        for target in wildcard_hits:
+            if os.path.isfile(target):
                 return target
     return None
 
@@ -237,30 +258,36 @@ def _diagram_points_for_tipo(tipo_vehiculo: str | None) -> dict[str, tuple[float
             "moto_trasera": (0.24, 0.30),
         }
     if "pesado" in tipo:
-        # Coordenadas normalizadas sobre pesado_base.png (cabina a la izquierda).
+        # Coordenadas normalizadas sobre la nueva plantilla pesado_base (cabina a la izquierda).
+        # Convención usada en este formato: "izquierda" queda en la parte inferior del plano.
         return {
-            "pes_e1_izq": (0.18, 0.18),
-            "pes_e1_der": (0.18, 0.73),
-            "pes_e2_izq_ext": (0.62, 0.18),
-            "pes_e2_izq_int": (0.55, 0.18),
-            "pes_e2_der_int": (0.55, 0.73),
-            "pes_e2_der_ext": (0.62, 0.73),
-            "pes_e3_izq_ext": (0.79, 0.18),
-            "pes_e3_izq_int": (0.72, 0.18),
-            "pes_e3_der_int": (0.72, 0.73),
-            "pes_e3_der_ext": (0.79, 0.73),
-            "pes_e4_izq_ext": (0.92, 0.18),
-            "pes_e4_der_ext": (0.92, 0.73),
-            "pes_rep_1": (0.07, 0.88),
-            "pes_rep_2": (0.33, 0.88),
+            # OJO: ReportLab usa origen en esquina inferior izquierda; estas Y ya están convertidas.
+            "pes_e1_izq": (0.366, 0.460),
+            "pes_e1_der": (0.366, 0.831),
+            "pes_e2_izq_ext": (0.649, 0.457),
+            "pes_e2_izq_int": (0.649, 0.496),
+            "pes_e2_der_int": (0.649, 0.828),
+            "pes_e2_der_ext": (0.649, 0.866),
+            "pes_e3_izq_ext": (0.784, 0.457),
+            "pes_e3_izq_int": (0.784, 0.496),
+            "pes_e3_der_int": (0.784, 0.828),
+            "pes_e3_der_ext": (0.784, 0.866),
+            "pes_e4_izq_ext": (0.493, 0.460),
+            "pes_e4_der_ext": (0.493, 0.831),
+            # En esta plantilla, los repuestos son las dos llantas sueltas de la parte inferior.
+            "pes_rep_1": (0.440, 0.122),
+            "pes_rep_2": (0.569, 0.122),
         }
     # Liviano (top view)
+    # Plantilla nueva: llantas fuera del vehículo (esquinas + repuesto abajo al centro).
     return {
-        "liv_del_izq": (0.18, 0.30),
-        "liv_del_der": (0.18, 0.66),
-        "liv_tra_izq": (0.66, 0.30),
-        "liv_tra_der": (0.66, 0.66),
-        "liv_rep_1": (0.84, 0.48),
+        # Frente/atrás correcto; se invierte izq/der por orientación real de la plantilla.
+        # Ajustado a centros reales de las llantas del nuevo arte (más cerca del vehículo).
+        "liv_del_izq": (0.31, 0.30),
+        "liv_del_der": (0.31, 0.77),
+        "liv_tra_izq": (0.69, 0.30),
+        "liv_tra_der": (0.69, 0.77),
+        "liv_rep_1": (0.50, 0.12),
     }
 
 
@@ -273,27 +300,28 @@ def _diagram_label_offsets_for_tipo(tipo_vehiculo: str | None) -> dict[str, tupl
         }
     if "pesado" in tipo:
         return {
-            "pes_e1_izq": (-66, 14),
-            "pes_e1_der": (-66, -26),
-            "pes_e2_izq_ext": (-52, 18),
-            "pes_e2_izq_int": (-76, 2),
-            "pes_e2_der_int": (-76, -26),
-            "pes_e2_der_ext": (-52, -44),
-            "pes_e3_izq_ext": (-30, 18),
-            "pes_e3_izq_int": (-56, 2),
-            "pes_e3_der_int": (-56, -24),
-            "pes_e3_der_ext": (-30, -42),
-            "pes_e4_izq_ext": (2, 16),
-            "pes_e4_der_ext": (2, -26),
-            "pes_rep_1": (24, -10),
-            "pes_rep_2": (42, -10),
+            "pes_e1_izq": (-72, -14),
+            "pes_e1_der": (-72, 10),
+            "pes_e2_izq_ext": (-18, -34),
+            "pes_e2_izq_int": (-82, -10),
+            "pes_e2_der_int": (-82, 10),
+            "pes_e2_der_ext": (-18, 30),
+            "pes_e3_izq_ext": (24, -34),
+            "pes_e3_izq_int": (-40, -10),
+            "pes_e3_der_int": (-40, 10),
+            "pes_e3_der_ext": (24, 30),
+            "pes_e4_izq_ext": (-10, -24),
+            "pes_e4_der_ext": (-10, 20),
+            "pes_rep_1": (-52, 12),
+            "pes_rep_2": (16, 12),
         }
     return {
-        "liv_del_izq": (-42, 8),
-        "liv_del_der": (-42, -18),
-        "liv_tra_izq": (8, 8),
-        "liv_tra_der": (8, -28),
-        "liv_rep_1": (10, -8),
+        # Etiquetas más cerca de cada llanta para evitar líneas largas.
+        "liv_del_izq": (-34, -6),
+        "liv_del_der": (-34, 6),
+        "liv_tra_izq": (10, -6),
+        "liv_tra_der": (10, 6),
+        "liv_rep_1": (8, 8),
     }
 
 
@@ -724,24 +752,24 @@ def generar_recepcion_formato_extra_pdf(
 
     flow.append(_section_banner("2. PREPARACION DEL VEHICULO PARA INSPECCION"))
     checklist_map = [
-        ("Estado de limpieza y descargado", "limpieza_descargado"),
-        ("Licencia y confrontacion de datos", "licencia_y_confrontacion_datos"),
-        ("Conversion a gas vigente (si aplica)", "conversion_gas_vigente"),
-        ("Presion de inflado adecuada segun disposiciones del CDA", "presion_llantas_adecuada_cda"),
-        ("Sin copas/tapacubos en valvulas", "tapa_o_capuchones_valvula"),
-        ("Niveles de fluidos visibles", "niveles_fluidos_visibles"),
-        ("Sin accesorios que impidan acople", "sin_accesorios_que_impidan_acople"),
-        ("Retiro de elementos en cabina/carga", "retiro_elementos_cabina_carga"),
-        ("Liberacion de carga para inspeccion", "liberacion_carga_para_inspeccion"),
-        ("Tablero instrumentos visible", "tablero_instrumentos_ok"),
-        ("Cinturones/sillas/accesos OK", "cinturones_sillas_accesos_ok"),
-        ("Combustible suficiente", "combustible_suficiente"),
-        ("Placa identificacion legible", "placa_identificacion_legible"),
-        ("Llanta repuesto accesible", "llanta_repuesto_accesible"),
-        ("Luces funcionales", "luces_funcionales"),
-        ("Extintor central funcional moto", "extintor_central_funcional_moto"),
-        ("Adaptaciones discapacidad (si aplica)", "adaptaciones_discapacidad"),
-        ("Viable ingreso a linea", "viable_ingreso_linea"),
+        ("¿El vehículo se encuentra en un estado de limpieza adecuado y descargado? (peso adicional que no hace parte del vehículo) y, si aplica, con la alarma desactivada?", "limpieza_descargado"),
+        ("¿Se presenta la licencia de tránsito (tarjeta de propiedad) del vehículo? ¿La confrontación de los datos: Placa – Marca - Clase – Modelo – Servicio – Color con el vehículo, ¿es correcto?", "licencia_y_confrontacion_datos"),
+        ("El vehículo (si aplica), cuenta con certificado de conversión a gas VIGENTE (registrar fecha en el evento que aplique)", "conversion_gas_vigente"),
+        ("¿El vehículo se presenta sin copas o tapacubos ( o slider) que cubran el rin y/o los pernos o tuercas?", "tapa_o_capuchones_valvula"),
+        (f"¿La presión de inflado de las llantas son adecuadas de acuerdo con las disposiciones de {tenant_nombre.upper()} (ver procedimiento de pre-revisión y post-revisión RTM-04-PR)", "presion_llantas_adecuada_cda"),
+        ("¿La motocicleta NO cuenta con accesorios que impida la ubicación adecuada del acople (si aplica) y la introducción de la sonda de muestreo?", "sin_accesorios_que_impidan_acople"),
+        ("Los depósitos de los niveles de líquido de frenos son visibles (que no presenten alteraciones que no permitan inspeccionar el nivel en las líneas de inspección).", "niveles_fluidos_visibles"),
+        ("Si aplica, se deja libre la carpa con el objetivo de verificar las puertas y compuertas de carga para brindar las condiciones necesarias para realizar la inspección a conformidad.", "liberacion_carga_para_inspeccion"),
+        ("Se retiran candados (o dejarlos abiertos) o seguros de la(s) cubierta(s) de la(s) batería(s), puertas, compuertas, cabina basculante (cuando aplique), tapa de combustible y el brazo utilizado como soporte exterior de la llanta de repuesto (si aplica), así como amarres, cintas, forros, fundas, los protectores o tapas de las exploradoras y demás elementos que protejan parte del vehículo para asegurarse que se tenga acceso a los mismos y brindar las condiciones necesarias para realizar la inspección a conformidad.", "retiro_elementos_cabina_carga"),
+        ("¿El vehículo se presenta sin fugas de combustible, aceite, líquidos de frenos, líquido refrigerante (si aplica), con la tapa del combustible y no cuenta con otras condiciones que impidan que se realicen las pruebas de manera segura (ver procedimiento de pre-revisión y post-revisión RTM-04-PR)", "viable_ingreso_linea"),
+        ("El tablero de instrumentos se encuentra en un estado tal que permita visualizar los indicadores de falla del motor, presión de aceite y temperatura.", "tablero_instrumentos_ok"),
+        ("¿Los cinturones de seguridad, las sillas / asientos son de fácil acceso, para permitir su verificación en las líneas de inspección?", "cinturones_sillas_accesos_ok"),
+        ("El vehículo cuenta con el combustible suficiente para el desarrollo de la inspección", "combustible_suficiente"),
+        ("¿La placa del vehículo está en buen estado y posicionamiento que garantice su plena identificación?", "placa_identificacion_legible"),
+        ("En vehículos en los que la llanta de repuesto vaya fijada en el soporte exterior, se retira el protector, seguro o forro de la llanta de repuesto. En vehículos tipo sedán/coupé se deja libre la llanta de repuesto para que sea accesible a los inspectores durante la inspección.", "llanta_repuesto_accesible"),
+        ("¿El vehículo cuenta con al menos una luz funcional?", "luces_funcionales"),
+        ("¿Si es una motocicleta automática, ¿cuenta con el soporte central funcional?", "extintor_central_funcional_moto"),
+        ("¿El vehículo cuenta con adaptaciones para personas con discapacidad?", "adaptaciones_discapacidad"),
     ]
     checklist_rows: list[list[Any]] = [
         [

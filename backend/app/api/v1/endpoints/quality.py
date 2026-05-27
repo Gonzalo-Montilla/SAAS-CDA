@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime, timezone, timedelta
 from statistics import mean
 
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import false, or_
 from sqlalchemy.orm import Session
@@ -21,6 +21,7 @@ from app.models.vehiculo import EstadoVehiculo, VehiculoProceso
 from app.utils.quality import process_due_quality_invites, utcnow_naive
 from app.utils.rtm_reminders import process_due_rtm_renewal_reminders
 from app.utils.email import enviar_email, generar_email_recordatorio_proxima_rtm
+from app.utils.tenant_logo import normalize_external_logo_url, save_tenant_logo_upload
 
 router = APIRouter()
 
@@ -78,6 +79,12 @@ class QualitySummaryResponse(BaseModel):
     total_pendientes: int
     promedio_general: float
     tasa_respuesta: float
+
+
+class QualityTenantLogoResponse(BaseModel):
+    logo_calidad_url: str | None = None
+    logo_general_url: str | None = None
+    formato_prerevision_version: str | None = None
 
 
 class QualityInviteItem(BaseModel):
@@ -335,6 +342,93 @@ def _to_rtm_item(
         sent_at=reminder.sent_at,
         last_manual_sent_at=reminder.last_manual_sent_at,
         created_at=reminder.created_at,
+    )
+
+
+def _require_logo_calidad_admin(user: Usuario) -> None:
+    if user.rol != RolEnum.ADMINISTRADOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo administradores pueden actualizar el logo de Calidad.",
+        )
+
+
+@router.get("/logo-calidad", response_model=QualityTenantLogoResponse)
+def get_quality_logo_config(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado")
+    return QualityTenantLogoResponse(
+        logo_calidad_url=tenant.logo_calidad_url,
+        logo_general_url=tenant.logo_url,
+        formato_prerevision_version=(tenant.formato_prerevision_version or "").strip() or None,
+    )
+
+
+@router.put("/logo-calidad", response_model=QualityTenantLogoResponse)
+def upsert_quality_logo_config(
+    logo_url: str | None = Form(default=None),
+    logo_file: UploadFile | None = File(default=None),
+    formato_prerevision_version: str | None = Form(default=None),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    _require_logo_calidad_admin(current_user)
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado")
+
+    version_payload_provided = formato_prerevision_version is not None
+    if logo_file is None and not (logo_url or "").strip() and not version_payload_provided:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Debes enviar logo_url, subir logo_file o actualizar formato_prerevision_version",
+        )
+
+    if logo_file is not None:
+        tenant.logo_calidad_url = save_tenant_logo_upload(logo_file)
+    elif (logo_url or "").strip():
+        tenant.logo_calidad_url = normalize_external_logo_url((logo_url or "").strip())
+
+    if version_payload_provided:
+        version_clean = (formato_prerevision_version or "").strip()
+        if len(version_clean) > 50:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="formato_prerevision_version no puede superar 50 caracteres",
+            )
+        tenant.formato_prerevision_version = version_clean or None
+
+    tenant.updated_at = _now_naive()
+    db.commit()
+    db.refresh(tenant)
+    return QualityTenantLogoResponse(
+        logo_calidad_url=tenant.logo_calidad_url,
+        logo_general_url=tenant.logo_url,
+        formato_prerevision_version=(tenant.formato_prerevision_version or "").strip() or None,
+    )
+
+
+@router.delete("/logo-calidad", response_model=QualityTenantLogoResponse)
+def clear_quality_logo_config(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    _require_logo_calidad_admin(current_user)
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado")
+    tenant.logo_calidad_url = None
+    tenant.updated_at = _now_naive()
+    db.commit()
+    db.refresh(tenant)
+    return QualityTenantLogoResponse(
+        logo_calidad_url=tenant.logo_calidad_url,
+        logo_general_url=tenant.logo_url,
+        formato_prerevision_version=(tenant.formato_prerevision_version or "").strip() or None,
     )
 
 

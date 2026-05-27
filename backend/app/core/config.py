@@ -168,6 +168,34 @@ class Settings(BaseSettings):
     SARLAFT_UNUSUAL_CRITICAL_COUNT_THRESHOLD: int = Field(
         default=10, ge=2, le=500, env="SARLAFT_UNUSUAL_CRITICAL_COUNT_THRESHOLD"
     )
+    # SARLAFT - Señal inter-CDA (anonimizada)
+    SARLAFT_INTERCDA_ENABLED: bool = Field(default=True, env="SARLAFT_INTERCDA_ENABLED")
+    SARLAFT_INTERCDA_WINDOWS_DAYS: str = Field(default="30,90,365", env="SARLAFT_INTERCDA_WINDOWS_DAYS")
+    SARLAFT_INTERCDA_MIN_DISTINCT_TENANTS: int = Field(
+        default=2, ge=2, le=1000, env="SARLAFT_INTERCDA_MIN_DISTINCT_TENANTS"
+    )
+    SARLAFT_INTERCDA_MIN_TOTAL_OPS: int = Field(default=4, ge=2, le=50000, env="SARLAFT_INTERCDA_MIN_TOTAL_OPS")
+    SARLAFT_INTERCDA_MIN_CASH_RATIO: float = Field(
+        default=0.6, ge=0.0, le=1.0, env="SARLAFT_INTERCDA_MIN_CASH_RATIO"
+    )
+    SARLAFT_INTERCDA_ALERT_COOLDOWN_HOURS: int = Field(
+        default=72, ge=1, le=720, env="SARLAFT_INTERCDA_ALERT_COOLDOWN_HOURS"
+    )
+    SARLAFT_INTERCDA_DOC_HASH_PEPPER: str = Field(default="", env="SARLAFT_INTERCDA_DOC_HASH_PEPPER")
+    SARLAFT_INTERCDA_ASYNC_ENABLED: bool = Field(default=True, env="SARLAFT_INTERCDA_ASYNC_ENABLED")
+    SARLAFT_INTERCDA_ASYNC_BATCH_LIMIT: int = Field(
+        default=200, ge=1, le=5000, env="SARLAFT_INTERCDA_ASYNC_BATCH_LIMIT"
+    )
+    # OpenSanctions - estrategia comercial backoffice
+    OPENSANCTIONS_COST_PER_CALL_EUR: float = Field(
+        default=0.10, ge=0.0, env="OPENSANCTIONS_COST_PER_CALL_EUR"
+    )
+    OPENSANCTIONS_PREPAID_UNIT_PRICE_COP: float = Field(
+        default=450.0, ge=0.0, env="OPENSANCTIONS_PREPAID_UNIT_PRICE_COP"
+    )
+    OPENSANCTIONS_PREPAID_PACKAGE_EXPIRES_DAYS: int = Field(
+        default=365, ge=1, le=3650, env="OPENSANCTIONS_PREPAID_PACKAGE_EXPIRES_DAYS"
+    )
     
     # Facturación electrónica (Factus) — URLs oficiales en https://developers.factus.com.co/
     FACTUS_SANDBOX_BASE_URL: str = Field(default="https://api-sandbox.factus.com.co", env="FACTUS_SANDBOX_BASE_URL")

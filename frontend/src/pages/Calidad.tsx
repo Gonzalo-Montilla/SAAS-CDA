@@ -9,10 +9,13 @@ import {
   ChevronsRight,
   ClipboardList,
   Eye,
+  Image as ImageIcon,
+  ImagePlus,
   Mail,
   MessageCircle,
   MessageSquareHeart,
   RefreshCw,
+  Trash2,
   Star,
   X,
 } from 'lucide-react';
@@ -74,6 +77,56 @@ const scoreBorderClass = (value?: number | null): string => {
   return 'border-l-emerald-500';
 };
 
+const DEFAULT_API_URL = 'http://localhost:8000/api/v1';
+
+const extractHttpUrl = (value: string): string | null => {
+  const match = value.match(/https?:\/\/[^\s"'|]+/i);
+  return match ? match[0] : null;
+};
+
+const resolveBackendBaseUrl = (): string => {
+  const rawEnv = String(import.meta.env.VITE_API_URL || '').trim();
+  if (import.meta.env.DEV && rawEnv.startsWith('/')) {
+    if (typeof window !== 'undefined' && window.location?.origin) {
+      return window.location.origin;
+    }
+  }
+  const extractedEnvUrl = rawEnv ? extractHttpUrl(rawEnv) : null;
+  const apiUrl = extractedEnvUrl || DEFAULT_API_URL;
+  return apiUrl.replace(/\/api\/v1\/?$/i, '').replace(/\/+$/, '');
+};
+
+const normalizeSlashes = (value: string): string => value.replace(/\\/g, '/');
+
+const buildLogoPreviewCandidates = (rawUrl?: string | null): string[] => {
+  const raw = normalizeSlashes((rawUrl || '').trim());
+  if (!raw) return [];
+  if (raw.startsWith('data:') || raw.startsWith('blob:')) return [raw];
+
+  const backendBase = resolveBackendBaseUrl();
+  const candidates = new Set<string>();
+  candidates.add(raw);
+
+  if (raw.startsWith('/uploads/')) {
+    candidates.add(`${backendBase}${raw}`);
+  }
+  if (raw.startsWith('uploads/')) {
+    candidates.add(`${backendBase}/${raw}`);
+  }
+
+  const uploadsIndex = raw.toLowerCase().indexOf('/uploads/');
+  if (uploadsIndex >= 0) {
+    candidates.add(`${backendBase}${raw.slice(uploadsIndex)}`);
+  }
+
+  const relUploadsIndex = raw.toLowerCase().indexOf('uploads/');
+  if (relUploadsIndex >= 0) {
+    candidates.add(`${backendBase}/${raw.slice(relUploadsIndex)}`);
+  }
+
+  return Array.from(candidates);
+};
+
 export default function Calidad() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -83,7 +136,8 @@ export default function Calidad() {
   const tenantUser = user && 'tenant_id' in user ? (user as Usuario) : null;
   const puedeElegirSedeCalidad =
     !!tenantUser && (tenantUser.rol === 'administrador' || tenantUser.rol === 'contador');
-  const [activeTab, setActiveTab] = useState<'encuestas' | 'vencimientos'>('encuestas');
+  const puedeGestionarLogoCalidad = !!tenantUser && tenantUser.rol === 'administrador';
+  const [activeTab, setActiveTab] = useState<'encuestas' | 'vencimientos' | 'logo_calidad'>('encuestas');
   const [statusFilter, setStatusFilter] = useState<string>('todos');
   const [calidadSedeScope, setCalidadSedeScope] = useState<'todas' | 'sucursal'>('todas');
   const [calidadSedeId, setCalidadSedeId] = useState('');
@@ -99,6 +153,11 @@ export default function Calidad() {
     emptyQualitySurveyRatings
   );
   const [inPersonComentario, setInPersonComentario] = useState('');
+  const [logoCalidadFile, setLogoCalidadFile] = useState<File | null>(null);
+  const [logoCalidadUrlInput, setLogoCalidadUrlInput] = useState('');
+  const [logoCalidadPreviewLocal, setLogoCalidadPreviewLocal] = useState<string | null>(null);
+  const [qualityLogoPreviewCandidateIndex, setQualityLogoPreviewCandidateIndex] = useState(0);
+  const [formatoVersionInput, setFormatoVersionInput] = useState('');
 
   useEffect(() => {
     if (!manualInviteId) return;
@@ -138,6 +197,12 @@ export default function Calidad() {
     refetchInterval: 30000,
   });
 
+  const qualityLogoQuery = useQuery({
+    queryKey: ['quality-logo-calidad'],
+    queryFn: qualityApi.getTenantLogoCalidad,
+    staleTime: 30000,
+  });
+
   const invitesQuery = useQuery({
     queryKey: [
       'quality-invites',
@@ -163,6 +228,64 @@ export default function Calidad() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['quality-summary'] });
       queryClient.invalidateQueries({ queryKey: ['quality-invites'] });
+    },
+  });
+
+  const upsertQualityLogoMutation = useMutation({
+    mutationFn: qualityApi.upsertTenantLogoCalidad,
+    onSuccess: () => {
+      setLogoCalidadFile(null);
+      setLogoCalidadUrlInput('');
+      queryClient.invalidateQueries({ queryKey: ['quality-logo-calidad'] });
+      showToast('success', 'Logo de Calidad actualizado', 'Se guardó el logo que se usará en el PDF de pre-revisión.');
+    },
+    onError: (error: unknown) => {
+      let message = 'No fue posible actualizar el logo de Calidad.';
+      if (axios.isAxiosError(error)) {
+        const d = error.response?.data?.detail;
+        if (typeof d === 'string') message = d;
+      } else if (error instanceof Error) {
+        message = error.message;
+      }
+      showToast('error', 'Error', message);
+    },
+  });
+
+  const clearQualityLogoMutation = useMutation({
+    mutationFn: qualityApi.clearTenantLogoCalidad,
+    onSuccess: () => {
+      setLogoCalidadFile(null);
+      setLogoCalidadUrlInput('');
+      queryClient.invalidateQueries({ queryKey: ['quality-logo-calidad'] });
+      showToast('success', 'Logo de Calidad eliminado', 'El PDF de pre-revisión volverá a usar el logo general.');
+    },
+    onError: (error: unknown) => {
+      let message = 'No fue posible eliminar el logo de Calidad.';
+      if (axios.isAxiosError(error)) {
+        const d = error.response?.data?.detail;
+        if (typeof d === 'string') message = d;
+      } else if (error instanceof Error) {
+        message = error.message;
+      }
+      showToast('error', 'Error', message);
+    },
+  });
+
+  const updateFormatoVersionMutation = useMutation({
+    mutationFn: qualityApi.updateFormatoPrerevisionVersion,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['quality-logo-calidad'] });
+      showToast('success', 'Versión actualizada', 'Se guardó la versión del formato de pre-revisión.');
+    },
+    onError: (error: unknown) => {
+      let message = 'No fue posible actualizar la versión del formato.';
+      if (axios.isAxiosError(error)) {
+        const d = error.response?.data?.detail;
+        if (typeof d === 'string') message = d;
+      } else if (error instanceof Error) {
+        message = error.message;
+      }
+      showToast('error', 'Error', message);
     },
   });
 
@@ -284,6 +407,14 @@ export default function Calidad() {
   });
 
   const rows = invitesQuery.data?.items ?? [];
+  const qualityLogoSettings = qualityLogoQuery.data;
+  const qualityLogoPreviewCandidates = useMemo(() => {
+    const localCandidates = buildLogoPreviewCandidates(logoCalidadPreviewLocal);
+    const calidadCandidates = buildLogoPreviewCandidates(qualityLogoSettings?.logo_calidad_url);
+    const generalCandidates = buildLogoPreviewCandidates(qualityLogoSettings?.logo_general_url);
+    return Array.from(new Set([...localCandidates, ...calidadCandidates, ...generalCandidates]));
+  }, [logoCalidadPreviewLocal, qualityLogoSettings?.logo_calidad_url, qualityLogoSettings?.logo_general_url]);
+  const qualityLogoPreview = qualityLogoPreviewCandidates[qualityLogoPreviewCandidateIndex] || null;
   const totalEncuestas = invitesQuery.data?.total ?? 0;
   const totalPaginasEncuestas = Math.max(1, Math.ceil(totalEncuestas / encuestasPorPagina) || 1);
   const encuestaDesde =
@@ -361,6 +492,24 @@ export default function Calidad() {
     };
   }, [rows, encuestasPorPagina, statusFilter, searchDebounced, calidadSedeApiParam]);
 
+  useEffect(() => {
+    if (!logoCalidadFile) {
+      setLogoCalidadPreviewLocal(null);
+      return;
+    }
+    const objectUrl = URL.createObjectURL(logoCalidadFile);
+    setLogoCalidadPreviewLocal(objectUrl);
+    return () => URL.revokeObjectURL(objectUrl);
+  }, [logoCalidadFile]);
+
+  useEffect(() => {
+    setQualityLogoPreviewCandidateIndex(0);
+  }, [qualityLogoPreviewCandidates]);
+
+  useEffect(() => {
+    setFormatoVersionInput(qualityLogoSettings?.formato_prerevision_version || 'RTM-01-FR v13');
+  }, [qualityLogoSettings?.formato_prerevision_version]);
+
   const handleTopEncuestasScroll = () => {
     const top = topEncuestasScrollRef.current;
     const bottom = bottomEncuestasScrollRef.current;
@@ -411,6 +560,16 @@ export default function Calidad() {
               className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${activeTab === 'vencimientos' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-700 hover:bg-slate-100'}`}
             >
               Próximos vencimientos RTM
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('logo_calidad')}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${activeTab === 'logo_calidad' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-700 hover:bg-slate-100'}`}
+            >
+              <span className="inline-flex items-center gap-2">
+                <ImageIcon className="w-4 h-4" />
+                Logo Calidad
+              </span>
             </button>
           </div>
         </section>
@@ -901,6 +1060,118 @@ export default function Calidad() {
               </div>
             </section>
           </>
+        )}
+        {activeTab === 'logo_calidad' && (
+          <section className="section-card p-6">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <p className="text-sm font-semibold text-slate-800">Logo de Calidad (PDF Pre-revisión)</p>
+                <p className="text-xs text-slate-500 mt-1">
+                  Este logo solo aplica al PDF de pre-revisión. Si no configuras uno, se usa el logo general del tenant.
+                </p>
+              </div>
+              <div className="text-xs text-slate-500">
+                Formatos permitidos: PNG, JPG, JPEG, WEBP
+              </div>
+            </div>
+            <div className="grid grid-cols-1 lg:grid-cols-[220px,1fr] gap-4 mt-4">
+              <div className="rounded-xl border border-slate-200 bg-white p-3">
+                <p className="text-xs font-semibold text-slate-600 mb-2">Vista previa</p>
+                <div className="h-28 rounded-lg border border-dashed border-slate-200 bg-slate-50 flex items-center justify-center overflow-hidden">
+                  {qualityLogoPreview ? (
+                    <img
+                      src={qualityLogoPreview}
+                      alt="Logo de calidad"
+                      className="max-h-full max-w-full object-contain"
+                      onError={() => {
+                        setQualityLogoPreviewCandidateIndex((prev) =>
+                          prev < qualityLogoPreviewCandidates.length - 1 ? prev + 1 : prev
+                        );
+                      }}
+                    />
+                  ) : (
+                    <span className="text-xs text-slate-500 px-3 text-center">Sin logo de calidad configurado</span>
+                  )}
+                </div>
+                {!qualityLogoPreview && qualityLogoSettings?.logo_general_url && (
+                  <p className="text-[11px] text-slate-500 mt-2">Se usará el logo general actual en el PDF.</p>
+                )}
+              </div>
+              <div className="space-y-3">
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                  <p className="text-xs font-semibold text-slate-700 mb-2">Versión formato pre-revisión</p>
+                  {puedeGestionarLogoCalidad ? (
+                    <div className="flex flex-wrap gap-2 items-center">
+                      <input
+                        type="text"
+                        value={formatoVersionInput}
+                        onChange={(e) => setFormatoVersionInput(e.target.value)}
+                        className="input-corporate flex-1 min-w-[220px]"
+                        maxLength={50}
+                        placeholder="Ej: RTM-01-FR v13"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => updateFormatoVersionMutation.mutate(formatoVersionInput.trim())}
+                        disabled={updateFormatoVersionMutation.isLoading || !formatoVersionInput.trim()}
+                        className="btn-corporate-primary px-4 disabled:opacity-60"
+                      >
+                        {updateFormatoVersionMutation.isLoading ? 'Guardando...' : 'Guardar versión'}
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-slate-600">{qualityLogoSettings?.formato_prerevision_version || 'RTM-01-FR v13'}</p>
+                  )}
+                </div>
+                {puedeGestionarLogoCalidad ? (
+                  <>
+                    <input
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg,image/webp"
+                      onChange={(e) => setLogoCalidadFile(e.target.files?.[0] || null)}
+                      className="input-corporate"
+                    />
+                    <input
+                      type="url"
+                      value={logoCalidadUrlInput}
+                      onChange={(e) => setLogoCalidadUrlInput(e.target.value)}
+                      className="input-corporate"
+                      placeholder="O pega una URL (https://...)"
+                    />
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => upsertQualityLogoMutation.mutate({ logoFile: logoCalidadFile, logoUrl: logoCalidadUrlInput })}
+                        disabled={upsertQualityLogoMutation.isLoading || (!logoCalidadFile && !logoCalidadUrlInput.trim())}
+                        className="btn-corporate-primary px-4 inline-flex items-center gap-2 disabled:opacity-60"
+                      >
+                        <ImagePlus className="w-4 h-4" />
+                        {upsertQualityLogoMutation.isLoading ? 'Guardando...' : 'Guardar logo de Calidad'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => clearQualityLogoMutation.mutate()}
+                        disabled={clearQualityLogoMutation.isLoading || !qualityLogoSettings?.logo_calidad_url}
+                        className="btn-corporate-muted px-4 inline-flex items-center gap-2 disabled:opacity-60"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                        {clearQualityLogoMutation.isLoading ? 'Restaurando...' : 'Quitar y usar logo general'}
+                      </button>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-xs text-slate-500">
+                    Solo el rol administrador puede actualizar este logo.
+                  </p>
+                )}
+                {qualityLogoSettings?.logo_general_url && (
+                  <p className="text-[11px] text-slate-500">
+                    Logo general configurado: <span className="font-semibold text-slate-700">disponible</span>
+                  </p>
+                )}
+              </div>
+            </div>
+          </section>
         )}
       </div>
 

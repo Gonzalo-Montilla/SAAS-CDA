@@ -2,7 +2,7 @@
 Modelo de Vehículos en Proceso
 """
 from sqlalchemy import Column, String, Integer, Numeric, Boolean, DateTime, ForeignKey, Enum as SQLEnum, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
 import uuid
@@ -84,6 +84,7 @@ class VehiculoProceso(Base):
     
     # Observaciones
     observaciones = Column(Text)
+    recepcion_formato_extra_json = Column(JSONB, nullable=True)
     
     # Auditoría
     caja_id = Column(UUID(as_uuid=True), ForeignKey("cajas.id"), nullable=True)

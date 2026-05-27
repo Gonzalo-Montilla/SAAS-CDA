@@ -47,6 +47,8 @@ def ensure_tenant_baseline_schema(db):
                 celular VARCHAR(30),
                 nombre_comercial VARCHAR(200) NOT NULL DEFAULT 'CDASOFT',
                 logo_url VARCHAR(500),
+                logo_calidad_url VARCHAR(500),
+                formato_prerevision_version VARCHAR(50),
                 color_primario VARCHAR(20) NOT NULL DEFAULT '#2563eb',
                 color_secundario VARCHAR(20) NOT NULL DEFAULT '#0f172a',
                 plan_actual VARCHAR(30) NOT NULL DEFAULT 'demo',
@@ -70,6 +72,8 @@ def ensure_tenant_baseline_schema(db):
 
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS nombre_comercial VARCHAR(200)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS logo_url VARCHAR(500)"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS logo_calidad_url VARCHAR(500)"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS formato_prerevision_version VARCHAR(50)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS color_primario VARCHAR(20)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS color_secundario VARCHAR(20)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan_actual VARCHAR(30)"))
@@ -271,6 +275,7 @@ def ensure_tenant_domain_schema(db):
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS valor_excluido_servicio NUMERIC(12,2)"))
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS certificado_entregado_at TIMESTAMP WITHOUT TIME ZONE"))
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS certificado_entregado_por UUID"))
+    db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS recepcion_formato_extra_json JSONB"))
     db.execute(
         text(
             "ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS cliente_tipo_documento VARCHAR(10) NOT NULL DEFAULT 'CC'"
@@ -1747,6 +1752,41 @@ def ensure_sarlaft_schema(db):
     db.execute(
         text(
             """
+            CREATE TABLE IF NOT EXISTS sarlaft_intercda_signals (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                source_case_id UUID REFERENCES sarlaft_cases(id) ON DELETE SET NULL,
+                doc_hash VARCHAR(64) NOT NULL,
+                window_days INTEGER NOT NULL DEFAULT 30,
+                alert_level VARCHAR(20) NOT NULL DEFAULT 'media',
+                reason VARCHAR(80) NOT NULL DEFAULT 'actividad_intercda_inusual',
+                metrics_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS sarlaft_intercda_jobs (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                source_case_id UUID NOT NULL REFERENCES sarlaft_cases(id) ON DELETE CASCADE,
+                status VARCHAR(20) NOT NULL DEFAULT 'queued',
+                attempts INTEGER NOT NULL DEFAULT 0,
+                next_run_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                started_at TIMESTAMP WITHOUT TIME ZONE,
+                finished_at TIMESTAMP WITHOUT TIME ZONE,
+                last_error TEXT,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
             CREATE TABLE IF NOT EXISTS sarlaft_manual_checks (
                 id UUID PRIMARY KEY,
                 tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
@@ -1892,6 +1932,26 @@ def ensure_sarlaft_schema(db):
     db.execute(
         text(
             "CREATE INDEX IF NOT EXISTS idx_sarlaft_audit_entity ON sarlaft_audit_logs(tenant_id, entity_type, entity_id, created_at DESC)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_sarlaft_intercda_tenant_created ON sarlaft_intercda_signals(tenant_id, created_at DESC)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_sarlaft_intercda_doc_hash_window ON sarlaft_intercda_signals(doc_hash, window_days, created_at DESC)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_sarlaft_intercda_jobs_status_next ON sarlaft_intercda_jobs(status, next_run_at ASC)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS idx_sarlaft_intercda_jobs_tenant_created ON sarlaft_intercda_jobs(tenant_id, created_at DESC)"
         )
     )
     db.execute(
@@ -2417,6 +2477,8 @@ def init_db():
     from app.models.sarlaft_sirel_report import SarlaftSirelReport  # noqa: F401
     from app.models.sarlaft_batch_job import SarlaftBatchJob  # noqa: F401
     from app.models.sarlaft_batch_row import SarlaftBatchRow  # noqa: F401
+    from app.models.sarlaft_intercda_job import SarlaftIntercdaJob  # noqa: F401
+    from app.models.sarlaft_intercda_signal import SarlaftIntercdaSignal  # noqa: F401
     from app.models.iva_provision import IvaProvisionRegistro  # noqa: F401
     nomina_available = True
     try:
