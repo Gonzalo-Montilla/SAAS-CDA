@@ -20,7 +20,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { configApi } from '../api/config';
 import { vehiculosApi, type TarifaCalculada } from '../api/vehiculos';
 import { tarifasApi } from '../api/tarifas';
-import type { VehiculoRegistro, VehiculoConsultaRunt } from '../types';
+import type { VehiculoRegistro, VehiculoConsultaRunt, Usuario } from '../types';
 import { formatCOP } from '../utils/formatNumber';
 
 type SnNoNa = 'si' | 'no' | 'na' | '';
@@ -32,25 +32,6 @@ type PresionLlantaItem = {
   posicion_label: string;
   psi: string;
   is_repuesto: boolean;
-};
-
-type RecepcionDatosTecnicos = {
-  clase_vehiculo: string;
-  marca: string;
-  linea: string;
-  modelo: string;
-  color: string;
-  servicio: string;
-  tipo_combustible: string;
-  carga_pasajeros: string;
-  ensenanza: SnNo;
-  kilometraje: string;
-  blindado: SnNoNa;
-  polarizado: SnNoNa;
-  cilindraje: string;
-  presion_inflado: string;
-  presion_llantas: PresionLlantaItem[];
-  observaciones_tecnicas: string;
 };
 
 type RecepcionPreparacionChecklist = {
@@ -357,6 +338,7 @@ export default function Recepcion() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const tenantUser = user && 'tenant_id' in user ? (user as Usuario) : null;
   const { showToast } = useToast();
   const anoActual = new Date().getFullYear();
   const [tarifaCalculada, setTarifaCalculada] = useState<TarifaCalculada | null>(null);
@@ -402,10 +384,10 @@ export default function Recepcion() {
     document_number: '',
   });
   const versionFormatoTenant =
-    (user?.tenant_branding?.formato_prerevision_version || '').trim() || DEFAULT_FORMAT_VERSION;
+    (tenantUser?.tenant_branding?.formato_prerevision_version || '').trim() || DEFAULT_FORMAT_VERSION;
   const preparacionItems = useMemo(
-    () => buildPreparacionItems((user?.tenant_branding?.nombre_comercial || 'CDASOFT').trim() || 'CDASOFT'),
-    [user?.tenant_branding?.nombre_comercial]
+    () => buildPreparacionItems((tenantUser?.tenant_branding?.nombre_comercial || 'CDASOFT').trim() || 'CDASOFT'),
+    [tenantUser?.tenant_branding?.nombre_comercial]
   );
 
   const formatoExtraResumen = useMemo(() => {
