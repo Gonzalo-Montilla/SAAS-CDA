@@ -402,15 +402,16 @@ export default function Recepcion() {
     return { estado: 'Parcial', className: 'bg-amber-100 text-amber-700' };
   }, [formatoExtra, preparacionItems.length]);
 
-  const requiereFirmaFormato = useMemo(() => {
-    const tecnicoCount = countTecnicosDiligenciados(formatoExtra.datos_tecnicos);
-    const checklistCount = Object.values(formatoExtra.preparacion_checklist).filter((v) => v === 'si' || v === 'no' || v === 'na').length;
-    const preRevisionCount = countPreRevisionDiligenciada(formatoExtra.pre_revision);
-    return tecnicoCount + checklistCount + preRevisionCount > 0;
-  }, [formatoExtra]);
-
   const firmaCapturada = Boolean(formatoExtra.firma_titular?.data_url);
   const firmaOperarioCapturada = Boolean(formatoExtra.pre_revision.firma_operario?.data_url);
+  const requiereFirmaFormato = useMemo(() => {
+    // Opcional por tenant: solo exigir firmas cuando realmente se diligencia el checklist
+    // de pre-revisión (SI/NO/N/A) o cuando ya existe alguna firma capturada.
+    const checklistCount = Object.values(formatoExtra.preparacion_checklist).filter(
+      (v) => v === 'si' || v === 'no' || v === 'na'
+    ).length;
+    return checklistCount > 0 || firmaCapturada || firmaOperarioCapturada;
+  }, [formatoExtra.preparacion_checklist, firmaCapturada, firmaOperarioCapturada]);
   const bloqueoFirmaRegistro = requiereFirmaFormato && (!firmaCapturada || !firmaOperarioCapturada);
   const layoutLlantas = useMemo(() => {
     const key = resolveTipoLlantasKey(formData.tipo_vehiculo);
@@ -637,19 +638,21 @@ export default function Recepcion() {
           cliente_nombre: data.titular_nombre ? String(data.titular_nombre).toUpperCase() : prev.cliente_nombre,
         };
       });
-      setFormatoExtra((prev) => ({
-        ...prev,
-        datos_tecnicos: {
-          ...prev.datos_tecnicos,
-          clase_vehiculo: data.clase_vehiculo || prev.datos_tecnicos.clase_vehiculo,
-          marca: data.marca || prev.datos_tecnicos.marca || formData.marca || '',
-          linea: data.linea || prev.datos_tecnicos.linea,
-          modelo: data.modelo || prev.datos_tecnicos.modelo || formData.modelo || '',
-          servicio: data.tipo_servicio || prev.datos_tecnicos.servicio,
-          color: data.color || prev.datos_tecnicos.color,
-          cilindraje: data.cilindraje || prev.datos_tecnicos.cilindraje,
-        },
-      }));
+      if (mostrarFormatoExtra) {
+        setFormatoExtra((prev) => ({
+          ...prev,
+          datos_tecnicos: {
+            ...prev.datos_tecnicos,
+            clase_vehiculo: data.clase_vehiculo || prev.datos_tecnicos.clase_vehiculo,
+            marca: data.marca || prev.datos_tecnicos.marca || '',
+            linea: data.linea || prev.datos_tecnicos.linea,
+            modelo: data.modelo || prev.datos_tecnicos.modelo || '',
+            servicio: data.tipo_servicio || prev.datos_tecnicos.servicio,
+            color: data.color || prev.datos_tecnicos.color,
+            cilindraje: data.cilindraje || prev.datos_tecnicos.cilindraje,
+          },
+        }));
+      }
       if (!data.encontrado) {
         showToast(
           'warning',
@@ -932,9 +935,9 @@ export default function Recepcion() {
       tipo_vehiculo_formato: (formatoExtra.tipo_vehiculo_formato || mapTipoVehiculoFormato(formData.tipo_vehiculo)).trim(),
       datos_tecnicos: {
         clase_vehiculo: (formatoExtra.datos_tecnicos.clase_vehiculo || '').trim(),
-        marca: (formatoExtra.datos_tecnicos.marca || formData.marca || '').trim(),
+        marca: (formatoExtra.datos_tecnicos.marca || '').trim(),
         linea: (formatoExtra.datos_tecnicos.linea || '').trim(),
-        modelo: (formatoExtra.datos_tecnicos.modelo || formData.modelo || '').trim(),
+        modelo: (formatoExtra.datos_tecnicos.modelo || '').trim(),
         color: (formatoExtra.datos_tecnicos.color || '').trim(),
         servicio: (formatoExtra.datos_tecnicos.servicio || '').trim(),
         tipo_combustible: (formatoExtra.datos_tecnicos.tipo_combustible || '').trim(),
@@ -953,7 +956,7 @@ export default function Recepcion() {
             is_repuesto: Boolean(item.is_repuesto),
           }))
           .filter((item) => item.posicion_id.length > 0),
-        observaciones_tecnicas: (formatoExtra.datos_tecnicos.observaciones_tecnicas || formData.observaciones || '').trim(),
+        observaciones_tecnicas: (formatoExtra.datos_tecnicos.observaciones_tecnicas || '').trim(),
       },
       preparacion_checklist: { ...formatoExtra.preparacion_checklist },
       titular_datos: titularAuto,
@@ -1146,7 +1149,7 @@ export default function Recepcion() {
     const midDigits = (clienteFactusMunicipalityId || '').replace(/\D/g, '').trim();
     const clienteFactusMunicipalityIdParsed = midDigits ? parseInt(midDigits, 10) : undefined;
     const recepcionFormatoExtra = construirFormatoExtraPayload();
-    if (recepcionFormatoExtra && !recepcionFormatoExtra.firma_titular?.data_url) {
+    if (requiereFirmaFormato && !recepcionFormatoExtra?.firma_titular?.data_url) {
       showToast(
         'warning',
         'Firma requerida',
@@ -1154,7 +1157,7 @@ export default function Recepcion() {
       );
       return;
     }
-    if (recepcionFormatoExtra && !recepcionFormatoExtra.pre_revision.firma_operario?.data_url) {
+    if (requiereFirmaFormato && !recepcionFormatoExtra?.pre_revision.firma_operario?.data_url) {
       showToast(
         'warning',
         'Firma requerida',
