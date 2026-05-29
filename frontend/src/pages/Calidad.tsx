@@ -25,7 +25,7 @@ import Layout from '../components/Layout';
 import { qualityApi } from '../api/quality';
 import type { QualityInviteItem, RTMReminderItem, Usuario } from '../types';
 import { useAuth } from '../contexts/AuthContext';
-import type { QualitySurveySubmitPayload } from '../api/quality';
+import type { QualitySurveySubmitPayload, MarkCertificateDeliveredPayload } from '../api/quality';
 import { useBrand } from '../contexts/BrandContext';
 import { useToast } from '../contexts/ToastContext';
 import {
@@ -132,7 +132,7 @@ export default function Calidad() {
   const navigate = useNavigate();
   const { showToast } = useToast();
   const brand = useBrand();
-  const { user } = useAuth();
+  const { user, refreshTenantUser } = useAuth();
   const tenantUser = user && 'tenant_id' in user ? (user as Usuario) : null;
   const puedeElegirSedeCalidad =
     !!tenantUser && (tenantUser.rol === 'administrador' || tenantUser.rol === 'contador');
@@ -149,6 +149,8 @@ export default function Calidad() {
   const [manualInviteId, setManualInviteId] = useState<string | null>(null);
   const [confirmEntregaInvite, setConfirmEntregaInvite] = useState<QualityInviteItem | null>(null);
   const [markingInviteId, setMarkingInviteId] = useState<string | null>(null);
+  const [cierreResultado, setCierreResultado] = useState<'aprobado' | 'rechazado'>('aprobado');
+  const [cierreObservacion, setCierreObservacion] = useState('');
   const [inPersonRatings, setInPersonRatings] = useState<Record<QualitySurveyRatingKey, number>>(
     emptyQualitySurveyRatings
   );
@@ -233,10 +235,11 @@ export default function Calidad() {
 
   const upsertQualityLogoMutation = useMutation({
     mutationFn: qualityApi.upsertTenantLogoCalidad,
-    onSuccess: () => {
+    onSuccess: async () => {
       setLogoCalidadFile(null);
       setLogoCalidadUrlInput('');
       queryClient.invalidateQueries({ queryKey: ['quality-logo-calidad'] });
+      await refreshTenantUser();
       showToast('success', 'Logo de Calidad actualizado', 'Se guardó el logo que se usará en el PDF de pre-revisión.');
     },
     onError: (error: unknown) => {
@@ -253,10 +256,11 @@ export default function Calidad() {
 
   const clearQualityLogoMutation = useMutation({
     mutationFn: qualityApi.clearTenantLogoCalidad,
-    onSuccess: () => {
+    onSuccess: async () => {
       setLogoCalidadFile(null);
       setLogoCalidadUrlInput('');
       queryClient.invalidateQueries({ queryKey: ['quality-logo-calidad'] });
+      await refreshTenantUser();
       showToast('success', 'Logo de Calidad eliminado', 'El PDF de pre-revisión volverá a usar el logo general.');
     },
     onError: (error: unknown) => {
@@ -273,8 +277,9 @@ export default function Calidad() {
 
   const updateFormatoVersionMutation = useMutation({
     mutationFn: qualityApi.updateFormatoPrerevisionVersion,
-    onSuccess: () => {
+    onSuccess: async () => {
       queryClient.invalidateQueries({ queryKey: ['quality-logo-calidad'] });
+      await refreshTenantUser();
       showToast('success', 'Versión actualizada', 'Se guardó la versión del formato de pre-revisión.');
     },
     onError: (error: unknown) => {
@@ -325,18 +330,21 @@ export default function Calidad() {
   });
 
   const markCertificateDeliveredMutation = useMutation({
-    mutationFn: (inviteId: string) => qualityApi.markCertificateDelivered(inviteId),
+    mutationFn: ({ inviteId, payload }: { inviteId: string; payload: MarkCertificateDeliveredPayload }) =>
+      qualityApi.markCertificateDelivered(inviteId, payload),
     onSuccess: (data) => {
       setConfirmEntregaInvite(null);
       setMarkingInviteId(null);
-      showToast('success', 'Certificado entregado', data.message);
+      setCierreResultado('aprobado');
+      setCierreObservacion('');
+      showToast('success', data.resultado === 'aprobado' ? 'Resultado aprobado' : 'Resultado rechazado', data.message);
       queryClient.invalidateQueries({ queryKey: ['quality-invites'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-operativo'] });
       queryClient.invalidateQueries({ queryKey: ['quality-invite-detail'] });
     },
     onError: (error: unknown) => {
       setMarkingInviteId(null);
-      let message = 'No fue posible marcar el certificado como entregado.';
+      let message = 'No fue posible guardar el resultado de inspección.';
       if (axios.isAxiosError(error)) {
         const d = error.response?.data?.detail;
         if (typeof d === 'string') message = d;
@@ -757,27 +765,39 @@ export default function Calidad() {
                           <Eye className="w-3.5 h-3.5" />
                           Ver detalle
                         </button>
-                        {!row.certificado_entregado_at ? (
+                        {!(row.revision_cierre_resultado || row.certificado_entregado_at) ? (
                           <button
                             type="button"
-                            onClick={() => setConfirmEntregaInvite(row)}
+                            onClick={() => {
+                              setCierreResultado('aprobado');
+                              setCierreObservacion('');
+                              setConfirmEntregaInvite(row);
+                            }}
                             disabled={markCertificateDeliveredMutation.isLoading && markingInviteId === row.id}
                             className="px-3 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-60"
                           >
                             <CheckCircle2 className="w-3.5 h-3.5" />
                             {markCertificateDeliveredMutation.isLoading && markingInviteId === row.id
                               ? 'Marcando...'
-                              : 'Certificado entregado'}
+                              : 'Cerrar inspección'}
                           </button>
                         ) : (
                           <span
-                            className="badge badge-success text-xs inline-flex items-center gap-1"
-                            title={`Entregado: ${new Date(row.certificado_entregado_at).toLocaleString()}${
-                              row.certificado_entregado_por ? ` · ${row.certificado_entregado_por}` : ''
+                            className={`text-xs inline-flex items-center gap-1 ${
+                              row.revision_cierre_resultado === 'rechazado'
+                                ? 'badge badge-warning'
+                                : 'badge badge-success'
                             }`}
+                            title={
+                              row.revision_cierre_resultado === 'aprobado' || (!row.revision_cierre_resultado && !!row.certificado_entregado_at)
+                                ? `Aprobado y entregado: ${row.certificado_entregado_at ? new Date(row.certificado_entregado_at).toLocaleString() : ''}${
+                                    row.certificado_entregado_por ? ` · ${row.certificado_entregado_por}` : ''
+                                  }`
+                                : `Rechazado: ${row.revision_cierre_observacion || 'Sin observación'}`
+                            }
                           >
                             <CheckCircle2 className="w-3.5 h-3.5" />
-                            Entregado
+                            {row.revision_cierre_resultado === 'rechazado' ? 'Rechazado' : 'Aprobado'}
                           </span>
                         )}
                       </div>
@@ -1301,13 +1321,49 @@ export default function Calidad() {
                 <CheckCircle2 className="w-6 h-6 text-emerald-600" />
               </div>
               <div>
-                <p className="text-base font-semibold text-slate-900">Confirmar entrega de certificado</p>
+                <p className="text-base font-semibold text-slate-900">Cerrar resultado de inspección</p>
                 <p className="text-sm text-slate-600 mt-1">
-                  Vas a marcar como entregado el certificado RTM de la placa{' '}
+                  Registra el resultado final para la placa{' '}
                   <span className="font-semibold text-slate-800">{confirmEntregaInvite.placa}</span>.
                 </p>
-                <p className="text-xs text-slate-500 mt-1">Esta acción no se puede deshacer.</p>
+                <p className="text-xs text-slate-500 mt-1">Este registro define si puede aplicar reinspección por rechazo.</p>
               </div>
+            </div>
+            <div className="space-y-3 mb-4">
+              <label className="flex items-center gap-2 text-sm text-slate-800">
+                <input
+                  type="radio"
+                  name="resultado-cierre"
+                  checked={cierreResultado === 'aprobado'}
+                  onChange={() => setCierreResultado('aprobado')}
+                />
+                Aprobado (entrega de certificado)
+              </label>
+              <label className="flex items-center gap-2 text-sm text-slate-800">
+                <input
+                  type="radio"
+                  name="resultado-cierre"
+                  checked={cierreResultado === 'rechazado'}
+                  onChange={() => setCierreResultado('rechazado')}
+                />
+                Rechazado (sin entrega de certificado)
+              </label>
+              <textarea
+                value={cierreObservacion}
+                onChange={(e) => setCierreObservacion(e.target.value)}
+                placeholder={
+                  cierreResultado === 'rechazado'
+                    ? 'Observación obligatoria del rechazo'
+                    : 'Observación opcional'
+                }
+                className="input-corporate min-h-[96px]"
+                maxLength={2000}
+              />
+              {cierreResultado === 'rechazado' && (
+                <p className="text-xs text-amber-700">
+                  Para rechazo, la observación es obligatoria.
+                </p>
+              )}
             </div>
             <div className="flex items-center justify-end gap-2">
               <button
@@ -1321,14 +1377,25 @@ export default function Calidad() {
               <button
                 type="button"
                 onClick={() => {
+                  const observacion = cierreObservacion.trim();
+                  if (cierreResultado === 'rechazado' && !observacion) {
+                    showToast('warning', 'Observación requerida', 'Debes registrar la observación del rechazo.');
+                    return;
+                  }
                   setMarkingInviteId(confirmEntregaInvite.id);
-                  markCertificateDeliveredMutation.mutate(confirmEntregaInvite.id);
+                  markCertificateDeliveredMutation.mutate({
+                    inviteId: confirmEntregaInvite.id,
+                    payload: {
+                      resultado: cierreResultado,
+                      observacion: observacion || undefined,
+                    },
+                  });
                 }}
                 className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-60 inline-flex items-center gap-2"
                 disabled={markCertificateDeliveredMutation.isLoading}
               >
                 <CheckCircle2 className="w-4 h-4" />
-                {markCertificateDeliveredMutation.isLoading ? 'Marcando...' : 'Confirmar entrega'}
+                {markCertificateDeliveredMutation.isLoading ? 'Guardando...' : 'Guardar resultado'}
               </button>
             </div>
           </div>

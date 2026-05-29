@@ -1,5 +1,5 @@
 import apiClient from './client';
-import type { Vehiculo, VehiculoRegistro, VehiculoCobro, VehiculoConsultaRunt } from '../types';
+import type { Vehiculo, VehiculoRegistro, VehiculoCobro, VehiculoConsultaRunt, ReinspeccionElegibilidad } from '../types';
 
 export interface VentaSOAT {
   placa: string;
@@ -69,6 +69,15 @@ export const vehiculosApi = {
           documentNumber: opts?.documentNumber,
         },
       }
+    );
+    return response.data;
+  },
+
+  // Consultar si la placa puede reingresar por rechazo inicial
+  consultarElegibilidadReinspeccion: async (placa: string): Promise<ReinspeccionElegibilidad> => {
+    const cleaned = (placa || '').trim().toUpperCase();
+    const response = await apiClient.get<ReinspeccionElegibilidad>(
+      `/vehiculos/reinspeccion/elegibilidad/${encodeURIComponent(cleaned)}`
     );
     return response.data;
   },

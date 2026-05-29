@@ -78,6 +78,14 @@ class VehiculoProceso(Base):
     fecha_pago = Column(DateTime, nullable=True)
     certificado_entregado_at = Column(DateTime, nullable=True)
     certificado_entregado_por = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=True)
+    revision_cierre_resultado = Column(String(40), nullable=True)
+    revision_cierre_observacion = Column(Text, nullable=True)
+    revision_cierre_at = Column(DateTime, nullable=True)
+    revision_cierre_por = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=True)
+    reinspeccion_origen_id = Column(UUID(as_uuid=True), ForeignKey("vehiculos_proceso.id"), nullable=True, index=True)
+    reinspeccion_intento = Column(Integer, nullable=False, default=1)
+    reinspeccion_vence_at = Column(DateTime, nullable=True)
+    reinspeccion_exenta = Column(Boolean, nullable=False, default=False)
     
     # Estado del proceso
     estado = Column(SQLEnum(EstadoVehiculo), default=EstadoVehiculo.REGISTRADO, nullable=False)
@@ -97,6 +105,7 @@ class VehiculoProceso(Base):
     registrador = relationship("Usuario", foreign_keys=[registrado_por])
     cajero = relationship("Usuario", foreign_keys=[cobrado_por])
     certificado_entregador = relationship("Usuario", foreign_keys=[certificado_entregado_por])
+    revision_cierre_usuario = relationship("Usuario", foreign_keys=[revision_cierre_por])
     
     def __repr__(self):
         return f"<VehiculoProceso {self.placa} - {self.estado}>"

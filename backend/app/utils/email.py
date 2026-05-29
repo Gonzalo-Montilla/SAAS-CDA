@@ -729,3 +729,66 @@ def generar_email_recordatorio_proxima_rtm(
         body_html=body_html,
         label=f"Renovación RTM - {nombre_cda}",
     )
+
+
+def generar_email_rechazo_reinspeccion_cliente(
+    nombre_cda: str,
+    nombre_cliente: str,
+    placa: str,
+    observacion_rechazo: str,
+    *,
+    correo_contacto_cda: str | None = None,
+    telefono_contacto_cda: str | None = None,
+) -> str:
+    """Email para notificar rechazo y ventana de reinspección sin costo."""
+    safe_cda = html.escape((nombre_cda or "").strip() or "CDASOFT")
+    safe_cliente = html.escape((nombre_cliente or "").strip() or "Cliente")
+    safe_placa = html.escape((placa or "").strip().upper())
+    safe_obs = html.escape((observacion_rechazo or "").strip() or "Sin observación adicional registrada.")
+    safe_correo = html.escape((correo_contacto_cda or "").strip())
+    safe_tel = html.escape((telefono_contacto_cda or "").strip())
+
+    contacto_block = ""
+    if safe_correo or safe_tel:
+        contacto_rows = []
+        if safe_correo:
+            contacto_rows.append(
+                f'<p style="margin:0 0 6px 0;"><strong>Correo:</strong> <a href="mailto:{safe_correo}">{safe_correo}</a></p>'
+            )
+        if safe_tel:
+            contacto_rows.append(f'<p style="margin:0;"><strong>Teléfono:</strong> {safe_tel}</p>')
+        contacto_block = (
+            '<div class="highlight" style="margin-top:14px;">'
+            + "".join(contacto_rows)
+            + "</div>"
+        )
+
+    body_html = f"""
+    <p>Hola <strong>{safe_cliente}</strong>, 👋</p>
+    <p>Recibe un cordial saludo de <strong>{safe_cda}</strong>.</p>
+    <p>
+        Te informamos que el vehículo de placa <strong>{safe_placa}</strong>
+        <strong>no aprobó</strong> la inspección técnico-mecánica en esta oportunidad.
+    </p>
+    <p>
+        Nuestro personal técnico <strong>ya te indicó de manera clara y detallada las razones del rechazo</strong>,
+        para que puedas realizar las correcciones necesarias con tranquilidad.
+    </p>
+    <div class="highlight">
+        Puedes presentarte nuevamente a <strong>reinspección sin costo</strong> dentro de los
+        <strong>15 días calendario</strong> siguientes al primer intento.<br/>
+        Durante ese periodo, cuentas con <strong>una (1) reinspección sin cobro</strong>.
+    </div>
+    <p><strong>Observación registrada en el sistema:</strong><br/>{safe_obs}</p>
+    <p>Si deseas, estaremos atentos para orientarte en tu reingreso y acompañarte en el proceso.</p>
+    {contacto_block}
+    <p class="muted">
+        Un saludo cordial,<br />
+        <strong>Equipo {safe_cda}</strong>
+    </p>
+    """
+    return _render_email_corporativo(
+        title=f"Resultado de inspección RTM - {safe_placa}",
+        body_html=body_html,
+        label=f"Calidad - {safe_cda}",
+    )

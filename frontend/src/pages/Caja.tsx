@@ -782,10 +782,21 @@ function VehiculosPendientes({
                 <div className="min-w-0">
                   <p className="text-2xl font-bold tracking-wide text-slate-900 sm:text-3xl">{vehiculo.placa}</p>
                   <p className="text-sm capitalize text-slate-600">{vehiculo.tipo_vehiculo}</p>
+                  {vehiculo.reinspeccion_exenta && (
+                    <p className="mt-1 text-xs font-semibold text-emerald-700">
+                      Reintento por rechazo inicial · intento {vehiculo.reinspeccion_intento || 2}/3
+                    </p>
+                  )}
                 </div>
-                <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-900">
-                  Pendiente
-                </span>
+                {vehiculo.reinspeccion_exenta ? (
+                  <span className="shrink-0 rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-semibold text-emerald-900">
+                    Reintento
+                  </span>
+                ) : (
+                  <span className="shrink-0 rounded-full bg-amber-100 px-2.5 py-0.5 text-xs font-semibold text-amber-900">
+                    Pendiente
+                  </span>
+                )}
               </div>
 
               <div className="mb-4 space-y-1 text-sm text-slate-700">
@@ -811,7 +822,7 @@ function VehiculosPendientes({
                 className="btn-primary-solid mt-auto inline-flex w-full items-center justify-center gap-2 py-3 text-base font-semibold"
               >
                 <CreditCard className="h-5 w-5 shrink-0" />
-                Cobrar
+                {vehiculo.reinspeccion_exenta ? 'Validar reintento' : 'Cobrar'}
               </button>
             </div>
           ))}
@@ -862,6 +873,7 @@ function ModalCobro({
   // Estado para valor manual de PREVENTIVA
   const [valorPreventiva, setValorPreventiva] = useState<string>('');
   const esPreventiva = vehiculo.tipo_vehiculo === 'preventiva';
+  const esReintentoExento = Boolean(vehiculo.reinspeccion_exenta);
   
   // Estado para desglose de pago mixto
   const [desgloseMixto, setDesgloseMixto] = useState({
@@ -910,10 +922,11 @@ function ModalCobro({
   const facturaOk =
     modoFactus || (!loadingFactusSettings && !!numeroFactura.trim());
   const todosRegistrados =
-    registros.registrado_runt && registros.registrado_sicov && registros.registrado_indra && facturaOk;
+    esReintentoExento ||
+    (registros.registrado_runt && registros.registrado_sicov && registros.registrado_indra && facturaOk);
   
   // Validar que si es preventiva, tenga valor
-  const preventivaTieneValor = esPreventiva ? parseFloat(valorPreventiva) > 0 : true;
+  const preventivaTieneValor = esReintentoExento ? true : (esPreventiva ? parseFloat(valorPreventiva) > 0 : true);
   
   const puedeConfirmarCobro = todosRegistrados && preventivaTieneValor && desgloseMixtoValido;
 
@@ -926,6 +939,21 @@ function ModalCobro({
   const cobrarMutation = useMutation({
     mutationFn: vehiculosApi.cobrar,
     onSuccess: async (vehiculoCobrado) => {
+      if (esReintentoExento) {
+        if (!isMountedRef.current) return;
+        showToast(
+          'success',
+          'Reintento validado',
+          `La placa ${vehiculoCobrado.placa} quedó habilitada para continuar a Calidad (sin cobro).`,
+        );
+        setTimeout(() => {
+          if (!isMountedRef.current) return;
+          queryClient.invalidateQueries({ queryKey: ['vehiculos-pendientes'] });
+          queryClient.invalidateQueries({ queryKey: ['dashboard-operativo'] });
+        }, 300);
+        onClose();
+        return;
+      }
       // Generar PDF del recibo de pago
       const comisionFinal = clientePagaSOAT ? vehiculo.comision_soat : 0;
       const { generarPDFReciboPagoParaEnvio } = await import('../utils/generarPDFReciboPago');
@@ -999,9 +1027,9 @@ function ModalCobro({
         queryClient.invalidateQueries({ queryKey: ['vehiculos-pendientes'] });
       }, 300);
       
-      if (!vehiculoCobrado.sarlaft_alert_generated) {
-        onClose();
-      }
+      // Siempre cerrar modal de cobro tras confirmar.
+      // Si hay alerta SARLAFT, queda visible el modal de remisión al oficial.
+      onClose();
     },
   });
 
@@ -1092,7 +1120,9 @@ function ModalCobro({
           {/* Header */}
           <div className="modal-header-sticky -mx-6 px-6 pt-1 pb-4 flex justify-between items-start mb-6 border-b border-slate-200">
             <div>
-              <h3 className="text-3xl font-bold text-slate-900">Cobrar Vehículo</h3>
+              <h3 className="text-3xl font-bold text-slate-900">
+                {esReintentoExento ? 'Validar reintento' : 'Cobrar Vehículo'}
+              </h3>
               <p className="text-xl font-bold text-primary-600 mt-1">{vehiculo.placa}</p>
             </div>
             <button
@@ -1110,6 +1140,16 @@ function ModalCobro({
               <p className="text-red-800 font-semibold text-left flex items-start gap-2 break-words whitespace-pre-wrap">
                 <XCircle className="w-5 h-5 shrink-0 mt-0.5" />
                 {extractApiErrorMessage(cobrarMutation.error, 'No fue posible registrar el cobro.')}
+              </p>
+            </div>
+          )}
+
+          {esReintentoExento && (
+            <div className="bg-emerald-50 border-2 border-emerald-200 rounded-lg p-4 mb-6">
+              <p className="text-emerald-900 font-semibold text-left flex items-start gap-2">
+                <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />
+                Reintento por rechazo inicial (intento {vehiculo.reinspeccion_intento || 2}/3). Valor $0.
+                Confirma para enviar nuevamente el vehículo a Calidad.
               </p>
             </div>
           )}
@@ -1191,7 +1231,7 @@ function ModalCobro({
           </div>
 
           {/* Control de Comisión SOAT (si aplica) */}
-          {vehiculo.tiene_soat && vehiculo.comision_soat > 0 && (
+          {!esReintentoExento && vehiculo.tiene_soat && vehiculo.comision_soat > 0 && (
             <div className="mb-6">
               <div className="bg-secondary-50 border-2 border-secondary-200 rounded-lg p-4">
                 <div className="flex items-center justify-between mb-3">
@@ -1228,6 +1268,7 @@ function ModalCobro({
           )}
 
           {/* Métodos de Pago */}
+          {!esReintentoExento && (
           <div className="mb-6">
             <label className="block text-lg font-bold text-slate-900 mb-3 flex items-center gap-2">
               <CreditCard className="w-5 h-5" />
@@ -1439,8 +1480,10 @@ function ModalCobro({
               </div>
             )}
           </div>
+          )}
 
           {/* Registros Externos */}
+          {!esReintentoExento && (
           <div className="mb-6">
             <label className="block text-lg font-bold text-gray-900 mb-3 flex items-center gap-2">
               <Link2 className="w-5 h-5" />
@@ -1560,8 +1603,10 @@ function ModalCobro({
               </div>
             </div>
           </div>
+          )}
 
           {/* Factura DIAN */}
+          {!esReintentoExento && (
           <div className="mb-6">
             <div className="bg-amber-50 border-2 border-amber-200 rounded-lg p-4">
               <div className="flex items-center justify-between mb-3">
@@ -1637,9 +1682,12 @@ function ModalCobro({
               </div>
             )}
           </div>
+          )}
 
           <div className="modal-footer-sticky -mx-6 mt-6 border-t border-slate-200 px-6 pt-4">
-            <p className="mb-3 text-center text-xs text-slate-500">Atajos: Esc cerrar · Ctrl+Enter confirmar</p>
+            <p className="mb-3 text-center text-xs text-slate-500">
+              Atajos: Esc cerrar · Ctrl+Enter {esReintentoExento ? 'validar reintento' : 'confirmar'}
+            </p>
             <div className="flex flex-col gap-3 sm:flex-row">
               <button
                 type="button"
@@ -1660,7 +1708,7 @@ function ModalCobro({
                 ) : (
                   <span className="inline-flex items-center justify-center gap-2">
                     <CheckCircle2 className="h-5 w-5 shrink-0" />
-                    Confirmar cobro
+                    {esReintentoExento ? 'Confirmar reintento' : 'Confirmar cobro'}
                   </span>
                 )}
               </button>

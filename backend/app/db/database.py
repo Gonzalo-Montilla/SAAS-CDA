@@ -275,12 +275,22 @@ def ensure_tenant_domain_schema(db):
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS valor_excluido_servicio NUMERIC(12,2)"))
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS certificado_entregado_at TIMESTAMP WITHOUT TIME ZONE"))
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS certificado_entregado_por UUID"))
+    db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS revision_cierre_resultado VARCHAR(40)"))
+    db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS revision_cierre_observacion TEXT"))
+    db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS revision_cierre_at TIMESTAMP WITHOUT TIME ZONE"))
+    db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS revision_cierre_por UUID"))
+    db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS reinspeccion_origen_id UUID"))
+    db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS reinspeccion_intento INTEGER"))
+    db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS reinspeccion_vence_at TIMESTAMP WITHOUT TIME ZONE"))
+    db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS reinspeccion_exenta BOOLEAN"))
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS recepcion_formato_extra_json JSONB"))
     db.execute(
         text(
             "ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS cliente_tipo_documento VARCHAR(10) NOT NULL DEFAULT 'CC'"
         )
     )
+    db.execute(text("UPDATE vehiculos_proceso SET reinspeccion_intento = COALESCE(reinspeccion_intento, 1)"))
+    db.execute(text("UPDATE vehiculos_proceso SET reinspeccion_exenta = COALESCE(reinspeccion_exenta, FALSE)"))
     db.execute(text("ALTER TABLE tarifas ADD COLUMN IF NOT EXISTS tenant_id UUID"))
     db.execute(
         text(

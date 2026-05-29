@@ -2,6 +2,7 @@
 Endpoints de Vehículos
 """
 import re
+import json
 import time
 import traceback
 from io import BytesIO
@@ -9,8 +10,8 @@ from io import BytesIO
 from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, func
-from datetime import datetime, date, timezone
+from sqlalchemy import and_, func, or_
+from datetime import datetime, date, timezone, timedelta
 from typing import List, Dict, Any
 from decimal import Decimal
 from uuid import UUID
@@ -97,9 +98,12 @@ from app.schemas.vehiculo import (
     TarifaCalculada,
     VentaSOAT,
     VehiculoConsultaRuntResponse,
+    ReinspeccionElegibilidadResponse,
 )
 
 router = APIRouter()
+REINSPECCION_MAX_INTENTOS = 3
+REINSPECCION_VENTANA_DIAS = 15
 
 _RUNT_FX_CACHE: dict[str, Any] = {"rate": None, "expires_at": 0.0}
 
@@ -512,6 +516,72 @@ def _filtro_vehiculo_sede(q, tenant_id, sucursal_id: UUID):
         VehiculoProceso.tenant_id == tenant_id,
         VehiculoProceso.sucursal_id == sucursal_id,
     )
+
+
+def _build_reinspeccion_context_for_origen(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    origen: VehiculoProceso,
+) -> dict[str, Any]:
+    def _to_naive_utc(dt: datetime) -> datetime:
+        if dt.tzinfo is None:
+            return dt
+        return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+    intentos = (
+        db.query(VehiculoProceso)
+        .filter(
+            VehiculoProceso.tenant_id == tenant_id,
+            or_(
+                VehiculoProceso.id == origen.id,
+                VehiculoProceso.reinspeccion_origen_id == origen.id,
+            ),
+        )
+        .order_by(VehiculoProceso.fecha_registro.asc())
+        .all()
+    )
+    if not intentos:
+        intentos = [origen]
+    primer_intento_at = _to_naive_utc(intentos[0].fecha_registro)
+    ultimo_intento_at = _to_naive_utc(intentos[-1].fecha_registro)
+    vence_at = primer_intento_at + timedelta(days=REINSPECCION_VENTANA_DIAS)
+    intentos_usados = len(intentos)
+    intentos_restantes = max(0, REINSPECCION_MAX_INTENTOS - intentos_usados)
+    ultimo = intentos[-1]
+    ultimo_resultado = (ultimo.revision_cierre_resultado or "").strip().lower()
+    if not ultimo_resultado:
+        if ultimo.estado == EstadoVehiculo.RECHAZADO:
+            ultimo_resultado = "rechazado"
+        elif ultimo.estado in (EstadoVehiculo.APROBADO, EstadoVehiculo.COMPLETADO):
+            ultimo_resultado = "aprobado"
+    now_naive = datetime.now(timezone.utc).replace(tzinfo=None)
+    elegible = bool(
+        ultimo_resultado == "rechazado"
+        and now_naive <= vence_at
+        and intentos_restantes > 0
+    )
+    motivo = None
+    if not elegible:
+        if ultimo_resultado != "rechazado":
+            motivo = "El último intento no quedó rechazado."
+        elif now_naive > vence_at:
+            motivo = (
+                f"Ventana vencida: la reinspección solo aplica por {REINSPECCION_VENTANA_DIAS} días "
+                "calendario desde el primer intento."
+            )
+        elif intentos_restantes <= 0:
+            motivo = "Se agotaron los 3 intentos totales permitidos para esta placa."
+    return {
+        "elegible": elegible,
+        "motivo": motivo,
+        "origen": origen,
+        "primer_intento_at": primer_intento_at,
+        "ultimo_intento_at": ultimo_intento_at,
+        "intentos_usados": intentos_usados,
+        "intentos_restantes": intentos_restantes,
+        "vence_at": vence_at,
+    }
 
 
 def _map_sarlaft_hits_count(raw_results: list[dict], threshold: float) -> tuple[int, float]:
@@ -1036,6 +1106,64 @@ def _calcular_snapshot_iva_servicio(
     return (base, iva, excluido.quantize(Decimal("0.01")))
 
 
+@router.get("/reinspeccion/elegibilidad/{placa}", response_model=ReinspeccionElegibilidadResponse)
+def consultar_elegibilidad_reinspeccion(
+    placa: str,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_recepcionista_or_admin),
+):
+    placa_upper = (placa or "").strip().upper()
+    if len(placa_upper) < 5:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Placa inválida")
+
+    latest = (
+        db.query(VehiculoProceso)
+        .filter(
+            VehiculoProceso.tenant_id == current_user.tenant_id,
+            VehiculoProceso.placa == placa_upper,
+        )
+        .order_by(VehiculoProceso.fecha_registro.desc())
+        .first()
+    )
+    if not latest:
+        return ReinspeccionElegibilidadResponse(
+            placa=placa_upper,
+            tiene_historial=False,
+            elegible_reingreso=False,
+            motivo="Sin historial previo para esta placa en el CDA.",
+        )
+
+    origen = latest
+    if latest.reinspeccion_origen_id is not None:
+        origen = (
+            db.query(VehiculoProceso)
+            .filter(
+                VehiculoProceso.id == latest.reinspeccion_origen_id,
+                VehiculoProceso.tenant_id == current_user.tenant_id,
+            )
+            .first()
+            or latest
+        )
+    ctx = _build_reinspeccion_context_for_origen(
+        db,
+        tenant_id=current_user.tenant_id,
+        origen=origen,
+    )
+    return ReinspeccionElegibilidadResponse(
+        placa=placa_upper,
+        tiene_historial=True,
+        elegible_reingreso=bool(ctx["elegible"]),
+        motivo=ctx["motivo"],
+        vehiculo_origen_id=ctx["origen"].id,
+        primer_intento_at=ctx["primer_intento_at"],
+        ultimo_intento_at=ctx["ultimo_intento_at"],
+        intentos_usados=ctx["intentos_usados"],
+        intentos_totales_permitidos=REINSPECCION_MAX_INTENTOS,
+        intentos_restantes=ctx["intentos_restantes"],
+        vence_at=ctx["vence_at"],
+    )
+
+
 @router.post("/registrar", response_model=VehiculoResponse, status_code=status.HTTP_201_CREATED)
 def registrar_vehiculo(
     vehiculo_data: VehiculoRegistro,
@@ -1047,7 +1175,7 @@ def registrar_vehiculo(
     Registrar vehículo (Recepción)
     """
     # Validar que no exista vehículo con la misma placa en proceso
-    placa_upper = vehiculo_data.placa.upper()
+    placa_upper = (vehiculo_data.placa or "").strip().upper()
     vehiculo_existente = db.query(VehiculoProceso).filter(
         and_(
             VehiculoProceso.placa == placa_upper,
@@ -1061,9 +1189,83 @@ def registrar_vehiculo(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Ya existe un vehículo con placa {placa_upper} en estado {vehiculo_existente.estado}"
         )
+
+    es_reingreso = bool(vehiculo_data.es_reingreso_rechazo_inicial)
+    reinspeccion_ctx: dict[str, Any] | None = None
+    if es_reingreso:
+        if vehiculo_data.reinspeccion_vehiculo_origen_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Debes seleccionar el intento original para registrar una reinspección.",
+            )
+        origen = (
+            db.query(VehiculoProceso)
+            .filter(
+                VehiculoProceso.id == vehiculo_data.reinspeccion_vehiculo_origen_id,
+                VehiculoProceso.tenant_id == current_user.tenant_id,
+                VehiculoProceso.placa == placa_upper,
+            )
+            .first()
+        )
+        if not origen:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="No se encontró el intento inicial de reinspección para esta placa.",
+            )
+        reinspeccion_ctx = _build_reinspeccion_context_for_origen(
+            db, tenant_id=current_user.tenant_id, origen=origen
+        )
+        if not reinspeccion_ctx["elegible"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=reinspeccion_ctx["motivo"] or "Esta placa no es elegible para reinspección sin cobro.",
+            )
+    else:
+        # Si existe caso elegible de reinspección, obligamos a confirmarlo explícitamente.
+        latest = (
+            db.query(VehiculoProceso)
+            .filter(
+                VehiculoProceso.tenant_id == current_user.tenant_id,
+                VehiculoProceso.placa == placa_upper,
+            )
+            .order_by(VehiculoProceso.fecha_registro.desc())
+            .first()
+        )
+        if latest:
+            origen = latest
+            if latest.reinspeccion_origen_id is not None:
+                origen = (
+                    db.query(VehiculoProceso)
+                    .filter(
+                        VehiculoProceso.id == latest.reinspeccion_origen_id,
+                        VehiculoProceso.tenant_id == current_user.tenant_id,
+                    )
+                    .first()
+                    or latest
+                )
+            preview_ctx = _build_reinspeccion_context_for_origen(
+                db, tenant_id=current_user.tenant_id, origen=origen
+            )
+            if preview_ctx["elegible"]:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=(
+                        "Esta placa tiene reinspección elegible (sin cobro). "
+                        "Confirma 'reingreso por rechazo inicial' para continuar."
+                    ),
+                )
     
+    tiene_soat_final = vehiculo_data.tiene_soat
+    estado_inicial = EstadoVehiculo.REGISTRADO
+    # Reingreso por rechazo: sin cobro, conserva trazabilidad de intentos.
+    if es_reingreso and reinspeccion_ctx is not None:
+        valor_rtm = Decimal(0)
+        comision_soat = Decimal(0)
+        total_cobrado = Decimal(0)
+        intento_actual = int(reinspeccion_ctx["intentos_usados"]) + 1
+        tiene_soat_final = False
     # Si es PREVENTIVA, no calcular tarifa (se define en Caja)
-    if vehiculo_data.tipo_vehiculo == "preventiva":
+    elif vehiculo_data.tipo_vehiculo == "preventiva":
         # PREVENTIVA: valor se define manualmente en Caja
         valor_rtm = Decimal(0)
         comision_soat = Decimal(0)
@@ -1134,13 +1336,17 @@ def registrar_vehiculo(
         cliente_direccion=vehiculo_data.cliente_direccion,
         cliente_factus_municipality_id=vehiculo_data.cliente_factus_municipality_id,
         valor_rtm=valor_rtm,
-        tiene_soat=vehiculo_data.tiene_soat,
+        tiene_soat=tiene_soat_final if es_reingreso and reinspeccion_ctx is not None else vehiculo_data.tiene_soat,
         comision_soat=comision_soat,
         total_cobrado=total_cobrado,
-        estado=EstadoVehiculo.REGISTRADO,
+        estado=estado_inicial,
         observaciones=vehiculo_data.observaciones,
         recepcion_formato_extra_json=vehiculo_data.recepcion_formato_extra,
-        registrado_por=current_user.id
+        reinspeccion_origen_id=(reinspeccion_ctx["origen"].id if es_reingreso and reinspeccion_ctx is not None else None),
+        reinspeccion_intento=(intento_actual if es_reingreso and reinspeccion_ctx is not None else 1),
+        reinspeccion_vence_at=(reinspeccion_ctx["vence_at"] if es_reingreso and reinspeccion_ctx is not None else None),
+        reinspeccion_exenta=bool(es_reingreso and reinspeccion_ctx is not None),
+        registrado_por=current_user.id,
     )
     
     db.add(nuevo_vehiculo)
@@ -1242,7 +1448,7 @@ def editar_vehiculo(
         )
     
     # Si cambió la placa, validar que no exista otra con la misma placa
-    placa_upper = vehiculo_data.placa.upper()
+    placa_upper = (vehiculo_data.placa or "").strip().upper()
     if placa_upper != vehiculo.placa:
         vehiculo_existente = db.query(VehiculoProceso).filter(
             and_(
@@ -1512,8 +1718,6 @@ def cobrar_vehiculo(
     """
     Cobrar vehículo (Caja)
     """
-    metodo_pago = _normalize_payment_method(cobro_data.metodo_pago)
-
     vehiculo = _filtro_vehiculo_sede(
         db.query(VehiculoProceso),
         current_user.tenant_id,
@@ -1531,6 +1735,12 @@ def cobrar_vehiculo(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Vehículo ya está en estado: {vehiculo.estado}"
         )
+    es_reinspeccion_exenta = bool(getattr(vehiculo, "reinspeccion_exenta", False))
+    metodo_pago = (
+        "reinspeccion_exenta"
+        if es_reinspeccion_exenta
+        else _normalize_payment_method(cobro_data.metodo_pago)
+    )
     
     # Verificar que cajero tenga caja abierta
     caja_abierta = db.query(Caja).filter(
@@ -1549,8 +1759,13 @@ def cobrar_vehiculo(
         )
 
     try:
+        if es_reinspeccion_exenta:
+            vehiculo.valor_rtm = Decimal(0)
+            vehiculo.comision_soat = Decimal(0)
+            vehiculo.total_cobrado = Decimal(0)
+            vehiculo.tiene_soat = False
         # Si es PREVENTIVA y viene valor manual, actualizar
-        if vehiculo.tipo_vehiculo == "preventiva":
+        elif vehiculo.tipo_vehiculo == "preventiva":
             if cobro_data.valor_preventiva is None or cobro_data.valor_preventiva <= 0:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -1617,19 +1832,26 @@ def cobrar_vehiculo(
             .filter(TenantFactusSettings.tenant_id == current_user.tenant_id)
             .first()
         )
-        modo_factus = fs is not None and fs.modo == "factus"
+        modo_factus = (fs is not None and fs.modo == "factus") and not es_reinspeccion_exenta
         range_id_cobro: int | None = None
-        if fs is not None:
+        if fs is not None and not es_reinspeccion_exenta:
             range_id_cobro = resolve_numbering_range_id_for_cobro(
                 db,
                 tenant_id=current_user.tenant_id,
                 active_sucursal_id=active_sucursal_id,
                 tenant_default_range_id=fs.default_numbering_range_id,
             )
-        cred_factus_ok = fs is not None and creds_complete_for_active_env(fs) and range_id_cobro is not None
+        cred_factus_ok = (
+            fs is not None and creds_complete_for_active_env(fs) and range_id_cobro is not None
+        )
 
         tarifa_emit: Tarifa | None = None
-        if modo_factus:
+        if es_reinspeccion_exenta:
+            vehiculo.numero_factura_dian = (
+                vehiculo.numero_factura_dian
+                or f"REINTENTO-{vehiculo.placa}-{vehiculo.reinspeccion_intento or 2}"
+            )
+        elif modo_factus:
             if not cred_factus_ok:
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
@@ -1696,7 +1918,9 @@ def cobrar_vehiculo(
         
         # Para metodo_pago, usar UPDATE raw SQL para bypass enum type checking cuando es mixto
         from sqlalchemy import text
-        if metodo_pago == "mixto":
+        if es_reinspeccion_exenta:
+            vehiculo.metodo_pago = "reinspeccion_exenta"
+        elif metodo_pago == "mixto":
             # Usar SQL directo para actualizar con el valor literal
             db.execute(
                 text("UPDATE vehiculos_proceso SET metodo_pago = :metodo WHERE id = :vehiculo_id"),
@@ -1721,7 +1945,10 @@ def cobrar_vehiculo(
         # Tarjetas, transferencias y créditos NO ingresan a caja física
         
         # Si es PAGO MIXTO, crear múltiples movimientos
-        if metodo_pago == "mixto":
+        if es_reinspeccion_exenta:
+            # Reintento validado por caja: no genera ingreso ni movimiento contable.
+            pass
+        elif metodo_pago == "mixto":
             desglose_mixto = _validate_mixed_breakdown(cobro_data.desglose_mixto, vehiculo.total_cobrado)
             
             # Crear movimientos por cada método usado en el desglose
@@ -1807,7 +2034,7 @@ def cobrar_vehiculo(
             "alert_messages": [],
         }
         tenant_row = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
-        if tenant_row:
+        if tenant_row and not es_reinspeccion_exenta:
             cash_amount_cop = Decimal(str(vehiculo.total_cobrado or 0))
             if metodo_pago not in {"efectivo", "mixto"}:
                 cash_amount_cop = Decimal("0")
@@ -1882,10 +2109,15 @@ def cobrar_vehiculo(
 
         from app.utils.audit import audit_caja_operation
         from app.models.audit_log import AuditAction
+        audit_desc = (
+            f"Reintento validado en caja: {vehiculo.placa} (sin cobro)"
+            if es_reinspeccion_exenta
+            else f"Cobro registrado: {vehiculo.placa} por ${vehiculo.total_cobrado} ({metodo_pago})"
+        )
         audit_caja_operation(
             db=db,
             action=AuditAction.UPDATE_VEHICLE,
-            description=f"Cobro registrado: {vehiculo.placa} por ${vehiculo.total_cobrado} ({metodo_pago})",
+            description=audit_desc,
             usuario=current_user,
             request=request,
             metadata={
@@ -1896,6 +2128,8 @@ def cobrar_vehiculo(
                 "tiene_soat": bool(vehiculo.tiene_soat),
                 "comision_soat": float(vehiculo.comision_soat or 0),
                 "es_pago_mixto": metodo_pago == "mixto",
+                "reinspeccion_exenta": es_reinspeccion_exenta,
+                "reinspeccion_intento": int(vehiculo.reinspeccion_intento or 1),
             },
         )
         
@@ -1938,7 +2172,7 @@ def venta_solo_soat(
             detail="No tienes una caja abierta. Debes abrir caja antes de registrar ventas."
         )
 
-    placa_upper = venta_data.placa.upper()
+    placa_upper = (venta_data.placa or "").strip().upper()
     
     # Obtener comisión SOAT desde la base de datos
     hoy = date.today()
@@ -2435,6 +2669,18 @@ def descargar_recepcion_formato_extra_pdf(
         else (tenant.nombre if tenant else "CDASOFT")
     )
 
+    observaciones_recepcion = ""
+    try:
+        obs_raw = vehiculo.observaciones
+        if isinstance(obs_raw, str) and obs_raw.strip():
+            parsed_obs = json.loads(obs_raw)
+            if isinstance(parsed_obs, dict):
+                observaciones_recepcion = str(parsed_obs.get("texto") or "").strip()
+            else:
+                observaciones_recepcion = obs_raw.strip()
+    except Exception:
+        observaciones_recepcion = str(vehiculo.observaciones or "").strip()
+
     pdf_bytes = generar_recepcion_formato_extra_pdf(
         tenant_nombre=tenant_nombre,
         tenant_nit=tenant.nit_cda if tenant else None,
@@ -2450,6 +2696,10 @@ def descargar_recepcion_formato_extra_pdf(
         fecha_registro=vehiculo.fecha_registro,
         formato_extra={
             **formato_extra,
+            "observaciones_recepcion": (
+                str((formato_extra or {}).get("observaciones_recepcion", "")).strip()
+                or observaciones_recepcion
+            ),
             "version": (
                 (str((formato_extra or {}).get("version", "")).strip())
                 or (tenant.formato_prerevision_version.strip() if tenant and tenant.formato_prerevision_version else "")

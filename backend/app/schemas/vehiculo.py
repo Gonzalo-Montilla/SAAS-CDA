@@ -85,6 +85,8 @@ class VehiculoRegistro(BaseModel):
     tiene_soat: bool = False
     observaciones: Optional[str] = None
     recepcion_formato_extra: Optional[dict[str, Any]] = None
+    es_reingreso_rechazo_inicial: bool = False
+    reinspeccion_vehiculo_origen_id: Optional[UUID] = None
 
     @field_validator("cliente_telefono", mode="before")
     @classmethod
@@ -204,6 +206,13 @@ class VehiculoResponse(BaseModel):
     registrado_indra: bool
     fecha_pago: Optional[datetime]
     estado: str
+    revision_cierre_resultado: Optional[str] = None
+    revision_cierre_observacion: Optional[str] = None
+    revision_cierre_at: Optional[datetime] = None
+    reinspeccion_origen_id: Optional[UUID] = None
+    reinspeccion_intento: Optional[int] = None
+    reinspeccion_vence_at: Optional[datetime] = None
+    reinspeccion_exenta: Optional[bool] = None
     observaciones: Optional[str]
     recepcion_formato_extra_json: Optional[dict[str, Any]] = None
     fecha_registro: datetime
@@ -264,6 +273,20 @@ class VehiculoConsultaRuntResponse(BaseModel):
     cached: bool = False
     observaciones: list[str] = []
     proveedor: Optional[str] = None
+
+
+class ReinspeccionElegibilidadResponse(BaseModel):
+    placa: str
+    tiene_historial: bool
+    elegible_reingreso: bool
+    motivo: Optional[str] = None
+    vehiculo_origen_id: Optional[UUID] = None
+    primer_intento_at: Optional[datetime] = None
+    ultimo_intento_at: Optional[datetime] = None
+    intentos_usados: int = 0
+    intentos_totales_permitidos: int = 3
+    intentos_restantes: int = 0
+    vence_at: Optional[datetime] = None
 
 
 class VentaSOAT(BaseModel):

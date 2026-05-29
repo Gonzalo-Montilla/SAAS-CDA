@@ -20,7 +20,7 @@ import { useAuth } from '../contexts/AuthContext';
 import { configApi } from '../api/config';
 import { vehiculosApi, type TarifaCalculada } from '../api/vehiculos';
 import { tarifasApi } from '../api/tarifas';
-import type { VehiculoRegistro, VehiculoConsultaRunt, Usuario } from '../types';
+import type { VehiculoRegistro, VehiculoConsultaRunt, Usuario, ReinspeccionElegibilidad } from '../types';
 import { formatCOP } from '../utils/formatNumber';
 
 type SnNoNa = 'si' | 'no' | 'na' | '';
@@ -110,6 +110,7 @@ type RecepcionFormatoExtra = {
     adaptaciones_discapacidad: SnNoNa;
     viable_ingreso_linea: SnNo;
   };
+  observaciones_recepcion: string;
   titular_datos: {
     nombre_apellidos: string;
     numero_documento: string;
@@ -171,6 +172,7 @@ const createDefaultFormatoExtra = (): RecepcionFormatoExtra => ({
     adaptaciones_discapacidad: '',
     viable_ingreso_linea: '',
   },
+  observaciones_recepcion: '',
   titular_datos: {
     nombre_apellidos: '',
     numero_documento: '',
@@ -347,6 +349,10 @@ export default function Recepcion() {
   const [runtSugerencia, setRuntSugerencia] = useState<VehiculoConsultaRunt | null>(null);
   const [clienteFactusMunicipalityId, setClienteFactusMunicipalityId] = useState('');
   const [clienteFactusMunicipalityLabel, setClienteFactusMunicipalityLabel] = useState('');
+  const [reinspeccionInfo, setReinspeccionInfo] = useState<ReinspeccionElegibilidad | null>(null);
+  const [mostrarModalReinspeccion, setMostrarModalReinspeccion] = useState(false);
+  const [placaEvaluadaReinspeccion, setPlacaEvaluadaReinspeccion] = useState('');
+  const [esReingresoRechazoInicial, setEsReingresoRechazoInicial] = useState(false);
 
   // Estado para edición
   const [modoEdicion, setModoEdicion] = useState(false);
@@ -428,6 +434,35 @@ export default function Recepcion() {
       return prev;
     });
   }, [mostrarFormatoExtra, versionFormatoTenant]);
+
+  useEffect(() => {
+    if (modoEdicion) return;
+    const placaUpper = (formData.placa || '').trim().toUpperCase();
+    if (placaUpper.length < 5) {
+      setReinspeccionInfo(null);
+      setMostrarModalReinspeccion(false);
+      setPlacaEvaluadaReinspeccion('');
+      setEsReingresoRechazoInicial(false);
+      return;
+    }
+    const handle = window.setTimeout(async () => {
+      try {
+        const data = await vehiculosApi.consultarElegibilidadReinspeccion(placaUpper);
+        setReinspeccionInfo(data);
+        if (!data.elegible_reingreso) {
+          setEsReingresoRechazoInicial(false);
+        }
+        const esNuevaPlaca = placaEvaluadaReinspeccion !== placaUpper;
+        if (data.tiene_historial && esNuevaPlaca) {
+          setMostrarModalReinspeccion(true);
+          setPlacaEvaluadaReinspeccion(placaUpper);
+        }
+      } catch {
+        setReinspeccionInfo(null);
+      }
+    }, 450);
+    return () => window.clearTimeout(handle);
+  }, [formData.placa, modoEdicion, placaEvaluadaReinspeccion]);
 
   type PrefillState = {
     agendamiento_prefill?: {
@@ -810,6 +845,10 @@ export default function Recepcion() {
       document_type: 'CC',
       document_number: '',
     });
+    setReinspeccionInfo(null);
+    setMostrarModalReinspeccion(false);
+    setPlacaEvaluadaReinspeccion('');
+    setEsReingresoRechazoInicial(false);
     
     // NO limpiar tarifaCalculada aquí - dejar que el useEffect lo maneje
     // Esto permite que la tarifa permanezca visible después del registro
@@ -903,8 +942,39 @@ export default function Recepcion() {
       ano_modelo: runtSugerencia.ano_modelo || prev.ano_modelo,
       tipo_vehiculo: runtSugerencia.tipo_vehiculo_sugerido || prev.tipo_vehiculo,
     }));
+    setFormatoExtra((prev) => ({
+      ...prev,
+      datos_tecnicos: {
+        ...prev.datos_tecnicos,
+        clase_vehiculo: runtSugerencia.clase_vehiculo || prev.datos_tecnicos.clase_vehiculo,
+        marca: runtSugerencia.marca || prev.datos_tecnicos.marca || '',
+        linea: runtSugerencia.linea || prev.datos_tecnicos.linea,
+        modelo: runtSugerencia.modelo || prev.datos_tecnicos.modelo || '',
+        servicio: runtSugerencia.tipo_servicio || prev.datos_tecnicos.servicio,
+        color: runtSugerencia.color || prev.datos_tecnicos.color,
+        cilindraje: runtSugerencia.cilindraje || prev.datos_tecnicos.cilindraje,
+      },
+    }));
     showToast('success', 'Sugerencias aplicadas', 'Se aplicaron datos sugeridos desde RUNT.');
   };
+
+  useEffect(() => {
+    if (!mostrarFormatoExtra || !runtSugerencia?.encontrado) return;
+    setFormatoExtra((prev) => ({
+      ...prev,
+      datos_tecnicos: {
+        ...prev.datos_tecnicos,
+        // Solo completamos vacíos para no pisar edición manual del usuario.
+        clase_vehiculo: prev.datos_tecnicos.clase_vehiculo || runtSugerencia.clase_vehiculo || '',
+        marca: prev.datos_tecnicos.marca || runtSugerencia.marca || '',
+        linea: prev.datos_tecnicos.linea || runtSugerencia.linea || '',
+        modelo: prev.datos_tecnicos.modelo || runtSugerencia.modelo || '',
+        servicio: prev.datos_tecnicos.servicio || runtSugerencia.tipo_servicio || '',
+        color: prev.datos_tecnicos.color || runtSugerencia.color || '',
+        cilindraje: prev.datos_tecnicos.cilindraje || runtSugerencia.cilindraje || '',
+      },
+    }));
+  }, [mostrarFormatoExtra, runtSugerencia]);
 
   const consultarRunt = () => {
     const placa = (formData.placa || '').trim().toUpperCase();
@@ -959,6 +1029,7 @@ export default function Recepcion() {
         observaciones_tecnicas: (formatoExtra.datos_tecnicos.observaciones_tecnicas || '').trim(),
       },
       preparacion_checklist: { ...formatoExtra.preparacion_checklist },
+      observaciones_recepcion: (formData.observaciones || '').trim(),
       titular_datos: titularAuto,
       pre_revision: {
         firma_operario: formatoExtra.pre_revision.firma_operario?.data_url
@@ -1008,6 +1079,7 @@ export default function Recepcion() {
     const hasValues =
       hasScalarTecnico ||
       hasPsi ||
+      String(payload.observaciones_recepcion || '').trim().length > 0 ||
       Object.values(payload.preparacion_checklist).some((v) => v === 'si' || v === 'no' || v === 'na') ||
       Boolean(payload.pre_revision.firma_operario?.data_url);
     return hasValues ? payload : undefined;
@@ -1088,6 +1160,7 @@ export default function Recepcion() {
         adaptaciones_discapacidad: pickSn(ck.adaptaciones_discapacidad),
         viable_ingreso_linea: pickSnNo(ck.viable_ingreso_linea),
       },
+      observaciones_recepcion: String(input.observaciones_recepcion || ''),
       titular_datos: {
         nombre_apellidos: String(titular.nombre_apellidos || ''),
         numero_documento: String(titular.numero_documento || ''),
@@ -1165,9 +1238,19 @@ export default function Recepcion() {
       );
       return;
     }
+    if (!modoEdicion && reinspeccionInfo?.elegible_reingreso && !esReingresoRechazoInicial) {
+      showToast(
+        'warning',
+        'Confirma tipo de ingreso',
+        'Esta placa tiene reinspección elegible. Marca "Sí, es reingreso por rechazo inicial" antes de registrar.'
+      );
+      setMostrarModalReinspeccion(true);
+      return;
+    }
     // Preparar datos incluyendo fotos en observaciones
     const dataConFotos = {
       ...formData,
+      placa: (formData.placa || '').trim().toUpperCase(),
       cliente_documento: normalizarDocumentoCliente(formData.cliente_documento, formData.cliente_tipo_documento),
       cliente_telefono: telDigits,
       cliente_email: clienteEmailNormalizado,
@@ -1177,7 +1260,12 @@ export default function Recepcion() {
       observaciones: JSON.stringify({
         texto: formData.observaciones || '',
         fotos: fotosVehiculo
-      })
+      }),
+      es_reingreso_rechazo_inicial: esReingresoRechazoInicial,
+      reinspeccion_vehiculo_origen_id:
+        esReingresoRechazoInicial && reinspeccionInfo?.vehiculo_origen_id
+          ? reinspeccionInfo.vehiculo_origen_id
+          : undefined,
     };
     
     if (modoEdicion && vehiculoEditando) {
@@ -1726,8 +1814,14 @@ export default function Recepcion() {
                     type="text"
                     value={formData.placa}
                     onChange={(e) => {
-                      handleInputChange('placa', e.target.value.toUpperCase());
+                      const nextPlaca = e.target.value.toUpperCase();
+                      handleInputChange('placa', nextPlaca);
                       setRuntSugerencia(null);
+                      setEsReingresoRechazoInicial(false);
+                      if ((nextPlaca || '').trim().toUpperCase() !== placaEvaluadaReinspeccion) {
+                        setReinspeccionInfo(null);
+                        setMostrarModalReinspeccion(false);
+                      }
                     }}
                     required
                     className="input-pos uppercase"
@@ -1787,6 +1881,26 @@ export default function Recepcion() {
               <p className="text-xs text-slate-500">
                 Consulta por placa para autocompletar datos técnicos del vehículo. Los datos del cliente se registran manualmente.
               </p>
+              {reinspeccionInfo?.tiene_historial && (
+                <div className="mt-1 text-xs rounded-lg border border-amber-200 bg-amber-50 p-2 text-amber-800 flex flex-wrap items-center gap-2">
+                  <span>
+                    Historial detectado para placa {reinspeccionInfo.placa}. Intentos usados: {reinspeccionInfo.intentos_usados}/
+                    {reinspeccionInfo.intentos_totales_permitidos}.
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setMostrarModalReinspeccion(true)}
+                    className="underline font-semibold"
+                  >
+                    Ver detalle
+                  </button>
+                  {esReingresoRechazoInicial && reinspeccionInfo.elegible_reingreso && (
+                    <span className="inline-flex items-center rounded-full px-2 py-0.5 bg-emerald-100 text-emerald-700 font-semibold">
+                      Reingreso sin cobro activado
+                    </span>
+                  )}
+                </div>
+              )}
               {runtSugerencia && (
                 <div className="mt-2 p-2 rounded-lg border border-slate-200 bg-white text-xs text-slate-700">
                   <p className="font-semibold mb-1">
@@ -3152,6 +3266,69 @@ export default function Recepcion() {
         )}
         </ErrorBoundary>
       </div>
+
+      {mostrarModalReinspeccion && reinspeccionInfo && (
+        <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-xl rounded-2xl bg-white shadow-2xl border border-slate-200 p-5">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-6 h-6 text-amber-600 mt-0.5" />
+              <div className="flex-1">
+                <h4 className="text-base font-bold text-slate-900">Posible reingreso por rechazo inicial</h4>
+                <p className="text-sm text-slate-700 mt-1">
+                  La placa <span className="font-semibold">{reinspeccionInfo.placa}</span> ya tiene historial en este CDA.
+                </p>
+              </div>
+            </div>
+            <div className="mt-4 grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                <p className="text-slate-500 text-xs">Primer intento</p>
+                <p className="font-semibold text-slate-900">
+                  {reinspeccionInfo.primer_intento_at
+                    ? new Date(reinspeccionInfo.primer_intento_at).toLocaleString()
+                    : '-'}
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
+                <p className="text-slate-500 text-xs">Intentos restantes</p>
+                <p className="font-semibold text-slate-900">{reinspeccionInfo.intentos_restantes}</p>
+              </div>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 sm:col-span-2">
+                <p className="text-slate-500 text-xs">Vence reinspección</p>
+                <p className="font-semibold text-slate-900">
+                  {reinspeccionInfo.vence_at ? new Date(reinspeccionInfo.vence_at).toLocaleString() : '-'}
+                </p>
+                {reinspeccionInfo.motivo && (
+                  <p className="text-xs text-amber-700 mt-1">{reinspeccionInfo.motivo}</p>
+                )}
+              </div>
+            </div>
+            {reinspeccionInfo.elegible_reingreso ? (
+              <label className="mt-4 flex items-start gap-2 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">
+                <input
+                  type="checkbox"
+                  checked={esReingresoRechazoInicial}
+                  onChange={(e) => setEsReingresoRechazoInicial(e.target.checked)}
+                  className="mt-0.5"
+                />
+                <span>Sí, este registro corresponde a reingreso por rechazo inicial (sin cobro).</span>
+              </label>
+            ) : (
+              <p className="mt-4 text-sm text-slate-700 rounded-lg border border-slate-200 bg-slate-50 p-3">
+                Este caso no es elegible para reinspección sin cobro. Puedes continuar con registro normal.
+              </p>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setMostrarModalReinspeccion(false)}
+                className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 font-semibold hover:bg-slate-50"
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {pdfPreview && (
         <div

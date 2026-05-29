@@ -36,6 +36,13 @@ def _vp_scope(tenant_id, scope_sid: Optional[UUID], *extra):
     return and_(*cond)
 
 
+def _no_reinspeccion_exenta_clause():
+    return or_(
+        VehiculoProceso.reinspeccion_exenta.is_(False),
+        VehiculoProceso.reinspeccion_exenta.is_(None),
+    )
+
+
 def _mt_scope(tenant_id, scope_sid: Optional[UUID], *extra):
     cond = [
         MovimientoTesoreria.tenant_id == tenant_id,
@@ -481,7 +488,7 @@ def obtener_dashboard_operativo(
 
     total_ingresados = base_periodo_q.count()
 
-    pagados_periodo = (
+    pagados_periodo_all = (
         db.query(VehiculoProceso)
         .filter(
             _vp_scope(
@@ -494,6 +501,8 @@ def obtener_dashboard_operativo(
         )
         .all()
     )
+    pagados_periodo = [v for v in pagados_periodo_all if not bool(getattr(v, "reinspeccion_exenta", False))]
+    reintentos_validados_periodo = [v for v in pagados_periodo_all if bool(getattr(v, "reinspeccion_exenta", False))]
 
     # SLA registro -> pago (minutos).
     tiempos_minutos = []
@@ -572,6 +581,7 @@ def obtener_dashboard_operativo(
         "resumen_operativo": {
             "ingresados_periodo": total_ingresados,
             "pagados_periodo": len(pagados_periodo),
+            "reintentos_validados_periodo": len(reintentos_validados_periodo),
             "terminados_periodo": terminados_periodo,
             "pendientes_caja": pendientes_caja,
             "pendientes_pista": pendientes_pista,
@@ -930,6 +940,7 @@ def obtener_provisiones_iva(
                 tid,
                 scope_sid,
                 VehiculoProceso.estado == EstadoVehiculo.PAGADO,
+                _no_reinspeccion_exenta_clause(),
                 VehiculoProceso.fecha_pago.isnot(None),
                 VehiculoProceso.fecha_pago >= fecha_inicio_dt,
                 VehiculoProceso.fecha_pago <= fecha_fin_dt,
@@ -1039,6 +1050,7 @@ def marcar_provisiones_iva_rango(
                 tid,
                 scope_sid,
                 VehiculoProceso.estado == EstadoVehiculo.PAGADO,
+                _no_reinspeccion_exenta_clause(),
                 VehiculoProceso.fecha_pago.isnot(None),
                 VehiculoProceso.fecha_pago >= fecha_inicio_dt,
                 VehiculoProceso.fecha_pago <= fecha_fin_dt,

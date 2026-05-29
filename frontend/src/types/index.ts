@@ -664,6 +664,9 @@ export interface QualityInviteItem {
   comentario?: string | null;
   certificado_entregado_at?: string | null;
   certificado_entregado_por?: string | null;
+  revision_cierre_resultado?: 'aprobado' | 'rechazado' | null;
+  revision_cierre_observacion?: string | null;
+  revision_cierre_at?: string | null;
   created_at: string;
 }
 
@@ -861,6 +864,13 @@ export interface Vehiculo {
   registrado_indra: boolean;
   fecha_pago?: string;
   estado: 'registrado' | 'pagado' | 'en_pista' | 'aprobado' | 'rechazado' | 'completado';
+  revision_cierre_resultado?: 'aprobado' | 'rechazado' | null;
+  revision_cierre_observacion?: string | null;
+  revision_cierre_at?: string | null;
+  reinspeccion_origen_id?: string | null;
+  reinspeccion_intento?: number | null;
+  reinspeccion_vence_at?: string | null;
+  reinspeccion_exenta?: boolean | null;
   observaciones?: string;
   recepcion_formato_extra_json?: Record<string, unknown> | null;
   fecha_registro: string;
@@ -888,6 +898,22 @@ export interface VehiculoRegistro {
   tiene_soat: boolean;
   observaciones?: string;
   recepcion_formato_extra?: Record<string, unknown> | null;
+  es_reingreso_rechazo_inicial?: boolean;
+  reinspeccion_vehiculo_origen_id?: string | null;
+}
+
+export interface ReinspeccionElegibilidad {
+  placa: string;
+  tiene_historial: boolean;
+  elegible_reingreso: boolean;
+  motivo?: string | null;
+  vehiculo_origen_id?: string | null;
+  primer_intento_at?: string | null;
+  ultimo_intento_at?: string | null;
+  intentos_usados: number;
+  intentos_totales_permitidos: number;
+  intentos_restantes: number;
+  vence_at?: string | null;
 }
 
 export interface VehiculoConsultaRunt {

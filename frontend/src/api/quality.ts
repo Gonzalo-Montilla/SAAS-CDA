@@ -32,9 +32,16 @@ export interface RTMReminderUpdatePayload {
 export interface MarkCertificateDeliveredResponse {
   success: boolean;
   vehiculo_id: string;
-  certificado_entregado_at: string;
-  certificado_entregado_por: string;
+  resultado: 'aprobado' | 'rechazado';
+  certificado_entregado_at?: string | null;
+  certificado_entregado_por?: string | null;
+  observacion?: string | null;
   message: string;
+}
+
+export interface MarkCertificateDeliveredPayload {
+  resultado: 'aprobado' | 'rechazado';
+  observacion?: string;
 }
 
 export interface QualityLogoUpdatePayload {
@@ -117,9 +124,13 @@ export const qualityApi = {
     return response.data;
   },
 
-  markCertificateDelivered: async (inviteId: string): Promise<MarkCertificateDeliveredResponse> => {
+  markCertificateDelivered: async (
+    inviteId: string,
+    payload: MarkCertificateDeliveredPayload
+  ): Promise<MarkCertificateDeliveredResponse> => {
     const response = await apiClient.post<MarkCertificateDeliveredResponse>(
-      `/quality/invites/${inviteId}/mark-certificate-delivered`
+      `/quality/invites/${inviteId}/mark-certificate-delivered`,
+      payload
     );
     return response.data;
   },

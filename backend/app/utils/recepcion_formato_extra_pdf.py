@@ -389,6 +389,7 @@ def generar_recepcion_formato_extra_pdf(
     datos_tecnicos = (formato_extra or {}).get("datos_tecnicos") or {}
     checklist = (formato_extra or {}).get("preparacion_checklist") or {}
     pre_revision = (formato_extra or {}).get("pre_revision") or {}
+    observaciones_recepcion = _to_text((formato_extra or {}).get("observaciones_recepcion"), default="")
     autorizaciones = (formato_extra or {}).get("autorizaciones_datos") or {}
     firma_titular = (formato_extra or {}).get("firma_titular") or {}
     firma_operario = pre_revision.get("firma_operario") if isinstance(pre_revision, dict) else {}
@@ -808,6 +809,27 @@ def generar_recepcion_formato_extra_pdf(
     )
     flow.append(checklist_table)
     flow.append(Spacer(1, 0.08 * inch))
+
+    if observaciones_recepcion:
+        flow.append(Paragraph("Observaciones de recepcion", card_label))
+        obs_table = Table(
+            [[Paragraph(_xml_esc(observaciones_recepcion).replace("\n", "<br/>"), body_style)]],
+            colWidths=[7.25 * inch],
+        )
+        obs_table.setStyle(
+            TableStyle(
+                [
+                    ("GRID", (0, 0), (-1, -1), 0.55, slate_300),
+                    ("BACKGROUND", (0, 0), (-1, -1), amber_50),
+                    ("LEFTPADDING", (0, 0), (-1, -1), 8),
+                    ("RIGHTPADDING", (0, 0), (-1, -1), 8),
+                    ("TOPPADDING", (0, 0), (-1, -1), 6),
+                    ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
+                ]
+            )
+        )
+        flow.append(obs_table)
+        flow.append(Spacer(1, 0.08 * inch))
 
     flow.append(_section_banner("3. OPERARIOS RESPONSABLES"))
     operario_nombre = _to_text(

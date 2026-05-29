@@ -4,6 +4,7 @@ Endpoints de calidad (encuestas de satisfacción por tenant).
 import uuid
 from datetime import datetime, timezone, timedelta
 from statistics import mean
+from typing import Literal
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from pydantic import BaseModel, Field
@@ -20,7 +21,11 @@ from app.models.usuario import RolEnum, Usuario
 from app.models.vehiculo import EstadoVehiculo, VehiculoProceso
 from app.utils.quality import process_due_quality_invites, utcnow_naive
 from app.utils.rtm_reminders import process_due_rtm_renewal_reminders
-from app.utils.email import enviar_email, generar_email_recordatorio_proxima_rtm
+from app.utils.email import (
+    enviar_email,
+    generar_email_recordatorio_proxima_rtm,
+    generar_email_rechazo_reinspeccion_cliente,
+)
 from app.utils.tenant_logo import normalize_external_logo_url, save_tenant_logo_upload
 
 router = APIRouter()
@@ -105,6 +110,9 @@ class QualityInviteItem(BaseModel):
     comentario: str | None = None
     certificado_entregado_at: datetime | None = None
     certificado_entregado_por: str | None = None
+    revision_cierre_resultado: str | None = None
+    revision_cierre_observacion: str | None = None
+    revision_cierre_at: datetime | None = None
     created_at: datetime
 
 
@@ -205,9 +213,16 @@ class RTMReminderManualSendResponse(BaseModel):
 class MarkCertificateDeliveredResponse(BaseModel):
     success: bool
     vehiculo_id: str
-    certificado_entregado_at: datetime
-    certificado_entregado_por: str
+    resultado: Literal["aprobado", "rechazado"]
+    certificado_entregado_at: datetime | None = None
+    certificado_entregado_por: str | None = None
+    observacion: str | None = None
     message: str
+
+
+class MarkCertificateDeliveredRequest(BaseModel):
+    resultado: Literal["aprobado", "rechazado"]
+    observacion: str | None = Field(default=None, max_length=2000)
 
 
 class RTMReminderTouchManagementRequest(BaseModel):
@@ -269,6 +284,9 @@ def _invite_to_item(
         comentario=response.comentario if response else None,
         certificado_entregado_at=(vehiculo.certificado_entregado_at if vehiculo else None),
         certificado_entregado_por=entregador_nombre,
+        revision_cierre_resultado=(vehiculo.revision_cierre_resultado if vehiculo else None),
+        revision_cierre_observacion=(vehiculo.revision_cierre_observacion if vehiculo else None),
+        revision_cierre_at=(vehiculo.revision_cierre_at if vehiculo else None),
         created_at=invite.created_at,
     )
 
@@ -717,6 +735,7 @@ def submit_in_person_quality_survey(
 @router.post("/invites/{invite_id}/mark-certificate-delivered", response_model=MarkCertificateDeliveredResponse)
 def mark_certificate_delivered(
     invite_id: str,
+    payload: MarkCertificateDeliveredRequest,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
@@ -748,7 +767,7 @@ def mark_certificate_delivered(
     if not vehiculo:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehículo no encontrado")
 
-    if vehiculo.certificado_entregado_at is not None:
+    if vehiculo.revision_cierre_resultado in {"aprobado", "rechazado"}:
         entregador_nombre = "Usuario"
         if vehiculo.certificado_entregado_por:
             entregador = db.query(Usuario).filter(Usuario.id == vehiculo.certificado_entregado_por).first()
@@ -757,9 +776,11 @@ def mark_certificate_delivered(
         return MarkCertificateDeliveredResponse(
             success=True,
             vehiculo_id=str(vehiculo.id),
+            resultado=vehiculo.revision_cierre_resultado,
             certificado_entregado_at=vehiculo.certificado_entregado_at,
-            certificado_entregado_por=entregador_nombre,
-            message="Este certificado ya estaba marcado como entregado.",
+            certificado_entregado_por=entregador_nombre if vehiculo.certificado_entregado_at else None,
+            observacion=vehiculo.revision_cierre_observacion,
+            message="Este servicio ya tiene un cierre de resultado registrado.",
         )
 
     if vehiculo.estado == EstadoVehiculo.REGISTRADO:
@@ -769,17 +790,66 @@ def mark_certificate_delivered(
         )
 
     now = _now_naive()
-    vehiculo.certificado_entregado_at = now
-    vehiculo.certificado_entregado_por = current_user.id
+    resultado = payload.resultado
+    observacion = (payload.observacion or "").strip() or None
+    if resultado == "rechazado" and not observacion:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La observación es obligatoria cuando el resultado es rechazado.",
+        )
+
+    vehiculo.revision_cierre_resultado = resultado
+    vehiculo.revision_cierre_observacion = observacion
+    vehiculo.revision_cierre_at = now
+    vehiculo.revision_cierre_por = current_user.id
+    if resultado == "aprobado":
+        vehiculo.estado = EstadoVehiculo.APROBADO
+        vehiculo.certificado_entregado_at = now
+        vehiculo.certificado_entregado_por = current_user.id
+    else:
+        vehiculo.estado = EstadoVehiculo.RECHAZADO
+        vehiculo.certificado_entregado_at = None
+        vehiculo.certificado_entregado_por = None
     db.commit()
     db.refresh(vehiculo)
+
+    if resultado == "rechazado":
+        cliente_email = (vehiculo.cliente_email or "").strip().lower()
+        if cliente_email:
+            try:
+                tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+                nombre_cda = (
+                    tenant.nombre_comercial
+                    if tenant and tenant.nombre_comercial
+                    else (tenant.nombre if tenant else "CDASOFT")
+                )
+                asunto = f"Resultado de inspección RTM - {vehiculo.placa} - {nombre_cda}"
+                cuerpo_html = generar_email_rechazo_reinspeccion_cliente(
+                    nombre_cda=nombre_cda,
+                    nombre_cliente=vehiculo.cliente_nombre or "Cliente",
+                    placa=vehiculo.placa or "",
+                    observacion_rechazo=observacion or "",
+                    correo_contacto_cda=(tenant.correo_electronico if tenant else None),
+                    telefono_contacto_cda=(tenant.celular if tenant else None),
+                )
+                sent = enviar_email(cliente_email, asunto, cuerpo_html)
+                if not sent:
+                    print("[WARN] Correo de rechazo/reinspección no enviado (SMTP retornó false).")
+            except Exception as email_exc:
+                print(f"[WARN] No se pudo enviar correo de rechazo/reinspección: {email_exc}")
 
     return MarkCertificateDeliveredResponse(
         success=True,
         vehiculo_id=str(vehiculo.id),
-        certificado_entregado_at=now,
-        certificado_entregado_por=current_user.nombre_completo,
-        message="Certificado RTM marcado como entregado.",
+        resultado=resultado,
+        certificado_entregado_at=vehiculo.certificado_entregado_at,
+        certificado_entregado_por=current_user.nombre_completo if resultado == "aprobado" else None,
+        observacion=observacion,
+        message=(
+            "Resultado registrado: aprobado y certificado entregado."
+            if resultado == "aprobado"
+            else "Resultado registrado: rechazado (sin entrega de certificado)."
+        ),
     )
 
 
