@@ -280,16 +280,25 @@ const formatServerDateTimeToBogota = (value?: string | null): string => {
 
 const mapTipoVehiculoFormato = (tipo: string, claseVehiculo?: string): string => {
   const t = (tipo || '').trim().toLowerCase();
-  if (t === 'moto') return 'MOTOCICLETA 4T';
-  if (t.includes('pesado')) return 'PESADO';
-  if (t === 'preventiva' || t === 'pruebas_auditoria') {
-    const clase = (claseVehiculo || '').trim().toLowerCase();
-    if (clase.includes('moto')) return 'MOTOCICLETA 4T';
-    if (clase.includes('camion') || clase.includes('camión') || clase.includes('pesado')) return 'PESADO';
-    if (clase.includes('liviano') || clase.includes('automovil') || clase.includes('automóvil') || clase.includes('carro')) {
-      return 'LIVIANO';
-    }
-  }
+  const clase = (claseVehiculo || '').trim().toLowerCase();
+  const hasAny = (raw: string, tokens: string[]) => tokens.some((token) => raw.includes(token));
+  const motoTokens = ['moto', 'motocicleta'];
+  const pesadoTokens = [
+    'pesado',
+    'camion',
+    'camión',
+    'tracto',
+    'tractocamion',
+    'tractocamión',
+    'volqueta',
+    'bus',
+    'buseta',
+    'microbus',
+    'microbús',
+  ];
+
+  if (hasAny(t, motoTokens) || hasAny(clase, motoTokens)) return 'MOTOCICLETA 4T';
+  if (hasAny(t, pesadoTokens) || hasAny(clase, pesadoTokens)) return 'PESADO';
   return 'LIVIANO';
 };
 
@@ -304,17 +313,25 @@ const resolveTipoLlantasKey = (
   claseVehiculo?: string
 ): keyof typeof TIPO_LLAYOUT => {
   const t = (tipoVehiculo || '').trim().toLowerCase();
-  if (t === 'moto') return 'moto';
-  if (t.includes('pesado')) return 'pesado';
+  const clase = (claseVehiculo || '').trim().toLowerCase();
+  const hasAny = (raw: string, tokens: string[]) => tokens.some((token) => raw.includes(token));
+  const motoTokens = ['moto', 'motocicleta'];
+  const pesadoTokens = [
+    'pesado',
+    'camion',
+    'camión',
+    'tracto',
+    'tractocamion',
+    'tractocamión',
+    'volqueta',
+    'bus',
+    'buseta',
+    'microbus',
+    'microbús',
+  ];
 
-  // Para servicios especiales, derivar layout desde "clase de vehículo".
-  if (t === 'preventiva' || t === 'pruebas_auditoria') {
-    const clase = (claseVehiculo || '').trim().toLowerCase();
-    if (clase.includes('moto')) return 'moto';
-    if (clase.includes('camion') || clase.includes('camión') || clase.includes('pesado')) return 'pesado';
-    return 'liviano';
-  }
-
+  if (hasAny(t, motoTokens) || hasAny(clase, motoTokens)) return 'moto';
+  if (hasAny(t, pesadoTokens) || hasAny(clase, pesadoTokens)) return 'pesado';
   return 'liviano';
 };
 

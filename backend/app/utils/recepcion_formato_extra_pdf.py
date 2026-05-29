@@ -250,6 +250,67 @@ def _resolve_vehicle_diagram_path(tipo_vehiculo: str | None) -> str | None:
     return None
 
 
+def _resolve_visual_vehicle_type(
+    tipo_vehiculo: str | None,
+    tipo_vehiculo_formato: str | None = None,
+    clase_vehiculo: str | None = None,
+) -> str:
+    """
+    Normaliza el tipo visual para el diagrama de llantas.
+    Para servicios especiales (preventiva/auditoria) se deriva desde clase/formato.
+    """
+    tipo = (tipo_vehiculo or "").strip().lower()
+    tipo_formato = (tipo_vehiculo_formato or "").strip().lower()
+    clase = (clase_vehiculo or "").strip().lower()
+
+    moto_tokens = ("moto", "motocicleta")
+    pesado_tokens = (
+        "pesado",
+        "camion",
+        "camión",
+        "tracto",
+        "tractocamion",
+        "tractocamión",
+        "volqueta",
+        "bus",
+        "buseta",
+        "microbus",
+        "microbús",
+    )
+    liviano_tokens = (
+        "liviano",
+        "carro",
+        "automovil",
+        "automóvil",
+        "camioneta",
+        "suv",
+        "pickup",
+        "pick-up",
+    )
+
+    def _has_any(raw: str, tokens: tuple[str, ...]) -> bool:
+        return any(token in raw for token in tokens)
+
+    # 1) Tipo explícito del registro (si viene claro, manda).
+    if _has_any(tipo, moto_tokens):
+        return "moto"
+    if _has_any(tipo, pesado_tokens):
+        return "pesado"
+    if _has_any(tipo, liviano_tokens):
+        return "liviano"
+
+    # 2) Para tipos especiales o ambiguos, derivar del formato/clase.
+    if _has_any(tipo_formato, moto_tokens) or _has_any(clase, moto_tokens):
+        return "moto"
+    if _has_any(tipo_formato, pesado_tokens) or _has_any(clase, pesado_tokens):
+        return "pesado"
+    if _has_any(tipo_formato, liviano_tokens) or _has_any(clase, liviano_tokens):
+        return "liviano"
+
+    # 3) Fallback conservador histórico.
+    return "liviano"
+
+
 def _diagram_points_for_tipo(tipo_vehiculo: str | None) -> dict[str, tuple[float, float]]:
     tipo = (tipo_vehiculo or "").strip().lower()
     if tipo == "moto":
@@ -587,6 +648,11 @@ def generar_recepcion_formato_extra_pdf(
     no_inspeccion = _to_text((formato_extra or {}).get("no_inspeccion"))
     tipo_formato = _to_text((formato_extra or {}).get("tipo_vehiculo_formato") or tipo_vehiculo)
     constancia_fecha, constancia_tz = _format_constancia_fecha(fecha_registro)
+    diagram_tipo = _resolve_visual_vehicle_type(
+        tipo_vehiculo,
+        tipo_formato,
+        _to_text(datos_tecnicos.get("clase_vehiculo"), default=""),
+    )
 
     # Tarjetas de resumen (vehiculo / titular)
     vehicle_rows = [
@@ -695,15 +761,15 @@ def generar_recepcion_formato_extra_pdf(
     )
     flow.append(tecnicos_table)
     if presion_llantas_validas:
-        diagram_path = _resolve_vehicle_diagram_path(tipo_vehiculo)
+        diagram_path = _resolve_vehicle_diagram_path(diagram_tipo)
         if diagram_path:
             flow.append(Spacer(1, 0.05 * inch))
             flow.append(Paragraph("Diagrama de presion por llanta", small_style))
             flow.append(
                 TirePressureDiagramFlowable(
                     image_path=diagram_path,
-                    points_by_pos=_diagram_points_for_tipo(tipo_vehiculo),
-                    offsets_by_pos=_diagram_label_offsets_for_tipo(tipo_vehiculo),
+                    points_by_pos=_diagram_points_for_tipo(diagram_tipo),
+                    offsets_by_pos=_diagram_label_offsets_for_tipo(diagram_tipo),
                     entries=presion_llantas_validas,
                     width=7.0 * inch,
                     max_height=2.9 * inch,
