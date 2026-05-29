@@ -11,7 +11,8 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFi
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func, or_
-from datetime import datetime, date, timezone, timedelta
+from datetime import datetime, date, time as dt_time, timezone, timedelta
+from zoneinfo import ZoneInfo
 from typing import List, Dict, Any
 from decimal import Decimal
 from uuid import UUID
@@ -104,6 +105,27 @@ from app.schemas.vehiculo import (
 router = APIRouter()
 REINSPECCION_MAX_INTENTOS = 3
 REINSPECCION_VENTANA_DIAS = 15
+COLOMBIA_TZ = ZoneInfo("America/Bogota")
+
+
+def _co_today_date() -> date:
+    return datetime.now(COLOMBIA_TZ).date()
+
+
+def _co_day_utc_bounds(target_date: date) -> tuple[datetime, datetime]:
+    """Devuelve [inicio, fin) en UTC naive para un día calendario de Colombia."""
+    start_local = datetime.combine(target_date, dt_time.min, tzinfo=COLOMBIA_TZ)
+    end_local = start_local + timedelta(days=1)
+    start_utc = start_local.astimezone(timezone.utc).replace(tzinfo=None)
+    end_utc = end_local.astimezone(timezone.utc).replace(tzinfo=None)
+    return start_utc, end_utc
+
+
+def _utc_naive_to_co_date(dt: datetime | None) -> date | None:
+    if not dt:
+        return None
+    dt_utc = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+    return dt_utc.astimezone(COLOMBIA_TZ).date()
 
 _RUNT_FX_CACHE: dict[str, Any] = {"rate": None, "expires_at": 0.0}
 
@@ -2268,7 +2290,7 @@ def listar_cobrados_hoy(
     Para permitir cambio de método de pago
     """
     current_role = current_user.rol.value if hasattr(current_user.rol, "value") else str(current_user.rol)
-    hoy = date.today()
+    inicio_hoy_utc, fin_hoy_utc = _co_day_utc_bounds(_co_today_date())
 
     if current_role == "administrador":
         cajas_abiertas_subq = db.query(Caja.id).filter(
@@ -2287,7 +2309,8 @@ def listar_cobrados_hoy(
             and_(
                 VehiculoProceso.caja_id.in_(cajas_abiertas_subq),
                 VehiculoProceso.estado == EstadoVehiculo.PAGADO,
-                func.date(VehiculoProceso.fecha_pago) == hoy,
+                VehiculoProceso.fecha_pago >= inicio_hoy_utc,
+                VehiculoProceso.fecha_pago < fin_hoy_utc,
             )
         ).order_by(VehiculoProceso.fecha_pago.desc()).all()
         return vehiculos
@@ -2311,7 +2334,8 @@ def listar_cobrados_hoy(
         and_(
             VehiculoProceso.caja_id == caja_abierta.id,
             VehiculoProceso.estado == EstadoVehiculo.PAGADO,
-            func.date(VehiculoProceso.fecha_pago) == hoy,
+            VehiculoProceso.fecha_pago >= inicio_hoy_utc,
+            VehiculoProceso.fecha_pago < fin_hoy_utc,
         )
     ).order_by(VehiculoProceso.fecha_pago.desc()).all()
 
@@ -2405,8 +2429,8 @@ def cambiar_metodo_pago(
         )
     
     # Validar que sea el mismo día
-    hoy = date.today()
-    fecha_pago = vehiculo.fecha_pago.date() if vehiculo.fecha_pago else None
+    hoy = _co_today_date()
+    fecha_pago = _utc_naive_to_co_date(vehiculo.fecha_pago)
     if fecha_pago != hoy:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -2769,7 +2793,7 @@ def listar_vehiculos(
     - skip: Saltar registros (paginación)
     - limit: Límite de registros (default 20)
     """
-    from sqlalchemy import or_, func
+    from sqlalchemy import or_
 
     query = _filtro_vehiculo_sede(
         db.query(VehiculoProceso),
@@ -2796,14 +2820,16 @@ def listar_vehiculos(
     if fecha_desde:
         try:
             fecha_inicio = datetime.strptime(fecha_desde, "%Y-%m-%d").date()
-            query = query.filter(func.date(VehiculoProceso.fecha_registro) >= fecha_inicio)
+            fecha_inicio_utc, _ = _co_day_utc_bounds(fecha_inicio)
+            query = query.filter(VehiculoProceso.fecha_registro >= fecha_inicio_utc)
         except ValueError:
             pass
     
     if fecha_hasta:
         try:
             fecha_fin = datetime.strptime(fecha_hasta, "%Y-%m-%d").date()
-            query = query.filter(func.date(VehiculoProceso.fecha_registro) <= fecha_fin)
+            _, fecha_fin_utc = _co_day_utc_bounds(fecha_fin)
+            query = query.filter(VehiculoProceso.fecha_registro < fecha_fin_utc)
         except ValueError:
             pass
     
@@ -2830,7 +2856,7 @@ def contar_vehiculos(
     Contar total de vehículos con los mismos filtros que listar_vehiculos
     Útil para calcular paginación en el frontend
     """
-    from sqlalchemy import or_, func
+    from sqlalchemy import or_
 
     query = _filtro_vehiculo_sede(
         db.query(VehiculoProceso),
@@ -2855,14 +2881,16 @@ def contar_vehiculos(
     if fecha_desde:
         try:
             fecha_inicio = datetime.strptime(fecha_desde, "%Y-%m-%d").date()
-            query = query.filter(func.date(VehiculoProceso.fecha_registro) >= fecha_inicio)
+            fecha_inicio_utc, _ = _co_day_utc_bounds(fecha_inicio)
+            query = query.filter(VehiculoProceso.fecha_registro >= fecha_inicio_utc)
         except ValueError:
             pass
     
     if fecha_hasta:
         try:
             fecha_fin = datetime.strptime(fecha_hasta, "%Y-%m-%d").date()
-            query = query.filter(func.date(VehiculoProceso.fecha_registro) <= fecha_fin)
+            _, fecha_fin_utc = _co_day_utc_bounds(fecha_fin)
+            query = query.filter(VehiculoProceso.fecha_registro < fecha_fin_utc)
         except ValueError:
             pass
     
