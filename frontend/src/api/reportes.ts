@@ -52,6 +52,7 @@ export interface DashboardOperativoResponse {
   resumen_operativo: {
     ingresados_periodo: number;
     pagados_periodo: number;
+    reintentos_validados_periodo: number;
     terminados_periodo: number;
     pendientes_caja: number;
     pendientes_pista: number;

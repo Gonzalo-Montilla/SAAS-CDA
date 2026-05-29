@@ -1618,7 +1618,7 @@ export default function ReportesPage() {
             <p className="text-sm text-slate-600">Periodo: {operativoData?.periodo || periodoActual}</p>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-5">
+          <div className="grid grid-cols-1 gap-3 mb-5 md:grid-cols-3 lg:grid-cols-7">
             <div className="rounded-lg border border-slate-200 p-3 bg-white">
               <p className="text-xs text-slate-500">Pendientes caja</p>
               <p className="text-2xl font-bold text-amber-700">{operativoData?.resumen_operativo.pendientes_caja ?? 0}</p>
@@ -1630,6 +1630,12 @@ export default function ReportesPage() {
             <div className="rounded-lg border border-slate-200 p-3 bg-white">
               <p className="text-xs text-slate-500">En pista</p>
               <p className="text-2xl font-bold text-indigo-700">{operativoData?.resumen_operativo.en_pista ?? 0}</p>
+            </div>
+            <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-3">
+              <p className="text-xs text-emerald-700">Reintentos validados</p>
+              <p className="text-2xl font-bold text-emerald-800">
+                {operativoData?.resumen_operativo.reintentos_validados_periodo ?? 0}
+              </p>
             </div>
             <div className="rounded-lg border border-slate-200 p-3 bg-white">
               <p className="text-xs text-slate-500">SLA promedio</p>
