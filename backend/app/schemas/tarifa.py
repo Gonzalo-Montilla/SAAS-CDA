@@ -1,7 +1,7 @@
 """
 Schemas de Tarifas
 """
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 from decimal import Decimal
 from datetime import date
 from typing import Optional
@@ -13,19 +13,35 @@ class TarifaCreate(BaseModel):
     ano_vigencia: int = Field(ge=2020, le=2050)
     vigencia_inicio: date
     vigencia_fin: date
-    tipo_vehiculo: str = Field(pattern="^(moto|liviano_particular|liviano_publico|pesado_particular|pesado_publico)$")
+    tipo_vehiculo: str = Field(pattern="^(moto|liviano_particular|liviano_publico|pesado_particular|pesado_publico|pruebas_auditoria)$")
     antiguedad_min: int = Field(ge=0)
     antiguedad_max: Optional[int] = None
-    valor_rtm: Decimal = Field(gt=0)
+    valor_rtm: Decimal = Field(ge=0)
     valor_terceros_runt: Decimal = Field(ge=0)
     valor_terceros_sicov: Decimal = Field(ge=0)
     valor_terceros_bancarizacion: Decimal = Field(ge=0)
     valor_terceros_ansv: Decimal = Field(ge=0)
 
+    @model_validator(mode="after")
+    def validate_values(self):
+        suma_terceros = (
+            Decimal(str(self.valor_terceros_runt or 0))
+            + Decimal(str(self.valor_terceros_sicov or 0))
+            + Decimal(str(self.valor_terceros_bancarizacion or 0))
+            + Decimal(str(self.valor_terceros_ansv or 0))
+        )
+        if self.tipo_vehiculo == "pruebas_auditoria":
+            if Decimal(str(self.valor_rtm or 0)) != 0 or suma_terceros != 0:
+                raise ValueError("Para 'pruebas_auditoria' el valor RTM y terceros deben ser exactamente 0.")
+        else:
+            if Decimal(str(self.valor_rtm or 0)) <= 0 or suma_terceros <= 0:
+                raise ValueError("El valor RTM y la suma de terceros deben ser mayores a cero.")
+        return self
+
 
 class TarifaUpdate(BaseModel):
     """Actualizar tarifa"""
-    valor_rtm: Optional[Decimal] = Field(default=None, gt=0)
+    valor_rtm: Optional[Decimal] = Field(default=None, ge=0)
     valor_terceros_runt: Optional[Decimal] = Field(default=None, ge=0)
     valor_terceros_sicov: Optional[Decimal] = Field(default=None, ge=0)
     valor_terceros_bancarizacion: Optional[Decimal] = Field(default=None, ge=0)

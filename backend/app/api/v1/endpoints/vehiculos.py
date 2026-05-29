@@ -105,6 +105,7 @@ from app.schemas.vehiculo import (
 router = APIRouter()
 REINSPECCION_MAX_INTENTOS = 3
 REINSPECCION_VENTANA_DIAS = 15
+TIPO_VEHICULO_PRUEBAS_AUDITORIA = "pruebas_auditoria"
 COLOMBIA_TZ = ZoneInfo("America/Bogota")
 
 
@@ -126,6 +127,10 @@ def _utc_naive_to_co_date(dt: datetime | None) -> date | None:
         return None
     dt_utc = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
     return dt_utc.astimezone(COLOMBIA_TZ).date()
+
+
+def _es_prueba_auditoria(tipo_vehiculo: str | None) -> bool:
+    return (tipo_vehiculo or "").strip().lower() == TIPO_VEHICULO_PRUEBAS_AUDITORIA
 
 _RUNT_FX_CACHE: dict[str, Any] = {"rate": None, "expires_at": 0.0}
 
@@ -1029,6 +1034,8 @@ def mapear_tipo_vehiculo_a_comision(tipo_vehiculo: str) -> str:
         return "moto"
     elif tipo_vehiculo in ["liviano_particular", "liviano_publico", "pesado_particular", "pesado_publico"]:
         return "carro"
+    elif _es_prueba_auditoria(tipo_vehiculo):
+        return "carro"
     else:
         # Por defecto, si es un tipo no reconocido, usar 'carro'
         return "carro"
@@ -1286,6 +1293,12 @@ def registrar_vehiculo(
         total_cobrado = Decimal(0)
         intento_actual = int(reinspeccion_ctx["intentos_usados"]) + 1
         tiene_soat_final = False
+    # Pruebas de auditoría: flujo operativo, sin cobro ni SOAT.
+    elif _es_prueba_auditoria(vehiculo_data.tipo_vehiculo):
+        valor_rtm = Decimal(0)
+        comision_soat = Decimal(0)
+        total_cobrado = Decimal(0)
+        tiene_soat_final = False
     # Si es PREVENTIVA, no calcular tarifa (se define en Caja)
     elif vehiculo_data.tipo_vehiculo == "preventiva":
         # PREVENTIVA: valor se define manualmente en Caja
@@ -1358,7 +1371,11 @@ def registrar_vehiculo(
         cliente_direccion=vehiculo_data.cliente_direccion,
         cliente_factus_municipality_id=vehiculo_data.cliente_factus_municipality_id,
         valor_rtm=valor_rtm,
-        tiene_soat=tiene_soat_final if es_reingreso and reinspeccion_ctx is not None else vehiculo_data.tiene_soat,
+        tiene_soat=(
+            tiene_soat_final
+            if (es_reingreso and reinspeccion_ctx is not None) or _es_prueba_auditoria(vehiculo_data.tipo_vehiculo)
+            else vehiculo_data.tiene_soat
+        ),
         comision_soat=comision_soat,
         total_cobrado=total_cobrado,
         estado=estado_inicial,
@@ -1487,8 +1504,14 @@ def editar_vehiculo(
                 detail=f"Ya existe otro vehículo con placa {placa_upper} en estado {vehiculo_existente.estado}"
             )
     
+    # Pruebas de auditoría: sin cobro ni SOAT.
+    if _es_prueba_auditoria(vehiculo_data.tipo_vehiculo):
+        valor_rtm = Decimal(0)
+        comision_soat = Decimal(0)
+        total_cobrado = Decimal(0)
+        vehiculo_data.tiene_soat = False
     # Si es PREVENTIVA, no calcular tarifa
-    if vehiculo_data.tipo_vehiculo == "preventiva":
+    elif vehiculo_data.tipo_vehiculo == "preventiva":
         valor_rtm = Decimal(0)
         comision_soat = Decimal(0)
         total_cobrado = Decimal(0)
@@ -1553,7 +1576,7 @@ def editar_vehiculo(
     vehiculo.cliente_email = str(vehiculo_data.cliente_email).strip().lower()
     vehiculo.cliente_direccion = vehiculo_data.cliente_direccion
     vehiculo.cliente_factus_municipality_id = vehiculo_data.cliente_factus_municipality_id
-    vehiculo.tiene_soat = vehiculo_data.tiene_soat
+    vehiculo.tiene_soat = False if _es_prueba_auditoria(vehiculo_data.tipo_vehiculo) else vehiculo_data.tiene_soat
     vehiculo.observaciones = vehiculo_data.observaciones
     vehiculo.recepcion_formato_extra_json = vehiculo_data.recepcion_formato_extra
     
@@ -1758,10 +1781,16 @@ def cobrar_vehiculo(
             detail=f"Vehículo ya está en estado: {vehiculo.estado}"
         )
     es_reinspeccion_exenta = bool(getattr(vehiculo, "reinspeccion_exenta", False))
+    es_prueba_auditoria = _es_prueba_auditoria(getattr(vehiculo, "tipo_vehiculo", None))
+    es_cobro_exento = es_reinspeccion_exenta or es_prueba_auditoria
     metodo_pago = (
         "reinspeccion_exenta"
         if es_reinspeccion_exenta
-        else _normalize_payment_method(cobro_data.metodo_pago)
+        else (
+            "auditoria_exenta"
+            if es_prueba_auditoria
+            else _normalize_payment_method(cobro_data.metodo_pago)
+        )
     )
     
     # Verificar que cajero tenga caja abierta
@@ -1781,7 +1810,7 @@ def cobrar_vehiculo(
         )
 
     try:
-        if es_reinspeccion_exenta:
+        if es_cobro_exento:
             vehiculo.valor_rtm = Decimal(0)
             vehiculo.comision_soat = Decimal(0)
             vehiculo.total_cobrado = Decimal(0)
@@ -1854,9 +1883,9 @@ def cobrar_vehiculo(
             .filter(TenantFactusSettings.tenant_id == current_user.tenant_id)
             .first()
         )
-        modo_factus = (fs is not None and fs.modo == "factus") and not es_reinspeccion_exenta
+        modo_factus = (fs is not None and fs.modo == "factus") and not es_cobro_exento
         range_id_cobro: int | None = None
-        if fs is not None and not es_reinspeccion_exenta:
+        if fs is not None and not es_cobro_exento:
             range_id_cobro = resolve_numbering_range_id_for_cobro(
                 db,
                 tenant_id=current_user.tenant_id,
@@ -1872,6 +1901,11 @@ def cobrar_vehiculo(
             vehiculo.numero_factura_dian = (
                 vehiculo.numero_factura_dian
                 or f"REINTENTO-{vehiculo.placa}-{vehiculo.reinspeccion_intento or 2}"
+            )
+        elif es_prueba_auditoria:
+            vehiculo.numero_factura_dian = (
+                vehiculo.numero_factura_dian
+                or f"AUDITORIA-{vehiculo.placa}-{datetime.now(timezone.utc).strftime('%Y%m%d')}"
             )
         elif modo_factus:
             if not cred_factus_ok:
@@ -1942,6 +1976,8 @@ def cobrar_vehiculo(
         from sqlalchemy import text
         if es_reinspeccion_exenta:
             vehiculo.metodo_pago = "reinspeccion_exenta"
+        elif es_prueba_auditoria:
+            vehiculo.metodo_pago = "auditoria_exenta"
         elif metodo_pago == "mixto":
             # Usar SQL directo para actualizar con el valor literal
             db.execute(
@@ -1967,7 +2003,7 @@ def cobrar_vehiculo(
         # Tarjetas, transferencias y créditos NO ingresan a caja física
         
         # Si es PAGO MIXTO, crear múltiples movimientos
-        if es_reinspeccion_exenta:
+        if es_cobro_exento:
             # Reintento validado por caja: no genera ingreso ni movimiento contable.
             pass
         elif metodo_pago == "mixto":
@@ -2056,7 +2092,7 @@ def cobrar_vehiculo(
             "alert_messages": [],
         }
         tenant_row = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
-        if tenant_row and not es_reinspeccion_exenta:
+        if tenant_row and not es_cobro_exento:
             cash_amount_cop = Decimal(str(vehiculo.total_cobrado or 0))
             if metodo_pago not in {"efectivo", "mixto"}:
                 cash_amount_cop = Decimal("0")
@@ -2134,7 +2170,11 @@ def cobrar_vehiculo(
         audit_desc = (
             f"Reintento validado en caja: {vehiculo.placa} (sin cobro)"
             if es_reinspeccion_exenta
-            else f"Cobro registrado: {vehiculo.placa} por ${vehiculo.total_cobrado} ({metodo_pago})"
+            else (
+                f"Prueba de auditoría validada en caja: {vehiculo.placa} (sin cobro)"
+                if es_prueba_auditoria
+                else f"Cobro registrado: {vehiculo.placa} por ${vehiculo.total_cobrado} ({metodo_pago})"
+            )
         )
         audit_caja_operation(
             db=db,
@@ -2152,6 +2192,7 @@ def cobrar_vehiculo(
                 "es_pago_mixto": metodo_pago == "mixto",
                 "reinspeccion_exenta": es_reinspeccion_exenta,
                 "reinspeccion_intento": int(vehiculo.reinspeccion_intento or 1),
+                "auditoria_exenta": es_prueba_auditoria,
             },
         )
         
@@ -2568,6 +2609,14 @@ def calcular_tarifa(
     """
     Calcular tarifa para un vehículo según su año de modelo y tipo
     """
+    if _es_prueba_auditoria(tipo_vehiculo):
+        return TarifaCalculada(
+            valor_rtm=Decimal("0"),
+            valor_terceros=Decimal("0"),
+            valor_total=Decimal("0"),
+            descripcion_antiguedad="Pruebas de auditoría (sin cobro)",
+        )
+
     tarifa = calcular_tarifa_por_antiguedad(ano_modelo, tipo_vehiculo, current_user.tenant_id, db)
     ano_actual = datetime.now().year
     antiguedad = ano_actual - ano_modelo

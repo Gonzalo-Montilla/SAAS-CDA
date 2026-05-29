@@ -102,7 +102,14 @@ def crear_tarifa(
         tarifa_data.valor_terceros_bancarizacion,
         tarifa_data.valor_terceros_ansv,
     )
-    if valor_terceros <= 0:
+    es_pruebas_auditoria = tarifa_data.tipo_vehiculo == "pruebas_auditoria"
+    if es_pruebas_auditoria:
+        if tarifa_data.valor_rtm != 0 or valor_terceros != 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Para 'pruebas_auditoria' el valor RTM y terceros deben ser 0.",
+            )
+    elif valor_terceros <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="La suma de RUNT + SICOV + Bancarización + ANSV (terceros) debe ser mayor a cero.",
@@ -261,14 +268,27 @@ def actualizar_tarifa(
         else tarifa.valor_terceros_ansv
     )
     valor_terceros_efectivo = _suma_terceros_desglose(runt, sicov, bancar, ansv)
-    if valor_terceros_efectivo <= 0:
+    es_pruebas_auditoria = (tarifa.tipo_vehiculo or "").strip().lower() == "pruebas_auditoria"
+    if es_pruebas_auditoria:
+        if valor_terceros_efectivo != 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Para 'pruebas_auditoria' la suma de terceros debe ser 0.",
+            )
+    elif valor_terceros_efectivo <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="La suma de terceros (RUNT + SICOV + Bancarización + ANSV) debe ser mayor a cero.",
         )
 
     valor_rtm_efectivo = tarifa_data.valor_rtm if tarifa_data.valor_rtm is not None else tarifa.valor_rtm
-    if valor_rtm_efectivo <= 0:
+    if es_pruebas_auditoria:
+        if valor_rtm_efectivo != 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Para 'pruebas_auditoria' el valor RTM debe ser 0.",
+            )
+    elif valor_rtm_efectivo <= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="El valor RTM debe ser mayor a cero.",

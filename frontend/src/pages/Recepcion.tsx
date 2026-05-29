@@ -70,6 +70,7 @@ type FirmaDigital = {
 type RecepcionFormatoExtra = {
   version: string;
   fecha_formato: string;
+  no_inspeccion_modo?: 'auto' | 'manual';
   no_inspeccion: string;
   tipo_vehiculo_formato: string;
   datos_tecnicos: {
@@ -257,10 +258,38 @@ const formatTodayYmd = (): string => {
   return `${y}-${m}-${day}`;
 };
 
-const mapTipoVehiculoFormato = (tipo: string): string => {
-  const t = (tipo || '').toLowerCase();
+const formatServerDateTimeToBogota = (value?: string | null): string => {
+  if (!value) return '-';
+  const raw = String(value).trim();
+  if (!raw) return '-';
+  // Backend envía varios datetime sin zona; los interpretamos como UTC explícitamente.
+  const normalized = /z$|[+-]\d{2}:\d{2}$/i.test(raw) ? raw : `${raw}Z`;
+  const parsed = new Date(normalized);
+  if (Number.isNaN(parsed.getTime())) return raw;
+  return parsed.toLocaleString('es-CO', {
+    timeZone: 'America/Bogota',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  });
+};
+
+const mapTipoVehiculoFormato = (tipo: string, claseVehiculo?: string): string => {
+  const t = (tipo || '').trim().toLowerCase();
   if (t === 'moto') return 'MOTOCICLETA 4T';
   if (t.includes('pesado')) return 'PESADO';
+  if (t === 'preventiva' || t === 'pruebas_auditoria') {
+    const clase = (claseVehiculo || '').trim().toLowerCase();
+    if (clase.includes('moto')) return 'MOTOCICLETA 4T';
+    if (clase.includes('camion') || clase.includes('camión') || clase.includes('pesado')) return 'PESADO';
+    if (clase.includes('liviano') || clase.includes('automovil') || clase.includes('automóvil') || clase.includes('carro')) {
+      return 'LIVIANO';
+    }
+  }
   return 'LIVIANO';
 };
 
@@ -270,10 +299,22 @@ const buildNoInspeccionProvisional = (placa: string): string => {
   return `PR-${stamp}-${p}`;
 };
 
-const resolveTipoLlantasKey = (tipoVehiculo: string): keyof typeof TIPO_LLAYOUT => {
-  const t = (tipoVehiculo || '').toLowerCase();
+const resolveTipoLlantasKey = (
+  tipoVehiculo: string,
+  claseVehiculo?: string
+): keyof typeof TIPO_LLAYOUT => {
+  const t = (tipoVehiculo || '').trim().toLowerCase();
   if (t === 'moto') return 'moto';
   if (t.includes('pesado')) return 'pesado';
+
+  // Para servicios especiales, derivar layout desde "clase de vehículo".
+  if (t === 'preventiva' || t === 'pruebas_auditoria') {
+    const clase = (claseVehiculo || '').trim().toLowerCase();
+    if (clase.includes('moto')) return 'moto';
+    if (clase.includes('camion') || clase.includes('camión') || clase.includes('pesado')) return 'pesado';
+    return 'liviano';
+  }
+
   return 'liviano';
 };
 
@@ -376,6 +417,7 @@ export default function Recepcion() {
   });
   const [mostrarFormatoExtra, setMostrarFormatoExtra] = useState(false);
   const [formatoExtra, setFormatoExtra] = useState<RecepcionFormatoExtra>(createDefaultFormatoExtra());
+  const [modoNoInspeccion, setModoNoInspeccion] = useState<'auto' | 'manual'>('auto');
   const firmaCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const firmaOperarioCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [firmaDibujando, setFirmaDibujando] = useState(false);
@@ -420,9 +462,9 @@ export default function Recepcion() {
   }, [formatoExtra.preparacion_checklist, firmaCapturada, firmaOperarioCapturada]);
   const bloqueoFirmaRegistro = requiereFirmaFormato && (!firmaCapturada || !firmaOperarioCapturada);
   const layoutLlantas = useMemo(() => {
-    const key = resolveTipoLlantasKey(formData.tipo_vehiculo);
+    const key = resolveTipoLlantasKey(formData.tipo_vehiculo, formatoExtra.datos_tecnicos.clase_vehiculo);
     return TIPO_LLAYOUT[key];
-  }, [formData.tipo_vehiculo]);
+  }, [formData.tipo_vehiculo, formatoExtra.datos_tecnicos.clase_vehiculo]);
 
   useEffect(() => {
     if (!mostrarFormatoExtra) return;
@@ -740,6 +782,7 @@ export default function Recepcion() {
       'pesado_publico',
       'moto',
       'preventiva',
+      'pruebas_auditoria',
     ]);
 
     const tipoMap: Record<string, string> = {
@@ -774,8 +817,8 @@ export default function Recepcion() {
   useEffect(() => {
     let cancelled = false;
 
-    // Si es preventiva, no calcular tarifa
-    if (formData.tipo_vehiculo === 'preventiva') {
+    // Preventiva y pruebas de auditoría: no requieren cálculo de tarifa en recepción.
+    if (formData.tipo_vehiculo === 'preventiva' || formData.tipo_vehiculo === 'pruebas_auditoria') {
       setTarifaCalculada(null);
       setTarifaError('');
       return;
@@ -840,6 +883,7 @@ export default function Recepcion() {
     setClienteFactusMunicipalityLabel('');
     setRuntSugerencia(null);
     setFormatoExtra(createDefaultFormatoExtra());
+    setModoNoInspeccion('auto');
     setMostrarFormatoExtra(false);
     setConsultaRunt({
       document_type: 'CC',
@@ -900,6 +944,10 @@ export default function Recepcion() {
     setClienteFactusMunicipalityLabel('');
     const formatoGuardado = hidratarFormatoExtra(vehiculo.recepcion_formato_extra_json);
     setFormatoExtra(formatoGuardado);
+    setModoNoInspeccion(
+      formatoGuardado.no_inspeccion_modo ||
+      ((formatoGuardado.no_inspeccion || '').trim().length > 0 ? 'manual' : 'auto')
+    );
     const tecnicoCountGuardado = countTecnicosDiligenciados(formatoGuardado.datos_tecnicos);
     const tieneFormatoGuardado =
       tecnicoCountGuardado > 0 ||
@@ -1001,8 +1049,15 @@ export default function Recepcion() {
     const payload: RecepcionFormatoExtra = {
       version: (formatoExtra.version || DEFAULT_FORMAT_VERSION).trim(),
       fecha_formato: (formatoExtra.fecha_formato || formatTodayYmd()).trim(),
-      no_inspeccion: (formatoExtra.no_inspeccion || buildNoInspeccionProvisional(formData.placa)).trim(),
-      tipo_vehiculo_formato: (formatoExtra.tipo_vehiculo_formato || mapTipoVehiculoFormato(formData.tipo_vehiculo)).trim(),
+      no_inspeccion_modo: modoNoInspeccion,
+      no_inspeccion:
+        modoNoInspeccion === 'manual'
+          ? (formatoExtra.no_inspeccion || '').trim()
+          : buildNoInspeccionProvisional(formData.placa).trim(),
+      tipo_vehiculo_formato: (
+        formatoExtra.tipo_vehiculo_formato ||
+        mapTipoVehiculoFormato(formData.tipo_vehiculo, formatoExtra.datos_tecnicos.clase_vehiculo)
+      ).trim(),
       datos_tecnicos: {
         clase_vehiculo: (formatoExtra.datos_tecnicos.clase_vehiculo || '').trim(),
         marca: (formatoExtra.datos_tecnicos.marca || '').trim(),
@@ -1108,6 +1163,7 @@ export default function Recepcion() {
     return {
       version: String(input.version || base.version),
       fecha_formato: String(input.fecha_formato || ''),
+      no_inspeccion_modo: (String(input.no_inspeccion_modo || '').toLowerCase() === 'manual' ? 'manual' : 'auto'),
       no_inspeccion: String(input.no_inspeccion || ''),
       tipo_vehiculo_formato: String(input.tipo_vehiculo_formato || ''),
       datos_tecnicos: {
@@ -1221,6 +1277,14 @@ export default function Recepcion() {
     const dirCliente = (formData.cliente_direccion || '').trim();
     const midDigits = (clienteFactusMunicipalityId || '').replace(/\D/g, '').trim();
     const clienteFactusMunicipalityIdParsed = midDigits ? parseInt(midDigits, 10) : undefined;
+    if (modoNoInspeccion === 'manual' && !(formatoExtra.no_inspeccion || '').trim()) {
+      showToast(
+        'warning',
+        'No. inspección requerido',
+        'En modo MANUAL debes digitar el número de inspección antes de registrar.'
+      );
+      return;
+    }
     const recepcionFormatoExtra = construirFormatoExtraPayload();
     if (requiereFirmaFormato && !recepcionFormatoExtra?.firma_titular?.data_url) {
       showToast(
@@ -1600,6 +1664,7 @@ export default function Recepcion() {
 
   // Calcular total con SOAT si aplica
   const calcularTotalConSOAT = () => {
+    if (formData.tipo_vehiculo === 'pruebas_auditoria') return 0;
     if (!tarifaCalculada) return 0;
     
     // Convertir a número para evitar concatenación de strings
@@ -1618,6 +1683,12 @@ export default function Recepcion() {
   // Obtener comisión SOAT usando el mapeo
   const tipoComisionActual = mapearTipoVehiculoAComision(formData.tipo_vehiculo);
   const comisionSOAT = comisionesSOAT?.find(c => c.tipo_vehiculo === tipoComisionActual);
+
+  useEffect(() => {
+    if (formData.tipo_vehiculo !== 'pruebas_auditoria') return;
+    if (!formData.tiene_soat) return;
+    setFormData((prev) => ({ ...prev, tiene_soat: false }));
+  }, [formData.tipo_vehiculo, formData.tiene_soat]);
 
   // Helper para extraer fotos de observaciones
   const extraerFotosDeObservaciones = (observaciones?: string): string[] => {
@@ -1951,6 +2022,7 @@ export default function Recepcion() {
                   <option value="pesado_publico">Pesado Público</option>
                   <option value="moto">Motocicleta</option>
                   <option value="preventiva">Preventiva (valor en Caja)</option>
+                  <option value="pruebas_auditoria">Pruebas de Auditoría (sin cobro)</option>
                 </select>
               </div>
 
@@ -2098,25 +2170,53 @@ export default function Recepcion() {
                         <div>
                           <label className="block text-xs text-slate-600 mb-1 flex items-center justify-between">
                             <span>No. inspección</span>
-                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${formatoExtra.no_inspeccion ? 'bg-slate-200 text-slate-700' : 'bg-emerald-100 text-emerald-700'}`}>
-                              {formatoExtra.no_inspeccion ? 'Manual' : 'Auto'}
+                            <span className={`text-[10px] px-1.5 py-0.5 rounded-full ${modoNoInspeccion === 'manual' ? 'bg-slate-200 text-slate-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                              {modoNoInspeccion === 'manual' ? 'Manual' : 'Auto'}
                             </span>
                           </label>
-                          <div className="flex items-center gap-2">
+                          <div className="space-y-2">
+                            <div className="grid grid-cols-2 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-1">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setModoNoInspeccion('auto');
+                                  setFormatoExtra((prev) => ({ ...prev, no_inspeccion: '' }));
+                                }}
+                                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                                  modoNoInspeccion === 'auto'
+                                    ? 'bg-emerald-600 text-white shadow'
+                                    : 'bg-white text-slate-700 hover:bg-slate-100'
+                                }`}
+                              >
+                                AUTO
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setModoNoInspeccion('manual');
+                                  setFormatoExtra((prev) => ({ ...prev, no_inspeccion: '' }));
+                                }}
+                                className={`rounded-md px-3 py-1.5 text-xs font-semibold transition ${
+                                  modoNoInspeccion === 'manual'
+                                    ? 'bg-primary-700 text-white shadow'
+                                    : 'bg-white text-slate-700 hover:bg-slate-100'
+                                }`}
+                              >
+                                MANUAL
+                              </button>
+                            </div>
                             <input
                               type="text"
-                              className="input-pos uppercase"
-                              value={formatoExtra.no_inspeccion || buildNoInspeccionProvisional(formData.placa)}
+                              className={`input-pos uppercase ${modoNoInspeccion === 'auto' ? 'bg-slate-100 text-slate-500' : ''}`}
+                              value={
+                                modoNoInspeccion === 'manual'
+                                  ? (formatoExtra.no_inspeccion || '')
+                                  : buildNoInspeccionProvisional(formData.placa)
+                              }
+                              readOnly={modoNoInspeccion === 'auto'}
                               onChange={(e) => handleFormatoEncabezadoChange('no_inspeccion', e.target.value.toUpperCase())}
+                              placeholder={modoNoInspeccion === 'manual' ? 'Digita el No. de inspección' : undefined}
                             />
-                            <button
-                              type="button"
-                              onClick={() => handleFormatoEncabezadoChange('no_inspeccion', '')}
-                              className="px-2 py-2 rounded-md border border-slate-300 text-xs font-semibold text-slate-600 hover:bg-slate-50"
-                              title="Volver a valor autogenerado"
-                            >
-                              Auto
-                            </button>
                           </div>
                         </div>
                         <div>
@@ -2129,7 +2229,10 @@ export default function Recepcion() {
                           <input
                             type="text"
                             className="input-pos uppercase"
-                            value={formatoExtra.tipo_vehiculo_formato || mapTipoVehiculoFormato(formData.tipo_vehiculo)}
+                            value={
+                              formatoExtra.tipo_vehiculo_formato ||
+                              mapTipoVehiculoFormato(formData.tipo_vehiculo, formatoExtra.datos_tecnicos.clase_vehiculo)
+                            }
                             onChange={(e) => handleFormatoEncabezadoChange('tipo_vehiculo_formato', e.target.value.toUpperCase())}
                           />
                         </div>
@@ -2529,20 +2632,26 @@ export default function Recepcion() {
               </div>
 
               {/* SOAT */}
-              <div className="md:col-span-2 mt-1">
-                <label className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 cursor-pointer">
-                  <div>
-                    <p className="text-base font-semibold text-slate-900">¿Compra SOAT?</p>
-                    <p className="text-xs text-slate-500">Si aplica, la comisión se suma al total a cobrar.</p>
-                  </div>
-                  <input
-                    type="checkbox"
-                    checked={formData.tiene_soat}
-                    onChange={(e) => handleInputChange('tiene_soat', e.target.checked)}
-                    className="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500"
-                  />
-                </label>
-              </div>
+              {formData.tipo_vehiculo !== 'pruebas_auditoria' ? (
+                <div className="md:col-span-2 mt-1">
+                  <label className="flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 cursor-pointer">
+                    <div>
+                      <p className="text-base font-semibold text-slate-900">¿Compra SOAT?</p>
+                      <p className="text-xs text-slate-500">Si aplica, la comisión se suma al total a cobrar.</p>
+                    </div>
+                    <input
+                      type="checkbox"
+                      checked={formData.tiene_soat}
+                      onChange={(e) => handleInputChange('tiene_soat', e.target.checked)}
+                      className="w-5 h-5 text-primary-600 border-slate-300 rounded focus:ring-primary-500"
+                    />
+                  </label>
+                </div>
+              ) : (
+                <div className="md:col-span-2 mt-1 rounded-lg border border-cyan-200 bg-cyan-50 px-4 py-3">
+                  <p className="text-sm font-semibold text-cyan-900">Pruebas de Auditoría no permite cobro de SOAT.</p>
+                </div>
+              )}
             </div>
 
             <hr className="my-6" />
@@ -2897,6 +3006,35 @@ export default function Recepcion() {
                     )}
                   </div>
                 </div>
+              </div>
+            ) : formData.tipo_vehiculo === 'pruebas_auditoria' ? (
+              <div>
+                <div className="bg-emerald-50 border-2 border-emerald-300 rounded-lg p-6 text-center">
+                  <DollarSign className="w-16 h-16 text-emerald-600 mx-auto mb-3" />
+                  <p className="text-lg font-bold text-emerald-900 mb-2">PRUEBAS DE AUDITORÍA</p>
+                  <p className="text-sm text-emerald-700">Este ingreso se registra con valor $0 y sin cobro en Caja.</p>
+                </div>
+
+                {/* Indicador de fotos */}
+                {fotosVehiculo.length > 0 ? (
+                  <div className="mt-4 p-3 rounded-lg bg-green-50 border-2 border-green-200">
+                    <p className="text-xs font-medium mb-1 flex items-center gap-1">
+                      <Camera className="w-4 h-4" />
+                      <span>Fotos Capturadas</span>
+                    </p>
+                    <p className="text-sm font-bold text-green-900">
+                      <span>{fotosVehiculo.length} {fotosVehiculo.length === 1 ? 'foto' : 'fotos'}</span>
+                    </p>
+                  </div>
+                ) : (
+                  <div className="mt-4 p-3 rounded-lg bg-slate-50 border border-slate-200">
+                    <p className="text-xs font-medium text-slate-500 mb-1 flex items-center gap-1">
+                      <Camera className="w-4 h-4" />
+                      <span>Sin Fotos</span>
+                    </p>
+                    <p className="text-sm font-bold text-slate-700">0 fotos</p>
+                  </div>
+                )}
               </div>
             ) : (
               <div className="text-center py-8">
@@ -3283,9 +3421,7 @@ export default function Recepcion() {
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
                 <p className="text-slate-500 text-xs">Primer intento</p>
                 <p className="font-semibold text-slate-900">
-                  {reinspeccionInfo.primer_intento_at
-                    ? new Date(reinspeccionInfo.primer_intento_at).toLocaleString()
-                    : '-'}
+                  {formatServerDateTimeToBogota(reinspeccionInfo.primer_intento_at)}
                 </p>
               </div>
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-2">
@@ -3295,7 +3431,7 @@ export default function Recepcion() {
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 sm:col-span-2">
                 <p className="text-slate-500 text-xs">Vence reinspección</p>
                 <p className="font-semibold text-slate-900">
-                  {reinspeccionInfo.vence_at ? new Date(reinspeccionInfo.vence_at).toLocaleString() : '-'}
+                  {formatServerDateTimeToBogota(reinspeccionInfo.vence_at)}
                 </p>
                 {reinspeccionInfo.motivo && (
                   <p className="text-xs text-amber-700 mt-1">{reinspeccionInfo.motivo}</p>

@@ -234,7 +234,8 @@ function TarifasRTM({
                     liviano_particular: 'Liviano Particular',
                     liviano_publico: 'Liviano Público',
                     pesado_particular: 'Pesado Particular',
-                    pesado_publico: 'Pesado Público'
+                    pesado_publico: 'Pesado Público',
+                    pruebas_auditoria: 'Pruebas de Auditoría',
                   }[tarifa.tipo_vehiculo] || tarifa.tipo_vehiculo;
 
                   return (
@@ -361,6 +362,7 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
     formData.valor_terceros_bancarizacion +
     formData.valor_terceros_ansv;
   const totalCliente = formData.valor_rtm + sumaTerceros;
+  const esPruebasAuditoria = formData.tipo_vehiculo === 'pruebas_auditoria';
 
   const validateForm = (): string | null => {
     if (formData.antiguedad_max < formData.antiguedad_min) {
@@ -368,6 +370,12 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
     }
     if (new Date(formData.vigencia_inicio) > new Date(formData.vigencia_fin)) {
       return 'La fecha de inicio de vigencia no puede ser mayor a la fecha fin.';
+    }
+    if (esPruebasAuditoria) {
+      if (formData.valor_rtm !== 0 || sumaTerceros !== 0) {
+        return 'Para "Pruebas de Auditoría" el RTM y terceros deben quedar en 0.';
+      }
+      return null;
     }
     if (formData.valor_rtm <= 0 || sumaTerceros <= 0) {
       return 'El RTM y la suma de terceros (RUNT+SICOV+Bancarización+ANSV) deben ser mayores a cero.';
@@ -454,7 +462,22 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
               </label>
               <select
                 value={formData.tipo_vehiculo}
-                onChange={(e) => setFormData({ ...formData, tipo_vehiculo: e.target.value })}
+                onChange={(e) => {
+                  const selected = e.target.value;
+                  setFormData((prev) => ({
+                    ...prev,
+                    tipo_vehiculo: selected,
+                    ...(selected === 'pruebas_auditoria'
+                      ? {
+                          valor_rtm: 0,
+                          valor_terceros_runt: 0,
+                          valor_terceros_sicov: 0,
+                          valor_terceros_bancarizacion: 0,
+                          valor_terceros_ansv: 0,
+                        }
+                      : {}),
+                  }));
+                }}
                 className="input-pos"
                 required
               >
@@ -463,6 +486,7 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
                 <option value="liviano_publico">Liviano Público</option>
                 <option value="pesado_particular">Pesado Particular</option>
                 <option value="pesado_publico">Pesado Público</option>
+                <option value="pruebas_auditoria">Pruebas de Auditoría</option>
               </select>
             </div>
 
@@ -697,8 +721,15 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
     (tarifa.valor_terceros_bancarizacion ?? 0) +
     (tarifa.valor_terceros_ansv ?? 0);
   const totalClienteOriginal = Number(tarifa.valor_rtm) + sumaTercerosOriginal;
+  const esPruebasAuditoria = tarifa.tipo_vehiculo === 'pruebas_auditoria';
 
   const validateForm = (): string | null => {
+    if (esPruebasAuditoria) {
+      if (formData.valor_rtm !== 0 || sumaTerceros !== 0) {
+        return 'Para "Pruebas de Auditoría" el RTM y terceros deben quedar en 0.';
+      }
+      return null;
+    }
     if (formData.valor_rtm <= 0 || sumaTerceros <= 0) {
       return 'El RTM y la suma de terceros deben ser mayores a cero.';
     }

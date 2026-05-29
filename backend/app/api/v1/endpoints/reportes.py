@@ -43,6 +43,13 @@ def _no_reinspeccion_exenta_clause():
     )
 
 
+def _no_pruebas_auditoria_clause():
+    return or_(
+        VehiculoProceso.tipo_vehiculo.is_(None),
+        VehiculoProceso.tipo_vehiculo != "pruebas_auditoria",
+    )
+
+
 def _mt_scope(tenant_id, scope_sid: Optional[UUID], *extra):
     cond = [
         MovimientoTesoreria.tenant_id == tenant_id,
@@ -227,9 +234,12 @@ def obtener_dashboard_general(
     )
     tid = current_user.tenant_id
 
-    fecha_base = fecha or date.today()
-    fecha_inicio = datetime.combine(fecha_base, datetime.min.time())
-    fecha_fin = datetime.combine(fecha_base, datetime.max.time())
+    fecha_inicio, fecha_fin, etiqueta_fecha = resolve_report_date_window(
+        fecha=fecha,
+        fecha_inicio=None,
+        fecha_fin=None,
+    )
+    fecha_base = datetime.strptime(etiqueta_fecha, "%Y-%m-%d").date()
 
     ingresos_caja = db.query(func.sum(MovimientoCaja.monto)).filter(
         _mc_scope(
@@ -304,8 +314,11 @@ def obtener_dashboard_general(
     ingresos_7_dias = []
     for i in range(6, -1, -1):
         dia = fecha_base - timedelta(days=i)
-        dia_inicio = datetime.combine(dia, datetime.min.time())
-        dia_fin = datetime.combine(dia, datetime.max.time())
+        dia_inicio, dia_fin, _ = resolve_report_date_window(
+            fecha=dia,
+            fecha_inicio=None,
+            fecha_fin=None,
+        )
 
         ing_caja = db.query(func.sum(MovimientoCaja.monto)).filter(
             _mc_scope(
@@ -375,9 +388,12 @@ def comparativo_sedes(
     """
     Ranking simple por sede: trámites registrados e ingresos (caja+tesorería) en el día.
     """
-    fecha_base = fecha or date.today()
-    d0 = datetime.combine(fecha_base, datetime.min.time())
-    d1 = datetime.combine(fecha_base, datetime.max.time())
+    d0, d1, etiqueta_fecha = resolve_report_date_window(
+        fecha=fecha,
+        fecha_inicio=None,
+        fecha_fin=None,
+    )
+    fecha_base = datetime.strptime(etiqueta_fecha, "%Y-%m-%d").date()
     tid = current_user.tenant_id
 
     sedes = db.query(Sucursal).filter(Sucursal.tenant_id == tid, Sucursal.activa.is_(True)).all()
@@ -435,7 +451,7 @@ def comparativo_sedes(
             }
         )
     filas.sort(key=lambda x: x["ingresos_total"], reverse=True)
-    return {"fecha": fecha_base.strftime("%Y-%m-%d"), "sedes": filas}
+    return {"fecha": etiqueta_fecha, "sedes": filas}
 
 
 @router.get("/dashboard-operativo")
@@ -501,7 +517,12 @@ def obtener_dashboard_operativo(
         )
         .all()
     )
-    pagados_periodo = [v for v in pagados_periodo_all if not bool(getattr(v, "reinspeccion_exenta", False))]
+    pagados_periodo = [
+        v
+        for v in pagados_periodo_all
+        if not bool(getattr(v, "reinspeccion_exenta", False))
+        and str(getattr(v, "tipo_vehiculo", "") or "").strip().lower() != "pruebas_auditoria"
+    ]
     reintentos_validados_periodo = [v for v in pagados_periodo_all if bool(getattr(v, "reinspeccion_exenta", False))]
 
     # SLA registro -> pago (minutos).
@@ -939,8 +960,8 @@ def obtener_provisiones_iva(
             _vp_scope(
                 tid,
                 scope_sid,
-                VehiculoProceso.estado == EstadoVehiculo.PAGADO,
                 _no_reinspeccion_exenta_clause(),
+                _no_pruebas_auditoria_clause(),
                 VehiculoProceso.fecha_pago.isnot(None),
                 VehiculoProceso.fecha_pago >= fecha_inicio_dt,
                 VehiculoProceso.fecha_pago <= fecha_fin_dt,
@@ -1049,8 +1070,8 @@ def marcar_provisiones_iva_rango(
             _vp_scope(
                 tid,
                 scope_sid,
-                VehiculoProceso.estado == EstadoVehiculo.PAGADO,
                 _no_reinspeccion_exenta_clause(),
+                _no_pruebas_auditoria_clause(),
                 VehiculoProceso.fecha_pago.isnot(None),
                 VehiculoProceso.fecha_pago >= fecha_inicio_dt,
                 VehiculoProceso.fecha_pago <= fecha_fin_dt,
