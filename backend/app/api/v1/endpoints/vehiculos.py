@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFi
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func, or_
+from sqlalchemy.exc import OperationalError
 from datetime import datetime, date, time as dt_time, timezone, timedelta
 from zoneinfo import ZoneInfo
 from typing import List, Dict, Any
@@ -1763,11 +1764,31 @@ def cobrar_vehiculo(
     """
     Cobrar vehículo (Caja)
     """
-    vehiculo = _filtro_vehiculo_sede(
+    vehiculo_query = _filtro_vehiculo_sede(
         db.query(VehiculoProceso),
         current_user.tenant_id,
         active_sucursal_id,
-    ).filter(VehiculoProceso.id == cobro_data.vehiculo_id).first()
+    ).filter(VehiculoProceso.id == cobro_data.vehiculo_id)
+
+    # Blindaje de concurrencia:
+    # si dos cajas intentan cobrar el mismo vehículo al tiempo, en PostgreSQL
+    # usamos lock NOWAIT para que solo una continúe y la otra reciba error controlado.
+    try:
+        bind = db.get_bind()
+        if bind is not None and bind.dialect.name == "postgresql":
+            vehiculo_query = vehiculo_query.with_for_update(nowait=True)
+        else:
+            vehiculo_query = vehiculo_query.with_for_update()
+        vehiculo = vehiculo_query.first()
+    except OperationalError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Este vehículo está siendo cobrado en otra caja en este momento. "
+                "Actualiza la lista e intenta de nuevo en unos segundos."
+            ),
+        )
 
     if not vehiculo:
         raise HTTPException(
