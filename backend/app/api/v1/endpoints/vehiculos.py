@@ -109,6 +109,14 @@ REINSPECCION_VENTANA_DIAS = 15
 TIPO_VEHICULO_PRUEBAS_AUDITORIA = "pruebas_auditoria"
 COLOMBIA_TZ = ZoneInfo("America/Bogota")
 
+ESTADOS_COBRO_EFECTIVO = [
+    EstadoVehiculo.PAGADO,
+    EstadoVehiculo.EN_PISTA,
+    EstadoVehiculo.APROBADO,
+    EstadoVehiculo.RECHAZADO,
+    EstadoVehiculo.COMPLETADO,
+]
+
 
 def _co_today_date() -> date:
     return datetime.now(COLOMBIA_TZ).date()
@@ -2363,7 +2371,7 @@ def listar_cobrados_hoy(
         active_sucursal_id,
     ).filter(
         and_(
-            VehiculoProceso.estado == EstadoVehiculo.PAGADO,
+            VehiculoProceso.estado.in_(ESTADOS_COBRO_EFECTIVO),
             VehiculoProceso.fecha_pago >= inicio_hoy_utc,
             VehiculoProceso.fecha_pago < fin_hoy_utc,
         )
@@ -2426,11 +2434,11 @@ def cambiar_metodo_pago(
             detail="Vehículo no encontrado"
         )
     
-    # Validar que esté pagado
-    if vehiculo.estado != EstadoVehiculo.PAGADO:
+    # Validar que esté en una etapa posterior al cobro
+    if vehiculo.estado not in ESTADOS_COBRO_EFECTIVO:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Solo se puede cambiar el método de pago de vehículos pagados. Estado actual: {vehiculo.estado}"
+            detail=f"Solo se puede cambiar el método de pago de vehículos cobrados. Estado actual: {vehiculo.estado}"
         )
     
     # Validar que tenga caja asociada
