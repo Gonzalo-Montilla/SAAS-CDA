@@ -2348,58 +2348,36 @@ def listar_cobrados_hoy(
     active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
-    Listar vehículos cobrados hoy en la caja del usuario actual
-    Para permitir cambio de método de pago
+    Listar vehículos cobrados hoy (día Colombia) en la sede activa.
+    - Administrador: ve todos los cobros de la sede.
+    - Cajero: ve los cobros que él mismo realizó en la sede.
+    Esto evita perder visibilidad de cobros de la mañana cuando una caja se cerró
+    y se abrió una nueva en el mismo día.
     """
     current_role = current_user.rol.value if hasattr(current_user.rol, "value") else str(current_user.rol)
     inicio_hoy_utc, fin_hoy_utc = _co_day_utc_bounds(_co_today_date())
 
-    if current_role == "administrador":
-        cajas_abiertas_subq = db.query(Caja.id).filter(
-            and_(
-                Caja.tenant_id == current_user.tenant_id,
-                Caja.sucursal_id == active_sucursal_id,
-                Caja.estado == EstadoCaja.ABIERTA,
-            )
-        ).subquery()
-
-        vehiculos = _filtro_vehiculo_sede(
-            db.query(VehiculoProceso),
-            current_user.tenant_id,
-            active_sucursal_id,
-        ).filter(
-            and_(
-                VehiculoProceso.caja_id.in_(cajas_abiertas_subq),
-                VehiculoProceso.estado == EstadoVehiculo.PAGADO,
-                VehiculoProceso.fecha_pago >= inicio_hoy_utc,
-                VehiculoProceso.fecha_pago < fin_hoy_utc,
-            )
-        ).order_by(VehiculoProceso.fecha_pago.desc()).all()
-        return vehiculos
-
-    caja_abierta = db.query(Caja).filter(
-        and_(
-            Caja.usuario_id == current_user.id,
-            Caja.tenant_id == current_user.tenant_id,
-            Caja.sucursal_id == active_sucursal_id,
-            Caja.estado == EstadoCaja.ABIERTA,
-        )
-    ).first()
-    if not caja_abierta:
-        return []
-
-    vehiculos = _filtro_vehiculo_sede(
+    base_query = _filtro_vehiculo_sede(
         db.query(VehiculoProceso),
         current_user.tenant_id,
         active_sucursal_id,
     ).filter(
         and_(
-            VehiculoProceso.caja_id == caja_abierta.id,
             VehiculoProceso.estado == EstadoVehiculo.PAGADO,
             VehiculoProceso.fecha_pago >= inicio_hoy_utc,
             VehiculoProceso.fecha_pago < fin_hoy_utc,
         )
-    ).order_by(VehiculoProceso.fecha_pago.desc()).all()
+    )
+
+    if current_role == "administrador":
+        return base_query.order_by(VehiculoProceso.fecha_pago.desc()).all()
+
+    vehiculos = (
+        base_query
+        .filter(VehiculoProceso.cobrado_por == current_user.id)
+        .order_by(VehiculoProceso.fecha_pago.desc())
+        .all()
+    )
 
     return vehiculos
 
