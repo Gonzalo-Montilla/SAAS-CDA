@@ -49,6 +49,7 @@ import {
   TrendingUp,
   TrendingDown,
   Shield,
+  Info,
   Eye,
   CornerUpLeft,
   Receipt,
@@ -580,6 +581,26 @@ function VehiculosPendientes({
   const [vehiculoSeleccionado, setVehiculoSeleccionado] = useState<Vehiculo | null>(null);
   const [busqueda, setBusqueda] = useState('');
   const [sarlaftEscalationNotice, setSarlaftEscalationNotice] = useState<string | null>(null);
+  const [expandedExtras, setExpandedExtras] = useState<Record<string, boolean>>({});
+
+  const valueOrDash = (value?: string | number | null): string => {
+    if (value === null || value === undefined) return '—';
+    const txt = String(value).trim();
+    return txt.length > 0 ? txt : '—';
+  };
+
+  const extractKilometraje = (vehiculo: Vehiculo): string => {
+    const extra = vehiculo.recepcion_formato_extra_json as Record<string, unknown> | null | undefined;
+    const datosTecnicos = extra && typeof extra === 'object'
+      ? (extra.datos_tecnicos as Record<string, unknown> | undefined)
+      : undefined;
+    const rawKm = datosTecnicos?.kilometraje;
+    return valueOrDash(rawKm as string | number | null | undefined);
+  };
+
+  const toggleExtras = (vehiculoId: string) => {
+    setExpandedExtras((prev) => ({ ...prev, [vehiculoId]: !prev[vehiculoId] }));
+  };
 
   const notificarPasoCaja = (vehiculo: Vehiculo) => {
     void vehiculosApi.notificarPasoCaja(vehiculo.id)
@@ -776,7 +797,10 @@ function VehiculosPendientes({
       ) : (
         <ErrorBoundary>
           <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {vehiculosFiltrados.map((vehiculo) => (
+          {vehiculosFiltrados.map((vehiculo) => {
+            const correoDisplay = valueOrDash(vehiculo.cliente_email);
+            const correoLargo = correoDisplay !== '—' && correoDisplay.length > 28;
+            return (
             <div key={vehiculo.id} className="vehicle-card flex flex-col text-left">
               <div className="mb-3 flex items-start justify-between gap-2">
                 <div className="min-w-0">
@@ -820,6 +844,62 @@ function VehiculosPendientes({
                 </p>
               </div>
 
+              <div className="mb-4 overflow-hidden rounded-xl border border-slate-200 bg-slate-50/70">
+                <button
+                  type="button"
+                  onClick={() => toggleExtras(vehiculo.id)}
+                  className="flex w-full items-center justify-between px-3 py-2.5 text-left text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100/70"
+                >
+                  <span className="inline-flex items-center gap-1.5">
+                    <Info className="h-4 w-4 text-slate-500" />
+                    {expandedExtras[vehiculo.id] ? 'Ocultar datos adicionales' : 'Ver datos adicionales'}
+                  </span>
+                  <span className="rounded-md border border-slate-200 bg-white px-1.5 py-0.5">
+                    {expandedExtras[vehiculo.id] ? (
+                      <ChevronUp className="h-4 w-4 text-slate-500" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 text-slate-500" />
+                    )}
+                  </span>
+                </button>
+                <div
+                  className={`grid transition-all duration-200 ease-out ${
+                    expandedExtras[vehiculo.id]
+                      ? 'max-h-80 grid-rows-[1fr] border-t border-slate-200 opacity-100'
+                      : 'max-h-0 grid-rows-[0fr] border-t border-transparent opacity-0'
+                  }`}
+                >
+                  <div className="overflow-hidden">
+                    <div className="grid grid-cols-1 gap-2 px-3 py-2.5 md:grid-cols-2">
+                      <div className={`min-w-0 ${correoLargo ? 'md:col-span-2' : ''}`}>
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Correo</p>
+                        <p className="mt-0.5 text-sm font-medium text-slate-800 break-all">
+                          {correoDisplay}
+                        </p>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Celular</p>
+                        <p className="mt-0.5 text-sm font-medium text-slate-800 break-words">
+                          {valueOrDash(vehiculo.cliente_telefono)}
+                        </p>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Dirección</p>
+                        <p className="mt-0.5 text-sm font-medium text-slate-800 break-words">
+                          {valueOrDash(vehiculo.cliente_direccion)}
+                        </p>
+                      </div>
+                      <div className="min-w-0">
+                        <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">Kilometraje</p>
+                        <p className="mt-0.5 inline-flex rounded-md bg-slate-100 px-2 py-0.5 text-sm font-semibold text-slate-800">
+                          {extractKilometraje(vehiculo)}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
               <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/90 p-3">
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Total a cobrar</p>
                 <p className="text-2xl font-bold tabular-nums text-slate-900">${formatCurrency(vehiculo.total_cobrado)}</p>
@@ -838,7 +918,8 @@ function VehiculosPendientes({
                     : 'Cobrar'}
               </button>
             </div>
-          ))}
+            );
+          })}
           </div>
         </ErrorBoundary>
       )}

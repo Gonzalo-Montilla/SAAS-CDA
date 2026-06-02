@@ -235,6 +235,21 @@ def get_cajero_contador_or_admin(current_user: Usuario = Depends(get_current_use
     return current_user
 
 
+def get_recepcionista_cajero_contador_or_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
+    """Recepción, caja, contabilidad o administración para consultas operativas de FE."""
+    if current_user.rol not in (
+        RolEnum.RECEPCIONISTA,
+        RolEnum.CAJERO,
+        RolEnum.CONTADOR,
+        RolEnum.ADMINISTRADOR,
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tiene permiso para consultar datos de facturación electrónica.",
+        )
+    return current_user
+
+
 def get_recepcionista_or_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
     """Recepcionistas o administradores"""
     if current_user.rol not in [RolEnum.RECEPCIONISTA, RolEnum.ADMINISTRADOR]:

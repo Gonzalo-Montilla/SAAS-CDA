@@ -24,10 +24,10 @@ from sqlalchemy.orm import Session
 
 from app.core.deps import (
     get_admin,
-    get_cajero_contador_or_admin,
     get_contador_or_admin,
     get_current_user,
     get_db,
+    get_recepcionista_cajero_contador_or_admin,
 )
 from app.utils.factus_validators import email_valido_factus as _email_valido_factus
 
@@ -204,7 +204,7 @@ def patch_factus_modo(
 def get_factus_municipalities(
     name: str = Query(..., min_length=2, max_length=200),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_cajero_contador_or_admin),
+    current_user: Usuario = Depends(get_recepcionista_cajero_contador_or_admin),
 ):
     """
     Proxy a GET /v1/municipalities con token del ambiente Factus activo del CDA.

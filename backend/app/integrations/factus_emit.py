@@ -179,6 +179,34 @@ def _nombre_linea_servicio_unico_con_desglose(bruto_con_iva: Decimal) -> str:
     return s[:200]
 
 
+def _tipo_preventiva_label(vehiculo: VehiculoProceso) -> str:
+    """
+    Determina etiqueta comercial de preventiva desde clase de vehículo en recepción.
+    Fallback: LIVIANO.
+    """
+    extra = getattr(vehiculo, "recepcion_formato_extra_json", None)
+    clase_raw = ""
+    if isinstance(extra, dict):
+        datos_tecnicos = extra.get("datos_tecnicos")
+        if isinstance(datos_tecnicos, dict):
+            clase_raw = str(datos_tecnicos.get("clase_vehiculo") or "").strip().lower()
+
+    if "moto" in clase_raw:
+        return "MOTOCICLETA"
+    if any(token in clase_raw for token in ("camion", "camión", "pesado", "bus", "tracto", "volqueta")):
+        return "PESADO"
+    return "LIVIANO"
+
+
+def _nombre_linea_preventiva_con_desglose(vehiculo: VehiculoProceso, bruto_con_iva: Decimal) -> str:
+    base = _base_gravable_desde_total_con_iva_incluido_dian(bruto_con_iva)
+    iva = _quantize_moneda(bruto_con_iva - base)
+    p = int(settings.FACTUS_IVA_PORCENTAJE_GENERAL)
+    tipo_lbl = _tipo_preventiva_label(vehiculo)
+    s = f"Revision preventiva {tipo_lbl} - Base {_fmt_cop_nota(base)} + IVA {p}% {_fmt_cop_nota(iva)}"
+    return s[:200]
+
+
 def _map_metodo_pago_factus(metodo_pago: str) -> str:
     m = (metodo_pago or "efectivo").lower().strip()
     if m == "efectivo":
@@ -413,11 +441,19 @@ def _items_factura_cobro(
             raise ValueError("Tarifa sin valores RTM/terceros para facturar")
         return items
 
+    es_preventiva = (str(getattr(vehiculo, "tipo_vehiculo", "") or "").strip().lower() == "preventiva")
+    code_suffix = "PRV" if es_preventiva else "SRV"
+    line_name = (
+        _nombre_linea_preventiva_con_desglose(vehiculo, total_servicio)
+        if es_preventiva
+        else _nombre_linea_servicio_unico_con_desglose(total_servicio)
+    )
+
     # Fallback: un solo ítem gravado (p. ej. PREVENTIVA o tarifa desactualizada)
     items.append(
         {
-            **_item_linea_comun(vehiculo.placa, "SRV"),
-            "name": _nombre_linea_servicio_unico_con_desglose(total_servicio),
+            **_item_linea_comun(vehiculo.placa, code_suffix),
+            "name": line_name,
             "note": _nota_desglose_linea_gravada_iva(total_servicio),
             "price": float(_quantize_moneda(total_servicio)),
             "tax_rate": _iva_tax_rate_string_factus(),
@@ -484,10 +520,14 @@ def build_validate_body(
     addr_est = _resolve_establishment_address(sede, tenant)
 
     ref = f"cdsoft-{vehiculo.id.hex[:8]}-{uuid.uuid4().hex[:12]}"
-    obs = (
-        f"Placa {vehiculo.placa} — RTM + terceros "
-        f"(RUNT, SICOV, BANCARIZACION, ANSV) = total servicio"
-    )
+    tipo_vehiculo = str(getattr(vehiculo, "tipo_vehiculo", "") or "").strip().lower()
+    if tipo_vehiculo == "preventiva":
+        obs = f"Placa {vehiculo.placa} - Revision preventiva {_tipo_preventiva_label(vehiculo)}"
+    else:
+        obs = (
+            f"Placa {vehiculo.placa} — RTM + terceros "
+            f"(RUNT, SICOV, BANCARIZACION, ANSV) = total servicio"
+        )
 
     body: dict[str, Any] = {
         "document": "01",
