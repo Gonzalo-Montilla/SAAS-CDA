@@ -27,6 +27,36 @@ from app.models.iva_provision import IvaProvisionRegistro
 from app.models.appointment import Appointment
 
 router = APIRouter()
+REPORT_TZ = get_app_timezone()
+
+
+def _as_utc_aware(dt: Optional[datetime]) -> Optional[datetime]:
+    if not isinstance(dt, datetime):
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
+def _as_report_tz(dt: Optional[datetime]) -> Optional[datetime]:
+    utc_dt = _as_utc_aware(dt)
+    if utc_dt is None:
+        return None
+    return utc_dt.astimezone(REPORT_TZ)
+
+
+def _format_hms_report_tz(dt: Optional[datetime]) -> str:
+    local_dt = _as_report_tz(dt)
+    if local_dt is None:
+        return "—"
+    return local_dt.strftime("%H:%M:%S")
+
+
+def _iso_utc(dt: Optional[datetime]) -> Optional[str]:
+    utc_dt = _as_utc_aware(dt)
+    if utc_dt is None:
+        return None
+    return utc_dt.isoformat()
 
 
 def _vp_scope(tenant_id, scope_sid: Optional[UUID], *extra):
@@ -771,8 +801,8 @@ def obtener_movimientos_detallados(
         fe_v = fe_by_vid.get(vid) if vid else None
         lista_caja.append({
             "id": str(mov.id),
-            "hora": mov.created_at.strftime("%H:%M:%S"),
-            "_sort_ts": mov.created_at.isoformat(),
+            "hora": _format_hms_report_tz(mov.created_at),
+            "_sort_ts": _iso_utc(mov.created_at),
             "modulo": "Caja",
             "sede": sede_nombre,
             "turno": turno,
@@ -792,7 +822,7 @@ def obtener_movimientos_detallados(
                 if fe_v and fe_v.emitido_por_usuario_id
                 else None
             ),
-            "factura_emitida_en": fe_v.created_at.isoformat() if fe_v else None,
+            "factura_emitida_en": _iso_utc(fe_v.created_at) if fe_v else None,
             "factura_pdf_archivado": bool(fe_v and (fe_v.pdf_storage_relpath or "").strip()),
             "beneficiario": getattr(mov, "beneficiario", None),
             "beneficiario_tipo_identificacion": getattr(mov, "beneficiario_tipo_identificacion", None),
@@ -808,9 +838,7 @@ def obtener_movimientos_detallados(
                 if ds_row_caja and ds_row_caja.emitido_por_usuario_id
                 else None
             ),
-            "documento_soporte_emitido_en": (
-                ds_row_caja.created_at.isoformat() if ds_row_caja else None
-            ),
+            "documento_soporte_emitido_en": (_iso_utc(ds_row_caja.created_at) if ds_row_caja else None),
             "documento_soporte_pdf_archivado": bool(
                 ds_row_caja and (ds_row_caja.pdf_storage_relpath or "").strip()
             ),
@@ -849,8 +877,8 @@ def obtener_movimientos_detallados(
         ds_row_tes = ds_map.get(("tesoreria", mov.id))
         lista_tesoreria.append({
             "id": str(mov.id),
-            "hora": mov.fecha_movimiento.strftime("%H:%M:%S"),
-            "_sort_ts": mov.fecha_movimiento.isoformat(),
+            "hora": _format_hms_report_tz(mov.fecha_movimiento),
+            "_sort_ts": _iso_utc(mov.fecha_movimiento),
             "modulo": "Tesorería",
             "sede": sede_t,
             "turno": "N/A",
@@ -883,9 +911,7 @@ def obtener_movimientos_detallados(
                 if ds_row_tes and ds_row_tes.emitido_por_usuario_id
                 else None
             ),
-            "documento_soporte_emitido_en": (
-                ds_row_tes.created_at.isoformat() if ds_row_tes else None
-            ),
+            "documento_soporte_emitido_en": (_iso_utc(ds_row_tes.created_at) if ds_row_tes else None),
             "documento_soporte_pdf_archivado": bool(
                 ds_row_tes and (ds_row_tes.pdf_storage_relpath or "").strip()
             ),
@@ -1007,7 +1033,7 @@ def obtener_provisiones_iva(
         filas.append(
             {
                 "vehiculo_id": str(v.id),
-                "fecha_pago": v.fecha_pago.isoformat() if v.fecha_pago else None,
+                "fecha_pago": _iso_utc(v.fecha_pago),
                 "sucursal_id": str(v.sucursal_id) if v.sucursal_id else None,
                 "placa": v.placa,
                 "cliente_nombre": v.cliente_nombre,
@@ -1021,7 +1047,7 @@ def obtener_provisiones_iva(
                 "fuente_calculo": fuente,
                 "provisionado": provisionado,
                 "provisionado_lote_id": str(mark.lote_id) if mark else None,
-                "provisionado_en": mark.provisionado_en.isoformat() if mark else None,
+                "provisionado_en": _iso_utc(mark.provisionado_en) if mark else None,
             }
         )
 
@@ -1414,7 +1440,7 @@ def obtener_tramites_detallados(
         lista_tramites.append(
             {
                 "id": str(veh.id),
-                "hora_registro": veh.fecha_registro.strftime("%H:%M:%S"),
+                "hora_registro": _format_hms_report_tz(veh.fecha_registro),
                 "placa": veh.placa,
                 "tipo_vehiculo": veh.tipo_vehiculo,
                 "cliente": veh.cliente_nombre,
@@ -1844,8 +1870,8 @@ def listar_cierres_caja_reporte(
                 id=caja.id,
                 cajero_nombre=cajero_nombre,
                 sucursal_nombre=sede_nombre,
-                fecha_apertura=caja.fecha_apertura,
-                fecha_cierre=caja.fecha_cierre,
+                fecha_apertura=_as_utc_aware(caja.fecha_apertura),
+                fecha_cierre=_as_utc_aware(caja.fecha_cierre),
                 turno=turno_val,
                 monto_inicial=caja.monto_inicial,
                 monto_final_sistema=caja.monto_final_sistema,
