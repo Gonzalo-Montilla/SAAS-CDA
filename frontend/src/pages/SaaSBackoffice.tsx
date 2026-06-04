@@ -82,6 +82,9 @@ type BackofficeModule =
 const TABLE_DENSITY_STORAGE_KEY = 'saas_backoffice_table_density';
 type TenantProfileSection = 'brandAccess' | 'sedes' | 'factus' | 'billing' | 'payments' | 'users';
 type CheckoutSessionsViewTab = 'all' | 'pending' | 'paid' | 'fe_issue';
+const OPENSANCTIONS_CUSTOM_WINDOW = -1;
+const BOGOTA_TIME_ZONE = 'America/Bogota';
+const BOGOTA_UTC_OFFSET_HOURS = -5;
 
 const DEFAULT_TENANT_PROFILE_SECTIONS_OPEN: Record<TenantProfileSection, boolean> = {
   brandAccess: true,
@@ -90,6 +93,35 @@ const DEFAULT_TENANT_PROFILE_SECTIONS_OPEN: Record<TenantProfileSection, boolean
   billing: false,
   payments: false,
   users: false,
+};
+
+const toBogotaYmd = (date: Date): string => {
+  const shifted = new Date(date.getTime() + BOGOTA_UTC_OFFSET_HOURS * 60 * 60 * 1000);
+  const y = shifted.getUTCFullYear();
+  const m = String(shifted.getUTCMonth() + 1).padStart(2, '0');
+  const d = String(shifted.getUTCDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+};
+
+const shiftYmd = (ymd: string, deltaDays: number): string => {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const dt = new Date(Date.UTC(y, (m || 1) - 1, d || 1));
+  dt.setUTCDate(dt.getUTCDate() + deltaDays);
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+};
+
+const bogotaDayStartUtcIso = (ymd: string): string => {
+  const [y, m, d] = ymd.split('-').map(Number);
+  return new Date(Date.UTC(y, (m || 1) - 1, d || 1, 5, 0, 0, 0)).toISOString();
+};
+
+const bogotaDayEndUtcIso = (ymd: string): string => {
+  const [y, m, d] = ymd.split('-').map(Number);
+  const nextDayStartUtc = Date.UTC(y, (m || 1) - 1, (d || 1) + 1, 5, 0, 0, 0);
+  return new Date(nextDayStartUtc - 1).toISOString();
 };
 
 export default function SaaSBackoffice() {
@@ -103,6 +135,11 @@ export default function SaaSBackoffice() {
   const [runtMetricasDays, setRuntMetricasDays] = useState<number>(30);
   const [runtMetricasTenantId, setRuntMetricasTenantId] = useState<string>('');
   const [opensanctionsDays, setOpensanctionsDays] = useState<number>(30);
+  const [opensanctionsDateFrom, setOpensanctionsDateFrom] = useState<string>(() => {
+    const today = toBogotaYmd(new Date());
+    return shiftYmd(today, -29);
+  });
+  const [opensanctionsDateTo, setOpensanctionsDateTo] = useState<string>(() => toBogotaYmd(new Date()));
   const [opensanctionsTenantId, setOpensanctionsTenantId] = useState<string>('');
   const [opensanctionsTrm, setOpensanctionsTrm] = useState<number>(4379);
   const [selectedTenantId, setSelectedTenantId] = useState<string | null>(null);
@@ -662,6 +699,10 @@ export default function SaaSBackoffice() {
     },
   });
 
+  const opensanctionsCustomRangeInvalid =
+    opensanctionsDays === OPENSANCTIONS_CUSTOM_WINDOW &&
+    (!opensanctionsDateFrom || !opensanctionsDateTo || opensanctionsDateFrom > opensanctionsDateTo);
+
   const billingOverviewQuery = useQuery({
     queryKey: ['saas-billing-overview'],
     queryFn: async () => {
@@ -671,16 +712,39 @@ export default function SaaSBackoffice() {
     enabled: activeModule === 'facturacion',
   });
   const opensanctionsUsageQuery = useQuery({
-    queryKey: ['saas-opensanctions-usage-summary', opensanctionsDays, opensanctionsTenantId, opensanctionsTrm],
+    queryKey: [
+      'saas-opensanctions-usage-summary',
+      opensanctionsDays,
+      opensanctionsDateFrom,
+      opensanctionsDateTo,
+      opensanctionsTenantId,
+      opensanctionsTrm,
+    ],
     queryFn: async () => {
       const params = new URLSearchParams();
       const now = new Date();
-      const from =
-        opensanctionsDays === 0
-          ? new Date(now.getFullYear(), now.getMonth(), now.getDate())
-          : new Date(now.getTime() - opensanctionsDays * 24 * 60 * 60 * 1000);
-      params.set('from_date', from.toISOString());
-      params.set('to_date', now.toISOString());
+
+      let fromIso = '';
+      let toIso = '';
+      if (opensanctionsDays === OPENSANCTIONS_CUSTOM_WINDOW) {
+        fromIso = bogotaDayStartUtcIso(opensanctionsDateFrom);
+        toIso = bogotaDayEndUtcIso(opensanctionsDateTo);
+      } else if (opensanctionsDays === 0) {
+        const todayBogota = toBogotaYmd(now);
+        fromIso = bogotaDayStartUtcIso(todayBogota);
+        toIso = now.toISOString();
+      } else if (opensanctionsDays === 1) {
+        fromIso = new Date(now.getTime() - 24 * 60 * 60 * 1000).toISOString();
+        toIso = now.toISOString();
+      } else {
+        const todayBogota = toBogotaYmd(now);
+        const startBogota = shiftYmd(todayBogota, -(opensanctionsDays - 1));
+        fromIso = bogotaDayStartUtcIso(startBogota);
+        toIso = now.toISOString();
+      }
+
+      params.set('from_date', fromIso);
+      params.set('to_date', toIso);
       params.set('trm_cop', String(opensanctionsTrm));
       if (opensanctionsTenantId) {
         params.set('tenant_id', opensanctionsTenantId);
@@ -690,7 +754,7 @@ export default function SaaSBackoffice() {
       );
       return response.data;
     },
-    enabled: activeModule === 'facturacion' || activeModule === 'opensanctions_metricas',
+    enabled: (activeModule === 'facturacion' || activeModule === 'opensanctions_metricas') && !opensanctionsCustomRangeInvalid,
   });
 
   const checkoutSessionsQuery = useQuery({
@@ -1501,6 +1565,7 @@ export default function SaaSBackoffice() {
                   <option value={30}>30 días</option>
                   <option value={90}>90 días</option>
                   <option value={365}>365 días</option>
+                  <option value={OPENSANCTIONS_CUSTOM_WINDOW}>Rango personalizado</option>
                 </select>
               </label>
               <label className="text-sm text-slate-700">
@@ -1533,41 +1598,80 @@ export default function SaaSBackoffice() {
                 />
               </label>
             </div>
+            {opensanctionsDays === OPENSANCTIONS_CUSTOM_WINDOW && (
+              <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                <label className="text-sm text-slate-700">
+                  Desde (fecha local Colombia)
+                  <input
+                    type="date"
+                    className="input mt-1 w-full"
+                    value={opensanctionsDateFrom}
+                    onChange={(e) => setOpensanctionsDateFrom(e.target.value)}
+                  />
+                </label>
+                <label className="text-sm text-slate-700">
+                  Hasta (fecha local Colombia)
+                  <input
+                    type="date"
+                    className="input mt-1 w-full"
+                    value={opensanctionsDateTo}
+                    onChange={(e) => setOpensanctionsDateTo(e.target.value)}
+                  />
+                </label>
+              </div>
+            )}
+            {opensanctionsCustomRangeInvalid && (
+              <p className="mb-3 text-sm text-amber-700">
+                Define un rango válido: la fecha inicial debe ser menor o igual a la final.
+              </p>
+            )}
             {opensanctionsUsageQuery.isLoading && <LoadingBlock lines={3} />}
             {opensanctionsUsageQuery.isError && (
               <p className="text-sm text-red-600">No fue posible cargar el consumo de OpenSanctions.</p>
             )}
             {opensanctionsUsageQuery.data && (
               <div className="space-y-4">
-                <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50/70 p-2 text-xs md:grid-cols-6">
-                  <div className="rounded-lg bg-white px-2 py-1.5">
+                <div className="grid grid-cols-1 gap-2 rounded-xl border border-slate-200 bg-slate-50/70 p-2 text-xs sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-9">
+                  <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
                     <p className="text-slate-500">Total llamadas</p>
                     <p className="font-semibold text-slate-900">{opensanctionsUsageQuery.data.total_calls.toLocaleString('es-CO')}</p>
                   </div>
-                  <div className="rounded-lg bg-white px-2 py-1.5">
+                  <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
                     <p className="text-slate-500">Recepción</p>
                     <p className="font-semibold text-indigo-700">{opensanctionsUsageQuery.data.recepcion_calls.toLocaleString('es-CO')}</p>
                   </div>
-                  <div className="rounded-lg bg-white px-2 py-1.5">
+                  <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
                     <p className="text-slate-500">Manual</p>
                     <p className="font-semibold text-emerald-700">{opensanctionsUsageQuery.data.manual_calls.toLocaleString('es-CO')}</p>
                   </div>
-                  <div className="rounded-lg bg-white px-2 py-1.5">
+                  <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
                     <p className="text-slate-500">Lote</p>
                     <p className="font-semibold text-violet-700">{opensanctionsUsageQuery.data.lote_calls.toLocaleString('es-CO')}</p>
                   </div>
-                  <div className="rounded-lg bg-white px-2 py-1.5">
+                  <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
                     <p className="text-slate-500">Costo estimado EUR</p>
                     <p className="font-semibold text-slate-900">{formatEur(opensanctionsUsageQuery.data.estimated_cost_eur)}</p>
                   </div>
-                  <div className="rounded-lg bg-white px-2 py-1.5">
+                  <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
                     <p className="text-slate-500">Costo estimado COP</p>
                     <p className="font-semibold text-slate-900">{formatCurrency(opensanctionsUsageQuery.data.estimated_cost_cop)}</p>
                   </div>
+                  <div className="rounded-lg border border-indigo-200 bg-indigo-50/70 px-2 py-1.5 shadow-sm">
+                    <p className="text-slate-500">Neto facturable COP</p>
+                    <p className="font-semibold text-indigo-700">{formatCurrency(opensanctionsUsageQuery.data.billed_subtotal_cop)}</p>
+                  </div>
+                  <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-2 py-1.5 shadow-sm">
+                    <p className="text-slate-500">IVA facturable COP</p>
+                    <p className="font-semibold text-amber-700">{formatCurrency(opensanctionsUsageQuery.data.billed_iva_cop)}</p>
+                  </div>
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 px-2 py-1.5 shadow-sm">
+                    <p className="text-slate-500">Total facturable COP</p>
+                    <p className="font-semibold text-emerald-700">{formatCurrency(opensanctionsUsageQuery.data.billed_total_cop)}</p>
+                  </div>
                 </div>
                 <p className="text-xs text-slate-500">
-                  Periodo: {new Date(opensanctionsUsageQuery.data.from_date).toLocaleDateString()} -{' '}
-                  {new Date(opensanctionsUsageQuery.data.to_date).toLocaleDateString()} · TRM usada:{' '}
+                  Periodo: {new Date(opensanctionsUsageQuery.data.from_date).toLocaleDateString('es-CO', { timeZone: BOGOTA_TIME_ZONE })} -{' '}
+                  {new Date(opensanctionsUsageQuery.data.to_date).toLocaleDateString('es-CO', { timeZone: BOGOTA_TIME_ZONE })} · TRM usada:{' '}
                   {opensanctionsUsageQuery.data.trm_cop.toLocaleString('es-CO')} · Costo proveedor por llamada:{' '}
                   {formatEur(opensanctionsUsageQuery.data.cost_per_call_eur)}
                 </p>
@@ -1581,19 +1685,26 @@ export default function SaaSBackoffice() {
                   <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 font-medium text-amber-800">
                     Vigencia paquete: {opensanctionsUsageQuery.data.prepaid_package_expires_days} días
                   </span>
+                  <span className="rounded-full border border-fuchsia-200 bg-fuchsia-50 px-2.5 py-1 font-medium text-fuchsia-800">
+                    Precio venta CDA por consulta: {formatCurrency(opensanctionsUsageQuery.data.billed_unit_price_cop)}
+                    {' '}+ IVA {opensanctionsUsageQuery.data.billed_iva_pct.toLocaleString('es-CO')}%
+                  </span>
                 </div>
                 {opensanctionsUsageQuery.data.tenants.length > 0 ? (
                   <div className="table-shell">
                     <table className="table-enterprise">
                       <thead>
                         <tr>
-                          <th>CDA</th>
-                          <th>Recepción</th>
-                          <th>Manual</th>
-                          <th>Lote</th>
-                          <th>Total</th>
-                          <th>Costo EUR</th>
-                          <th>Costo COP</th>
+                          <th className="whitespace-nowrap">CDA</th>
+                          <th className="whitespace-nowrap text-right">Recepción</th>
+                          <th className="whitespace-nowrap text-right">Manual</th>
+                          <th className="whitespace-nowrap text-right">Lote</th>
+                          <th className="whitespace-nowrap text-right">Total</th>
+                          <th className="whitespace-nowrap text-right">Costo EUR</th>
+                          <th className="whitespace-nowrap text-right">Costo COP</th>
+                          <th className="whitespace-nowrap text-right">Neto facturable COP</th>
+                          <th className="whitespace-nowrap text-right">IVA COP</th>
+                          <th className="whitespace-nowrap text-right">Total facturable COP</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1603,12 +1714,15 @@ export default function SaaSBackoffice() {
                               {item.tenant_nombre}
                               <span className="ml-1 text-[11px] font-normal text-slate-500">/{item.tenant_slug}</span>
                             </td>
-                            <td>{item.recepcion_calls.toLocaleString('es-CO')}</td>
-                            <td>{item.manual_calls.toLocaleString('es-CO')}</td>
-                            <td>{item.lote_calls.toLocaleString('es-CO')}</td>
-                            <td className="font-semibold text-slate-900">{item.total_calls.toLocaleString('es-CO')}</td>
-                            <td>{formatEur(item.estimated_cost_eur)}</td>
-                            <td>{formatCurrency(item.estimated_cost_cop)}</td>
+                            <td className="text-right tabular-nums">{item.recepcion_calls.toLocaleString('es-CO')}</td>
+                            <td className="text-right tabular-nums">{item.manual_calls.toLocaleString('es-CO')}</td>
+                            <td className="text-right tabular-nums">{item.lote_calls.toLocaleString('es-CO')}</td>
+                            <td className="text-right tabular-nums font-semibold text-slate-900">{item.total_calls.toLocaleString('es-CO')}</td>
+                            <td className="text-right tabular-nums">{formatEur(item.estimated_cost_eur)}</td>
+                            <td className="text-right tabular-nums">{formatCurrency(item.estimated_cost_cop)}</td>
+                            <td className="text-right tabular-nums">{formatCurrency(item.billed_subtotal_cop)}</td>
+                            <td className="text-right tabular-nums">{formatCurrency(item.billed_iva_cop)}</td>
+                            <td className="text-right tabular-nums font-semibold text-emerald-700">{formatCurrency(item.billed_total_cop)}</td>
                           </tr>
                         ))}
                       </tbody>

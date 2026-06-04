@@ -475,6 +475,11 @@ export interface SaaSOpenSanctionsUsageTenantItem {
   total_calls: number;
   estimated_cost_eur: number;
   estimated_cost_cop: number;
+  billed_unit_price_cop: number;
+  billed_iva_pct: number;
+  billed_subtotal_cop: number;
+  billed_iva_cop: number;
+  billed_total_cop: number;
 }
 
 export interface SaaSOpenSanctionsUsageSummary {
@@ -492,6 +497,11 @@ export interface SaaSOpenSanctionsUsageSummary {
   total_calls: number;
   estimated_cost_eur: number;
   estimated_cost_cop: number;
+  billed_unit_price_cop: number;
+  billed_iva_pct: number;
+  billed_subtotal_cop: number;
+  billed_iva_cop: number;
+  billed_total_cop: number;
   tenants: SaaSOpenSanctionsUsageTenantItem[];
 }
 

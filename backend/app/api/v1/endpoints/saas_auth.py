@@ -381,6 +381,11 @@ class SaaSOpenSanctionsUsageTenantItem(BaseModel):
     total_calls: int
     estimated_cost_eur: float
     estimated_cost_cop: float
+    billed_unit_price_cop: float
+    billed_iva_pct: float
+    billed_subtotal_cop: float
+    billed_iva_cop: float
+    billed_total_cop: float
 
 
 class SaaSOpenSanctionsUsageOut(BaseModel):
@@ -398,6 +403,11 @@ class SaaSOpenSanctionsUsageOut(BaseModel):
     total_calls: int
     estimated_cost_eur: float
     estimated_cost_cop: float
+    billed_unit_price_cop: float
+    billed_iva_pct: float
+    billed_subtotal_cop: float
+    billed_iva_cop: float
+    billed_total_cop: float
     tenants: list[SaaSOpenSanctionsUsageTenantItem] = Field(default_factory=list)
 
 
@@ -1822,6 +1832,9 @@ def get_opensanctions_usage_summary(
     cost_per_call_cop = round(cost_per_call_eur * trm_cop, 2)
     prepaid_unit_price_cop = round(float(settings.OPENSANCTIONS_PREPAID_UNIT_PRICE_COP or 0), 2)
     prepaid_package_expires_days = int(settings.OPENSANCTIONS_PREPAID_PACKAGE_EXPIRES_DAYS or 365)
+    billed_unit_price_cop = 850.0
+    billed_iva_pct = 19.0
+    billed_iva_factor = billed_iva_pct / 100.0
 
     tenants = db.query(Tenant).all()
     tenant_meta = {
@@ -1870,7 +1883,12 @@ def get_opensanctions_usage_summary(
 
     tenant_ids = set(manual_by_tenant.keys()) | set(recepcion_by_tenant.keys()) | set(lote_by_tenant.keys())
     if tenant_id is not None:
-        tenant_ids = {tid for tid in tenant_ids if tid == str(tenant_id)}
+        tenant_filter = str(tenant_id)
+        tenant_ids = {tid for tid in tenant_ids if tid == tenant_filter}
+        # Si el tenant filtrado existe pero no tuvo consumo en el rango, devolver fila en 0
+        # para facilitar control y facturación mensual.
+        if tenant_filter in tenant_meta and tenant_filter not in tenant_ids:
+            tenant_ids.add(tenant_filter)
     tenant_items: list[SaaSOpenSanctionsUsageTenantItem] = []
     for tenant_id in tenant_ids:
         recepcion_calls = recepcion_by_tenant.get(tenant_id, 0)
@@ -1880,6 +1898,9 @@ def get_opensanctions_usage_summary(
         info = tenant_meta.get(tenant_id, {"slug": "n/d", "name": "Tenant no encontrado"})
         estimated_cost_eur = round(total_calls * cost_per_call_eur, 4)
         estimated_cost_cop = round(total_calls * cost_per_call_cop, 2)
+        billed_subtotal_cop = round(total_calls * billed_unit_price_cop, 2)
+        billed_iva_cop = round(billed_subtotal_cop * billed_iva_factor, 2)
+        billed_total_cop = round(billed_subtotal_cop + billed_iva_cop, 2)
         tenant_items.append(
             SaaSOpenSanctionsUsageTenantItem(
                 tenant_id=tenant_id,
@@ -1891,6 +1912,11 @@ def get_opensanctions_usage_summary(
                 total_calls=total_calls,
                 estimated_cost_eur=estimated_cost_eur,
                 estimated_cost_cop=estimated_cost_cop,
+                billed_unit_price_cop=billed_unit_price_cop,
+                billed_iva_pct=billed_iva_pct,
+                billed_subtotal_cop=billed_subtotal_cop,
+                billed_iva_cop=billed_iva_cop,
+                billed_total_cop=billed_total_cop,
             )
         )
     tenant_items.sort(key=lambda x: (x.total_calls, x.tenant_nombre.lower()), reverse=True)
@@ -1899,6 +1925,9 @@ def get_opensanctions_usage_summary(
     manual_total = sum(x.manual_calls for x in tenant_items)
     lote_total = sum(x.lote_calls for x in tenant_items)
     total_calls = recepcion_total + manual_total + lote_total
+    billed_subtotal_cop_total = round(total_calls * billed_unit_price_cop, 2)
+    billed_iva_cop_total = round(billed_subtotal_cop_total * billed_iva_factor, 2)
+    billed_total_cop_total = round(billed_subtotal_cop_total + billed_iva_cop_total, 2)
 
     return SaaSOpenSanctionsUsageOut(
         from_date=start_dt,
@@ -1915,6 +1944,11 @@ def get_opensanctions_usage_summary(
         total_calls=total_calls,
         estimated_cost_eur=round(total_calls * cost_per_call_eur, 4),
         estimated_cost_cop=round(total_calls * cost_per_call_cop, 2),
+        billed_unit_price_cop=billed_unit_price_cop,
+        billed_iva_pct=billed_iva_pct,
+        billed_subtotal_cop=billed_subtotal_cop_total,
+        billed_iva_cop=billed_iva_cop_total,
+        billed_total_cop=billed_total_cop_total,
         tenants=tenant_items,
     )
 
