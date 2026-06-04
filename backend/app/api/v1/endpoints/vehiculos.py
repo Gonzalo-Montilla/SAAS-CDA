@@ -1260,6 +1260,7 @@ def registrar_vehiculo(
             )
     else:
         # Si existe caso elegible de reinspección, obligamos a confirmarlo explícitamente.
+        # Excepción: para servicios PREVENTIVA no forzamos flujo de reinspección RTM.
         latest = (
             db.query(VehiculoProceso)
             .filter(
@@ -1284,7 +1285,7 @@ def registrar_vehiculo(
             preview_ctx = _build_reinspeccion_context_for_origen(
                 db, tenant_id=current_user.tenant_id, origen=origen
             )
-            if preview_ctx["elegible"]:
+            if preview_ctx["elegible"] and vehiculo_data.tipo_vehiculo != "preventiva":
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=(

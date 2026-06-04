@@ -1,5 +1,5 @@
 """
-Utilidades para recordatorios de próxima RTM.
+Utilidades para recordatorios de próxima RTM y control preventivo.
 """
 from datetime import datetime, timedelta, timezone
 from dateutil.relativedelta import relativedelta
@@ -10,9 +10,15 @@ from app.core.config import settings
 from app.models.rtm_reminder import RTMRenewalReminder
 from app.models.tenant import Tenant
 from app.models.vehiculo import VehiculoProceso
-from app.utils.email import enviar_email, generar_email_recordatorio_proxima_rtm
+from app.utils.email import (
+    enviar_email,
+    generar_email_recordatorio_control_preventivo,
+    generar_email_recordatorio_proxima_rtm,
+)
 
 REMINDER_MONTHS_AFTER_PAYMENT = 11
+PREVENTIVA_REMINDER_MONTHS_AFTER_PAYMENT = 2
+PREVENTIVA_REMINDER_DAYS_BEFORE_DUE = 7
 REMINDER_HOUR_LOCAL = 9
 STATUSES_PROCESSABLE = {"pending", "failed"}
 
@@ -36,9 +42,13 @@ def _humanize_service(tipo_vehiculo: str) -> str:
         "liviano_particular": "Revisión técnico-mecánica vehículo liviano particular",
         "liviano_publico": "Revisión técnico-mecánica vehículo liviano público",
         "pesado": "Revisión técnico-mecánica vehículo pesado",
-        "preventiva": "Servicio preventiva",
+        "preventiva": "Control preventivo",
     }
     return mapping.get(normalized, normalized.replace("_", " ").title() or "Revisión técnico-mecánica")
+
+
+def _is_preventiva(tipo_vehiculo: str | None) -> bool:
+    return (tipo_vehiculo or "").strip().lower() == "preventiva"
 
 
 def _format_fecha_es(target_date: datetime) -> str:
@@ -61,16 +71,34 @@ def _format_fecha_es(target_date: datetime) -> str:
 
 def schedule_rtm_renewal_reminder_for_vehicle(db: Session, vehiculo: VehiculoProceso) -> RTMRenewalReminder | None:
     """
-    Crea o actualiza recordatorio de próxima RTM para un vehículo cobrado.
+    Crea o actualiza recordatorio de próxima RTM / control preventivo para un vehículo cobrado.
     Deduplica por vehiculo_id.
     """
+    tipo_vehiculo = (vehiculo.tipo_vehiculo or "").strip().lower()
+    # Excluir flujos operativos que no generan recordatorio comercial.
+    if tipo_vehiculo in {"pruebas_auditoria"}:
+        return None
+    if bool(getattr(vehiculo, "reinspeccion_exenta", False)):
+        return None
+
     cliente_email = (vehiculo.cliente_email or "").strip().lower()
     if not cliente_email:
         return None
 
     paid_at = _to_naive_utc(vehiculo.fecha_pago)
-    next_due_at = paid_at + relativedelta(months=REMINDER_MONTHS_AFTER_PAYMENT)
-    scheduled_send_at = next_due_at.replace(hour=REMINDER_HOUR_LOCAL, minute=0, second=0, microsecond=0)
+    if _is_preventiva(tipo_vehiculo):
+        # Preventiva: control cada 2 meses, recordar una semana antes.
+        next_due_at = paid_at + relativedelta(months=PREVENTIVA_REMINDER_MONTHS_AFTER_PAYMENT)
+        scheduled_send_at = (next_due_at - timedelta(days=PREVENTIVA_REMINDER_DAYS_BEFORE_DUE)).replace(
+            hour=REMINDER_HOUR_LOCAL,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+    else:
+        # RTM regular: recordar aproximadamente 1 mes antes del vencimiento anual.
+        next_due_at = paid_at + relativedelta(months=REMINDER_MONTHS_AFTER_PAYMENT)
+        scheduled_send_at = next_due_at.replace(hour=REMINDER_HOUR_LOCAL, minute=0, second=0, microsecond=0)
     if scheduled_send_at <= utcnow_naive():
         scheduled_send_at = utcnow_naive() + timedelta(minutes=10)
 
@@ -144,15 +172,26 @@ def process_due_rtm_renewal_reminders(db: Session, *, tenant_id=None, limit: int
             if tenant_slug
             else None
         )
-        html = generar_email_recordatorio_proxima_rtm(
-            nombre_cda=nombre_cda,
-            nombre_cliente=reminder.cliente_nombre,
-            placa=reminder.placa,
-            tipo_servicio=_humanize_service(reminder.tipo_vehiculo),
-            fecha_sugerida=_format_fecha_es(reminder.next_due_at),
-            agendamiento_url=agendamiento_url,
-        )
-        subject = f"{nombre_cda} - Recordatorio de próxima RTM"
+        if _is_preventiva(reminder.tipo_vehiculo):
+            html = generar_email_recordatorio_control_preventivo(
+                nombre_cda=nombre_cda,
+                nombre_cliente=reminder.cliente_nombre,
+                placa=reminder.placa,
+                tipo_servicio=_humanize_service(reminder.tipo_vehiculo),
+                fecha_sugerida=_format_fecha_es(reminder.next_due_at),
+                agendamiento_url=agendamiento_url,
+            )
+            subject = f"{nombre_cda} - Recordatorio de control preventivo"
+        else:
+            html = generar_email_recordatorio_proxima_rtm(
+                nombre_cda=nombre_cda,
+                nombre_cliente=reminder.cliente_nombre,
+                placa=reminder.placa,
+                tipo_servicio=_humanize_service(reminder.tipo_vehiculo),
+                fecha_sugerida=_format_fecha_es(reminder.next_due_at),
+                agendamiento_url=agendamiento_url,
+            )
+            subject = f"{nombre_cda} - Recordatorio de próxima RTM"
         try:
             sent = enviar_email(reminder.cliente_email, subject, html)
             if sent:

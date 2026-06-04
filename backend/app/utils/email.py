@@ -731,6 +731,53 @@ def generar_email_recordatorio_proxima_rtm(
     )
 
 
+def generar_email_recordatorio_control_preventivo(
+    nombre_cda: str,
+    nombre_cliente: str,
+    placa: str,
+    tipo_servicio: str,
+    fecha_sugerida: str,
+    agendamiento_url: str | None = None,
+) -> str:
+    """Recordatorio de control preventivo bimestral."""
+    body_html = f"""
+    <p>Hola <strong>{nombre_cliente}</strong>,</p>
+    <p>
+        Te recordamos que tu <strong>control preventivo</strong> está próximo a cumplirse.
+        Para mantener tu vehículo en óptimas condiciones, te recomendamos agendar tu próxima revisión.
+    </p>
+    <p>En <strong>{nombre_cda}</strong> te acompañamos con un servicio ágil y confiable:</p>
+    <div class="highlight">
+        <p style="margin:0 0 6px 0;">📍 <strong>Placa:</strong> {placa}</p>
+        <p style="margin:0 0 6px 0;">🔧 <strong>Servicio:</strong> {tipo_servicio}</p>
+        <p style="margin:0;"><strong>Fecha sugerida:</strong> {fecha_sugerida}</p>
+    </div>
+    {(
+        f'''
+        <p style="text-align:center;">
+            <a href="{agendamiento_url}" class="button">Agendar control preventivo</a>
+        </p>
+        <p class="muted" style="text-align:center; margin-top:8px;">
+            Si el botón no abre, copia este enlace:
+            <span style="word-break:break-all;">{agendamiento_url}</span>
+        </p>
+        '''
+        if agendamiento_url
+        else ''
+    )}
+    <p>Gracias por confiar en nosotros. ¡Te esperamos pronto!</p>
+    <p class="muted">
+        Saludos,<br />
+        El equipo de {nombre_cda}
+    </p>
+    """
+    return _render_email_corporativo(
+        title=f"Recordatorio de control preventivo - {nombre_cda}",
+        body_html=body_html,
+        label=f"Control preventivo - {nombre_cda}",
+    )
+
+
 def generar_email_rechazo_reinspeccion_cliente(
     nombre_cda: str,
     nombre_cliente: str,
