@@ -32,6 +32,10 @@ export interface RuntMetricasSummary {
     tenant_slug: string;
     tenant_nombre: string;
     consultas: number;
+    resueltas: number;
+    no_resueltas: number;
+    empty_count: number;
+    error_count: number;
     costo_estimado_cop: number;
     costo_estimado_usd: number;
     costo_resuelto_cop: number;

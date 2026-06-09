@@ -196,6 +196,42 @@ def resumen_metricas_runt(
                 func.sum(
                     case(
                         (
+                            RuntConsultaMetrica.status == "success",
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            RuntConsultaMetrica.status == "empty",
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            RuntConsultaMetrica.status == "error",
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
                             and_(
                                 RuntConsultaMetrica.provider_resolved == "placaapi",
                                 RuntConsultaMetrica.status == "success",
@@ -299,12 +335,16 @@ def resumen_metricas_runt(
             "costo_estimado_usd": float(r[4] or 0),
             "costo_resuelto_cop": float(r[5] or 0),
             "costo_resuelto_usd": float(r[6] or 0),
-            "placaapi_resueltas": int(r[7] or 0),
-            "placaapi_costo_resuelto_cop": float(r[8] or 0),
-            "placaapi_costo_resuelto_usd": float(r[9] or 0),
-            "verifik_resueltas": int(r[10] or 0),
-            "verifik_costo_resuelto_cop": float(r[11] or 0),
-            "verifik_costo_resuelto_usd": float(r[12] or 0),
+            "resueltas": int(r[7] or 0),
+            "empty_count": int(r[8] or 0),
+            "error_count": int(r[9] or 0),
+            "no_resueltas": max(int(r[2] or 0) - int(r[7] or 0), 0),
+            "placaapi_resueltas": int(r[10] or 0),
+            "placaapi_costo_resuelto_cop": float(r[11] or 0),
+            "placaapi_costo_resuelto_usd": float(r[12] or 0),
+            "verifik_resueltas": int(r[13] or 0),
+            "verifik_costo_resuelto_cop": float(r[14] or 0),
+            "verifik_costo_resuelto_usd": float(r[15] or 0),
         }
         for r in tenant_rows
     ]

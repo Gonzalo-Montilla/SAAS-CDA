@@ -713,39 +713,33 @@ def listar_movimientos(
     """
     Listar movimientos de la caja activa
     """
-    if current_user.rol in (RolEnum.ADMINISTRADOR, RolEnum.CONTADOR):
-        caja = db.query(Caja).filter(
-            and_(
-                Caja.tenant_id == current_user.tenant_id,
-                Caja.sucursal_id == active_sucursal_id,
-                Caja.estado == EstadoCaja.ABIERTA,
-            )
-        ).first()
-    elif current_user.rol == RolEnum.CAJERO:
-        caja = db.query(Caja).filter(
-            and_(
-                Caja.usuario_id == current_user.id,
-                Caja.tenant_id == current_user.tenant_id,
-                Caja.sucursal_id == active_sucursal_id,
-                Caja.estado == EstadoCaja.ABIERTA,
-            )
-        ).first()
-    else:
+    if current_user.rol not in (RolEnum.ADMINISTRADOR, RolEnum.CONTADOR, RolEnum.CAJERO):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No autorizado para consultar movimientos de caja.",
         )
-    
-    if not caja:
+
+    movimientos_q = (
+        db.query(MovimientoCaja)
+        .join(Caja, MovimientoCaja.caja_id == Caja.id)
+        .filter(
+            MovimientoCaja.tenant_id == current_user.tenant_id,
+            Caja.tenant_id == current_user.tenant_id,
+            Caja.sucursal_id == active_sucursal_id,
+            Caja.estado == EstadoCaja.ABIERTA,
+        )
+    )
+
+    if current_user.rol == RolEnum.CAJERO:
+        movimientos_q = movimientos_q.filter(Caja.usuario_id == current_user.id)
+
+    movimientos = movimientos_q.order_by(MovimientoCaja.created_at.desc()).all()
+    if not movimientos:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No tienes una caja abierta"
         )
-    
-    movimientos = db.query(MovimientoCaja).filter(
-        MovimientoCaja.caja_id == caja.id
-    ).order_by(MovimientoCaja.created_at.desc()).all()
-    
+
     return movimientos
 
 
@@ -762,20 +756,6 @@ def anular_movimiento_caja(
     Anula un movimiento de caja sin borrarlo físicamente.
     El movimiento anulado deja de afectar saldos y aparece marcado en listados.
     """
-    caja = db.query(Caja).filter(
-        and_(
-            Caja.tenant_id == current_user.tenant_id,
-            Caja.sucursal_id == active_sucursal_id,
-            Caja.estado == EstadoCaja.ABIERTA,
-        )
-    ).first()
-
-    if not caja:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No hay una caja abierta en la sede activa para anular movimientos.",
-        )
-
     try:
         mid = UUID(str(movimiento_id).strip())
     except ValueError:
@@ -784,11 +764,18 @@ def anular_movimiento_caja(
             detail="Identificador de movimiento inválido",
         )
 
-    mov = db.query(MovimientoCaja).filter(
-        MovimientoCaja.id == mid,
-        MovimientoCaja.tenant_id == current_user.tenant_id,
-        MovimientoCaja.caja_id == caja.id,
-    ).first()
+    mov = (
+        db.query(MovimientoCaja)
+        .join(Caja, MovimientoCaja.caja_id == Caja.id)
+        .filter(
+            MovimientoCaja.id == mid,
+            MovimientoCaja.tenant_id == current_user.tenant_id,
+            Caja.tenant_id == current_user.tenant_id,
+            Caja.sucursal_id == active_sucursal_id,
+            Caja.estado == EstadoCaja.ABIERTA,
+        )
+        .first()
+    )
 
     if not mov:
         raise HTTPException(
@@ -822,7 +809,7 @@ def anular_movimiento_caja(
         usuario=current_user,
         request=request,
         metadata={
-            "caja_id": str(caja.id),
+            "caja_id": str(mov.caja_id),
             "movimiento_id": str(mov.id),
             "tipo": mov.tipo.value if hasattr(mov.tipo, "value") else str(mov.tipo),
             "monto": float(mov.monto),

@@ -1472,6 +1472,8 @@ export default function SaaSBackoffice() {
                         <tr>
                           <th>Tenant</th>
                           <th>Consultas totales</th>
+                          <th>Resueltas</th>
+                          <th>No resueltas</th>
                           <th>PlacaAPI resueltas</th>
                           <th>Costo PlacaAPI (COP / USD)</th>
                           <th>Verifik resueltas</th>
@@ -1482,7 +1484,7 @@ export default function SaaSBackoffice() {
                       <tbody>
                         {runtMetricasQuery.data.by_tenant.length === 0 ? (
                           <tr>
-                            <td colSpan={7} className="text-slate-500">
+                            <td colSpan={9} className="text-slate-500">
                               Sin datos en el período seleccionado.
                             </td>
                           </tr>
@@ -1495,6 +1497,12 @@ export default function SaaSBackoffice() {
                                 {row.tenant_nombre} <span className="text-xs text-slate-500">/{row.tenant_slug}</span>
                               </td>
                               <td>{row.consultas}</td>
+                              <td>{row.resueltas}</td>
+                              <td>
+                                <span className={row.no_resueltas > 0 ? 'font-semibold text-amber-700' : 'text-slate-500'}>
+                                  {row.no_resueltas}
+                                </span>
+                              </td>
                               <td>
                                 {row.placaapi_resueltas}
                               </td>
