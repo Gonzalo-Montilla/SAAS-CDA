@@ -1,7 +1,7 @@
 """
 Endpoints de Cajas
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Request, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Request, Query, Body
 from fastapi.responses import Response, StreamingResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, cast, Date, func, or_
@@ -9,7 +9,14 @@ from datetime import datetime, timezone, date, time, timedelta
 from decimal import Decimal
 from typing import List, Optional
 from uuid import UUID
-from app.core.deps import get_db, get_current_user, get_cajero_or_admin, get_admin, get_active_sucursal_id
+from app.core.deps import (
+    get_db,
+    get_current_user,
+    get_cajero_or_admin,
+    get_admin,
+    get_contador_or_admin,
+    get_active_sucursal_id,
+)
 from app.core.timezone_utils import zoneinfo_from_name
 from app.core.sucursal_scope import get_principal_sucursal_id, comprobante_egreso_scope_sid
 from app.models.usuario import Usuario, RolEnum
@@ -21,6 +28,7 @@ from app.schemas.caja import (
     CajaApertura,
     CajaCierre,
     MovimientoCreate,
+    MovimientoAnularRequest,
     MovimientoResponse,
     CajaResponse,
     CajaDetalle,
@@ -155,7 +163,8 @@ def obtener_resumen_caja(
     
     # Calcular totales por método de pago
     movimientos = db.query(MovimientoCaja).filter(
-        MovimientoCaja.caja_id == caja.id
+        MovimientoCaja.caja_id == caja.id,
+        or_(MovimientoCaja.anulado == False, MovimientoCaja.anulado.is_(None))
     ).all()
     
     efectivo = Decimal(0)
@@ -579,6 +588,11 @@ def descargar_comprobante_egreso_movimiento_caja(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Solo hay comprobante para gasto, devolución o ajuste de caja.",
         )
+    if bool(getattr(mov, "anulado", False)):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se puede descargar el comprobante de un movimiento anulado.",
+        )
     if mov.monto >= 0:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -693,20 +707,34 @@ def obtener_vehiculos_por_metodo(
 @router.get("/movimientos", response_model=List[MovimientoResponse])
 def listar_movimientos(
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_cajero_or_admin),
+    current_user: Usuario = Depends(get_current_user),
     active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Listar movimientos de la caja activa
     """
-    caja = db.query(Caja).filter(
-        and_(
-            Caja.usuario_id == current_user.id,
-            Caja.tenant_id == current_user.tenant_id,
-            Caja.sucursal_id == active_sucursal_id,
-            Caja.estado == EstadoCaja.ABIERTA,
+    if current_user.rol in (RolEnum.ADMINISTRADOR, RolEnum.CONTADOR):
+        caja = db.query(Caja).filter(
+            and_(
+                Caja.tenant_id == current_user.tenant_id,
+                Caja.sucursal_id == active_sucursal_id,
+                Caja.estado == EstadoCaja.ABIERTA,
+            )
+        ).first()
+    elif current_user.rol == RolEnum.CAJERO:
+        caja = db.query(Caja).filter(
+            and_(
+                Caja.usuario_id == current_user.id,
+                Caja.tenant_id == current_user.tenant_id,
+                Caja.sucursal_id == active_sucursal_id,
+                Caja.estado == EstadoCaja.ABIERTA,
+            )
+        ).first()
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No autorizado para consultar movimientos de caja.",
         )
-    ).first()
     
     if not caja:
         raise HTTPException(
@@ -716,9 +744,93 @@ def listar_movimientos(
     
     movimientos = db.query(MovimientoCaja).filter(
         MovimientoCaja.caja_id == caja.id
-    ).order_by(MovimientoCaja.created_at).all()
+    ).order_by(MovimientoCaja.created_at.desc()).all()
     
     return movimientos
+
+
+@router.post("/movimientos/{movimiento_id}/anular", response_model=MovimientoResponse)
+def anular_movimiento_caja(
+    movimiento_id: str,
+    request: Request,
+    body: MovimientoAnularRequest = Body(...),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
+):
+    """
+    Anula un movimiento de caja sin borrarlo físicamente.
+    El movimiento anulado deja de afectar saldos y aparece marcado en listados.
+    """
+    caja = db.query(Caja).filter(
+        and_(
+            Caja.tenant_id == current_user.tenant_id,
+            Caja.sucursal_id == active_sucursal_id,
+            Caja.estado == EstadoCaja.ABIERTA,
+        )
+    ).first()
+
+    if not caja:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No hay una caja abierta en la sede activa para anular movimientos.",
+        )
+
+    try:
+        mid = UUID(str(movimiento_id).strip())
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Identificador de movimiento inválido",
+        )
+
+    mov = db.query(MovimientoCaja).filter(
+        MovimientoCaja.id == mid,
+        MovimientoCaja.tenant_id == current_user.tenant_id,
+        MovimientoCaja.caja_id == caja.id,
+    ).first()
+
+    if not mov:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Movimiento no encontrado en la caja activa.",
+        )
+    if mov.anulado:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Este movimiento ya está anulado.",
+        )
+
+    motivo = (body.motivo or "").strip()
+    if len(motivo) < 10:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El motivo de anulación debe tener mínimo 10 caracteres.",
+        )
+
+    mov.anulado = True
+    mov.motivo_anulacion = motivo
+    mov.anulado_por = current_user.id
+    mov.fecha_anulacion = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(mov)
+
+    audit_caja_operation(
+        db=db,
+        action=AuditAction.UPDATE_MOVEMENT,
+        description=f"Movimiento de caja anulado: {mov.concepto} - ${abs(mov.monto):,.0f}",
+        usuario=current_user,
+        request=request,
+        metadata={
+            "caja_id": str(caja.id),
+            "movimiento_id": str(mov.id),
+            "tipo": mov.tipo.value if hasattr(mov.tipo, "value") else str(mov.tipo),
+            "monto": float(mov.monto),
+            "motivo_anulacion": motivo,
+        },
+    )
+
+    return mov
 
 
 @router.get("/ultima-cerrada")
@@ -991,7 +1103,8 @@ def descargar_comprobante_cierre(
         tenant_logo_url = tenant.logo_url if tenant else None
 
     movimientos = db.query(MovimientoCaja).filter(
-        MovimientoCaja.caja_id == caja.id
+        MovimientoCaja.caja_id == caja.id,
+        or_(MovimientoCaja.anulado == False, MovimientoCaja.anulado.is_(None))
     ).all()
     
     total_rtm = Decimal(0)

@@ -99,6 +99,9 @@ interface Movimiento {
   factura_public_url?: string | null;
   /** Solo filas de tesorería (reporte movimientos detallados). */
   anulado?: boolean;
+  motivo_anulacion?: string | null;
+  fecha_anulacion?: string | null;
+  anulado_por?: string | null;
   documento_soporte_numero?: string | null;
   documento_soporte_public_url?: string | null;
   documento_soporte_emitido_por?: string | null;
@@ -186,6 +189,7 @@ function movimientoElegibleDocumentoSoporte(m: Movimiento): boolean {
   const esEgresoCajaManual =
     m.modulo === 'Caja' &&
     !m.es_ingreso &&
+    !m.anulado &&
     ['gasto', 'devolucion', 'ajuste'].includes(m.categoria);
   const esEgresoTesoreria = m.modulo === 'Tesorería' && !m.es_ingreso && !m.anulado;
   if (!esEgresoCajaManual && !esEgresoTesoreria) return false;
@@ -2291,6 +2295,7 @@ export default function ReportesPage() {
                   const mostrarComprobanteCajaEgresoManual =
                     m.modulo === 'Caja' &&
                     !m.es_ingreso &&
+                    !m.anulado &&
                     ['gasto', 'devolucion', 'ajuste'].includes(m.categoria);
                   return (
                   <tr key={m.id} className="border-t">
@@ -2392,6 +2397,25 @@ export default function ReportesPage() {
                             </p>
                           ) : null}
                         </div>
+                      )}
+                      {m.anulado && (
+                        <details className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2 py-1.5 text-xs text-amber-900">
+                          <summary className="cursor-pointer list-none font-semibold">
+                            Movimiento anulado
+                          </summary>
+                          <div className="mt-1">
+                            <p>
+                              {m.anulado_por ? `Por: ${m.anulado_por}` : 'Por: N/A'}
+                              {m.fecha_anulacion
+                                ? ` · ${new Date(m.fecha_anulacion).toLocaleString('es-CO', {
+                                    dateStyle: 'short',
+                                    timeStyle: 'short',
+                                  })}`
+                                : ''}
+                            </p>
+                            {m.motivo_anulacion ? <p className="mt-0.5">Motivo: {m.motivo_anulacion}</p> : null}
+                          </div>
+                        </details>
                       )}
                     </td>
                     <td className="px-3 py-2">{m.categoria}</td>

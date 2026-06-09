@@ -97,6 +97,11 @@ export const cajasApi = {
     return response.data;
   },
 
+  anularMovimiento: async (movimientoId: string, motivo: string): Promise<MovimientoCaja> => {
+    const response = await apiClient.post<MovimientoCaja>(`/cajas/movimientos/${movimientoId}/anular`, { motivo });
+    return response.data;
+  },
+
   // Listar movimientos de caja activa
   listarMovimientos: async (): Promise<MovimientoCaja[]> => {
     try {

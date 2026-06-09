@@ -90,7 +90,7 @@ const saveBlobAsFile = (blob: Blob, filename: string): void => {
 
 export default function CajaPage() {
   const queryClient = useQueryClient();
-  const [vistaActual, setVistaActual] = useState<'apertura' | 'cobros' | 'cobrados-hoy' | 'cierre' | 'historial'>('cobros');
+  const [vistaActual, setVistaActual] = useState<'apertura' | 'cobros' | 'cobrados-hoy' | 'movimientos' | 'cierre' | 'historial'>('cobros');
   const [mostrarModalGasto, setMostrarModalGasto] = useState(false);
   const [mostrarModalVentaSOAT, setMostrarModalVentaSOAT] = useState(false);
 
@@ -270,6 +270,7 @@ export default function CajaPage() {
             [
               { id: 'cobros' as const, label: 'Pendientes', icon: Banknote, badge: vehiculosPendientes?.length, badgeClass: 'bg-rose-100 text-rose-800' },
               { id: 'cobrados-hoy' as const, label: 'Cobros hoy', icon: CheckCircle2, badge: vehiculosCobradosHoy?.length, badgeClass: 'bg-emerald-100 text-emerald-800' },
+              { id: 'movimientos' as const, label: 'Movimientos', icon: Receipt, badge: undefined, badgeClass: '' },
               { id: 'historial' as const, label: 'Historial', icon: Folder, badge: undefined, badgeClass: '' },
               { id: 'cierre' as const, label: 'Cierre', icon: Lock, badge: undefined, badgeClass: '' },
             ] as const
@@ -313,6 +314,10 @@ export default function CajaPage() {
           vehiculos={vehiculosCobradosHoy || []} 
           loading={loadingCobradosHoy}
         />
+      )}
+
+      {vistaActual === 'movimientos' && (
+        <MovimientosCaja />
       )}
 
       {vistaActual === 'cierre' && (
@@ -2506,6 +2511,8 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
 
   // Filtrar solo egresos (montos negativos)
   const egresos = movimientos?.filter(mov => mov.monto < 0) || [];
+  const egresosVigentes = egresos.filter((mov) => !mov.anulado);
+  const egresosAnulados = egresos.length - egresosVigentes.length;
 
   const cerrarMutation = useMutation({
     mutationFn: cajasApi.cerrar,
@@ -3022,9 +3029,14 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                 <div className="min-w-0">
                   <h4 className="text-lg font-bold text-gray-900">Detalle de Egresos</h4>
                   <p className="text-sm text-gray-600">
-                    {egresos.length} {egresos.length === 1 ? 'gasto' : 'gastos'} en el turno · Total: −$
+                    {egresosVigentes.length} {egresosVigentes.length === 1 ? 'gasto vigente' : 'gastos vigentes'} en el turno · Total: −$
                     {formatCurrency(resumen.total_egresos)}
                   </p>
+                  {egresosAnulados > 0 && (
+                    <p className="text-xs text-amber-700 mt-0.5">
+                      {egresosAnulados} {egresosAnulados === 1 ? 'movimiento anulado' : 'movimientos anulados'} no impactan el total.
+                    </p>
+                  )}
                   <p className="text-xs text-gray-500 mt-0.5">Desglose por movimiento (conciliación)</p>
                 </div>
               </div>
@@ -3048,11 +3060,14 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                           ? CornerUpLeft
                           : Scale;
                     const hora = formatTime24(egreso.created_at);
+                    const egresoAnulado = Boolean(egreso.anulado);
 
                     return (
                       <div
                         key={egreso.id}
-                        className="flex justify-between items-center p-3 bg-white rounded-lg border border-red-200"
+                        className={`flex justify-between items-center p-3 bg-white rounded-lg border ${
+                          egresoAnulado ? 'border-amber-300 bg-amber-50/40' : 'border-red-200'
+                        }`}
                       >
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -3061,6 +3076,11 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                             <span className="px-2 py-0.5 bg-red-100 text-red-800 text-xs font-semibold rounded capitalize">
                               {egreso.tipo}
                             </span>
+                            {egresoAnulado && (
+                              <span className="px-2 py-0.5 bg-amber-200 text-amber-900 text-xs font-semibold rounded">
+                                ANULADO
+                              </span>
+                            )}
                           </div>
                           {egreso.beneficiario ? (
                             <>
@@ -3079,6 +3099,11 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                             </>
                           ) : (
                             <p className="text-sm font-medium text-gray-900">{egreso.concepto}</p>
+                          )}
+                          {egresoAnulado && (
+                            <p className="mt-1 text-xs text-amber-900 break-words">
+                              Motivo anulación: {egreso.motivo_anulacion || 'No informado'}
+                            </p>
                           )}
                         </div>
                         <p className="text-xl font-bold text-red-600 ml-4 shrink-0">
@@ -3607,6 +3632,306 @@ function HistorialCajas() {
             </div>
           );
         })}
+      </div>
+    </div>
+  );
+}
+
+function MovimientosCaja() {
+  const { showToast } = useToast();
+  const [filtroTexto, setFiltroTexto] = useState('');
+  const [movimientoParaAnular, setMovimientoParaAnular] = useState<MovimientoCaja | null>(null);
+  const queryClient = useQueryClient();
+
+  const { data: movimientos = [], isLoading } = useQuery({
+    queryKey: ['movimientos-caja-tab'],
+    queryFn: cajasApi.listarMovimientos,
+    refetchInterval: 10000,
+    retry: 1,
+  });
+
+  const movimientosFiltrados = movimientos.filter((mov) => {
+    const term = filtroTexto.trim().toLowerCase();
+    if (!term) return true;
+    const searchable = [
+      mov.tipo,
+      mov.metodo_pago,
+      mov.concepto,
+      mov.beneficiario,
+      mov.beneficiario_numero_identificacion,
+      mov.id,
+      mov.motivo_anulacion,
+    ]
+      .filter(Boolean)
+      .join(' ')
+      .toLowerCase();
+    return searchable.includes(term);
+  });
+
+  // Prioridad operativa: primero egresos, luego ingresos.
+  // Dentro de cada grupo, mostrar del más reciente al más antiguo.
+  const movimientosOrdenados = [...movimientosFiltrados].sort((a, b) => {
+    const aEsEgreso = a.monto < 0;
+    const bEsEgreso = b.monto < 0;
+    if (aEsEgreso !== bEsEgreso) return aEsEgreso ? -1 : 1;
+    return new Date(b.created_at).getTime() - new Date(a.created_at).getTime();
+  });
+
+  const totalEgresos = movimientosFiltrados
+    .filter((mov) => mov.monto < 0)
+    .reduce((acc, mov) => acc + Math.abs(mov.monto), 0);
+
+  if (isLoading) {
+    return <LoadingSpinner message="Cargando movimientos de caja..." />;
+  }
+
+  if (movimientos.length === 0) {
+    return (
+      <div className="card-pos text-center py-12">
+        <div className="flex justify-center mb-4">
+          <Receipt className="w-20 h-20 text-gray-400" />
+        </div>
+        <h3 className="text-2xl font-bold text-gray-900 mb-2">Sin movimientos de caja</h3>
+        <p className="text-gray-600">Aun no hay gastos, devoluciones o ajustes en esta caja activa.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <div className="card-pos mb-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+          <div>
+            <h3 className="text-lg font-bold text-slate-900">Movimientos del turno</h3>
+            <p className="text-sm text-slate-600">
+              Total movimientos: {movimientosFiltrados.length} · Egresos filtrados: -$
+              {formatCurrency(totalEgresos)}
+            </p>
+          </div>
+          <div className="relative w-full md:w-80">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              value={filtroTexto}
+              onChange={(e) => setFiltroTexto(e.target.value)}
+              placeholder="Buscar por concepto, beneficiario o ID..."
+              className="input-pos pl-9"
+            />
+          </div>
+        </div>
+      </div>
+
+      <div className="space-y-3">
+        {movimientosOrdenados.map((mov) => {
+          const esEgreso = mov.monto < 0;
+          const tipoLabel =
+            mov.tipo === 'gasto'
+              ? 'Gasto'
+              : mov.tipo === 'devolucion'
+                ? 'Devolución'
+                : mov.tipo === 'ajuste'
+                  ? 'Ajuste'
+                  : mov.tipo;
+
+          return (
+            <div key={mov.id} className="card-pos border border-slate-200">
+              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2 mb-2">
+                    <span
+                      className={`px-2.5 py-1 rounded-full text-xs font-semibold ${
+                        esEgreso ? 'bg-red-100 text-red-800' : 'bg-emerald-100 text-emerald-800'
+                      }`}
+                    >
+                      {esEgreso ? 'Egreso' : 'Ingreso'}
+                    </span>
+                    <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-100 text-slate-700">
+                      {tipoLabel}
+                    </span>
+                    {mov.anulado && (
+                      <span className="px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-700 text-white">
+                        ANULADO
+                      </span>
+                    )}
+                    <span className="text-xs text-slate-500">{formatDateTimeShort(mov.created_at)}</span>
+                  </div>
+                  <p className="text-sm font-semibold text-slate-900 break-words">{mov.concepto}</p>
+                  {mov.anulado && (
+                    <p className="mt-1 text-xs text-slate-600 break-words">
+                      Motivo anulación: {mov.motivo_anulacion || 'No informado'}
+                    </p>
+                  )}
+                  <div className="mt-1 text-xs text-slate-600 flex flex-wrap gap-x-4 gap-y-1">
+                    <span>
+                      ID: <span className="font-mono">{mov.id.slice(0, 8).toUpperCase()}</span>
+                    </span>
+                    {mov.metodo_pago && <span>Método: {mov.metodo_pago}</span>}
+                    {mov.beneficiario && <span>Beneficiario: {mov.beneficiario}</span>}
+                    {mov.beneficiario_numero_identificacion && (
+                      <span>ID beneficiario: {mov.beneficiario_numero_identificacion}</span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-col items-start lg:items-end gap-2">
+                  <p className={`text-2xl font-bold tabular-nums ${esEgreso ? 'text-red-600' : 'text-emerald-700'}`}>
+                    {esEgreso ? '-' : '+'}${formatCurrency(Math.abs(mov.monto))}
+                  </p>
+                  {esEgreso && (
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-900 text-white text-xs font-semibold inline-flex items-center gap-1"
+                        disabled={!!mov.anulado}
+                        onClick={async () => {
+                          try {
+                            await cajasApi.descargarComprobanteEgresoCaja(mov.id);
+                          } catch (error: any) {
+                            showToast(
+                              'error',
+                              'No se pudo abrir comprobante',
+                              error?.message || 'Intenta nuevamente.',
+                            );
+                          }
+                        }}
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        Comprobante
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!!mov.anulado}
+                        title={mov.anulado ? 'Este movimiento ya está anulado' : 'Anular movimiento'}
+                        onClick={() => setMovimientoParaAnular(mov)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-semibold inline-flex items-center gap-1 ${
+                          mov.anulado
+                            ? 'border border-slate-300 bg-slate-100 text-slate-500 cursor-not-allowed'
+                            : 'border border-amber-300 bg-amber-50 text-amber-800 hover:bg-amber-100'
+                        }`}
+                      >
+                        <Lock className="w-3.5 h-3.5" />
+                        Anular
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {movimientoParaAnular && (
+        <ModalAnularMovimientoCaja
+          movimiento={movimientoParaAnular}
+          onClose={() => setMovimientoParaAnular(null)}
+          onSuccess={() => {
+            setMovimientoParaAnular(null);
+            queryClient.invalidateQueries({ queryKey: ['movimientos-caja-tab'] });
+            queryClient.invalidateQueries({ queryKey: ['movimientos-caja'] });
+            queryClient.invalidateQueries({ queryKey: ['caja-resumen-tiempo-real'] });
+            queryClient.invalidateQueries({ queryKey: ['caja-resumen'] });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+function ModalAnularMovimientoCaja({
+  movimiento,
+  onClose,
+  onSuccess,
+}: {
+  movimiento: MovimientoCaja;
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
+  const { showToast } = useToast();
+  const [motivo, setMotivo] = useState('');
+
+  const anularMutation = useMutation({
+    mutationFn: () => cajasApi.anularMovimiento(movimiento.id, motivo.trim()),
+    onSuccess: () => {
+      showToast('success', 'Movimiento anulado', 'El movimiento fue anulado y no afectará los saldos.');
+      onSuccess();
+    },
+    onError: (error: any) => {
+      showToast(
+        'error',
+        'No se pudo anular',
+        error?.response?.data?.detail || 'Intenta nuevamente.',
+      );
+    },
+  });
+
+  return (
+    <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+      <div className="modal-panel max-w-2xl w-full">
+        <div className="p-6">
+          <div className="modal-header-sticky -mx-6 px-6 pt-1 pb-4 flex justify-between items-start mb-6 border-b border-slate-200">
+            <div>
+              <h3 className="text-2xl font-bold text-slate-900 mb-1">Anular movimiento de caja</h3>
+              <p className="text-sm text-slate-600">
+                ID <span className="font-mono">{movimiento.id.slice(0, 8).toUpperCase()}</span> ·{' '}
+                {formatDateTimeShort(movimiento.created_at)}
+              </p>
+            </div>
+            <button
+              onClick={onClose}
+              className="h-10 w-10 rounded-lg border border-slate-300 text-slate-500 hover:bg-slate-50 hover:text-slate-700 transition flex items-center justify-center text-2xl"
+              disabled={anularMutation.isLoading}
+            >
+              ×
+            </button>
+          </div>
+
+          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 mb-4 text-sm text-amber-900">
+            <p className="font-semibold">Esta acción no borra el registro.</p>
+            <p>El movimiento quedará marcado como anulado y dejará de afectar los saldos de caja.</p>
+          </div>
+
+          <div className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 mb-4 text-sm text-slate-700">
+            <p>
+              <span className="font-semibold">Concepto:</span> {movimiento.concepto}
+            </p>
+            <p>
+              <span className="font-semibold">Monto:</span> -${formatCurrency(Math.abs(movimiento.monto))}
+            </p>
+          </div>
+
+          <label className="block text-sm font-semibold text-slate-900 mb-2">
+            Motivo de anulación <span className="text-red-600">*</span>
+          </label>
+          <textarea
+            value={motivo}
+            onChange={(e) => setMotivo(e.target.value)}
+            rows={4}
+            className="input-pos"
+            placeholder="Describe por qué se anula este movimiento (mínimo 10 caracteres)."
+            minLength={10}
+            maxLength={2000}
+          />
+          <p className="text-xs text-slate-500 mt-1">{motivo.trim().length}/2000</p>
+
+          <div className="modal-footer-sticky -mx-6 px-6 flex gap-4 mt-6">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 btn-pos btn-secondary"
+              disabled={anularMutation.isLoading}
+            >
+              Cancelar
+            </button>
+            <button
+              type="button"
+              disabled={anularMutation.isLoading || motivo.trim().length < 10}
+              onClick={() => anularMutation.mutate()}
+              className="flex-1 btn-pos btn-danger disabled:opacity-50 inline-flex items-center justify-center gap-2"
+            >
+              {anularMutation.isLoading ? 'Anulando...' : 'Confirmar anulación'}
+            </button>
+          </div>
+        </div>
       </div>
     </div>
   );

@@ -76,7 +76,7 @@ class Caja(Base):
         """Total de ingresos en efectivo (excluye CrediSmart)"""
         total = sum(
             m.monto for m in self.movimientos 
-            if m.ingresa_efectivo and m.monto > 0
+            if m.ingresa_efectivo and m.monto > 0 and not bool(getattr(m, "anulado", False))
         )
         return Decimal(str(total)) if total else Decimal('0')
     
@@ -85,7 +85,7 @@ class Caja(Base):
         """Total de egresos"""
         total = sum(
             abs(m.monto) for m in self.movimientos 
-            if m.monto < 0
+            if m.monto < 0 and not bool(getattr(m, "anulado", False))
         )
         return Decimal(str(total)) if total else Decimal('0')
     
@@ -128,11 +128,18 @@ class MovimientoCaja(Base):
     # Auditoría
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
     created_by = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"))
+
+    # Anulación (soft delete para conservar trazabilidad y evitar borrado físico)
+    anulado = Column(Boolean, nullable=False, default=False)
+    motivo_anulacion = Column(Text, nullable=True)
+    anulado_por = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=True)
+    fecha_anulacion = Column(DateTime, nullable=True)
     
     # Relaciones
     caja = relationship("Caja", back_populates="movimientos")
     vehiculo = relationship("VehiculoProceso")
-    usuario = relationship("Usuario")
+    usuario = relationship("Usuario", foreign_keys=[created_by])
+    usuario_anulacion = relationship("Usuario", foreign_keys=[anulado_por])
     
     def __repr__(self):
         signo = "+" if self.monto >= 0 else "-"

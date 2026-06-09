@@ -1036,6 +1036,9 @@ export interface MovimientoCaja {
   beneficiario_telefono?: string | null;
   beneficiario_factus_municipality_id?: number | null;
   proveedor_catalogo_id?: string | null;
+  anulado?: boolean;
+  motivo_anulacion?: string | null;
+  fecha_anulacion?: string | null;
 }
 
 // Tarifas

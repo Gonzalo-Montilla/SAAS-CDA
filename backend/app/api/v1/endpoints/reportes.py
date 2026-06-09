@@ -105,6 +105,34 @@ def _mc_scope(db: Session, tenant_id, scope_sid: Optional[UUID], *extra):
     Coherente con el PDF de comprobante de egreso de caja: si el tenant tiene una sola
     sede activa, incluye cajas con sucursal_id NULL (datos previos a asignar sede).
     """
+    cond = [
+        MovimientoCaja.tenant_id == tenant_id,
+        or_(MovimientoCaja.anulado == False, MovimientoCaja.anulado.is_(None)),
+        *extra,
+    ]
+    if scope_sid is not None:
+        n_sedes = (
+            db.query(Sucursal)
+            .filter(Sucursal.tenant_id == tenant_id, Sucursal.activa.is_(True))
+            .count()
+        )
+        if n_sedes <= 1:
+            caja_sede_clause = or_(Caja.sucursal_id == scope_sid, Caja.sucursal_id.is_(None))
+        else:
+            caja_sede_clause = Caja.sucursal_id == scope_sid
+        cond.append(
+            MovimientoCaja.caja_id.in_(
+                db.query(Caja.id).filter(Caja.tenant_id == tenant_id, caja_sede_clause)
+            )
+        )
+    return and_(*cond)
+
+
+def _mc_scope_incluye_anulados(db: Session, tenant_id, scope_sid: Optional[UUID], *extra):
+    """
+    Movimientos de caja visibles según sede del reporte, incluyendo anulados.
+    Útil para trazabilidad en reportes detallados de auditoría.
+    """
     cond = [MovimientoCaja.tenant_id == tenant_id, *extra]
     if scope_sid is not None:
         n_sedes = (
@@ -690,7 +718,7 @@ def obtener_movimientos_detallados(
     movimientos_caja = (
         db.query(MovimientoCaja)
         .filter(
-            _mc_scope(
+            _mc_scope_incluye_anulados(
                 db,
                 tid,
                 scope_sid,
@@ -831,6 +859,14 @@ def obtener_movimientos_detallados(
             "beneficiario_email": getattr(mov, "beneficiario_email", None),
             "beneficiario_telefono": getattr(mov, "beneficiario_telefono", None),
             "beneficiario_factus_municipality_id": getattr(mov, "beneficiario_factus_municipality_id", None),
+            "anulado": bool(getattr(mov, "anulado", False)),
+            "motivo_anulacion": getattr(mov, "motivo_anulacion", None),
+            "fecha_anulacion": _iso_utc(getattr(mov, "fecha_anulacion", None)),
+            "anulado_por": (
+                mov.usuario_anulacion.nombre_completo
+                if getattr(mov, "usuario_anulacion", None) is not None
+                else None
+            ),
             "documento_soporte_numero": ds_row_caja.numero_documento if ds_row_caja else None,
             "documento_soporte_public_url": ds_row_caja.public_url if ds_row_caja else None,
             "documento_soporte_emitido_por": (
@@ -891,6 +927,13 @@ def obtener_movimientos_detallados(
             "usuario": usuario_nombre,
             "numero_comprobante": mov.numero_comprobante or "N/A",
             "anulado": bool(getattr(mov, "anulado", False)),
+            "motivo_anulacion": getattr(mov, "motivo_anulacion", None),
+            "fecha_anulacion": _iso_utc(getattr(mov, "fecha_anulacion", None)),
+            "anulado_por": (
+                mov.usuario_anulacion.nombre_completo
+                if getattr(mov, "usuario_anulacion", None) is not None
+                else None
+            ),
             "vehiculo_id": None,
             "numero_factura_dian": None,
             "factura_public_url": None,

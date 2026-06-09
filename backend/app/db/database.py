@@ -1139,6 +1139,41 @@ def ensure_tesoreria_anulacion_y_enum(db):
     )
 
 
+def ensure_movimiento_caja_anulacion_schema(db):
+    """
+    Anulación de movimientos de caja (soft delete) para conservar trazabilidad.
+    """
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+    db.execute(
+        text(
+            """
+            ALTER TABLE movimientos_caja ADD COLUMN IF NOT EXISTS anulado BOOLEAN NOT NULL DEFAULT FALSE
+            """
+        )
+    )
+    db.execute(text("ALTER TABLE movimientos_caja ADD COLUMN IF NOT EXISTS motivo_anulacion TEXT"))
+    db.execute(
+        text(
+            "ALTER TABLE movimientos_caja ADD COLUMN IF NOT EXISTS anulado_por UUID REFERENCES usuarios(id)"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE movimientos_caja ADD COLUMN IF NOT EXISTS fecha_anulacion TIMESTAMP"
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS idx_movimientos_caja_anulado
+            ON movimientos_caja(anulado)
+            """
+        )
+    )
+
+
 def ensure_facturacion_ubicacion_schema(db):
     """Municipio y dirección para Factus: matriz (tenant) y override opcional por sede."""
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS factus_municipality_id INTEGER"))
@@ -2528,6 +2563,7 @@ def init_db():
         ensure_rtm_reminders_schema(db)
         ensure_sucursales_schema(db)
         ensure_tesoreria_anulacion_y_enum(db)
+        ensure_movimiento_caja_anulacion_schema(db)
         ensure_movimiento_tesoreria_beneficiario_columns(db)
         ensure_movimiento_caja_beneficiario_columns(db)
         ensure_movimiento_proveedor_contacto_documento_soporte(db)

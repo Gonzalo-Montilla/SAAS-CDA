@@ -89,8 +89,16 @@ class MovimientoResponse(BaseModel):
     beneficiario_telefono: Optional[str] = None
     beneficiario_factus_municipality_id: Optional[int] = None
     proveedor_catalogo_id: Optional[UUID] = None
+    anulado: bool = False
+    motivo_anulacion: Optional[str] = None
+    fecha_anulacion: Optional[datetime] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class MovimientoAnularRequest(BaseModel):
+    """Anulación de movimiento de caja con motivo obligatorio."""
+    motivo: str = Field(min_length=10, max_length=2000)
 
 
 class CajaResponse(BaseModel):
