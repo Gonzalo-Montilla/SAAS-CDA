@@ -116,6 +116,7 @@ class QualityInviteItem(BaseModel):
     revision_cierre_resultado: str | None = None
     revision_cierre_observacion: str | None = None
     revision_cierre_at: datetime | None = None
+    correccion_cierre_disponible: bool = False
     created_at: datetime
 
 
@@ -264,6 +265,21 @@ def _vehiculo_cerrado_como_aprobado(vehiculo: VehiculoProceso) -> bool:
     return estado_raw.strip().lower() == "aprobado"
 
 
+def _correccion_cierre_disponible(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    vehiculo: VehiculoProceso | None,
+) -> bool:
+    if not vehiculo or not _vehiculo_cerrado_como_aprobado(vehiculo):
+        return False
+    if vehiculo.estado == EstadoVehiculo.REGISTRADO:
+        return False
+    origen = _resolve_reinspeccion_origen(db, tenant_id=tenant_id, vehiculo=vehiculo)
+    vence_at = origen.fecha_registro + timedelta(days=REINSPECCION_VENTANA_DIAS)
+    return _now_naive() <= vence_at
+
+
 def _resolve_reinspeccion_origen(
     db: Session,
     *,
@@ -403,6 +419,7 @@ def _invite_to_item(
     response: QualitySurveyResponse | None,
     vehiculo: VehiculoProceso | None = None,
     entregador_nombre: str | None = None,
+    correccion_cierre_disponible: bool = False,
 ) -> QualityInviteItem:
     return QualityInviteItem(
         id=str(invite.id),
@@ -425,6 +442,7 @@ def _invite_to_item(
         revision_cierre_resultado=(vehiculo.revision_cierre_resultado if vehiculo else None),
         revision_cierre_observacion=(vehiculo.revision_cierre_observacion if vehiculo else None),
         revision_cierre_at=(vehiculo.revision_cierre_at if vehiculo else None),
+        correccion_cierre_disponible=correccion_cierre_disponible,
         created_at=invite.created_at,
     )
 
@@ -713,6 +731,11 @@ def list_quality_invites(
             if invite.vehiculo_id and vehiculo_map.get(str(invite.vehiculo_id))
             and vehiculo_map.get(str(invite.vehiculo_id)).certificado_entregado_por
             else None,
+            _correccion_cierre_disponible(
+                db,
+                tenant_id=current_user.tenant_id,
+                vehiculo=vehiculo_map.get(str(invite.vehiculo_id)) if invite.vehiculo_id else None,
+            ),
         )
         for invite in invites
     ]
@@ -752,7 +775,13 @@ def get_quality_invite_detail(
             entregador = db.query(Usuario).filter(Usuario.id == vehiculo.certificado_entregado_por).first()
             entregador_nombre = entregador.nombre_completo if entregador else None
 
-    base = _invite_to_item(invite, response, vehiculo, entregador_nombre)
+    base = _invite_to_item(
+        invite,
+        response,
+        vehiculo,
+        entregador_nombre,
+        _correccion_cierre_disponible(db, tenant_id=current_user.tenant_id, vehiculo=vehiculo),
+    )
     return QualityInviteDetailResponse(
         **base.model_dump(),
         facilidad_agendar_cita=response.facilidad_agendar_cita if response else None,

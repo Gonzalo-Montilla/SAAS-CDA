@@ -15,6 +15,7 @@ import {
   MessageCircle,
   MessageSquareHeart,
   RefreshCw,
+  RotateCcw,
   Trash2,
   Star,
   X,
@@ -25,7 +26,11 @@ import Layout from '../components/Layout';
 import { qualityApi } from '../api/quality';
 import type { QualityInviteItem, RTMReminderItem, Usuario } from '../types';
 import { useAuth } from '../contexts/AuthContext';
-import type { QualitySurveySubmitPayload, MarkCertificateDeliveredPayload } from '../api/quality';
+import type {
+  QualitySurveySubmitPayload,
+  MarkCertificateDeliveredPayload,
+  CorrectInspectionResultPayload,
+} from '../api/quality';
 import { useBrand } from '../contexts/BrandContext';
 import { useToast } from '../contexts/ToastContext';
 import {
@@ -38,6 +43,10 @@ import {
 
 const canRegisterInPerson = (row: QualityInviteItem) =>
   ['pending', 'no_email', 'sent', 'failed'].includes(row.status);
+
+const inviteCerradoAprobado = (row: QualityInviteItem) =>
+  row.revision_cierre_resultado === 'aprobado' ||
+  (!row.revision_cierre_resultado && !!row.certificado_entregado_at);
 
 const statusLabel = (status: string): string => {
   const map: Record<string, string> = {
@@ -137,6 +146,7 @@ export default function Calidad() {
   const puedeElegirSedeCalidad =
     !!tenantUser && (tenantUser.rol === 'administrador' || tenantUser.rol === 'contador');
   const puedeGestionarLogoCalidad = !!tenantUser && tenantUser.rol === 'administrador';
+  const puedeCorregirCierreInspeccion = !!tenantUser && tenantUser.rol === 'administrador';
   const [activeTab, setActiveTab] = useState<'encuestas' | 'vencimientos' | 'logo_calidad'>('encuestas');
   const [statusFilter, setStatusFilter] = useState<string>('todos');
   const [calidadSedeScope, setCalidadSedeScope] = useState<'todas' | 'sucursal'>('todas');
@@ -151,6 +161,11 @@ export default function Calidad() {
   const [markingInviteId, setMarkingInviteId] = useState<string | null>(null);
   const [cierreResultado, setCierreResultado] = useState<'aprobado' | 'rechazado'>('aprobado');
   const [cierreObservacion, setCierreObservacion] = useState('');
+  const [cierreConfirmAprobado, setCierreConfirmAprobado] = useState(false);
+  const [confirmCorreccionInvite, setConfirmCorreccionInvite] = useState<QualityInviteItem | null>(null);
+  const [correccionMotivo, setCorreccionMotivo] = useState('');
+  const [correccionSincronizar, setCorreccionSincronizar] = useState(true);
+  const [correccionInviteId, setCorreccionInviteId] = useState<string | null>(null);
   const [inPersonRatings, setInPersonRatings] = useState<Record<QualitySurveyRatingKey, number>>(
     emptyQualitySurveyRatings
   );
@@ -337,6 +352,7 @@ export default function Calidad() {
       setMarkingInviteId(null);
       setCierreResultado('aprobado');
       setCierreObservacion('');
+      setCierreConfirmAprobado(false);
       showToast('success', data.resultado === 'aprobado' ? 'Resultado aprobado' : 'Resultado rechazado', data.message);
       queryClient.invalidateQueries({ queryKey: ['quality-invites'] });
       queryClient.invalidateQueries({ queryKey: ['dashboard-operativo'] });
@@ -345,6 +361,37 @@ export default function Calidad() {
     onError: (error: unknown) => {
       setMarkingInviteId(null);
       let message = 'No fue posible guardar el resultado de inspección.';
+      if (axios.isAxiosError(error)) {
+        const d = error.response?.data?.detail;
+        if (typeof d === 'string') message = d;
+      } else if (error instanceof Error) {
+        message = error.message;
+      }
+      showToast('error', 'Error', message);
+    },
+  });
+
+  const correctInspectionResultMutation = useMutation({
+    mutationFn: ({ inviteId, payload }: { inviteId: string; payload: CorrectInspectionResultPayload }) =>
+      qualityApi.correctInspectionResult(inviteId, payload),
+    onSuccess: (data) => {
+      setConfirmCorreccionInvite(null);
+      setCorreccionInviteId(null);
+      setCorreccionMotivo('');
+      setCorreccionSincronizar(true);
+      showToast(
+        'success',
+        data.reintento_sincronizado ? 'Corrección aplicada' : 'Resultado corregido',
+        data.message
+      );
+      queryClient.invalidateQueries({ queryKey: ['quality-invites'] });
+      queryClient.invalidateQueries({ queryKey: ['quality-invite-detail'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-operativo'] });
+      queryClient.invalidateQueries({ queryKey: ['vehiculos-pendientes'] });
+    },
+    onError: (error: unknown) => {
+      setCorreccionInviteId(null);
+      let message = 'No fue posible corregir el resultado de inspección.';
       if (axios.isAxiosError(error)) {
         const d = error.response?.data?.detail;
         if (typeof d === 'string') message = d;
@@ -771,6 +818,7 @@ export default function Calidad() {
                             onClick={() => {
                               setCierreResultado('aprobado');
                               setCierreObservacion('');
+                              setCierreConfirmAprobado(false);
                               setConfirmEntregaInvite(row);
                             }}
                             disabled={markCertificateDeliveredMutation.isLoading && markingInviteId === row.id}
@@ -782,23 +830,46 @@ export default function Calidad() {
                               : 'Cerrar inspección'}
                           </button>
                         ) : (
-                          <span
-                            className={`text-xs inline-flex items-center gap-1 ${
-                              row.revision_cierre_resultado === 'rechazado'
-                                ? 'badge badge-warning'
-                                : 'badge badge-success'
-                            }`}
-                            title={
-                              row.revision_cierre_resultado === 'aprobado' || (!row.revision_cierre_resultado && !!row.certificado_entregado_at)
-                                ? `Aprobado y entregado: ${row.certificado_entregado_at ? new Date(row.certificado_entregado_at).toLocaleString() : ''}${
-                                    row.certificado_entregado_por ? ` · ${row.certificado_entregado_por}` : ''
-                                  }`
-                                : `Rechazado: ${row.revision_cierre_observacion || 'Sin observación'}`
-                            }
-                          >
-                            <CheckCircle2 className="w-3.5 h-3.5" />
-                            {row.revision_cierre_resultado === 'rechazado' ? 'Rechazado' : 'Aprobado'}
-                          </span>
+                          <>
+                            <span
+                              className={`text-xs inline-flex items-center gap-1 ${
+                                row.revision_cierre_resultado === 'rechazado'
+                                  ? 'badge badge-warning'
+                                  : 'badge badge-success'
+                              }`}
+                              title={
+                                row.revision_cierre_resultado === 'aprobado' || (!row.revision_cierre_resultado && !!row.certificado_entregado_at)
+                                  ? `Aprobado y entregado: ${row.certificado_entregado_at ? new Date(row.certificado_entregado_at).toLocaleString() : ''}${
+                                      row.certificado_entregado_por ? ` · ${row.certificado_entregado_por}` : ''
+                                    }`
+                                  : `Rechazado: ${row.revision_cierre_observacion || 'Sin observación'}`
+                              }
+                            >
+                              <CheckCircle2 className="w-3.5 h-3.5" />
+                              {row.revision_cierre_resultado === 'rechazado' ? 'Rechazado' : 'Aprobado'}
+                            </span>
+                            {puedeCorregirCierreInspeccion &&
+                              inviteCerradoAprobado(row) &&
+                              row.correccion_cierre_disponible && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setCorreccionMotivo('');
+                                  setCorreccionSincronizar(true);
+                                  setConfirmCorreccionInvite(row);
+                                }}
+                                disabled={
+                                  correctInspectionResultMutation.isLoading && correccionInviteId === row.id
+                                }
+                                className="px-3 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-60"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                                {correctInspectionResultMutation.isLoading && correccionInviteId === row.id
+                                  ? 'Corrigiendo...'
+                                  : 'Corregir a rechazado'}
+                              </button>
+                            )}
+                          </>
                         )}
                       </div>
                     </td>
@@ -1364,11 +1435,27 @@ export default function Calidad() {
                   Para rechazo, la observación es obligatoria.
                 </p>
               )}
+              {cierreResultado === 'aprobado' && (
+                <label className="flex items-start gap-2 text-sm text-slate-800 border border-amber-200 bg-amber-50 rounded-lg p-3">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={cierreConfirmAprobado}
+                    onChange={(e) => setCierreConfirmAprobado(e.target.checked)}
+                  />
+                  <span>
+                    Confirmo que el vehículo <strong>aprobó</strong> la inspección física y se entrega certificado.
+                  </span>
+                </label>
+              )}
             </div>
             <div className="flex items-center justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setConfirmEntregaInvite(null)}
+                onClick={() => {
+                  setConfirmEntregaInvite(null);
+                  setCierreConfirmAprobado(false);
+                }}
                 className="btn-corporate-muted px-4 py-2 rounded-lg"
                 disabled={markCertificateDeliveredMutation.isLoading}
               >
@@ -1382,6 +1469,14 @@ export default function Calidad() {
                     showToast('warning', 'Observación requerida', 'Debes registrar la observación del rechazo.');
                     return;
                   }
+                  if (cierreResultado === 'aprobado' && !cierreConfirmAprobado) {
+                    showToast(
+                      'warning',
+                      'Confirmación requerida',
+                      'Debes confirmar que el vehículo aprobó la inspección física.'
+                    );
+                    return;
+                  }
                   setMarkingInviteId(confirmEntregaInvite.id);
                   markCertificateDeliveredMutation.mutate({
                     inviteId: confirmEntregaInvite.id,
@@ -1392,10 +1487,95 @@ export default function Calidad() {
                   });
                 }}
                 className="px-4 py-2 rounded-lg bg-emerald-600 text-white font-semibold hover:bg-emerald-700 disabled:opacity-60 inline-flex items-center gap-2"
-                disabled={markCertificateDeliveredMutation.isLoading}
+                disabled={
+                  markCertificateDeliveredMutation.isLoading ||
+                  (cierreResultado === 'aprobado' && !cierreConfirmAprobado)
+                }
               >
                 <CheckCircle2 className="w-4 h-4" />
                 {markCertificateDeliveredMutation.isLoading ? 'Guardando...' : 'Guardar resultado'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {confirmCorreccionInvite && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+          <div className="w-full max-w-md section-card p-6 shadow-2xl">
+            <div className="flex items-start gap-3 mb-4">
+              <div className="mt-0.5">
+                <RotateCcw className="w-6 h-6 text-amber-600" />
+              </div>
+              <div>
+                <p className="text-base font-semibold text-slate-900">Corregir resultado de inspección</p>
+                <p className="text-sm text-slate-600 mt-1">
+                  Cambiará el cierre de <span className="font-semibold text-slate-800">aprobado</span> a{' '}
+                  <span className="font-semibold text-slate-800">rechazado</span> para la placa{' '}
+                  <span className="font-semibold text-slate-800">{confirmCorreccionInvite.placa}</span>.
+                </p>
+                <p className="text-xs text-amber-700 mt-2">
+                  No revierte cobros ni facturas ya emitidas. Habilita reinspección sin cobro si hay un registro
+                  pendiente en Caja.
+                </p>
+              </div>
+            </div>
+            <div className="space-y-3 mb-4">
+              <textarea
+                value={correccionMotivo}
+                onChange={(e) => setCorreccionMotivo(e.target.value)}
+                placeholder="Motivo obligatorio de la corrección (mínimo 10 caracteres)"
+                className="input-corporate min-h-[110px]"
+                maxLength={2000}
+              />
+              <label className="flex items-start gap-2 text-sm text-slate-800">
+                <input
+                  type="checkbox"
+                  className="mt-0.5"
+                  checked={correccionSincronizar}
+                  onChange={(e) => setCorreccionSincronizar(e.target.checked)}
+                />
+                <span>
+                  Si existe un registro pendiente en Caja para esta placa, marcarlo automáticamente como reintento
+                  exento ($0).
+                </span>
+              </label>
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirmCorreccionInvite(null)}
+                className="btn-corporate-muted px-4 py-2 rounded-lg"
+                disabled={correctInspectionResultMutation.isLoading}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const motivo = correccionMotivo.trim();
+                  if (motivo.length < 10) {
+                    showToast(
+                      'warning',
+                      'Motivo requerido',
+                      'Debes registrar un motivo de al menos 10 caracteres.'
+                    );
+                    return;
+                  }
+                  setCorreccionInviteId(confirmCorreccionInvite.id);
+                  correctInspectionResultMutation.mutate({
+                    inviteId: confirmCorreccionInvite.id,
+                    payload: {
+                      motivo,
+                      sincronizar_reintento_pendiente: correccionSincronizar,
+                    },
+                  });
+                }}
+                className="px-4 py-2 rounded-lg bg-amber-600 text-white font-semibold hover:bg-amber-700 disabled:opacity-60 inline-flex items-center gap-2"
+                disabled={correctInspectionResultMutation.isLoading}
+              >
+                <RotateCcw className="w-4 h-4" />
+                {correctInspectionResultMutation.isLoading ? 'Aplicando...' : 'Confirmar corrección'}
               </button>
             </div>
           </div>

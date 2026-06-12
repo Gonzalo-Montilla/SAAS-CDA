@@ -64,6 +64,8 @@ export interface Usuario {
   tenant_billing?: TenantBillingInfo | null;
   /** Switch por tenant para habilitar o bloquear Nómina. */
   tenant_nomina_enabled?: boolean;
+  /** Switch por tenant para habilitar o bloquear Exógena. */
+  tenant_exogena_enabled?: boolean;
   /** Switch por tenant para habilitar o bloquear SARLAFT. */
   tenant_sarlaft_enabled?: boolean;
 }
@@ -102,6 +104,7 @@ export interface SaaSTenantSummary {
   last_payment_at?: string | null;
   activo: boolean;
   nomina_enabled: boolean;
+  exogena_enabled: boolean;
   sarlaft_enabled: boolean;
   sarlaft_mode: 'manual' | 'api' | string;
   login_url: string;
@@ -677,6 +680,7 @@ export interface QualityInviteItem {
   revision_cierre_resultado?: 'aprobado' | 'rechazado' | null;
   revision_cierre_observacion?: string | null;
   revision_cierre_at?: string | null;
+  correccion_cierre_disponible?: boolean;
   created_at: string;
 }
 

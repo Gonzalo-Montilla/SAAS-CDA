@@ -44,6 +44,22 @@ export interface MarkCertificateDeliveredPayload {
   observacion?: string;
 }
 
+export interface CorrectInspectionResultPayload {
+  motivo: string;
+  sincronizar_reintento_pendiente?: boolean;
+}
+
+export interface CorrectInspectionResultResponse {
+  success: boolean;
+  vehiculo_id: string;
+  placa: string;
+  resultado_anterior: string;
+  resultado_nuevo: 'rechazado';
+  reintento_sincronizado: boolean;
+  reintento_vehiculo_id?: string | null;
+  message: string;
+}
+
 export interface QualityLogoUpdatePayload {
   logoUrl?: string;
   logoFile?: File | null;
@@ -130,6 +146,17 @@ export const qualityApi = {
   ): Promise<MarkCertificateDeliveredResponse> => {
     const response = await apiClient.post<MarkCertificateDeliveredResponse>(
       `/quality/invites/${inviteId}/mark-certificate-delivered`,
+      payload
+    );
+    return response.data;
+  },
+
+  correctInspectionResult: async (
+    inviteId: string,
+    payload: CorrectInspectionResultPayload
+  ): Promise<CorrectInspectionResultResponse> => {
+    const response = await apiClient.post<CorrectInspectionResultResponse>(
+      `/quality/invites/${inviteId}/corregir-cierre-resultado`,
       payload
     );
     return response.data;
