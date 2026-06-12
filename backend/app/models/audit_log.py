@@ -44,6 +44,7 @@ class AuditAction(str, enum.Enum):
     REGISTER_VEHICLE = "register_vehicle"
     UPDATE_VEHICLE = "update_vehicle"
     DELETE_VEHICLE = "delete_vehicle"
+    CORRECT_INSPECTION_RESULT = "correct_inspection_result"
 
 
 class AuditLog(Base):

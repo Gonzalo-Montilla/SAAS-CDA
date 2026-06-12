@@ -3,16 +3,19 @@ Endpoints de calidad (encuestas de satisfacción por tenant).
 """
 import uuid
 from datetime import datetime, timezone, timedelta
+from decimal import Decimal
 from statistics import mean
-from typing import Literal
+from typing import Any, Literal
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from pydantic import BaseModel, Field
 from sqlalchemy import false, or_
 from sqlalchemy.orm import Session
 
+from app.api.v1.endpoints.vehiculos import REINSPECCION_VENTANA_DIAS, _build_reinspeccion_context_for_origen
 from app.core.config import settings
 from app.core.deps import get_current_user, get_db
+from app.models.audit_log import AuditAction, AuditLog
 from app.models.quality import QualitySurveyInvite, QualitySurveyResponse
 from app.models.rtm_reminder import RTMRenewalReminder
 from app.models.sucursal import Sucursal
@@ -225,12 +228,147 @@ class MarkCertificateDeliveredRequest(BaseModel):
     observacion: str | None = Field(default=None, max_length=2000)
 
 
+class CorrectInspectionResultRequest(BaseModel):
+    motivo: str = Field(min_length=10, max_length=2000)
+    sincronizar_reintento_pendiente: bool = True
+
+
+class CorrectInspectionResultResponse(BaseModel):
+    success: bool
+    vehiculo_id: str
+    placa: str
+    resultado_anterior: str
+    resultado_nuevo: Literal["rechazado"]
+    reintento_sincronizado: bool
+    reintento_vehiculo_id: str | None = None
+    message: str
+
+
 class RTMReminderTouchManagementRequest(BaseModel):
     channel: str = Field(min_length=3, max_length=30)
     auto_status: str | None = Field(default=None, max_length=30)
 
 
 _IN_PERSON_SUBMIT_STATUSES = frozenset({"pending", "no_email", "sent", "failed"})
+
+
+def _vehiculo_cerrado_como_aprobado(vehiculo: VehiculoProceso) -> bool:
+    resultado = (vehiculo.revision_cierre_resultado or "").strip().lower()
+    if resultado == "aprobado":
+        return True
+    if resultado == "rechazado":
+        return False
+    if vehiculo.certificado_entregado_at is not None:
+        return True
+    estado_raw = vehiculo.estado.value if hasattr(vehiculo.estado, "value") else str(vehiculo.estado)
+    return estado_raw.strip().lower() == "aprobado"
+
+
+def _resolve_reinspeccion_origen(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    vehiculo: VehiculoProceso,
+) -> VehiculoProceso:
+    if vehiculo.reinspeccion_origen_id is None:
+        return vehiculo
+    origen = (
+        db.query(VehiculoProceso)
+        .filter(
+            VehiculoProceso.id == vehiculo.reinspeccion_origen_id,
+            VehiculoProceso.tenant_id == tenant_id,
+        )
+        .first()
+    )
+    return origen or vehiculo
+
+
+def _sync_pending_reinspeccion_registro(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    origen: VehiculoProceso,
+) -> VehiculoProceso | None:
+    root = _resolve_reinspeccion_origen(db, tenant_id=tenant_id, vehiculo=origen)
+    ctx = _build_reinspeccion_context_for_origen(db, tenant_id=tenant_id, origen=root)
+    if not ctx["elegible"]:
+        return None
+
+    pending = (
+        db.query(VehiculoProceso)
+        .filter(
+            VehiculoProceso.tenant_id == tenant_id,
+            VehiculoProceso.placa == origen.placa,
+            VehiculoProceso.estado == EstadoVehiculo.REGISTRADO,
+            VehiculoProceso.fecha_pago.is_(None),
+            VehiculoProceso.id != origen.id,
+            or_(
+                VehiculoProceso.reinspeccion_exenta.is_(False),
+                VehiculoProceso.reinspeccion_exenta.is_(None),
+            ),
+        )
+        .order_by(VehiculoProceso.fecha_registro.desc())
+        .first()
+    )
+    if not pending:
+        return None
+
+    intento_actual = int(ctx["intentos_usados"]) + 1
+    pending.reinspeccion_exenta = True
+    pending.reinspeccion_origen_id = root.id
+    pending.reinspeccion_intento = intento_actual
+    pending.reinspeccion_vence_at = ctx["vence_at"]
+    pending.valor_rtm = Decimal(0)
+    pending.comision_soat = Decimal(0)
+    pending.total_cobrado = Decimal(0)
+    pending.tiene_soat = False
+    return pending
+
+
+def _audit_inspection_correction(
+    db: Session,
+    *,
+    current_user: Usuario,
+    request: Request,
+    vehiculo: VehiculoProceso,
+    resultado_anterior: str,
+    motivo: str,
+    synced_pending: VehiculoProceso | None,
+    before_snapshot: dict[str, Any],
+) -> None:
+    ip_address = None
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        ip_address = forwarded.split(",")[0].strip()
+    elif request.client:
+        ip_address = request.client.host
+
+    db.add(
+        AuditLog(
+            action=AuditAction.CORRECT_INSPECTION_RESULT.value,
+            description=(
+                f"Corrección de resultado de inspección: {vehiculo.placa} "
+                f"({resultado_anterior} -> rechazado)"
+            ),
+            usuario_id=current_user.id,
+            usuario_email=current_user.email,
+            usuario_nombre=current_user.nombre_completo,
+            usuario_rol=current_user.rol.value if hasattr(current_user.rol, "value") else str(current_user.rol),
+            ip_address=ip_address,
+            user_agent=request.headers.get("User-Agent"),
+            extra_data={
+                "vehiculo_id": str(vehiculo.id),
+                "placa": vehiculo.placa,
+                "resultado_anterior": resultado_anterior,
+                "resultado_nuevo": "rechazado",
+                "motivo": motivo,
+                "before": before_snapshot,
+                "reintento_sincronizado": synced_pending is not None,
+                "reintento_vehiculo_id": str(synced_pending.id) if synced_pending else None,
+            },
+            success="success",
+        )
+    )
 
 
 def _persist_quality_survey_response(
@@ -850,6 +988,159 @@ def mark_certificate_delivered(
             if resultado == "aprobado"
             else "Resultado registrado: rechazado (sin entrega de certificado)."
         ),
+    )
+
+
+@router.post(
+    "/invites/{invite_id}/corregir-cierre-resultado",
+    response_model=CorrectInspectionResultResponse,
+)
+def corregir_cierre_resultado(
+    invite_id: str,
+    payload: CorrectInspectionResultRequest,
+    request: Request,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    if current_user.rol != RolEnum.ADMINISTRADOR:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo administradores pueden corregir el resultado de inspección.",
+        )
+
+    try:
+        invite_uuid = uuid.UUID(invite_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Identificador inválido") from exc
+
+    invite = (
+        db.query(QualitySurveyInvite)
+        .filter(QualitySurveyInvite.id == invite_uuid, QualitySurveyInvite.tenant_id == current_user.tenant_id)
+        .first()
+    )
+    if not invite:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitación no encontrada")
+    if not _calidad_invite_visible_for_user(invite, current_user):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitación no encontrada")
+    if not invite.vehiculo_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invitación sin vehículo asociado")
+
+    vehiculo = (
+        db.query(VehiculoProceso)
+        .filter(
+            VehiculoProceso.id == invite.vehiculo_id,
+            VehiculoProceso.tenant_id == current_user.tenant_id,
+        )
+        .first()
+    )
+    if not vehiculo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehículo no encontrado")
+
+    if not _vehiculo_cerrado_como_aprobado(vehiculo):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo se puede corregir un cierre registrado como aprobado.",
+        )
+
+    if vehiculo.estado == EstadoVehiculo.REGISTRADO:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El vehículo aún no está cobrado; use el cierre normal de inspección.",
+        )
+
+    motivo = payload.motivo.strip()
+    resultado_anterior = (vehiculo.revision_cierre_resultado or "aprobado").strip().lower()
+    origen = _resolve_reinspeccion_origen(db, tenant_id=current_user.tenant_id, vehiculo=vehiculo)
+    now = _now_naive()
+    vence_correccion = origen.fecha_registro + timedelta(days=REINSPECCION_VENTANA_DIAS)
+    if now > vence_correccion:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"La ventana de corrección venció ({REINSPECCION_VENTANA_DIAS} días "
+                "desde el primer intento de reinspección)."
+            ),
+        )
+
+    before_snapshot = {
+        "estado": vehiculo.estado.value if hasattr(vehiculo.estado, "value") else str(vehiculo.estado),
+        "revision_cierre_resultado": vehiculo.revision_cierre_resultado,
+        "revision_cierre_observacion": vehiculo.revision_cierre_observacion,
+        "certificado_entregado_at": vehiculo.certificado_entregado_at.isoformat()
+        if vehiculo.certificado_entregado_at
+        else None,
+    }
+
+    vehiculo.revision_cierre_resultado = "rechazado"
+    vehiculo.revision_cierre_observacion = motivo
+    vehiculo.revision_cierre_at = now
+    vehiculo.revision_cierre_por = current_user.id
+    vehiculo.estado = EstadoVehiculo.RECHAZADO
+    vehiculo.certificado_entregado_at = None
+    vehiculo.certificado_entregado_por = None
+
+    synced_pending = None
+    if payload.sincronizar_reintento_pendiente:
+        synced_pending = _sync_pending_reinspeccion_registro(
+            db,
+            tenant_id=current_user.tenant_id,
+            origen=vehiculo,
+        )
+
+    _audit_inspection_correction(
+        db,
+        current_user=current_user,
+        request=request,
+        vehiculo=vehiculo,
+        resultado_anterior=resultado_anterior,
+        motivo=motivo,
+        synced_pending=synced_pending,
+        before_snapshot=before_snapshot,
+    )
+    db.commit()
+    db.refresh(vehiculo)
+
+    cliente_email = (vehiculo.cliente_email or "").strip().lower()
+    if cliente_email:
+        try:
+            tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+            nombre_cda = (
+                tenant.nombre_comercial
+                if tenant and tenant.nombre_comercial
+                else (tenant.nombre if tenant else "CDASOFT")
+            )
+            asunto = f"Corrección resultado RTM - {vehiculo.placa} - {nombre_cda}"
+            cuerpo_html = generar_email_rechazo_reinspeccion_cliente(
+                nombre_cda=nombre_cda,
+                nombre_cliente=vehiculo.cliente_nombre or "Cliente",
+                placa=vehiculo.placa or "",
+                observacion_rechazo=motivo,
+                correo_contacto_cda=(tenant.correo_electronico if tenant else None),
+                telefono_contacto_cda=(tenant.celular if tenant else None),
+            )
+            enviar_email(cliente_email, asunto, cuerpo_html)
+        except Exception as email_exc:
+            print(f"[WARN] No se pudo enviar correo tras corrección de inspección: {email_exc}")
+
+    if synced_pending:
+        message = (
+            f"Resultado corregido a rechazado. Se actualizó el reintento pendiente en Caja "
+            f"({synced_pending.placa}) a $0."
+        )
+    else:
+        message = (
+            "Resultado corregido a rechazado. No se encontró un registro pendiente en Caja para sincronizar."
+        )
+
+    return CorrectInspectionResultResponse(
+        success=True,
+        vehiculo_id=str(vehiculo.id),
+        placa=vehiculo.placa or "",
+        resultado_anterior=resultado_anterior,
+        resultado_nuevo="rechazado",
+        reintento_sincronizado=synced_pending is not None,
+        reintento_vehiculo_id=str(synced_pending.id) if synced_pending else None,
+        message=message,
     )
 
 
