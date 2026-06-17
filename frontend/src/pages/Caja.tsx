@@ -132,7 +132,8 @@ export default function CajaPage() {
     queryKey: ['vehiculos-cobrados-hoy'],
     queryFn: vehiculosApi.obtenerCobradosHoy,
     enabled: !!cajaActiva || esAdmin,
-    refetchInterval: 10000, // Refrescar cada 10 segundos
+    refetchInterval: 30000, // Refrescar cada 30 segundos
+    staleTime: 10000,
     retry: 1,
   });
 

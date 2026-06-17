@@ -130,6 +130,7 @@ ESTADOS_COBRO_EFECTIVO = [
     EstadoVehiculo.RECHAZADO,
     EstadoVehiculo.COMPLETADO,
 ]
+MAX_COBRADOS_HOY_RESPONSE = 250
 
 
 def _co_today_date() -> date:
@@ -267,6 +268,7 @@ def _build_vehiculo_response_with_correccion(
     *,
     correccion: FacturaCorreccion | None = None,
     cajero_nombre: str | None = None,
+    compact: bool = False,
 ) -> VehiculoResponse:
     update_data: dict[str, Any] = {}
     if cajero_nombre is not None:
@@ -284,6 +286,9 @@ def _build_vehiculo_response_with_correccion(
                 "factura_correccion_factura_nueva": correccion.factura_nueva_numero,
             }
         )
+    if compact:
+        # Evita enviar JSON pesado de recepción en listados rápidos de Caja.
+        update_data["recepcion_formato_extra_json"] = None
     out = VehiculoResponse.model_validate(vehiculo)
     return out.model_copy(update=update_data) if update_data else out
 
@@ -2888,12 +2893,18 @@ def listar_cobrados_hoy(
     )
 
     if current_role == "administrador":
-        vehiculos = base_query.order_by(VehiculoProceso.fecha_pago.desc()).all()
+        vehiculos = (
+            base_query
+            .order_by(VehiculoProceso.fecha_pago.desc())
+            .limit(MAX_COBRADOS_HOY_RESPONSE)
+            .all()
+        )
     else:
         vehiculos = (
             base_query
             .filter(VehiculoProceso.cobrado_por == current_user.id)
             .order_by(VehiculoProceso.fecha_pago.desc())
+            .limit(MAX_COBRADOS_HOY_RESPONSE)
             .all()
         )
 
@@ -2906,6 +2917,7 @@ def listar_cobrados_hoy(
         _build_vehiculo_response_with_correccion(
             vehiculo,
             correccion=corrections.get(vehiculo.id),
+            compact=True,
         )
         for vehiculo in vehiculos
     ]
