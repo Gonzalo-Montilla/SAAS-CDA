@@ -115,6 +115,13 @@ interface Movimiento {
   factura_emitida_por?: string | null;
   factura_emitida_en?: string | null;
   factura_pdf_archivado?: boolean;
+  factura_corregida?: boolean;
+  factura_correccion_estado?: string | null;
+  factura_correccion_motivo?: string | null;
+  factura_correccion_at?: string | null;
+  factura_correccion_factura_original?: string | null;
+  factura_correccion_nota_credito?: string | null;
+  factura_correccion_factura_nueva?: string | null;
   /** Campos solo UI para vista compacta de pagos mixtos. */
   ui_pago_mixto_compacto?: boolean;
   ui_desglose_metodos?: Array<{ metodo: string; monto: number }>;
@@ -137,6 +144,13 @@ interface Tramite {
   pagado: boolean;
   registrado_por: string;
   sede?: string | null;
+  factura_corregida?: boolean;
+  factura_correccion_estado?: string | null;
+  factura_correccion_motivo?: string | null;
+  factura_correccion_at?: string | null;
+  factura_original_numero?: string | null;
+  nota_credito_numero?: string | null;
+  factura_nueva_numero?: string | null;
 }
 
 interface ProvisionIvaVenta {
@@ -2340,6 +2354,8 @@ export default function ReportesPage() {
                         </details>
                       )}
                       {(m.factura_emitida_por ||
+                        m.factura_corregida ||
+                        m.factura_correccion_estado ||
                         m.documento_soporte_emitido_por ||
                         m.documento_soporte_concepto_retencion ||
                         m.documento_soporte_retencion_calculada != null) && (
@@ -2357,6 +2373,34 @@ export default function ReportesPage() {
                               {m.factura_pdf_archivado ? (
                                 <span className="text-emerald-700 font-medium"> · PDF archivado</span>
                               ) : null}
+                            </p>
+                          ) : null}
+                          {(m.factura_corregida || m.factura_correccion_estado) ? (
+                            <p>
+                              <span className="font-medium text-slate-600">Corrección factura:</span>{' '}
+                              {m.factura_correccion_estado === 'failed'
+                                ? 'Fallida'
+                                : m.factura_corregida
+                                  ? 'Completada'
+                                  : 'Registrada'}
+                              {m.factura_correccion_motivo
+                                ? ` · motivo ${m.factura_correccion_motivo}`
+                                : ''}
+                              {m.factura_correccion_at
+                                ? ` · ${new Date(m.factura_correccion_at).toLocaleString('es-CO', {
+                                    dateStyle: 'short',
+                                    timeStyle: 'short',
+                                  })}`
+                                : ''}
+                              {m.factura_correccion_factura_original
+                                ? ` · Orig: ${m.factura_correccion_factura_original}`
+                                : ''}
+                              {m.factura_correccion_nota_credito
+                                ? ` · NC: ${m.factura_correccion_nota_credito}`
+                                : ''}
+                              {m.factura_correccion_factura_nueva
+                                ? ` · Nueva: ${m.factura_correccion_factura_nueva}`
+                                : ''}
                             </p>
                           ) : null}
                           {m.documento_soporte_emitido_por ? (
@@ -2560,6 +2604,7 @@ export default function ReportesPage() {
                   <th className="px-3 py-2 text-right">SOAT</th>
                   <th className="px-3 py-2 text-right">Total</th>
                   <th className="px-3 py-2">Método</th>
+                  <th className="px-3 py-2">Factura</th>
                   <th className="px-3 py-2">Estado</th>
                   <th className="px-3 py-2">Registrado por</th>
                 </tr>
@@ -2567,7 +2612,7 @@ export default function ReportesPage() {
               <tbody>
                 {(tramitesData?.tramites || []).length === 0 && (
                   <tr className="border-t">
-                    <td colSpan={12} className="px-3 py-6 text-center text-slate-500">
+                    <td colSpan={13} className="px-3 py-6 text-center text-slate-500">
                       No hay trámites para el periodo seleccionado.
                     </td>
                   </tr>
@@ -2584,6 +2629,28 @@ export default function ReportesPage() {
                     <td className="px-3 py-2 text-right">{formatCOP(t.comision_soat)}</td>
                     <td className="px-3 py-2 text-right font-semibold">{formatCOP(t.total_cobrado)}</td>
                     <td className="px-3 py-2">{t.metodo_pago}</td>
+                    <td className="px-3 py-2">
+                      {t.factura_corregida ? (
+                        <div className="space-y-1">
+                          <span
+                            className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-semibold ${
+                              t.factura_correccion_estado === 'failed'
+                                ? 'border-red-200 bg-red-50 text-red-700'
+                                : 'border-amber-200 bg-amber-50 text-amber-800'
+                            }`}
+                          >
+                            {t.factura_correccion_estado === 'failed' ? 'Corrección fallida' : 'Corregida (NC + reemisión)'}
+                          </span>
+                          <div className="text-[11px] text-slate-600 leading-tight">
+                            {t.factura_original_numero ? <div>Orig: {t.factura_original_numero}</div> : null}
+                            {t.nota_credito_numero ? <div>NC: {t.nota_credito_numero}</div> : null}
+                            {t.factura_nueva_numero ? <div>Nueva: {t.factura_nueva_numero}</div> : null}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="text-xs text-slate-400">Sin corrección</span>
+                      )}
+                    </td>
                     <td className="px-3 py-2">{t.estado}</td>
                     <td className="px-3 py-2">{t.registrado_por}</td>
                   </tr>

@@ -5,10 +5,12 @@ import re
 import json
 import time
 import traceback
+import uuid
 from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File, Query
 from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import OperationalError
@@ -28,14 +30,26 @@ from app.core.deps import (
 from app.models.usuario import Usuario
 from app.models.tenant import Tenant
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo, MetodoPago
-from app.models.factus import TenantFactusSettings, FacturaElectronica
+from app.models.factus import TenantFactusSettings, FacturaElectronica, FacturaCorreccion
 from app.models.runt_metrica import RuntConsultaMetrica
-from app.services.factus_tenant_settings import creds_complete_for_active_env
+from app.services.factus_tenant_settings import (
+    creds_complete_for_active_env,
+    active_auth_encrypted,
+    list_numbering_ranges_for_tenant,
+)
 from app.core.config import settings
-from app.integrations.factus_client import FactusAPIError, format_factus_error_for_user
+from app.core.factus_crypto import decrypt_secret
+from app.integrations.factus_client import (
+    FactusAPIError,
+    factus_base_url,
+    format_factus_error_for_user,
+    obtain_token,
+    validate_credit_note,
+)
 from app.integrations.placaapi_runt import PlacaApiRuntError, consultar_placaapi_por_placa
 from app.integrations.verifik_runt import VerifikRuntError, consultar_runt_vehiculo_por_placa
 from app.integrations.factus_emit import (
+    build_validate_body,
     emitir_y_persistir_factura_cobro,
     resolve_numbering_range_id_for_cobro,
     validar_datos_cliente_para_factus,
@@ -140,6 +154,139 @@ def _utc_naive_to_co_date(dt: datetime | None) -> date | None:
 
 def _es_prueba_auditoria(tipo_vehiculo: str | None) -> bool:
     return (tipo_vehiculo or "").strip().lower() == TIPO_VEHICULO_PRUEBAS_AUDITORIA
+
+
+MOTIVOS_CORRECCION_FACTURA = {"placa", "documento", "nombre", "identificacion"}
+
+
+class CorregirFacturaEmitidaRequest(BaseModel):
+    motivo: str = Field(min_length=3, max_length=40)
+    nueva_placa: str | None = Field(default=None, max_length=10)
+    cliente_nombre: str | None = Field(default=None, max_length=180)
+    cliente_documento: str | None = Field(default=None, max_length=40)
+    cliente_email: str | None = Field(default=None, max_length=255)
+    cliente_telefono: str | None = Field(default=None, max_length=40)
+    cliente_direccion: str | None = Field(default=None, max_length=255)
+    observacion: str | None = Field(default=None, max_length=250)
+
+
+class CorregirFacturaEmitidaResponse(BaseModel):
+    success: bool
+    vehiculo_id: str
+    factura_original: str | None = None
+    nota_credito: str | None = None
+    factura_nueva: str | None = None
+    message: str
+
+
+class FacturaCorreccionHistorialItem(BaseModel):
+    id: str
+    estado: str
+    motivo: str
+    error_detalle: str | None = None
+    factura_original: str | None = None
+    nota_credito: str | None = None
+    factura_nueva: str | None = None
+    ejecutado_por_usuario_id: str | None = None
+    created_at: datetime
+
+
+def _map_metodo_pago_factus_credit_note(metodo_pago: str | None) -> str:
+    m = (metodo_pago or "efectivo").strip().lower()
+    if m == "transferencia":
+        return "47"
+    if m in {"tarjeta_credito", "credismart", "sistecredito"}:
+        return "48"
+    if m == "tarjeta_debito":
+        return "49"
+    return "10"
+
+
+def _coerce_credit_note_result(data: dict[str, Any]) -> tuple[str | None, int | None]:
+    if not isinstance(data, dict):
+        return None, None
+    candidates: list[dict[str, Any]] = []
+    if isinstance(data.get("data"), dict):
+        candidates.append(data["data"])
+    candidates.append(data)
+    for item in candidates:
+        for key in ("credit_note", "creditNote", "note", "bill"):
+            nested = item.get(key)
+            if isinstance(nested, dict):
+                candidates.append(nested)
+    for item in candidates:
+        num = item.get("number") or item.get("document_number")
+        rid = item.get("id")
+        note_number = str(num).strip() if num is not None else None
+        try:
+            note_id = int(rid) if rid is not None else None
+        except Exception:
+            note_id = None
+        if note_number or note_id is not None:
+            return note_number, note_id
+    return None, None
+
+
+def _select_credit_note_range_id(fs: TenantFactusSettings) -> int | None:
+    ranges = list_numbering_ranges_for_tenant(fs)
+    for row in ranges:
+        document_raw = str(getattr(row, "document", "") or "").strip().lower()
+        if not bool(getattr(row, "is_active", True)):
+            continue
+        if document_raw in {"22", "nota crédito", "nota credito"}:
+            return int(row.id)
+        if "nota" in document_raw and "cr" in document_raw:
+            return int(row.id)
+    return None
+
+
+def _latest_factura_correcciones_by_vehiculo(
+    db: Session, tenant_id: UUID, vehiculo_ids: list[UUID]
+) -> dict[UUID, FacturaCorreccion]:
+    ids = [vid for vid in vehiculo_ids if isinstance(vid, UUID)]
+    if not ids:
+        return {}
+    rows = (
+        db.query(FacturaCorreccion)
+        .filter(
+            FacturaCorreccion.tenant_id == tenant_id,
+            FacturaCorreccion.vehiculo_proceso_id.in_(ids),
+        )
+        .order_by(FacturaCorreccion.vehiculo_proceso_id.asc(), FacturaCorreccion.created_at.desc())
+        .all()
+    )
+    out: dict[UUID, FacturaCorreccion] = {}
+    for row in rows:
+        if row.vehiculo_proceso_id not in out:
+            out[row.vehiculo_proceso_id] = row
+    return out
+
+
+def _build_vehiculo_response_with_correccion(
+    vehiculo: VehiculoProceso,
+    *,
+    correccion: FacturaCorreccion | None = None,
+    cajero_nombre: str | None = None,
+) -> VehiculoResponse:
+    update_data: dict[str, Any] = {}
+    if cajero_nombre is not None:
+        update_data["cajero_nombre"] = cajero_nombre
+    if correccion is not None:
+        es_corregida_ok = str(correccion.estado or "").lower() == "completed"
+        update_data.update(
+            {
+                "factura_corregida": es_corregida_ok,
+                "factura_correccion_estado": correccion.estado,
+                "factura_correccion_motivo": correccion.motivo,
+                "factura_correccion_at": correccion.created_at,
+                "factura_correccion_factura_original": correccion.factura_original_numero,
+                "factura_correccion_nota_credito": correccion.nota_credito_numero,
+                "factura_correccion_factura_nueva": correccion.factura_nueva_numero,
+            }
+        )
+    out = VehiculoResponse.model_validate(vehiculo)
+    return out.model_copy(update=update_data) if update_data else out
+
 
 _RUNT_FX_CACHE: dict[str, Any] = {"rate": None, "expires_at": 0.0}
 
@@ -2238,6 +2385,368 @@ def cobrar_vehiculo(
         )
 
 
+@router.post("/{vehiculo_id}/corregir-factura-emitida", response_model=CorregirFacturaEmitidaResponse)
+def corregir_factura_emitida(
+    vehiculo_id: UUID,
+    payload: CorregirFacturaEmitidaRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
+):
+    rol_actual = current_user.rol.value if hasattr(current_user.rol, "value") else str(current_user.rol)
+    if rol_actual != "administrador":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo administradores pueden corregir facturas emitidas.",
+        )
+
+    motivo = (payload.motivo or "").strip().lower()
+    if motivo not in MOTIVOS_CORRECCION_FACTURA:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Motivo inválido. Opciones: {', '.join(sorted(MOTIVOS_CORRECCION_FACTURA))}.",
+        )
+
+    vehiculo = (
+        _filtro_vehiculo_sede(
+            db.query(VehiculoProceso),
+            current_user.tenant_id,
+            active_sucursal_id,
+        )
+        .filter(VehiculoProceso.id == vehiculo_id)
+        .first()
+    )
+    if not vehiculo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehículo no encontrado")
+    if not vehiculo.fecha_pago or not vehiculo.numero_factura_dian:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El vehículo no tiene factura emitida para corregir.",
+        )
+    if _utc_naive_to_co_date(vehiculo.fecha_pago) != _co_today_date():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo se permiten correcciones de factura para cobros del mismo día.",
+        )
+    correccion_exitosa_previa = (
+        db.query(FacturaCorreccion)
+        .filter(
+            FacturaCorreccion.tenant_id == current_user.tenant_id,
+            FacturaCorreccion.vehiculo_proceso_id == vehiculo.id,
+            FacturaCorreccion.estado == "completed",
+        )
+        .first()
+    )
+    if correccion_exitosa_previa is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Esta factura ya fue corregida anteriormente y no admite una segunda corrección.",
+        )
+
+    fs = (
+        db.query(TenantFactusSettings)
+        .filter(TenantFactusSettings.tenant_id == current_user.tenant_id)
+        .first()
+    )
+    if fs is None or not creds_complete_for_active_env(fs):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Configure credenciales Factus completas para el ambiente activo.",
+        )
+    tenant_row = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    if tenant_row is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Tenant no encontrado")
+
+    fe_original = (
+        db.query(FacturaElectronica)
+        .filter(
+            FacturaElectronica.tenant_id == current_user.tenant_id,
+            FacturaElectronica.vehiculo_proceso_id == vehiculo.id,
+        )
+        .order_by(FacturaElectronica.created_at.desc())
+        .first()
+    )
+    if not fe_original:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se encontró traza de Factura Electrónica para este cobro.",
+        )
+
+    before_json = {
+        "placa": vehiculo.placa,
+        "cliente_nombre": vehiculo.cliente_nombre,
+        "cliente_documento": vehiculo.cliente_documento,
+        "cliente_email": vehiculo.cliente_email,
+        "cliente_telefono": vehiculo.cliente_telefono,
+        "cliente_direccion": vehiculo.cliente_direccion,
+        "numero_factura_dian": vehiculo.numero_factura_dian,
+    }
+
+    proposed_placa = (payload.nueva_placa or "").strip().upper() or vehiculo.placa
+    proposed_nombre = (payload.cliente_nombre or "").strip() or vehiculo.cliente_nombre
+    proposed_documento = (payload.cliente_documento or "").strip() or vehiculo.cliente_documento
+    proposed_email = (
+        (payload.cliente_email or "").strip().lower() if payload.cliente_email is not None else vehiculo.cliente_email
+    ) or None
+    proposed_telefono = (
+        (payload.cliente_telefono or "").strip() if payload.cliente_telefono is not None else vehiculo.cliente_telefono
+    ) or None
+    proposed_direccion = (
+        (payload.cliente_direccion or "").strip() if payload.cliente_direccion is not None else vehiculo.cliente_direccion
+    ) or None
+    did_change = (
+        proposed_placa != vehiculo.placa
+        or proposed_nombre != vehiculo.cliente_nombre
+        or proposed_documento != vehiculo.cliente_documento
+        or proposed_email != vehiculo.cliente_email
+        or proposed_telefono != vehiculo.cliente_telefono
+        or proposed_direccion != vehiculo.cliente_direccion
+    )
+    if not did_change:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Debes ajustar al menos placa o datos del cliente para reemitir.",
+        )
+
+    cid, sec_enc, user, pwd_enc = active_auth_encrypted(fs)
+    secret = decrypt_secret(sec_enc) if sec_enc else None
+    pwd = decrypt_secret(pwd_enc) if pwd_enc else None
+    if not cid or not secret or not user or not pwd:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se pudieron resolver credenciales Factus del ambiente activo.",
+        )
+    base = factus_base_url(use_sandbox=fs.use_sandbox)
+    try:
+        tok = obtain_token(
+            base_url=base,
+            client_id=cid,
+            client_secret=secret,
+            username=user,
+            password=pwd,
+        )
+    except FactusAPIError as e:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Factus: {format_factus_error_for_user(e)}",
+        ) from e
+    access = tok.get("access_token")
+    if not access:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Factus: token sin access_token")
+
+    range_id_cobro = resolve_numbering_range_id_for_cobro(
+        db,
+        tenant_id=current_user.tenant_id,
+        active_sucursal_id=active_sucursal_id,
+        tenant_default_range_id=fs.default_numbering_range_id,
+    )
+    if not range_id_cobro:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No hay rango de facturación válido para sede/tenant; no se puede reemitir.",
+        )
+
+    note_number: str | None = None
+    note_id: int | None = None
+    try:
+        body_for_items = build_validate_body(
+            vehiculo=vehiculo,
+            tenant=tenant_row,
+            db=db,
+            active_sucursal_id=active_sucursal_id,
+            numbering_range_id=range_id_cobro,
+            metodo_pago=str(vehiculo.metodo_pago or "efectivo"),
+            tarifa=None,
+        )
+        payment_method_code = _map_metodo_pago_factus_credit_note(str(vehiculo.metodo_pago or "efectivo"))
+        credit_note_body: dict[str, Any] = {
+            "reference_code": f"NC-{vehiculo.id.hex[:8]}-{uuid.uuid4().hex[:8]}",
+            "correction_concept_code": "2",
+            "customization_id": "20",
+            "observation": (payload.observacion or f"Corrección por {motivo} en CDASOFT")[:250],
+            "payment_details": [
+                {
+                    "payment_form": "1",
+                    "payment_method_code": payment_method_code,
+                    "reference_code": f"NC-{vehiculo.id.hex[:6]}",
+                    "amount": str(Decimal(str(vehiculo.total_cobrado or 0))),
+                }
+            ],
+            "customer": body_for_items.get("customer"),
+            "items": body_for_items.get("items") or [],
+        }
+        credit_note_range_id = _select_credit_note_range_id(fs)
+        if credit_note_range_id is not None:
+            credit_note_body["numbering_range_id"] = credit_note_range_id
+        if fe_original.factus_bill_id is not None:
+            credit_note_body["bill_id"] = int(fe_original.factus_bill_id)
+        else:
+            credit_note_body["bill_number"] = str(vehiculo.numero_factura_dian or "").strip()
+
+        nc_resp = validate_credit_note(
+            base_url=base,
+            access_token=str(access),
+            body=credit_note_body,
+        )
+        note_number, note_id = _coerce_credit_note_result(nc_resp if isinstance(nc_resp, dict) else {})
+        vehiculo.placa = proposed_placa
+        vehiculo.cliente_nombre = proposed_nombre
+        vehiculo.cliente_documento = proposed_documento
+        vehiculo.cliente_email = proposed_email
+        vehiculo.cliente_telefono = proposed_telefono
+        vehiculo.cliente_direccion = proposed_direccion
+        validar_datos_cliente_para_factus(vehiculo)
+
+        nueva_numero, _, _ = emitir_y_persistir_factura_cobro(
+            db,
+            vehiculo=vehiculo,
+            tenant=tenant_row,
+            fs=fs,
+            active_sucursal_id=active_sucursal_id,
+            metodo_pago=str(vehiculo.metodo_pago or "efectivo"),
+            tarifa=None,
+            emitido_por_usuario_id=current_user.id,
+        )
+        vehiculo.numero_factura_dian = nueva_numero
+
+        fe_nueva = (
+            db.query(FacturaElectronica)
+            .filter(
+                FacturaElectronica.tenant_id == current_user.tenant_id,
+                FacturaElectronica.vehiculo_proceso_id == vehiculo.id,
+                FacturaElectronica.numero_documento == nueva_numero,
+            )
+            .order_by(FacturaElectronica.created_at.desc())
+            .first()
+        )
+
+        db.add(
+            FacturaCorreccion(
+                tenant_id=current_user.tenant_id,
+                vehiculo_proceso_id=vehiculo.id,
+                factura_electronica_original_id=fe_original.id,
+                factura_electronica_nueva_id=(fe_nueva.id if fe_nueva else None),
+                motivo=motivo,
+                estado="completed",
+                factura_original_numero=fe_original.numero_documento or before_json.get("numero_factura_dian"),
+                factura_original_factus_bill_id=fe_original.factus_bill_id,
+                nota_credito_numero=note_number,
+                nota_credito_factus_id=note_id,
+                factura_nueva_numero=nueva_numero,
+                factura_nueva_factus_bill_id=(fe_nueva.factus_bill_id if fe_nueva else None),
+                before_json=json.dumps(before_json, ensure_ascii=False),
+                after_json=json.dumps(
+                    {
+                        "placa": vehiculo.placa,
+                        "cliente_nombre": vehiculo.cliente_nombre,
+                        "cliente_documento": vehiculo.cliente_documento,
+                        "cliente_email": vehiculo.cliente_email,
+                        "cliente_telefono": vehiculo.cliente_telefono,
+                        "cliente_direccion": vehiculo.cliente_direccion,
+                        "numero_factura_dian": vehiculo.numero_factura_dian,
+                    },
+                    ensure_ascii=False,
+                ),
+                ejecutado_por_usuario_id=current_user.id,
+            )
+        )
+        db.commit()
+        return CorregirFacturaEmitidaResponse(
+            success=True,
+            vehiculo_id=str(vehiculo.id),
+            factura_original=fe_original.numero_documento or before_json.get("numero_factura_dian"),
+            nota_credito=note_number,
+            factura_nueva=nueva_numero,
+            message="Factura corregida: NC validada y factura reemitida con datos actualizados.",
+        )
+    except FactusAPIError as e:
+        db.rollback()
+        error_text = f"Factus: {format_factus_error_for_user(e)}"
+        db.add(
+            FacturaCorreccion(
+                tenant_id=current_user.tenant_id,
+                vehiculo_proceso_id=vehiculo.id,
+                factura_electronica_original_id=fe_original.id,
+                motivo=motivo,
+                estado="failed",
+                error_detalle=error_text,
+                factura_original_numero=fe_original.numero_documento or before_json.get("numero_factura_dian"),
+                factura_original_factus_bill_id=fe_original.factus_bill_id,
+                nota_credito_numero=note_number,
+                nota_credito_factus_id=note_id,
+                before_json=json.dumps(before_json, ensure_ascii=False),
+                after_json=json.dumps(
+                    {
+                        "placa": vehiculo.placa,
+                        "cliente_nombre": vehiculo.cliente_nombre,
+                        "cliente_documento": vehiculo.cliente_documento,
+                        "cliente_email": vehiculo.cliente_email,
+                        "cliente_telefono": vehiculo.cliente_telefono,
+                        "cliente_direccion": vehiculo.cliente_direccion,
+                    },
+                    ensure_ascii=False,
+                ),
+                ejecutado_por_usuario_id=current_user.id,
+            )
+        )
+        db.commit()
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=error_text) from e
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"No fue posible completar la corrección de factura: {e}",
+        ) from e
+
+
+@router.get("/{vehiculo_id}/factura-correcciones", response_model=List[FacturaCorreccionHistorialItem])
+def listar_correcciones_factura_emitida(
+    vehiculo_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
+):
+    vehiculo = (
+        _filtro_vehiculo_sede(
+            db.query(VehiculoProceso),
+            current_user.tenant_id,
+            active_sucursal_id,
+        )
+        .filter(VehiculoProceso.id == vehiculo_id)
+        .first()
+    )
+    if not vehiculo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehículo no encontrado")
+
+    rows = (
+        db.query(FacturaCorreccion)
+        .filter(
+            FacturaCorreccion.tenant_id == current_user.tenant_id,
+            FacturaCorreccion.vehiculo_proceso_id == vehiculo.id,
+        )
+        .order_by(FacturaCorreccion.created_at.desc())
+        .all()
+    )
+
+    return [
+        FacturaCorreccionHistorialItem(
+            id=str(r.id),
+            estado=str(r.estado or ""),
+            motivo=str(r.motivo or ""),
+            error_detalle=r.error_detalle,
+            factura_original=r.factura_original_numero,
+            nota_credito=r.nota_credito_numero,
+            factura_nueva=r.factura_nueva_numero,
+            ejecutado_por_usuario_id=(str(r.ejecutado_por_usuario_id) if r.ejecutado_por_usuario_id else None),
+            created_at=r.created_at,
+        )
+        for r in rows
+    ]
+
+
 @router.post("/venta-soat", response_model=VehiculoResponse, status_code=status.HTTP_201_CREATED)
 def venta_solo_soat(
     venta_data: VentaSOAT,
@@ -2379,16 +2888,27 @@ def listar_cobrados_hoy(
     )
 
     if current_role == "administrador":
-        return base_query.order_by(VehiculoProceso.fecha_pago.desc()).all()
+        vehiculos = base_query.order_by(VehiculoProceso.fecha_pago.desc()).all()
+    else:
+        vehiculos = (
+            base_query
+            .filter(VehiculoProceso.cobrado_por == current_user.id)
+            .order_by(VehiculoProceso.fecha_pago.desc())
+            .all()
+        )
 
-    vehiculos = (
-        base_query
-        .filter(VehiculoProceso.cobrado_por == current_user.id)
-        .order_by(VehiculoProceso.fecha_pago.desc())
-        .all()
+    corrections = _latest_factura_correcciones_by_vehiculo(
+        db,
+        current_user.tenant_id,
+        [v.id for v in vehiculos],
     )
-
-    return vehiculos
+    return [
+        _build_vehiculo_response_with_correccion(
+            vehiculo,
+            correccion=corrections.get(vehiculo.id),
+        )
+        for vehiculo in vehiculos
+    ]
 
 
 @router.put("/{vehiculo_id}/cambiar-metodo-pago")
@@ -2818,13 +3338,21 @@ def obtener_vehiculo(
             detail="Vehículo no encontrado"
         )
 
-    out = VehiculoResponse.model_validate(vehiculo)
+    correction = _latest_factura_correcciones_by_vehiculo(
+        db,
+        current_user.tenant_id,
+        [vehiculo.id],
+    ).get(vehiculo.id)
     cajero_nombre = None
     if vehiculo.cobrado_por:
         cajero = db.query(Usuario).filter(Usuario.id == vehiculo.cobrado_por).first()
         if cajero:
             cajero_nombre = cajero.nombre_completo
-    return out.model_copy(update={"cajero_nombre": cajero_nombre})
+    return _build_vehiculo_response_with_correccion(
+        vehiculo,
+        correccion=correction,
+        cajero_nombre=cajero_nombre,
+    )
 
 
 @router.get("/", response_model=List[VehiculoResponse])

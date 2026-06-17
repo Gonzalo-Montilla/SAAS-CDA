@@ -318,6 +318,51 @@ def validate_invoice(
     raise RuntimeError("validate_invoice: no result")  # pragma: no cover
 
 
+def validate_credit_note(
+    *,
+    base_url: str,
+    access_token: str,
+    body: dict[str, Any],
+    timeout: float = 90.0,
+    max_attempts: int = 3,
+) -> dict[str, Any]:
+    """
+    POST /v1/credit-notes/validate — crea/valida nota crédito en Factus.
+    Reintenta solo errores transitorios de red o gateway.
+    """
+    url = f"{base_url.rstrip('/')}/v1/credit-notes/validate"
+    headers = {
+        "Accept": "application/json",
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {access_token}",
+    }
+    for attempt in range(max(1, max_attempts)):
+        try:
+            with httpx.Client(timeout=timeout) as client:
+                r = client.post(url, json=body, headers=headers)
+            data = _safe_json(r)
+            if r.status_code < 400:
+                return data if isinstance(data, dict) else {"raw": data}
+            if r.status_code in _TRANSIENT_VALIDATE_STATUS and attempt < max_attempts - 1:
+                time.sleep(min(2.0 * (attempt + 1), 8.0))
+                continue
+            raise FactusAPIError(
+                "Factus rechazó la validación de la nota crédito",
+                status_code=r.status_code,
+                body=data,
+            )
+        except (httpx.TimeoutException, httpx.ConnectError, httpx.ReadTimeout, httpx.WriteTimeout) as exc:
+            if attempt < max_attempts - 1:
+                time.sleep(min(2.0 * (attempt + 1), 8.0))
+                continue
+            raise FactusAPIError(
+                f"Red o tiempo de espera con Factus al validar nota crédito ({exc!s})",
+                status_code=504,
+                body=None,
+            ) from exc
+    raise RuntimeError("validate_credit_note: no result")  # pragma: no cover
+
+
 def get_bill_show(
     *,
     base_url: str,

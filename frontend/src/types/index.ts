@@ -894,6 +894,13 @@ export interface Vehiculo {
   sarlaft_alert_generated?: boolean | null;
   sarlaft_alert_count?: number | null;
   sarlaft_alert_message?: string | null;
+  factura_corregida?: boolean | null;
+  factura_correccion_estado?: string | null;
+  factura_correccion_motivo?: string | null;
+  factura_correccion_at?: string | null;
+  factura_correccion_factura_original?: string | null;
+  factura_correccion_nota_credito?: string | null;
+  factura_correccion_factura_nueva?: string | null;
 }
 
 export interface VehiculoRegistro {

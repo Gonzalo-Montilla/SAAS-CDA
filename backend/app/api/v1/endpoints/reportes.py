@@ -22,7 +22,7 @@ from app.models.tesoreria import MovimientoTesoreria, TipoMovimientoTesoreria
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo
 from app.models.tarifa import Tarifa
 from app.models.sucursal import Sucursal
-from app.models.factus import DocumentoSoporteElectronico, FacturaElectronica
+from app.models.factus import DocumentoSoporteElectronico, FacturaElectronica, FacturaCorreccion
 from app.models.iva_provision import IvaProvisionRegistro
 from app.models.appointment import Appointment
 
@@ -733,6 +733,7 @@ def obtener_movimientos_detallados(
     vids = list({mov.vehiculo_id for mov in movimientos_caja if mov.vehiculo_id})
     vmap: dict = {}
     fe_by_vid: dict = {}
+    corr_by_vid: dict = {}
     if vids:
         for v in db.query(VehiculoProceso).filter(VehiculoProceso.id.in_(vids)).all():
             vmap[v.id] = v
@@ -744,6 +745,17 @@ def obtener_movimientos_detallados(
         ):
             if fe.vehiculo_proceso_id not in fe_by_vid:
                 fe_by_vid[fe.vehiculo_proceso_id] = fe
+        for corr in (
+            db.query(FacturaCorreccion)
+            .filter(
+                FacturaCorreccion.tenant_id == tid,
+                FacturaCorreccion.vehiculo_proceso_id.in_(vids),
+            )
+            .order_by(FacturaCorreccion.created_at.desc())
+            .all()
+        ):
+            if corr.vehiculo_proceso_id not in corr_by_vid:
+                corr_by_vid[corr.vehiculo_proceso_id] = corr
 
     movimientos_tesoreria = (
         db.query(MovimientoTesoreria)
@@ -827,6 +839,7 @@ def obtener_movimientos_detallados(
             doc_factura_url = fe.public_url if fe else None
         ds_row_caja = ds_map.get(("caja", mov.id))
         fe_v = fe_by_vid.get(vid) if vid else None
+        corr_v = corr_by_vid.get(vid) if vid else None
         lista_caja.append({
             "id": str(mov.id),
             "hora": _format_hms_report_tz(mov.created_at),
@@ -852,6 +865,13 @@ def obtener_movimientos_detallados(
             ),
             "factura_emitida_en": _iso_utc(fe_v.created_at) if fe_v else None,
             "factura_pdf_archivado": bool(fe_v and (fe_v.pdf_storage_relpath or "").strip()),
+            "factura_corregida": bool(corr_v and str(corr_v.estado or "").lower() == "completed"),
+            "factura_correccion_estado": (corr_v.estado if corr_v else None),
+            "factura_correccion_motivo": (corr_v.motivo if corr_v else None),
+            "factura_correccion_at": (_iso_utc(corr_v.created_at) if corr_v else None),
+            "factura_correccion_factura_original": (corr_v.factura_original_numero if corr_v else None),
+            "factura_correccion_nota_credito": (corr_v.nota_credito_numero if corr_v else None),
+            "factura_correccion_factura_nueva": (corr_v.factura_nueva_numero if corr_v else None),
             "beneficiario": getattr(mov, "beneficiario", None),
             "beneficiario_tipo_identificacion": getattr(mov, "beneficiario_tipo_identificacion", None),
             "beneficiario_numero_identificacion": getattr(mov, "beneficiario_numero_identificacion", None),
@@ -940,6 +960,13 @@ def obtener_movimientos_detallados(
             "factura_emitida_por": None,
             "factura_emitida_en": None,
             "factura_pdf_archivado": False,
+            "factura_corregida": False,
+            "factura_correccion_estado": None,
+            "factura_correccion_motivo": None,
+            "factura_correccion_at": None,
+            "factura_correccion_factura_original": None,
+            "factura_correccion_nota_credito": None,
+            "factura_correccion_factura_nueva": None,
             "beneficiario": getattr(mov, "beneficiario", None),
             "beneficiario_tipo_identificacion": getattr(mov, "beneficiario_tipo_identificacion", None),
             "beneficiario_numero_identificacion": getattr(mov, "beneficiario_numero_identificacion", None),
@@ -1474,8 +1501,25 @@ def obtener_tramites_detallados(
         .all()
     )
 
+    corrections_map: dict[UUID, FacturaCorreccion] = {}
+    veh_ids = [v.id for v in vehiculos if v and v.id]
+    if veh_ids:
+        corr_rows = (
+            db.query(FacturaCorreccion)
+            .filter(
+                FacturaCorreccion.tenant_id == tid,
+                FacturaCorreccion.vehiculo_proceso_id.in_(veh_ids),
+            )
+            .order_by(FacturaCorreccion.vehiculo_proceso_id.asc(), FacturaCorreccion.created_at.desc())
+            .all()
+        )
+        for row in corr_rows:
+            if row.vehiculo_proceso_id not in corrections_map:
+                corrections_map[row.vehiculo_proceso_id] = row
+
     lista_tramites = []
     for veh in vehiculos:
+        corr = corrections_map.get(veh.id)
         sede_n = None
         if veh.sucursal_id:
             s = db.query(Sucursal).filter(Sucursal.id == veh.sucursal_id).first()
@@ -1497,6 +1541,13 @@ def obtener_tramites_detallados(
                 in ["pagado", "en_pista", "aprobado", "rechazado", "completado"],
                 "registrado_por": veh.registrador.nombre_completo if veh.registrador else "N/A",
                 "sede": sede_n,
+                "factura_corregida": corr is not None,
+                "factura_correccion_estado": (corr.estado if corr else None),
+                "factura_correccion_motivo": (corr.motivo if corr else None),
+                "factura_correccion_at": (_iso_utc(corr.created_at) if corr else None),
+                "factura_original_numero": (corr.factura_original_numero if corr else None),
+                "nota_credito_numero": (corr.nota_credito_numero if corr else None),
+                "factura_nueva_numero": (corr.factura_nueva_numero if corr else None),
             }
         )
     

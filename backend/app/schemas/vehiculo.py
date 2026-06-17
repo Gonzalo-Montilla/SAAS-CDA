@@ -223,6 +223,13 @@ class VehiculoResponse(BaseModel):
     sarlaft_alert_generated: Optional[bool] = None
     sarlaft_alert_count: Optional[int] = None
     sarlaft_alert_message: Optional[str] = None
+    factura_corregida: Optional[bool] = False
+    factura_correccion_estado: Optional[str] = None
+    factura_correccion_motivo: Optional[str] = None
+    factura_correccion_at: Optional[datetime] = None
+    factura_correccion_factura_original: Optional[str] = None
+    factura_correccion_nota_credito: Optional[str] = None
+    factura_correccion_factura_nueva: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 

@@ -42,6 +42,38 @@ interface VehiculoPdfDownload {
   filename: string;
 }
 
+export interface CorregirFacturaEmitidaPayload {
+  motivo: 'placa' | 'documento' | 'nombre' | 'identificacion';
+  nueva_placa?: string;
+  cliente_nombre?: string;
+  cliente_documento?: string;
+  cliente_email?: string;
+  cliente_telefono?: string;
+  cliente_direccion?: string;
+  observacion?: string;
+}
+
+export interface CorregirFacturaEmitidaResponse {
+  success: boolean;
+  vehiculo_id: string;
+  factura_original?: string | null;
+  nota_credito?: string | null;
+  factura_nueva?: string | null;
+  message: string;
+}
+
+export interface FacturaCorreccionHistorialItem {
+  id: string;
+  estado: string;
+  motivo: string;
+  error_detalle?: string | null;
+  factura_original?: string | null;
+  nota_credito?: string | null;
+  factura_nueva?: string | null;
+  ejecutado_por_usuario_id?: string | null;
+  created_at: string;
+}
+
 export const vehiculosApi = {
   // Registrar un nuevo vehículo (Recepción)
   registrar: async (data: VehiculoRegistro): Promise<Vehiculo> => {
@@ -187,6 +219,24 @@ export const vehiculosApi = {
     const response = await apiClient.put(`/vehiculos/${vehiculoId}/cambiar-metodo-pago`, null, {
       params: { nuevo_metodo: nuevoMetodo, motivo }
     });
+    return response.data;
+  },
+
+  corregirFacturaEmitida: async (
+    vehiculoId: string,
+    payload: CorregirFacturaEmitidaPayload
+  ): Promise<CorregirFacturaEmitidaResponse> => {
+    const response = await apiClient.post<CorregirFacturaEmitidaResponse>(
+      `/vehiculos/${vehiculoId}/corregir-factura-emitida`,
+      payload
+    );
+    return response.data;
+  },
+
+  listarCorreccionesFacturaEmitida: async (vehiculoId: string): Promise<FacturaCorreccionHistorialItem[]> => {
+    const response = await apiClient.get<FacturaCorreccionHistorialItem[]>(
+      `/vehiculos/${vehiculoId}/factura-correcciones`
+    );
     return response.data;
   },
 };
