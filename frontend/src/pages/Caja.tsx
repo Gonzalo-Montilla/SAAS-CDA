@@ -91,9 +91,12 @@ const saveBlobAsFile = (blob: Blob, filename: string): void => {
 
 export default function CajaPage() {
   const queryClient = useQueryClient();
+  const { user } = useAuth();
   const [vistaActual, setVistaActual] = useState<'apertura' | 'cobros' | 'cobrados-hoy' | 'movimientos' | 'cierre' | 'historial'>('cobros');
   const [mostrarModalGasto, setMostrarModalGasto] = useState(false);
   const [mostrarModalVentaSOAT, setMostrarModalVentaSOAT] = useState(false);
+  const rolActual = user && 'rol' in user ? String((user as { rol?: string }).rol || '').toLowerCase() : '';
+  const esAdmin = rolActual === 'administrador';
 
   // Obtener caja activa
   const { data: cajaActiva, isLoading: loadingCaja, error: errorCaja } = useQuery({
@@ -128,7 +131,7 @@ export default function CajaPage() {
   const { data: vehiculosCobradosHoy, isLoading: loadingCobradosHoy } = useQuery({
     queryKey: ['vehiculos-cobrados-hoy'],
     queryFn: vehiculosApi.obtenerCobradosHoy,
-    enabled: !!cajaActiva,
+    enabled: !!cajaActiva || esAdmin,
     refetchInterval: 10000, // Refrescar cada 10 segundos
     retry: 1,
   });
@@ -167,8 +170,27 @@ export default function CajaPage() {
     );
   }
 
-  // Si no hay caja activa, mostrar solo apertura
+  // Si no hay caja activa:
+  // - Admin: puede ver "Cobros hoy" aunque no sea su caja.
+  // - Cajero: flujo normal de apertura.
   if (!hayCajaActiva) {
+    if (esAdmin) {
+      return (
+        <Layout title="Módulo de Caja">
+          <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+            No tienes una caja abierta con este usuario. Como administrador puedes revisar <strong>Cobros hoy</strong>{' '}
+            de la sede activa y abrir caja si lo necesitas.
+          </div>
+          <div className="mb-6">
+            <VehiculosCobradosHoy
+              vehiculos={vehiculosCobradosHoy || []}
+              loading={loadingCobradosHoy}
+            />
+          </div>
+          <AperturaCaja />
+        </Layout>
+      );
+    }
     return (
       <Layout title="Módulo de Caja">
         <AperturaCaja />
