@@ -95,6 +95,7 @@ export default function CajaPage() {
   const [vistaActual, setVistaActual] = useState<'apertura' | 'cobros' | 'cobrados-hoy' | 'movimientos' | 'cierre' | 'historial'>('cobros');
   const [mostrarModalGasto, setMostrarModalGasto] = useState(false);
   const [mostrarModalVentaSOAT, setMostrarModalVentaSOAT] = useState(false);
+  const [mostrarCobrosHoySinCaja, setMostrarCobrosHoySinCaja] = useState(false);
   const rolActual = user && 'rol' in user ? String((user as { rol?: string }).rol || '').toLowerCase() : '';
   const esAdmin = rolActual === 'administrador';
 
@@ -131,7 +132,7 @@ export default function CajaPage() {
   const { data: vehiculosCobradosHoy, isLoading: loadingCobradosHoy } = useQuery({
     queryKey: ['vehiculos-cobrados-hoy'],
     queryFn: vehiculosApi.obtenerCobradosHoy,
-    enabled: !!cajaActiva || esAdmin,
+    enabled: !!cajaActiva || (esAdmin && mostrarCobrosHoySinCaja),
     refetchInterval: 30000, // Refrescar cada 30 segundos
     staleTime: 10000,
     retry: 1,
@@ -182,13 +183,36 @@ export default function CajaPage() {
             No tienes una caja abierta con este usuario. Como administrador puedes revisar <strong>Cobros hoy</strong>{' '}
             de la sede activa y abrir caja si lo necesitas.
           </div>
-          <div className="mb-6">
-            <VehiculosCobradosHoy
-              vehiculos={vehiculosCobradosHoy || []}
-              loading={loadingCobradosHoy}
-            />
-          </div>
           <AperturaCaja />
+          <div className="mt-6 card-pos border border-slate-200/90">
+            <button
+              type="button"
+              onClick={() => setMostrarCobrosHoySinCaja((prev) => !prev)}
+              className="w-full flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left"
+            >
+              <div>
+                <p className="text-sm font-semibold text-slate-900">
+                  Cobros de hoy {Array.isArray(vehiculosCobradosHoy) ? `(${vehiculosCobradosHoy.length})` : ''}
+                </p>
+                <p className="text-xs text-slate-600">
+                  Historial operativo de la sede activa (solo lectura).
+                </p>
+              </div>
+              {mostrarCobrosHoySinCaja ? (
+                <ChevronUp className="h-5 w-5 text-slate-500" />
+              ) : (
+                <ChevronDown className="h-5 w-5 text-slate-500" />
+              )}
+            </button>
+            {mostrarCobrosHoySinCaja && (
+              <div className="mt-4">
+                <VehiculosCobradosHoy
+                  vehiculos={vehiculosCobradosHoy || []}
+                  loading={loadingCobradosHoy}
+                />
+              </div>
+            )}
+          </div>
         </Layout>
       );
     }

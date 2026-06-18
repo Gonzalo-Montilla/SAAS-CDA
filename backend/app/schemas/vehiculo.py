@@ -215,6 +215,7 @@ class VehiculoResponse(BaseModel):
     reinspeccion_exenta: Optional[bool] = None
     observaciones: Optional[str]
     recepcion_formato_extra_json: Optional[dict[str, Any]] = None
+    tiene_recepcion_formato_extra: Optional[bool] = None
     fecha_registro: datetime
     
     # Campos calculados
@@ -223,6 +224,31 @@ class VehiculoResponse(BaseModel):
     sarlaft_alert_generated: Optional[bool] = None
     sarlaft_alert_count: Optional[int] = None
     sarlaft_alert_message: Optional[str] = None
+    factura_corregida: Optional[bool] = False
+    factura_correccion_estado: Optional[str] = None
+    factura_correccion_motivo: Optional[str] = None
+    factura_correccion_at: Optional[datetime] = None
+    factura_correccion_factura_original: Optional[str] = None
+    factura_correccion_nota_credito: Optional[str] = None
+    factura_correccion_factura_nueva: Optional[str] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class VehiculoCobradoHoyResponse(BaseModel):
+    """Respuesta liviana para listado 'Cobros hoy' en Caja."""
+
+    id: UUID
+    placa: str
+    tipo_vehiculo: str
+    cliente_nombre: str
+    cliente_documento: str
+    cliente_telefono: Optional[str] = None
+    cliente_email: Optional[str] = None
+    cliente_direccion: Optional[str] = None
+    metodo_pago: Optional[str] = None
+    total_cobrado: Decimal
+    numero_factura_dian: Optional[str] = None
     factura_corregida: Optional[bool] = False
     factura_correccion_estado: Optional[str] = None
     factura_correccion_motivo: Optional[str] = None

@@ -22,6 +22,7 @@ import { vehiculosApi, type TarifaCalculada } from '../api/vehiculos';
 import { tarifasApi } from '../api/tarifas';
 import type { VehiculoRegistro, VehiculoConsultaRunt, Usuario, ReinspeccionElegibilidad } from '../types';
 import { formatCOP } from '../utils/formatNumber';
+import { extractApiErrorMessage } from '../utils/apiError';
 
 type SnNoNa = 'si' | 'no' | 'na' | '';
 type SnNo = 'si' | 'no' | '';
@@ -614,7 +615,7 @@ export default function Recepcion() {
       fecha_desde: desde,
       fecha_hasta: hasta,
     }),
-    refetchInterval: 15000, // Actualizar cada 15 segundos
+    refetchInterval: 30000, // Actualizar cada 30 segundos
     retry: 1,
   });
 
@@ -629,10 +630,11 @@ export default function Recepcion() {
       buscar: buscar || undefined,
       fecha_desde: desde,
       fecha_hasta: hasta,
+      include_formato_extra: false,
       skip,
       limit: registrosPorPagina,
     }),
-    refetchInterval: 15000, // Actualizar cada 15 segundos
+    refetchInterval: 30000, // Actualizar cada 30 segundos
     retry: 1,
   });
 
@@ -974,6 +976,19 @@ export default function Recepcion() {
     
     // Scroll al formulario
     window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
+  const iniciarEdicionDesdeListado = async (vehiculo: any) => {
+    try {
+      const detalle = await vehiculosApi.obtenerPorId(vehiculo.id);
+      iniciarEdicion(detalle);
+    } catch (error) {
+      showToast(
+        'error',
+        'No fue posible cargar el detalle',
+        extractApiErrorMessage(error, 'Intenta nuevamente para editar el vehículo.'),
+      );
+    }
   };
 
   const cancelarEdicion = () => {
@@ -3227,9 +3242,10 @@ export default function Recepcion() {
               const fotos = extraerFotosDeObservaciones(vehiculo.observaciones);
               const primeraFoto = fotos[0];
               const tieneFormatoExtra =
-                !!vehiculo.recepcion_formato_extra_json &&
-                typeof vehiculo.recepcion_formato_extra_json === 'object' &&
-                Object.keys(vehiculo.recepcion_formato_extra_json).length > 0;
+                Boolean(vehiculo.tiene_recepcion_formato_extra) ||
+                (!!vehiculo.recepcion_formato_extra_json &&
+                  typeof vehiculo.recepcion_formato_extra_json === 'object' &&
+                  Object.keys(vehiculo.recepcion_formato_extra_json).length > 0);
               
               return (
                 <div key={vehiculo.id} className="vehicle-card relative overflow-hidden">
@@ -3302,7 +3318,7 @@ export default function Recepcion() {
                   {/* Botón editar (solo si estado = registrado) */}
                   {vehiculo.estado === 'registrado' && (
                     <button
-                      onClick={() => iniciarEdicion(vehiculo)}
+                      onClick={() => void iniciarEdicionDesdeListado(vehiculo)}
                       className="w-full mt-3 btn-pos btn-secondary flex items-center justify-center gap-2 py-2 text-sm"
                     >
                       <Edit className="w-4 h-4" />

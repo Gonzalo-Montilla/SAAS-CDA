@@ -109,6 +109,7 @@ from app.schemas.vehiculo import (
     VehiculoEdicion,
     VehiculoCobro,
     VehiculoResponse,
+    VehiculoCobradoHoyResponse,
     VehiculosPendientes,
     VehiculoConTarifa,
     TarifaCalculada,
@@ -291,6 +292,34 @@ def _build_vehiculo_response_with_correccion(
         update_data["recepcion_formato_extra_json"] = None
     out = VehiculoResponse.model_validate(vehiculo)
     return out.model_copy(update=update_data) if update_data else out
+
+
+def _build_vehiculo_cobrado_hoy_response(
+    vehiculo: VehiculoProceso,
+    *,
+    correccion: FacturaCorreccion | None = None,
+) -> VehiculoCobradoHoyResponse:
+    es_corregida_ok = bool(correccion and str(correccion.estado or "").lower() == "completed")
+    return VehiculoCobradoHoyResponse(
+        id=vehiculo.id,
+        placa=vehiculo.placa,
+        tipo_vehiculo=vehiculo.tipo_vehiculo,
+        cliente_nombre=vehiculo.cliente_nombre,
+        cliente_documento=vehiculo.cliente_documento,
+        cliente_telefono=vehiculo.cliente_telefono,
+        cliente_email=vehiculo.cliente_email,
+        cliente_direccion=vehiculo.cliente_direccion,
+        metodo_pago=str(vehiculo.metodo_pago or "") or None,
+        total_cobrado=vehiculo.total_cobrado,
+        numero_factura_dian=vehiculo.numero_factura_dian,
+        factura_corregida=es_corregida_ok,
+        factura_correccion_estado=(correccion.estado if correccion else None),
+        factura_correccion_motivo=(correccion.motivo if correccion else None),
+        factura_correccion_at=(correccion.created_at if correccion else None),
+        factura_correccion_factura_original=(correccion.factura_original_numero if correccion else None),
+        factura_correccion_nota_credito=(correccion.nota_credito_numero if correccion else None),
+        factura_correccion_factura_nueva=(correccion.factura_nueva_numero if correccion else None),
+    )
 
 
 _RUNT_FX_CACHE: dict[str, Any] = {"rate": None, "expires_at": 0.0}
@@ -2864,7 +2893,7 @@ def venta_solo_soat(
         )
 
 
-@router.get("/cobrados-hoy", response_model=List[VehiculoResponse])
+@router.get("/cobrados-hoy", response_model=List[VehiculoCobradoHoyResponse])
 def listar_cobrados_hoy(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_cajero_or_admin),
@@ -2914,10 +2943,9 @@ def listar_cobrados_hoy(
         [v.id for v in vehiculos],
     )
     return [
-        _build_vehiculo_response_with_correccion(
+        _build_vehiculo_cobrado_hoy_response(
             vehiculo,
             correccion=corrections.get(vehiculo.id),
-            compact=True,
         )
         for vehiculo in vehiculos
     ]
@@ -3373,6 +3401,7 @@ def listar_vehiculos(
     estado: str = None,
     fecha_desde: str = None,
     fecha_hasta: str = None,
+    include_formato_extra: bool = Query(True, description="Si false, omite JSON pesado de recepción en el listado"),
     skip: int = 0,
     limit: int = 20,
     db: Session = Depends(get_db),
@@ -3435,8 +3464,24 @@ def listar_vehiculos(
     
     # Paginación
     vehiculos = query.offset(skip).limit(limit).all()
-    
-    return vehiculos
+
+    out: list[VehiculoResponse] = []
+    for vehiculo in vehiculos:
+        tiene_formato = bool(
+            isinstance(vehiculo.recepcion_formato_extra_json, dict)
+            and len(vehiculo.recepcion_formato_extra_json) > 0
+        )
+        row = VehiculoResponse.model_validate(vehiculo).model_copy(
+            update={
+                "tiene_recepcion_formato_extra": tiene_formato,
+                "recepcion_formato_extra_json": (
+                    vehiculo.recepcion_formato_extra_json if include_formato_extra else None
+                ),
+            }
+        )
+        out.append(row)
+
+    return out
 
 
 @router.get("/count/total")

@@ -887,6 +887,7 @@ export interface Vehiculo {
   reinspeccion_exenta?: boolean | null;
   observaciones?: string;
   recepcion_formato_extra_json?: Record<string, unknown> | null;
+  tiene_recepcion_formato_extra?: boolean | null;
   fecha_registro: string;
   /** Nombre del usuario que cobró (solo en detalle GET). */
   cajero_nombre?: string | null;

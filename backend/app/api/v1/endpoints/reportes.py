@@ -717,6 +717,11 @@ def obtener_movimientos_detallados(
 
     movimientos_caja = (
         db.query(MovimientoCaja)
+        .options(
+            joinedload(MovimientoCaja.usuario),
+            joinedload(MovimientoCaja.caja),
+            joinedload(MovimientoCaja.usuario_anulacion),
+        )
         .filter(
             _mc_scope_incluye_anulados(
                 db,
@@ -759,6 +764,9 @@ def obtener_movimientos_detallados(
 
     movimientos_tesoreria = (
         db.query(MovimientoTesoreria)
+        .options(
+            joinedload(MovimientoTesoreria.usuario),
+        )
         .filter(
             _mt_scope_incluye_anulados(
                 tid,
@@ -813,6 +821,18 @@ def obtener_movimientos_detallados(
         for u in db.query(Usuario).filter(Usuario.id.in_(uids_emit)).all():
             unames[u.id] = u.nombre_completo
 
+    sucursal_ids: set[UUID] = set()
+    for mov in movimientos_caja:
+        if mov.caja and mov.caja.sucursal_id:
+            sucursal_ids.add(mov.caja.sucursal_id)
+    for mov in movimientos_tesoreria:
+        if mov.sucursal_id:
+            sucursal_ids.add(mov.sucursal_id)
+    sucursal_names: dict[UUID, str] = {}
+    if sucursal_ids:
+        for sid, sname in db.query(Sucursal.id, Sucursal.nombre).filter(Sucursal.id.in_(list(sucursal_ids))).all():
+            sucursal_names[sid] = sname
+
     lista_caja = []
     for mov in movimientos_caja:
         # Obtener nombre de usuario
@@ -824,10 +844,7 @@ def obtener_movimientos_detallados(
         # Determinar si es ingreso o egreso
         tipo_mov = "Ingreso" if mov.monto > 0 else "Egreso"
         
-        sede_nombre = None
-        if mov.caja and mov.caja.sucursal_id:
-            s = db.query(Sucursal).filter(Sucursal.id == mov.caja.sucursal_id).first()
-            sede_nombre = s.nombre if s else None
+        sede_nombre = sucursal_names.get(mov.caja.sucursal_id) if (mov.caja and mov.caja.sucursal_id) else None
         vid = mov.vehiculo_id
         doc_vehiculo_id = str(vid) if vid else None
         doc_numero_factura = None
@@ -926,10 +943,7 @@ def obtener_movimientos_detallados(
             categoria = mov.categoria_egreso.value if mov.categoria_egreso else "N/A"
             tipo_mov = "Egreso"
         
-        sede_t = None
-        if mov.sucursal_id:
-            s = db.query(Sucursal).filter(Sucursal.id == mov.sucursal_id).first()
-            sede_t = s.nombre if s else None
+        sede_t = sucursal_names.get(mov.sucursal_id) if mov.sucursal_id else None
         ds_row_tes = ds_map.get(("tesoreria", mov.id))
         lista_tesoreria.append({
             "id": str(mov.id),
@@ -1489,6 +1503,7 @@ def obtener_tramites_detallados(
     # Obtener vehículos del rango
     vehiculos = (
         db.query(VehiculoProceso)
+        .options(joinedload(VehiculoProceso.registrador))
         .filter(
             _vp_scope(
                 tid,
@@ -1517,13 +1532,16 @@ def obtener_tramites_detallados(
             if row.vehiculo_proceso_id not in corrections_map:
                 corrections_map[row.vehiculo_proceso_id] = row
 
+    sucursal_ids: set[UUID] = {v.sucursal_id for v in vehiculos if v.sucursal_id}
+    sucursal_names: dict[UUID, str] = {}
+    if sucursal_ids:
+        for sid, sname in db.query(Sucursal.id, Sucursal.nombre).filter(Sucursal.id.in_(list(sucursal_ids))).all():
+            sucursal_names[sid] = sname
+
     lista_tramites = []
     for veh in vehiculos:
         corr = corrections_map.get(veh.id)
-        sede_n = None
-        if veh.sucursal_id:
-            s = db.query(Sucursal).filter(Sucursal.id == veh.sucursal_id).first()
-            sede_n = s.nombre if s else None
+        sede_n = sucursal_names.get(veh.sucursal_id) if veh.sucursal_id else None
         lista_tramites.append(
             {
                 "id": str(veh.id),

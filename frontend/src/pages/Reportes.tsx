@@ -519,8 +519,8 @@ export default function ReportesPage() {
       const response = await apiClient.get(`/reportes/movimientos-detallados?${queryParams}`);
       return response.data;
     },
-    enabled: reportesEnabled,
-    refetchInterval: 60000,
+    enabled: reportesEnabled && reportesSeccion === 'detalle',
+    refetchInterval: reportesSeccion === 'detalle' ? 60000 : false,
   });
 
   const emitirDocumentoSoporteMutation = useMutation({
@@ -566,8 +566,8 @@ export default function ReportesPage() {
       const response = await apiClient.get(`/reportes/desglose-conceptos?${queryParams}`);
       return response.data;
     },
-    enabled: reportesEnabled,
-    refetchInterval: 60000,
+    enabled: reportesEnabled && reportesSeccion === 'finanzas',
+    refetchInterval: reportesSeccion === 'finanzas' ? 60000 : false,
   });
 
   // Query: Desglose por medios de pago
@@ -577,8 +577,8 @@ export default function ReportesPage() {
       const response = await apiClient.get(`/reportes/desglose-medios-pago?${queryParams}`);
       return response.data;
     },
-    enabled: reportesEnabled,
-    refetchInterval: 60000,
+    enabled: reportesEnabled && reportesSeccion === 'finanzas',
+    refetchInterval: reportesSeccion === 'finanzas' ? 60000 : false,
   });
 
   // Query: Trámites detallados
@@ -588,8 +588,8 @@ export default function ReportesPage() {
       const response = await apiClient.get(`/reportes/tramites-detallados?${queryParams}`);
       return response.data;
     },
-    enabled: reportesEnabled,
-    refetchInterval: 60000,
+    enabled: reportesEnabled && reportesSeccion === 'detalle',
+    refetchInterval: reportesSeccion === 'detalle' ? 60000 : false,
   });
 
   const { data: comparativoData } = useQuery({
@@ -608,8 +608,8 @@ export default function ReportesPage() {
         }>;
       };
     },
-    enabled: reportesEnabled && modoVista === 'dia' && puedeElegirSedeReporte,
-    refetchInterval: 60000,
+    enabled: reportesEnabled && reportesSeccion === 'resumen' && modoVista === 'dia' && puedeElegirSedeReporte,
+    refetchInterval: reportesSeccion === 'resumen' ? 60000 : false,
   });
 
   const { data: operativoData } = useQuery({
@@ -622,8 +622,8 @@ export default function ReportesPage() {
         fechaFin,
         sedeQuerySuffix,
       }),
-    enabled: reportesEnabled,
-    refetchInterval: 60000,
+    enabled: reportesEnabled && reportesSeccion === 'operacion',
+    refetchInterval: reportesSeccion === 'operacion' ? 60000 : false,
   });
 
   const agendamientoQueryParams = useMemo(() => {
@@ -639,8 +639,8 @@ export default function ReportesPage() {
   } = useQuery<AgendamientoMetricasResponse>({
     queryKey: ['reportes-agendamiento-metricas', agendamientoQueryParams],
     queryFn: () => reportesApi.getAgendamientoMetricas(agendamientoQueryParams),
-    enabled: reportesEnabled,
-    refetchInterval: 60000,
+    enabled: reportesEnabled && reportesSeccion === 'citas',
+    refetchInterval: reportesSeccion === 'citas' ? 60000 : false,
   });
 
   const {
