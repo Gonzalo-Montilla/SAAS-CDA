@@ -186,6 +186,7 @@ export const vehiculosApi = {
     fecha_desde?: string; 
     fecha_hasta?: string;
     include_formato_extra?: boolean;
+    include_observaciones?: boolean;
     skip?: number;
     limit?: number;
   }): Promise<Vehiculo[]> => {

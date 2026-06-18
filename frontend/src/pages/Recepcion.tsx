@@ -567,6 +567,13 @@ export default function Recepcion() {
     title: string;
     fileName: string;
   } | null>(null);
+  const [fotosPreview, setFotosPreview] = useState<{
+    vehiculoId: string;
+    placa: string;
+    fotos: string[];
+    index: number;
+  } | null>(null);
+  const [cargandoFotosVehiculoId, setCargandoFotosVehiculoId] = useState<string | null>(null);
   const [paginaActual, setPaginaActual] = useState(1);
   const registrosPorPagina = 12;
 
@@ -631,6 +638,7 @@ export default function Recepcion() {
       fecha_desde: desde,
       fecha_hasta: hasta,
       include_formato_extra: false,
+      include_observaciones: false,
       skip,
       limit: registrosPorPagina,
     }),
@@ -988,6 +996,32 @@ export default function Recepcion() {
         'No fue posible cargar el detalle',
         extractApiErrorMessage(error, 'Intenta nuevamente para editar el vehículo.'),
       );
+    }
+  };
+
+  const verFotosVehiculo = async (vehiculo: any) => {
+    try {
+      setCargandoFotosVehiculoId(vehiculo.id);
+      const detalle = await vehiculosApi.obtenerPorId(vehiculo.id);
+      const fotos = extraerFotosDeObservaciones(detalle.observaciones);
+      if (!fotos.length) {
+        showToast('warning', 'Sin fotos', `La placa ${vehiculo.placa} no tiene fotos registradas.`);
+        return;
+      }
+      setFotosPreview({
+        vehiculoId: vehiculo.id,
+        placa: vehiculo.placa,
+        fotos,
+        index: 0,
+      });
+    } catch (error) {
+      showToast(
+        'error',
+        'No fue posible cargar fotos',
+        extractApiErrorMessage(error, 'Intenta nuevamente para ver las fotos.'),
+      );
+    } finally {
+      setCargandoFotosVehiculoId(null);
     }
   };
 
@@ -3239,8 +3273,6 @@ export default function Recepcion() {
           <div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
               {vehiculos.map((vehiculo) => {
-              const fotos = extraerFotosDeObservaciones(vehiculo.observaciones);
-              const primeraFoto = fotos[0];
               const tieneFormatoExtra =
                 Boolean(vehiculo.tiene_recepcion_formato_extra) ||
                 (!!vehiculo.recepcion_formato_extra_json &&
@@ -3249,28 +3281,12 @@ export default function Recepcion() {
               
               return (
                 <div key={vehiculo.id} className="vehicle-card relative overflow-hidden">
-                  {/* Foto del vehículo si existe */}
-                  {primeraFoto ? (
-                    <div className="relative mb-3 -mx-4 -mt-4">
-                      <img 
-                        src={primeraFoto} 
-                        alt={`Vehículo ${vehiculo.placa}`}
-                        className="w-full h-32 object-cover rounded-t-lg"
-                      />
-                      {fotos.length > 1 && (
-                        <div className="absolute top-2 right-2 bg-slate-900/70 text-white text-xs px-2 py-1 rounded flex items-center gap-1">
-                          <Camera className="w-3 h-3" /> {fotos.length}
-                        </div>
-                      )}
+                  <div className="relative mb-3 -mx-4 -mt-4 bg-slate-100 h-20 flex items-center justify-center rounded-t-lg">
+                    <div className="text-center">
+                      <Car className="w-8 h-8 text-slate-400 mb-1 mx-auto" />
+                      <p className="text-[11px] text-slate-500">Fotos bajo demanda</p>
                     </div>
-                  ) : (
-                    <div className="relative mb-3 -mx-4 -mt-4 bg-slate-100 h-32 flex items-center justify-center rounded-t-lg">
-                      <div className="text-center">
-                        <Car className="w-12 h-12 text-slate-400 mb-1" />
-                        <p className="text-xs text-slate-500">Sin foto</p>
-                      </div>
-                    </div>
-                  )}
+                  </div>
 
                   <div className="flex justify-between items-start mb-2">
                     <div>
@@ -3302,6 +3318,16 @@ export default function Recepcion() {
                       {formatCOP(vehiculo.total_cobrado)}
                     </p>
                   </div>
+
+                  <button
+                    type="button"
+                    onClick={() => void verFotosVehiculo(vehiculo)}
+                    disabled={cargandoFotosVehiculoId === vehiculo.id}
+                    className="w-full mt-3 px-3 py-2 rounded-lg border border-slate-300 text-slate-700 bg-white hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed text-sm font-semibold flex items-center justify-center gap-2"
+                  >
+                    <Camera className="w-4 h-4" />
+                    {cargandoFotosVehiculoId === vehiculo.id ? 'Cargando fotos...' : 'Ver foto'}
+                  </button>
 
                   {tieneFormatoExtra && (
                     <button
@@ -3544,6 +3570,81 @@ export default function Recepcion() {
                 src={pdfPreview.blobUrl}
                 className="w-full flex-1 min-h-[70vh] border-0"
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {fotosPreview && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 p-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setFotosPreview(null);
+          }}
+        >
+          <div className="bg-white rounded-xl shadow-2xl max-w-4xl w-full max-h-[92vh] flex flex-col overflow-hidden">
+            <div className="flex items-center justify-between gap-2 px-4 py-3 border-b border-slate-200 bg-slate-50">
+              <h4 className="font-bold text-slate-900 flex items-center gap-2 text-sm sm:text-base min-w-0 pr-2">
+                <Camera className="w-5 h-5 text-primary-600 shrink-0" />
+                <span className="truncate">
+                  Fotos vehículo {fotosPreview.placa} ({fotosPreview.index + 1}/{fotosPreview.fotos.length})
+                </span>
+              </h4>
+              <button
+                type="button"
+                onClick={() => setFotosPreview(null)}
+                className="p-2 rounded-lg hover:bg-slate-200 text-slate-600"
+                aria-label="Cerrar"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="flex-1 min-h-0 bg-slate-100 p-4 flex flex-col gap-3">
+              <div className="flex-1 min-h-[50vh] bg-slate-200 rounded-lg overflow-hidden flex items-center justify-center">
+                <img
+                  src={fotosPreview.fotos[fotosPreview.index]}
+                  alt={`Foto ${fotosPreview.index + 1} ${fotosPreview.placa}`}
+                  className="max-h-[70vh] w-auto object-contain"
+                />
+              </div>
+              {fotosPreview.fotos.length > 1 && (
+                <div className="flex items-center justify-between gap-2">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFotosPreview((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              index: prev.index === 0 ? prev.fotos.length - 1 : prev.index - 1,
+                            }
+                          : prev,
+                      )
+                    }
+                    className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 text-sm font-semibold"
+                  >
+                    Anterior
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setFotosPreview((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              index: prev.index === prev.fotos.length - 1 ? 0 : prev.index + 1,
+                            }
+                          : prev,
+                      )
+                    }
+                    className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 text-sm font-semibold"
+                  >
+                    Siguiente
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>

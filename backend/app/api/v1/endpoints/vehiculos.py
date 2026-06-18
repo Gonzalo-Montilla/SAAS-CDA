@@ -3402,6 +3402,7 @@ def listar_vehiculos(
     fecha_desde: str = None,
     fecha_hasta: str = None,
     include_formato_extra: bool = Query(True, description="Si false, omite JSON pesado de recepción en el listado"),
+    include_observaciones: bool = Query(True, description="Si false, omite observaciones en el listado"),
     skip: int = 0,
     limit: int = 20,
     db: Session = Depends(get_db),
@@ -3477,6 +3478,7 @@ def listar_vehiculos(
                 "recepcion_formato_extra_json": (
                     vehiculo.recepcion_formato_extra_json if include_formato_extra else None
                 ),
+                "observaciones": vehiculo.observaciones if include_observaciones else None,
             }
         )
         out.append(row)
