@@ -570,8 +570,10 @@ export default function Recepcion() {
   const [fotosPreview, setFotosPreview] = useState<{
     vehiculoId: string;
     placa: string;
-    fotos: string[];
+    totalFotos: number;
+    fotosByIndex: Record<number, string>;
     index: number;
+    loadingIndex: number | null;
   } | null>(null);
   const [cargandoFotosVehiculoId, setCargandoFotosVehiculoId] = useState<string | null>(null);
   const [paginaActual, setPaginaActual] = useState(1);
@@ -1002,18 +1004,39 @@ export default function Recepcion() {
   const verFotosVehiculo = async (vehiculo: any) => {
     try {
       setCargandoFotosVehiculoId(vehiculo.id);
-      const detalle = await vehiculosApi.obtenerPorId(vehiculo.id);
-      const fotos = extraerFotosDeObservaciones(detalle.observaciones);
-      if (!fotos.length) {
+      const foto0 = await vehiculosApi.obtenerFotoVehiculo(vehiculo.id, 0);
+      if (!foto0.total_fotos) {
         showToast('warning', 'Sin fotos', `La placa ${vehiculo.placa} no tiene fotos registradas.`);
         return;
       }
+      const cache: Record<number, string> = {};
+      if (foto0.foto) cache[0] = foto0.foto;
       setFotosPreview({
         vehiculoId: vehiculo.id,
-        placa: vehiculo.placa,
-        fotos,
+        placa: foto0.placa || vehiculo.placa,
+        totalFotos: foto0.total_fotos,
+        fotosByIndex: cache,
         index: 0,
+        loadingIndex: null,
       });
+      // Prefetch silencioso de las siguientes 2 fotos para navegación más fluida.
+      const toPrefetch = [1, 2].filter((idx) => idx < (foto0.total_fotos || 0));
+      for (const idx of toPrefetch) {
+        void vehiculosApi
+          .obtenerFotoVehiculo(vehiculo.id, idx)
+          .then((resp) => {
+            if (!resp?.foto) return;
+            setFotosPreview((prev) => {
+              if (!prev || prev.vehiculoId !== vehiculo.id) return prev;
+              if (prev.fotosByIndex[idx]) return prev;
+              return {
+                ...prev,
+                fotosByIndex: { ...prev.fotosByIndex, [idx]: resp.foto as string },
+              };
+            });
+          })
+          .catch(() => undefined);
+      }
     } catch (error) {
       showToast(
         'error',
@@ -1022,6 +1045,46 @@ export default function Recepcion() {
       );
     } finally {
       setCargandoFotosVehiculoId(null);
+    }
+  };
+
+  const irAFoto = async (nextIndex: number) => {
+    let vehiculoId = '';
+    let placa = '';
+    let requiereCarga = false;
+    setFotosPreview((prev) => {
+      if (!prev) return prev;
+      vehiculoId = prev.vehiculoId;
+      placa = prev.placa;
+      requiereCarga = !prev.fotosByIndex[nextIndex];
+      return {
+        ...prev,
+        index: nextIndex,
+        loadingIndex: requiereCarga ? nextIndex : null,
+      };
+    });
+    if (!requiereCarga || !vehiculoId) return;
+    try {
+      const resp = await vehiculosApi.obtenerFotoVehiculo(vehiculoId, nextIndex);
+      if (!resp?.foto) {
+        showToast('warning', 'Foto no disponible', `No fue posible cargar la foto ${nextIndex + 1} de ${placa}.`);
+      } else {
+        setFotosPreview((prev) => {
+          if (!prev || prev.vehiculoId !== vehiculoId) return prev;
+          return {
+            ...prev,
+            totalFotos: resp.total_fotos || prev.totalFotos,
+            fotosByIndex: { ...prev.fotosByIndex, [nextIndex]: resp.foto as string },
+          };
+        });
+      }
+    } catch {
+      showToast('warning', 'Carga lenta', `No fue posible cargar la foto ${nextIndex + 1} de inmediato.`);
+    } finally {
+      setFotosPreview((prev) => {
+        if (!prev || prev.vehiculoId !== vehiculoId) return prev;
+        return { ...prev, loadingIndex: null };
+      });
     }
   };
 
@@ -3589,7 +3652,7 @@ export default function Recepcion() {
               <h4 className="font-bold text-slate-900 flex items-center gap-2 text-sm sm:text-base min-w-0 pr-2">
                 <Camera className="w-5 h-5 text-primary-600 shrink-0" />
                 <span className="truncate">
-                  Fotos vehículo {fotosPreview.placa} ({fotosPreview.index + 1}/{fotosPreview.fotos.length})
+                  Fotos vehículo {fotosPreview.placa} ({fotosPreview.index + 1}/{fotosPreview.totalFotos})
                 </span>
               </h4>
               <button
@@ -3603,42 +3666,38 @@ export default function Recepcion() {
             </div>
             <div className="flex-1 min-h-0 bg-slate-100 p-4 flex flex-col gap-3">
               <div className="flex-1 min-h-[50vh] bg-slate-200 rounded-lg overflow-hidden flex items-center justify-center">
-                <img
-                  src={fotosPreview.fotos[fotosPreview.index]}
-                  alt={`Foto ${fotosPreview.index + 1} ${fotosPreview.placa}`}
-                  className="max-h-[70vh] w-auto object-contain"
-                />
+                {fotosPreview.fotosByIndex[fotosPreview.index] ? (
+                  <img
+                    src={fotosPreview.fotosByIndex[fotosPreview.index]}
+                    alt={`Foto ${fotosPreview.index + 1} ${fotosPreview.placa}`}
+                    className="max-h-[70vh] w-auto object-contain"
+                  />
+                ) : (
+                  <div className="text-center text-slate-600">
+                    <LoadingSpinner message="Cargando foto..." />
+                  </div>
+                )}
               </div>
-              {fotosPreview.fotos.length > 1 && (
+              {fotosPreview.totalFotos > 1 && (
                 <div className="flex items-center justify-between gap-2">
                   <button
                     type="button"
-                    onClick={() =>
-                      setFotosPreview((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              index: prev.index === 0 ? prev.fotos.length - 1 : prev.index - 1,
-                            }
-                          : prev,
-                      )
-                    }
+                    onClick={() => {
+                      const nextIndex =
+                        fotosPreview.index === 0 ? fotosPreview.totalFotos - 1 : fotosPreview.index - 1;
+                      void irAFoto(nextIndex);
+                    }}
                     className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 text-sm font-semibold"
                   >
                     Anterior
                   </button>
                   <button
                     type="button"
-                    onClick={() =>
-                      setFotosPreview((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              index: prev.index === prev.fotos.length - 1 ? 0 : prev.index + 1,
-                            }
-                          : prev,
-                      )
-                    }
+                    onClick={() => {
+                      const nextIndex =
+                        fotosPreview.index === fotosPreview.totalFotos - 1 ? 0 : fotosPreview.index + 1;
+                      void irAFoto(nextIndex);
+                    }}
                     className="px-3 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 text-sm font-semibold"
                   >
                     Siguiente

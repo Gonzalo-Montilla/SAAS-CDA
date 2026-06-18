@@ -74,6 +74,14 @@ export interface FacturaCorreccionHistorialItem {
   created_at: string;
 }
 
+export interface VehiculoFotoResponse {
+  vehiculo_id: string;
+  placa: string;
+  total_fotos: number;
+  index: number;
+  foto?: string | null;
+}
+
 export const vehiculosApi = {
   // Registrar un nuevo vehículo (Recepción)
   registrar: async (data: VehiculoRegistro): Promise<Vehiculo> => {
@@ -165,6 +173,13 @@ export const vehiculosApi = {
       }
     }
     return { blob, filename };
+  },
+
+  obtenerFotoVehiculo: async (vehiculoId: string, index: number = 0): Promise<VehiculoFotoResponse> => {
+    const response = await apiClient.get<VehiculoFotoResponse>(`/vehiculos/${vehiculoId}/foto`, {
+      params: { index },
+    });
+    return response.data;
   },
 
   // Venta solo de comisión SOAT (sin revisión)

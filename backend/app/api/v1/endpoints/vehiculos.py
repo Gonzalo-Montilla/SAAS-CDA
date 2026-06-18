@@ -193,6 +193,14 @@ class FacturaCorreccionHistorialItem(BaseModel):
     created_at: datetime
 
 
+class VehiculoFotoResponse(BaseModel):
+    vehiculo_id: str
+    placa: str
+    total_fotos: int
+    index: int
+    foto: str | None = None
+
+
 def _map_metodo_pago_factus_credit_note(metodo_pago: str | None) -> str:
     m = (metodo_pago or "efectivo").strip().lower()
     if m == "transferencia":
@@ -240,6 +248,28 @@ def _select_credit_note_range_id(fs: TenantFactusSettings) -> int | None:
         if "nota" in document_raw and "cr" in document_raw:
             return int(row.id)
     return None
+
+
+def _extract_fotos_from_observaciones(observaciones: str | None) -> list[str]:
+    if not observaciones:
+        return []
+    try:
+        parsed = json.loads(observaciones)
+    except Exception:
+        return []
+    if not isinstance(parsed, dict):
+        return []
+    fotos = parsed.get("fotos")
+    if not isinstance(fotos, list):
+        return []
+    out: list[str] = []
+    for item in fotos:
+        if not isinstance(item, str):
+            continue
+        val = item.strip()
+        if val:
+            out.append(val)
+    return out
 
 
 def _latest_factura_correcciones_by_vehiculo(
@@ -3269,6 +3299,43 @@ def descargar_recibo_pago_pdf(
         BytesIO(pdf_bytes),
         media_type="application/pdf",
         headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
+
+
+@router.get("/{vehiculo_id}/foto", response_model=VehiculoFotoResponse)
+def obtener_foto_vehiculo(
+    vehiculo_id: str,
+    index: int = Query(0, ge=0),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
+):
+    """
+    Devuelve una sola foto del vehículo por índice (carga bajo demanda).
+    """
+    try:
+        vid = UUID(vehiculo_id)
+    except ValueError:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="ID de vehículo inválido")
+
+    vehiculo = _filtro_vehiculo_sede(
+        db.query(VehiculoProceso),
+        current_user.tenant_id,
+        active_sucursal_id,
+    ).filter(VehiculoProceso.id == vid).first()
+
+    if not vehiculo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehículo no encontrado")
+
+    fotos = _extract_fotos_from_observaciones(vehiculo.observaciones)
+    total = len(fotos)
+    foto = fotos[index] if 0 <= index < total else None
+    return VehiculoFotoResponse(
+        vehiculo_id=str(vehiculo.id),
+        placa=vehiculo.placa,
+        total_fotos=total,
+        index=index,
+        foto=foto,
     )
 
 
