@@ -1034,10 +1034,12 @@ function ModalCobro({
     sistecredito: 0,
   });
 
+  const valorPreventivaNum = Number(valorPreventiva || 0);
+
   // Calcular total a cobrar ajustado
   const calcularTotalAjustado = () => {
     if (esPreventiva) {
-      const valorBase = parseFloat(valorPreventiva) || 0;
+      const valorBase = valorPreventivaNum || 0;
       const comision = clientePagaSOAT ? vehiculo.comision_soat : 0;
       return valorBase + comision;
     }
@@ -1075,7 +1077,7 @@ function ModalCobro({
     (registros.registrado_runt && registros.registrado_sicov && registros.registrado_indra && facturaOk);
   
   // Validar que si es preventiva, tenga valor
-  const preventivaTieneValor = esCobroExento ? true : (esPreventiva ? parseFloat(valorPreventiva) > 0 : true);
+  const preventivaTieneValor = esCobroExento ? true : (esPreventiva ? valorPreventivaNum > 0 : true);
   
   const puedeConfirmarCobro = todosRegistrados && preventivaTieneValor && desgloseMixtoValido;
 
@@ -1197,7 +1199,7 @@ function ModalCobro({
       metodo_pago: metodoPago,
       tiene_soat: clientePagaSOAT,
       numero_factura_dian: modoFactus ? undefined : numeroFactura || undefined,
-      valor_preventiva: esPreventiva ? parseFloat(valorPreventiva) : undefined,
+      valor_preventiva: esPreventiva ? valorPreventivaNum : undefined,
       desglose_mixto: desgloseParaEnviar,
       ...registros,
     });
@@ -1347,14 +1349,16 @@ function ModalCobro({
                   <p className="text-sm opacity-90 mb-3">SERVICIO PREVENTIVA - Ingrese el valor</p>
                   <div className="bg-white rounded-lg p-4 mb-3">
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="numeric"
                       value={valorPreventiva}
-                      onChange={(e) => setValorPreventiva(e.target.value)}
-                      placeholder="Ej: 50000"
-                      min="0"
-                      step="1000"
+                      onChange={(e) => setValorPreventiva(e.target.value.replace(/\D/g, '').slice(0, 9))}
+                      placeholder="Ej: 70000"
                       className="w-full text-4xl font-bold text-gray-900 border-none focus:ring-0 p-0 text-center"
                     />
+                    <p className="text-xs text-slate-600 mt-2 text-center">
+                      Ingrese solo números (sin puntos ni comas). Valor digitado: ${formatCurrency(valorPreventivaNum || 0)}
+                    </p>
                   </div>
                   {vehiculo.tiene_soat && clientePagaSOAT && (
                     <p className="text-sm opacity-90 flex items-center justify-center gap-1">
@@ -1362,7 +1366,7 @@ function ModalCobro({
                       + Comisión SOAT: ${formatCurrency(vehiculo.comision_soat)}
                     </p>
                   )}
-                  {parseFloat(valorPreventiva) > 0 && (
+                  {valorPreventivaNum > 0 && (
                     <div className="mt-3 pt-3 border-t border-white border-opacity-30">
                       <p className="text-sm opacity-90 mb-1">TOTAL A COBRAR</p>
                       <p className="text-3xl font-bold">${formatCurrency(totalAjustado)}</p>
@@ -4021,7 +4025,7 @@ function VehiculosCobradosHoy({ vehiculos, loading }: { vehiculos: Vehiculo[], l
         </p>
         {puedeCorregirFactura && (
           <p className="mt-1 text-xs text-slate-500">
-            Como administrador también puedes corregir factura emitida (nota crédito + reemisión) para errores de placa o cliente.
+            Como administrador también puedes corregir factura emitida (nota crédito + reemisión) para errores de placa, cliente o valor (preventiva).
           </p>
         )}
       </div>
@@ -4122,6 +4126,7 @@ function VehiculosCobradosHoy({ vehiculos, loading }: { vehiculos: Vehiculo[], l
 function ModalCorregirFacturaEmitida({ vehiculo, onClose }: { vehiculo: Vehiculo; onClose: () => void }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const esPreventivaVehiculo = (vehiculo.tipo_vehiculo || '').toLowerCase() === 'preventiva';
   const [motivo, setMotivo] = useState<CorregirFacturaEmitidaPayload['motivo']>('placa');
   const [nuevaPlaca, setNuevaPlaca] = useState('');
   const [clienteNombre, setClienteNombre] = useState(vehiculo.cliente_nombre || '');
@@ -4129,6 +4134,9 @@ function ModalCorregirFacturaEmitida({ vehiculo, onClose }: { vehiculo: Vehiculo
   const [clienteEmail, setClienteEmail] = useState(vehiculo.cliente_email || '');
   const [clienteTelefono, setClienteTelefono] = useState(vehiculo.cliente_telefono || '');
   const [clienteDireccion, setClienteDireccion] = useState(vehiculo.cliente_direccion || '');
+  const [valorPreventivaNuevo, setValorPreventivaNuevo] = useState(
+    String(Math.round(Number(vehiculo.valor_rtm || 0))),
+  );
   const [observacion, setObservacion] = useState('');
   const { data: historialCorrecciones, isFetching: cargandoHistorial } = useQuery({
     queryKey: ['vehiculo-factura-correcciones', vehiculo.id],
@@ -4159,6 +4167,12 @@ function ModalCorregirFacturaEmitida({ vehiculo, onClose }: { vehiculo: Vehiculo
       }
       if ((clienteDireccion || '').trim() !== (vehiculo.cliente_direccion || '').trim()) {
         payload.cliente_direccion = clienteDireccion.trim() || '';
+      }
+      if (motivo === 'valor' && esPreventivaVehiculo) {
+        const valorNuevo = Number(valorPreventivaNuevo || 0);
+        if (valorNuevo > 0) {
+          payload.valor_preventiva_nuevo = valorNuevo;
+        }
       }
       return vehiculosApi.corregirFacturaEmitida(vehiculo.id, payload);
     },
@@ -4191,7 +4205,13 @@ function ModalCorregirFacturaEmitida({ vehiculo, onClose }: { vehiculo: Vehiculo
     (clienteTelefono || '').trim() !== (vehiculo.cliente_telefono || '').trim() ||
     (clienteDireccion || '').trim() !== (vehiculo.cliente_direccion || '').trim();
   const hayCambioPlaca = nuevaPlaca.trim().toUpperCase() !== '' && nuevaPlaca.trim().toUpperCase() !== vehiculo.placa;
-  const puedeEnviar = (hayCambioCliente || hayCambioPlaca) && observacion.trim().length >= 8;
+  const valorPreventivaNuevoNum = Number(valorPreventivaNuevo || 0);
+  const hayCambioValor =
+    motivo === 'valor' &&
+    esPreventivaVehiculo &&
+    valorPreventivaNuevoNum > 0 &&
+    valorPreventivaNuevoNum !== Number(vehiculo.valor_rtm || 0);
+  const puedeEnviar = (hayCambioCliente || hayCambioPlaca || hayCambioValor) && observacion.trim().length >= 8;
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
@@ -4206,6 +4226,7 @@ function ModalCorregirFacturaEmitida({ vehiculo, onClose }: { vehiculo: Vehiculo
               </p>
               <p className="text-xs text-amber-700 mt-1">
                 Esta acción crea nota crédito en Factus y reemite factura con datos corregidos.
+                En preventiva también puede registrar ajuste automático por diferencia.
               </p>
             </div>
             <button
@@ -4220,10 +4241,11 @@ function ModalCorregirFacturaEmitida({ vehiculo, onClose }: { vehiculo: Vehiculo
             <div>
               <label className="block text-sm font-semibold text-slate-800 mb-2">Motivo de corrección</label>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                {(['placa', 'documento', 'nombre', 'identificacion'] as const).map((m) => (
+                {(['placa', 'documento', 'nombre', 'identificacion', 'valor'] as const).map((m) => (
                   <button
                     key={m}
                     type="button"
+                    disabled={m === 'valor' && !esPreventivaVehiculo}
                     onClick={() => setMotivo(m)}
                     className={`rounded-lg border px-3 py-2 text-sm font-semibold transition ${
                       motivo === m
@@ -4235,6 +4257,11 @@ function ModalCorregirFacturaEmitida({ vehiculo, onClose }: { vehiculo: Vehiculo
                   </button>
                 ))}
               </div>
+              {!esPreventivaVehiculo && (
+                <p className="text-xs text-slate-500 mt-2">
+                  El motivo <span className="font-semibold">valor</span> solo está disponible para servicio preventiva.
+                </p>
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -4287,6 +4314,21 @@ function ModalCorregirFacturaEmitida({ vehiculo, onClose }: { vehiculo: Vehiculo
                   className="input-pos"
                 />
               </div>
+              {esPreventivaVehiculo && (
+                <div>
+                  <label className="block text-sm font-semibold text-slate-800 mb-1">Valor correcto preventiva</label>
+                  <input
+                    value={valorPreventivaNuevo}
+                    onChange={(e) => setValorPreventivaNuevo(e.target.value.replace(/\D/g, '').slice(0, 9))}
+                    className="input-pos"
+                    inputMode="numeric"
+                    placeholder="Ej: 70000"
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Valor actual: ${formatCurrency(Number(vehiculo.valor_rtm || 0))} · Nuevo: ${formatCurrency(valorPreventivaNuevoNum || 0)}
+                  </p>
+                </div>
+              )}
             </div>
 
             <div>

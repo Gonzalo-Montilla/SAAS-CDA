@@ -180,6 +180,20 @@ def obtener_resumen_caja(
     total_egresos = Decimal(0)
     
     for mov in movimientos:
+        metodo_lower = mov.metodo_pago.lower() if mov.metodo_pago else ""
+        if metodo_lower == "efectivo":
+            efectivo += mov.monto
+        elif metodo_lower == "tarjeta_debito":
+            tarjeta_debito += mov.monto
+        elif metodo_lower == "tarjeta_credito":
+            tarjeta_credito += mov.monto
+        elif metodo_lower == "transferencia":
+            transferencia += mov.monto
+        elif metodo_lower == "credismart":
+            credismart += mov.monto
+        elif metodo_lower == "sistecredito":
+            sistecredito += mov.monto
+
         if mov.monto > 0:
             total_ingresos += mov.monto
             if mov.ingresa_efectivo:
@@ -191,20 +205,6 @@ def obtener_resumen_caja(
             elif mov.tipo == TipoMovimiento.COMISION_SOAT:
                 total_comision_soat += mov.monto
             
-            # Clasificar por método (case-insensitive)
-            metodo_lower = mov.metodo_pago.lower() if mov.metodo_pago else ""
-            if metodo_lower == "efectivo":
-                efectivo += mov.monto
-            elif metodo_lower == "tarjeta_debito":
-                tarjeta_debito += mov.monto
-            elif metodo_lower == "tarjeta_credito":
-                tarjeta_credito += mov.monto
-            elif metodo_lower == "transferencia":
-                transferencia += mov.monto
-            elif metodo_lower == "credismart":
-                credismart += mov.monto
-            elif metodo_lower == "sistecredito":
-                sistecredito += mov.monto
         else:
             total_egresos += abs(mov.monto)
     
@@ -990,18 +990,17 @@ def obtener_detalle_caja(
     sistecredito = Decimal(0)
     
     for mov in movimientos:
-        if mov.monto > 0:
-            metodo_lower = mov.metodo_pago.lower() if mov.metodo_pago else ""
-            if metodo_lower == "efectivo":
-                efectivo += mov.monto
-            elif metodo_lower in ["tarjeta_debito", "tarjeta_credito"]:
-                tarjeta += mov.monto
-            elif metodo_lower == "transferencia":
-                transferencia += mov.monto
-            elif metodo_lower == "credismart":
-                credismart += mov.monto
-            elif metodo_lower == "sistecredito":
-                sistecredito += mov.monto
+        metodo_lower = mov.metodo_pago.lower() if mov.metodo_pago else ""
+        if metodo_lower == "efectivo":
+            efectivo += mov.monto
+        elif metodo_lower in ["tarjeta_debito", "tarjeta_credito"]:
+            tarjeta += mov.monto
+        elif metodo_lower == "transferencia":
+            transferencia += mov.monto
+        elif metodo_lower == "credismart":
+            credismart += mov.monto
+        elif metodo_lower == "sistecredito":
+            sistecredito += mov.monto
     
     # Contar vehículos
     vehiculos_cobrados = db.query(func.count(VehiculoProceso.id)).filter(
@@ -1104,26 +1103,25 @@ def descargar_comprobante_cierre(
     total_sistecredito = Decimal(0)
     
     for mov in movimientos:
+        metodo_lower = mov.metodo_pago.lower() if mov.metodo_pago else ""
+        if metodo_lower == "efectivo":
+            total_efectivo += mov.monto
+        elif metodo_lower == "tarjeta_debito":
+            total_tarjeta_debito += mov.monto
+        elif metodo_lower == "tarjeta_credito":
+            total_tarjeta_credito += mov.monto
+        elif metodo_lower == "transferencia":
+            total_transferencia += mov.monto
+        elif metodo_lower == "credismart":
+            total_credismart += mov.monto
+        elif metodo_lower == "sistecredito":
+            total_sistecredito += mov.monto
+
         if mov.monto > 0:
             if mov.tipo == TipoMovimiento.RTM:
                 total_rtm += mov.monto
             elif mov.tipo == TipoMovimiento.COMISION_SOAT:
                 total_soat += mov.monto
-            
-            # Clasificar por método de pago (case-insensitive)
-            metodo_lower = mov.metodo_pago.lower() if mov.metodo_pago else ""
-            if metodo_lower == "efectivo":
-                total_efectivo += mov.monto
-            elif metodo_lower == "tarjeta_debito":
-                total_tarjeta_debito += mov.monto
-            elif metodo_lower == "tarjeta_credito":
-                total_tarjeta_credito += mov.monto
-            elif metodo_lower == "transferencia":
-                total_transferencia += mov.monto
-            elif metodo_lower == "credismart":
-                total_credismart += mov.monto
-            elif metodo_lower == "sistecredito":
-                total_sistecredito += mov.monto
     
     # Contar vehículos
     vehiculos_cobrados = db.query(func.count(VehiculoProceso.id)).filter(

@@ -158,7 +158,7 @@ def _es_prueba_auditoria(tipo_vehiculo: str | None) -> bool:
     return (tipo_vehiculo or "").strip().lower() == TIPO_VEHICULO_PRUEBAS_AUDITORIA
 
 
-MOTIVOS_CORRECCION_FACTURA = {"placa", "documento", "nombre", "identificacion"}
+MOTIVOS_CORRECCION_FACTURA = {"placa", "documento", "nombre", "identificacion", "valor"}
 
 
 class CorregirFacturaEmitidaRequest(BaseModel):
@@ -169,6 +169,7 @@ class CorregirFacturaEmitidaRequest(BaseModel):
     cliente_email: str | None = Field(default=None, max_length=255)
     cliente_telefono: str | None = Field(default=None, max_length=40)
     cliente_direccion: str | None = Field(default=None, max_length=255)
+    valor_preventiva_nuevo: Decimal | None = Field(default=None, gt=0)
     observacion: str | None = Field(default=None, max_length=250)
 
 
@@ -2063,6 +2064,11 @@ def cobrar_vehiculo(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail="Debe ingresar un valor mayor a 0 para el servicio PREVENTIVA"
                 )
+            if Decimal(str(cobro_data.valor_preventiva)).as_tuple().exponent < 0:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="El valor de PREVENTIVA debe ingresarse sin decimales (pesos COP enteros).",
+                )
             
             # Actualizar valor RTM con el valor manual
             vehiculo.valor_rtm = cobro_data.valor_preventiva
@@ -2506,6 +2512,19 @@ def corregir_factura_emitida(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Esta factura ya fue corregida anteriormente y no admite una segunda corrección.",
         )
+    correccion_fallida_con_nc = (
+        db.query(FacturaCorreccion)
+        .filter(
+            FacturaCorreccion.tenant_id == current_user.tenant_id,
+            FacturaCorreccion.vehiculo_proceso_id == vehiculo.id,
+            FacturaCorreccion.estado == "failed",
+            FacturaCorreccion.nota_credito_numero.isnot(None),
+            FacturaCorreccion.factura_nueva_numero.is_(None),
+        )
+        .order_by(FacturaCorreccion.created_at.desc())
+        .first()
+    )
+    recovery_mode = correccion_fallida_con_nc is not None
 
     fs = (
         db.query(TenantFactusSettings)
@@ -2543,8 +2562,17 @@ def corregir_factura_emitida(
         "cliente_email": vehiculo.cliente_email,
         "cliente_telefono": vehiculo.cliente_telefono,
         "cliente_direccion": vehiculo.cliente_direccion,
+        "valor_rtm": str(Decimal(str(vehiculo.valor_rtm or 0))),
+        "comision_soat": str(Decimal(str(vehiculo.comision_soat or 0))),
+        "total_cobrado": str(Decimal(str(vehiculo.total_cobrado or 0))),
+        "metodo_pago": str(getattr(vehiculo.metodo_pago, "value", vehiculo.metodo_pago) or ""),
         "numero_factura_dian": vehiculo.numero_factura_dian,
     }
+
+    valor_rtm_original = Decimal(str(vehiculo.valor_rtm or 0))
+    comision_soat_original = Decimal(str(vehiculo.comision_soat or 0))
+    total_original = Decimal(str(vehiculo.total_cobrado or 0))
+    metodo_pago_original = str(getattr(vehiculo.metodo_pago, "value", vehiculo.metodo_pago) or "").strip().lower()
 
     proposed_placa = (payload.nueva_placa or "").strip().upper() or vehiculo.placa
     proposed_nombre = (payload.cliente_nombre or "").strip() or vehiculo.cliente_nombre
@@ -2558,6 +2586,35 @@ def corregir_factura_emitida(
     proposed_direccion = (
         (payload.cliente_direccion or "").strip() if payload.cliente_direccion is not None else vehiculo.cliente_direccion
     ) or None
+    proposed_valor_preventiva = valor_rtm_original
+    if payload.valor_preventiva_nuevo is not None:
+        proposed_valor_preventiva = Decimal(str(payload.valor_preventiva_nuevo))
+    if proposed_valor_preventiva.as_tuple().exponent < 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El valor corregido de PREVENTIVA debe enviarse sin decimales (pesos COP enteros).",
+        )
+    if motivo == "valor":
+        if (vehiculo.tipo_vehiculo or "").strip().lower() != "preventiva":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La corrección por valor solo aplica para servicios PREVENTIVA.",
+            )
+        if payload.valor_preventiva_nuevo is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Debes indicar el valor correcto para PREVENTIVA.",
+            )
+        if proposed_valor_preventiva <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El valor correcto para PREVENTIVA debe ser mayor a 0.",
+            )
+    elif payload.valor_preventiva_nuevo is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El campo valor_preventiva_nuevo solo se permite cuando el motivo es 'valor'.",
+        )
     did_change = (
         proposed_placa != vehiculo.placa
         or proposed_nombre != vehiculo.cliente_nombre
@@ -2565,11 +2622,16 @@ def corregir_factura_emitida(
         or proposed_email != vehiculo.cliente_email
         or proposed_telefono != vehiculo.cliente_telefono
         or proposed_direccion != vehiculo.cliente_direccion
+        or proposed_valor_preventiva != valor_rtm_original
     )
     if not did_change:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Debes ajustar al menos placa o datos del cliente para reemitir.",
+            detail=(
+                "Debes ingresar un valor diferente al facturado para reemitir."
+                if motivo == "valor"
+                else "Debes ajustar al menos placa o datos del cliente para reemitir."
+            ),
         )
 
     cid, sec_enc, user, pwd_enc = active_auth_encrypted(fs)
@@ -2612,6 +2674,9 @@ def corregir_factura_emitida(
 
     note_number: str | None = None
     note_id: int | None = None
+    if recovery_mode:
+        note_number = str(correccion_fallida_con_nc.nota_credito_numero or "") or None
+        note_id = int(correccion_fallida_con_nc.nota_credito_factus_id) if correccion_fallida_con_nc.nota_credito_factus_id else None
     try:
         body_for_items = build_validate_body(
             vehiculo=vehiculo,
@@ -2622,43 +2687,47 @@ def corregir_factura_emitida(
             metodo_pago=str(vehiculo.metodo_pago or "efectivo"),
             tarifa=None,
         )
-        payment_method_code = _map_metodo_pago_factus_credit_note(str(vehiculo.metodo_pago or "efectivo"))
-        credit_note_body: dict[str, Any] = {
-            "reference_code": f"NC-{vehiculo.id.hex[:8]}-{uuid.uuid4().hex[:8]}",
-            "correction_concept_code": "2",
-            "customization_id": "20",
-            "observation": (payload.observacion or f"Corrección por {motivo} en CDASOFT")[:250],
-            "payment_details": [
-                {
-                    "payment_form": "1",
-                    "payment_method_code": payment_method_code,
-                    "reference_code": f"NC-{vehiculo.id.hex[:6]}",
-                    "amount": str(Decimal(str(vehiculo.total_cobrado or 0))),
-                }
-            ],
-            "customer": body_for_items.get("customer"),
-            "items": body_for_items.get("items") or [],
-        }
-        credit_note_range_id = _select_credit_note_range_id(fs)
-        if credit_note_range_id is not None:
-            credit_note_body["numbering_range_id"] = credit_note_range_id
-        if fe_original.factus_bill_id is not None:
-            credit_note_body["bill_id"] = int(fe_original.factus_bill_id)
-        else:
-            credit_note_body["bill_number"] = str(vehiculo.numero_factura_dian or "").strip()
+        if not recovery_mode:
+            payment_method_code = _map_metodo_pago_factus_credit_note(str(vehiculo.metodo_pago or "efectivo"))
+            credit_note_body: dict[str, Any] = {
+                "reference_code": f"NC-{vehiculo.id.hex[:8]}-{uuid.uuid4().hex[:8]}",
+                "correction_concept_code": "2",
+                "customization_id": "20",
+                "observation": (payload.observacion or f"Corrección por {motivo} en CDASOFT")[:250],
+                "payment_details": [
+                    {
+                        "payment_form": "1",
+                        "payment_method_code": payment_method_code,
+                        "reference_code": f"NC-{vehiculo.id.hex[:6]}",
+                        "amount": str(Decimal(str(vehiculo.total_cobrado or 0))),
+                    }
+                ],
+                "customer": body_for_items.get("customer"),
+                "items": body_for_items.get("items") or [],
+            }
+            credit_note_range_id = _select_credit_note_range_id(fs)
+            if credit_note_range_id is not None:
+                credit_note_body["numbering_range_id"] = credit_note_range_id
+            if fe_original.factus_bill_id is not None:
+                credit_note_body["bill_id"] = int(fe_original.factus_bill_id)
+            else:
+                credit_note_body["bill_number"] = str(vehiculo.numero_factura_dian or "").strip()
 
-        nc_resp = validate_credit_note(
-            base_url=base,
-            access_token=str(access),
-            body=credit_note_body,
-        )
-        note_number, note_id = _coerce_credit_note_result(nc_resp if isinstance(nc_resp, dict) else {})
+            nc_resp = validate_credit_note(
+                base_url=base,
+                access_token=str(access),
+                body=credit_note_body,
+            )
+            note_number, note_id = _coerce_credit_note_result(nc_resp if isinstance(nc_resp, dict) else {})
         vehiculo.placa = proposed_placa
         vehiculo.cliente_nombre = proposed_nombre
         vehiculo.cliente_documento = proposed_documento
         vehiculo.cliente_email = proposed_email
         vehiculo.cliente_telefono = proposed_telefono
         vehiculo.cliente_direccion = proposed_direccion
+        if motivo == "valor":
+            vehiculo.valor_rtm = proposed_valor_preventiva
+            vehiculo.total_cobrado = proposed_valor_preventiva + comision_soat_original
         validar_datos_cliente_para_factus(vehiculo)
 
         nueva_numero, _, _ = emitir_y_persistir_factura_cobro(
@@ -2683,6 +2752,35 @@ def corregir_factura_emitida(
             .order_by(FacturaElectronica.created_at.desc())
             .first()
         )
+        total_nuevo = Decimal(str(vehiculo.total_cobrado or 0))
+        ajuste_diferencia = (total_nuevo - total_original).quantize(Decimal("0.01"))
+        if motivo == "valor" and ajuste_diferencia != Decimal("0.00"):
+            if not vehiculo.caja_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No se encontró caja asociada al cobro original para registrar el ajuste.",
+                )
+            if metodo_pago_original in {"", "mixto", "reinspeccion_exenta", "auditoria_exenta"}:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No se puede aplicar ajuste automático para este método de pago original.",
+                )
+            db.add(
+                MovimientoCaja(
+                    tenant_id=current_user.tenant_id,
+                    caja_id=vehiculo.caja_id,
+                    vehiculo_id=vehiculo.id,
+                    tipo=TipoMovimiento.AJUSTE,
+                    monto=ajuste_diferencia,
+                    metodo_pago=metodo_pago_original,
+                    concepto=(
+                        f"Ajuste por corrección de valor PREVENTIVA {vehiculo.placa} "
+                        f"(Orig: {total_original.quantize(Decimal('0.01'))} / Nuevo: {total_nuevo.quantize(Decimal('0.01'))})"
+                    ),
+                    ingresa_efectivo=(metodo_pago_original == "efectivo"),
+                    created_by=current_user.id,
+                )
+            )
 
         db.add(
             FacturaCorreccion(
@@ -2707,6 +2805,11 @@ def corregir_factura_emitida(
                         "cliente_email": vehiculo.cliente_email,
                         "cliente_telefono": vehiculo.cliente_telefono,
                         "cliente_direccion": vehiculo.cliente_direccion,
+                        "valor_rtm": str(Decimal(str(vehiculo.valor_rtm or 0))),
+                        "comision_soat": str(Decimal(str(vehiculo.comision_soat or 0))),
+                        "total_cobrado": str(Decimal(str(vehiculo.total_cobrado or 0))),
+                        "metodo_pago_ajuste": metodo_pago_original,
+                        "ajuste_diferencia": str(ajuste_diferencia),
                         "numero_factura_dian": vehiculo.numero_factura_dian,
                     },
                     ensure_ascii=False,
@@ -2721,7 +2824,15 @@ def corregir_factura_emitida(
             factura_original=fe_original.numero_documento or before_json.get("numero_factura_dian"),
             nota_credito=note_number,
             factura_nueva=nueva_numero,
-            message="Factura corregida: NC validada y factura reemitida con datos actualizados.",
+            message=(
+                "Factura corregida: NC validada y factura reemitida con datos actualizados."
+                if motivo != "valor"
+                else (
+                    "Factura corregida por valor: NC validada, factura reemitida y ajuste registrado en caja."
+                    if not recovery_mode
+                    else "Recuperación completada: se reutilizó NC existente y se reemitió factura con ajuste en caja."
+                )
+            ),
         )
     except FactusAPIError as e:
         db.rollback()

@@ -43,13 +43,14 @@ interface VehiculoPdfDownload {
 }
 
 export interface CorregirFacturaEmitidaPayload {
-  motivo: 'placa' | 'documento' | 'nombre' | 'identificacion';
+  motivo: 'placa' | 'documento' | 'nombre' | 'identificacion' | 'valor';
   nueva_placa?: string;
   cliente_nombre?: string;
   cliente_documento?: string;
   cliente_email?: string;
   cliente_telefono?: string;
   cliente_direccion?: string;
+  valor_preventiva_nuevo?: number;
   observacion?: string;
 }
 
