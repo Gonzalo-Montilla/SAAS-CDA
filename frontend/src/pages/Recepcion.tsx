@@ -412,6 +412,12 @@ export default function Recepcion() {
   const [mostrarModalReinspeccion, setMostrarModalReinspeccion] = useState(false);
   const [placaEvaluadaReinspeccion, setPlacaEvaluadaReinspeccion] = useState('');
   const [esReingresoRechazoInicial, setEsReingresoRechazoInicial] = useState(false);
+  const [historialClienteSugerido, setHistorialClienteSugerido] = useState<{
+    fuente: string;
+    placa: string;
+    fecha_ultima_atencion?: string | null;
+  } | null>(null);
+  const historialSugerenciaKeyRef = useRef<string>('');
 
   // Estado para edición
   const [modoEdicion, setModoEdicion] = useState(false);
@@ -523,6 +529,95 @@ export default function Recepcion() {
     }, 450);
     return () => window.clearTimeout(handle);
   }, [formData.placa, modoEdicion, placaEvaluadaReinspeccion]);
+
+  useEffect(() => {
+    if (modoEdicion) return;
+    const placaNorm = (formData.placa || '').trim().toUpperCase();
+    const docNorm = (formData.cliente_documento || '').trim();
+    const tipoDoc = (formData.cliente_tipo_documento || 'CC').trim().toUpperCase();
+    if (placaNorm.length < 5 && docNorm.length < 5) {
+      setHistorialClienteSugerido(null);
+      return;
+    }
+    const key = `${placaNorm}|${tipoDoc}|${docNorm}`;
+    if (historialSugerenciaKeyRef.current === key) return;
+
+    const timer = window.setTimeout(async () => {
+      historialSugerenciaKeyRef.current = key;
+      try {
+        const sug = await vehiculosApi.obtenerHistorialClienteSugerencia({
+          placa: placaNorm,
+          clienteTipoDocumento: tipoDoc,
+          clienteDocumento: docNorm,
+        });
+        if (!sug?.encontrado) return;
+
+        let aplicado = false;
+        setFormData((prev) => {
+          const next = { ...prev };
+
+          const nombreSug = String(sug.cliente_nombre || '').trim();
+          if (String(next.cliente_nombre || '').trim().length === 0 && nombreSug.length > 0) {
+            next.cliente_nombre = nombreSug.toUpperCase();
+            aplicado = true;
+          }
+          const telSug = String(sug.cliente_telefono || '').trim();
+          if (String(next.cliente_telefono || '').trim().length === 0 && telSug.length > 0) {
+            next.cliente_telefono = telSug;
+            aplicado = true;
+          }
+          const emailSug = String(sug.cliente_email || '').trim();
+          if (String(next.cliente_email || '').trim().length === 0 && emailSug.length > 0) {
+            next.cliente_email = emailSug.toLowerCase();
+            aplicado = true;
+          }
+          const dirSug = String(sug.cliente_direccion || '').trim();
+          if (String(next.cliente_direccion || '').trim().length === 0 && dirSug.length > 0) {
+            next.cliente_direccion = dirSug;
+            aplicado = true;
+          }
+          const tipoSug = String(sug.cliente_tipo_documento || '').trim().toUpperCase();
+          if (
+            String(next.cliente_tipo_documento || '').trim().length === 0 &&
+            ['CC', 'CE', 'PA', 'NIT'].includes(tipoSug)
+          ) {
+            next.cliente_tipo_documento = tipoSug as VehiculoRegistro['cliente_tipo_documento'];
+            aplicado = true;
+          }
+          if (
+            String(next.cliente_documento || '').trim().length === 0 &&
+            String(sug.cliente_documento || '').trim().length > 0
+          ) {
+            const tipo = (next.cliente_tipo_documento || 'CC') as VehiculoRegistro['cliente_tipo_documento'];
+            next.cliente_documento = normalizarDocumentoCliente(String(sug.cliente_documento), tipo);
+            aplicado = true;
+          }
+          return next;
+        });
+        if ((clienteFactusMunicipalityId || '').trim().length === 0 && sug.cliente_factus_municipality_id != null) {
+          setClienteFactusMunicipalityId(String(sug.cliente_factus_municipality_id));
+          aplicado = true;
+        }
+        if (aplicado) {
+          setHistorialClienteSugerido({
+            fuente: String(sug.fuente || 'historial'),
+            placa: String(sug.placa || placaNorm),
+            fecha_ultima_atencion: sug.fecha_ultima_atencion || null,
+          });
+        }
+      } catch {
+        // No bloquea el flujo de recepción si falla la sugerencia.
+      }
+    }, 500);
+    return () => window.clearTimeout(timer);
+  }, [
+    formData.placa,
+    formData.cliente_documento,
+    formData.cliente_tipo_documento,
+    modoEdicion,
+    clienteFactusMunicipalityId,
+    showToast,
+  ]);
 
   type PrefillState = {
     agendamiento_prefill?: {
@@ -760,24 +855,8 @@ export default function Recepcion() {
         }));
       }
       if (!data.encontrado) {
-        showToast(
-          'warning',
-          'Sin datos para autocompletar',
-          `No se encontró información RUNT para ${data.placa_consultada}. Puedes continuar manualmente.`
-        );
         return;
       }
-      const resumen = [
-        data.marca,
-        data.linea,
-        data.modelo,
-        data.ano_modelo ? String(data.ano_modelo) : null,
-      ].filter(Boolean).join(' · ');
-      showToast(
-        'success',
-        'Consulta RUNT exitosa',
-        resumen || `Placa ${data.placa_consultada} encontrada`
-      );
     },
     onError: (error: any) => {
       const errorMessage = error?.response?.data?.detail || 'No fue posible consultar RUNT en este momento.';
@@ -922,6 +1001,8 @@ export default function Recepcion() {
     setMostrarModalReinspeccion(false);
     setPlacaEvaluadaReinspeccion('');
     setEsReingresoRechazoInicial(false);
+    setHistorialClienteSugerido(null);
+    historialSugerenciaKeyRef.current = '';
     
     // NO limpiar tarifaCalculada aquí - dejar que el useEffect lo maneje
     // Esto permite que la tarifa permanezca visible después del registro
@@ -2079,8 +2160,16 @@ export default function Recepcion() {
                 </div>
               </div>
               <p className="text-xs text-slate-500">
-                Consulta por placa para autocompletar datos técnicos del vehículo. Los datos del cliente se registran manualmente.
+                Consulta por placa para sugerir datos técnicos y autocompletar cliente desde historial.
               </p>
+              {historialClienteSugerido && (
+                <div className="mt-1 text-xs rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-emerald-800">
+                  Datos del cliente autocompletados desde historial para placa {historialClienteSugerido.placa}
+                  {historialClienteSugerido.fecha_ultima_atencion
+                    ? ` · última atención: ${formatServerDateTimeToBogota(historialClienteSugerido.fecha_ultima_atencion)}`
+                    : ''}
+                </div>
+              )}
               {reinspeccionInfo?.tiene_historial && (
                 <div className="mt-1 text-xs rounded-lg border border-amber-200 bg-amber-50 p-2 text-amber-800 flex flex-wrap items-center gap-2">
                   <span>
@@ -2110,14 +2199,9 @@ export default function Recepcion() {
                   </p>
                   {runtSugerencia.encontrado && camposSugeribles.length > 0 && (
                     <>
-                      <p className="mb-1">
-                        {camposSugeribles.map((c) => `${c.label}: ${c.valor}`).join(' | ')}
+                      <p className="mb-2 text-slate-600">
+                        {camposSugeribles.slice(0, 2).map((c) => `${c.label}: ${c.valor}`).join(' · ')}
                       </p>
-                      {!runtSugerencia.titular_nombre && (
-                        <p className="mb-1 text-amber-700">
-                          Nombre del titular no disponible
-                        </p>
-                      )}
                       <button
                         type="button"
                         onClick={aplicarSugerenciaRunt}
