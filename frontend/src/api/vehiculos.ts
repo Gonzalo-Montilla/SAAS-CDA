@@ -83,6 +83,21 @@ export interface VehiculoFotoResponse {
   foto?: string | null;
 }
 
+export interface HistorialClienteSugerencia {
+  encontrado: boolean;
+  fuente?: string | null;
+  vehiculo_id?: string | null;
+  placa?: string | null;
+  cliente_nombre?: string | null;
+  cliente_tipo_documento?: string | null;
+  cliente_documento?: string | null;
+  cliente_telefono?: string | null;
+  cliente_email?: string | null;
+  cliente_direccion?: string | null;
+  cliente_factus_municipality_id?: number | null;
+  fecha_ultima_atencion?: string | null;
+}
+
 export const vehiculosApi = {
   // Registrar un nuevo vehículo (Recepción)
   registrar: async (data: VehiculoRegistro): Promise<Vehiculo> => {
@@ -119,6 +134,22 @@ export const vehiculosApi = {
     const cleaned = (placa || '').trim().toUpperCase();
     const response = await apiClient.get<ReinspeccionElegibilidad>(
       `/vehiculos/reinspeccion/elegibilidad/${encodeURIComponent(cleaned)}`
+    );
+    return response.data;
+  },
+
+  obtenerHistorialClienteSugerencia: async (params: {
+    placa?: string;
+    clienteTipoDocumento?: string;
+    clienteDocumento?: string;
+  }): Promise<HistorialClienteSugerencia> => {
+    const qp = new URLSearchParams();
+    if (params.placa) qp.set('placa', (params.placa || '').trim().toUpperCase());
+    if (params.clienteTipoDocumento) qp.set('cliente_tipo_documento', params.clienteTipoDocumento);
+    if (params.clienteDocumento) qp.set('cliente_documento', params.clienteDocumento);
+    const suffix = qp.toString();
+    const response = await apiClient.get<HistorialClienteSugerencia>(
+      `/vehiculos/historial-cliente-sugerencia${suffix ? `?${suffix}` : ''}`
     );
     return response.data;
   },
@@ -224,6 +255,14 @@ export const vehiculosApi = {
   // Obtener vehículos cobrados hoy (Caja)
   obtenerCobradosHoy: async (): Promise<Vehiculo[]> => {
     const response = await apiClient.get<Vehiculo[]>('/vehiculos/cobrados-hoy');
+    return response.data;
+  },
+
+  // Obtener vehículos cobrados en ventana reciente (Caja)
+  obtenerCobradosRecientes: async (dias: number = 7): Promise<Vehiculo[]> => {
+    const response = await apiClient.get<Vehiculo[]>('/vehiculos/cobrados-recientes', {
+      params: { dias },
+    });
     return response.data;
   },
 

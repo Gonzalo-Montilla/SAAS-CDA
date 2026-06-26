@@ -92,10 +92,11 @@ const saveBlobAsFile = (blob: Blob, filename: string): void => {
 export default function CajaPage() {
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const [vistaActual, setVistaActual] = useState<'apertura' | 'cobros' | 'cobrados-hoy' | 'movimientos' | 'cierre' | 'historial'>('cobros');
+  const [vistaActual, setVistaActual] = useState<'apertura' | 'cobros' | 'cobrados-hoy' | 'cobrados-recientes' | 'movimientos' | 'cierre' | 'historial'>('cobros');
   const [mostrarModalGasto, setMostrarModalGasto] = useState(false);
   const [mostrarModalVentaSOAT, setMostrarModalVentaSOAT] = useState(false);
   const [mostrarCobrosHoySinCaja, setMostrarCobrosHoySinCaja] = useState(false);
+  const [mostrarCobrosRecientesSinCaja, setMostrarCobrosRecientesSinCaja] = useState(false);
   const rolActual = user && 'rol' in user ? String((user as { rol?: string }).rol || '').toLowerCase() : '';
   const esAdmin = rolActual === 'administrador';
 
@@ -134,6 +135,14 @@ export default function CajaPage() {
     queryFn: vehiculosApi.obtenerCobradosHoy,
     enabled: !!cajaActiva || (esAdmin && mostrarCobrosHoySinCaja),
     refetchInterval: 30000, // Refrescar cada 30 segundos
+    staleTime: 10000,
+    retry: 1,
+  });
+  const { data: vehiculosCobradosRecientes, isLoading: loadingCobradosRecientes } = useQuery({
+    queryKey: ['vehiculos-cobrados-recientes', 7],
+    queryFn: () => vehiculosApi.obtenerCobradosRecientes(7),
+    enabled: !!cajaActiva || (esAdmin && mostrarCobrosRecientesSinCaja),
+    refetchInterval: 30000,
     staleTime: 10000,
     retry: 1,
   });
@@ -209,9 +218,42 @@ export default function CajaPage() {
                 <VehiculosCobradosHoy
                   vehiculos={vehiculosCobradosHoy || []}
                   loading={loadingCobradosHoy}
+                  modo="hoy"
+                  permitirCambioMetodo={false}
                 />
               </div>
             )}
+            <div className="mt-3">
+              <button
+                type="button"
+                onClick={() => setMostrarCobrosRecientesSinCaja((prev) => !prev)}
+                className="w-full flex items-center justify-between rounded-lg border border-slate-200 bg-slate-50 px-4 py-3 text-left"
+              >
+                <div>
+                  <p className="text-sm font-semibold text-slate-900">
+                    Cobros últimos 7 días {Array.isArray(vehiculosCobradosRecientes) ? `(${vehiculosCobradosRecientes.length})` : ''}
+                  </p>
+                  <p className="text-xs text-slate-600">
+                    Revisión y corrección de facturas en ventana operativa.
+                  </p>
+                </div>
+                {mostrarCobrosRecientesSinCaja ? (
+                  <ChevronUp className="h-5 w-5 text-slate-500" />
+                ) : (
+                  <ChevronDown className="h-5 w-5 text-slate-500" />
+                )}
+              </button>
+              {mostrarCobrosRecientesSinCaja && (
+                <div className="mt-4">
+                  <VehiculosCobradosHoy
+                    vehiculos={vehiculosCobradosRecientes || []}
+                    loading={loadingCobradosRecientes}
+                    modo="recientes"
+                    permitirCambioMetodo={false}
+                  />
+                </div>
+              )}
+            </div>
           </div>
         </Layout>
       );
@@ -318,6 +360,7 @@ export default function CajaPage() {
             [
               { id: 'cobros' as const, label: 'Pendientes', icon: Banknote, badge: vehiculosPendientes?.length, badgeClass: 'bg-rose-100 text-rose-800' },
               { id: 'cobrados-hoy' as const, label: 'Cobros hoy', icon: CheckCircle2, badge: vehiculosCobradosHoy?.length, badgeClass: 'bg-emerald-100 text-emerald-800' },
+              { id: 'cobrados-recientes' as const, label: 'Cobros 7 días', icon: Clock, badge: vehiculosCobradosRecientes?.length, badgeClass: 'bg-amber-100 text-amber-800' },
               { id: 'movimientos' as const, label: 'Movimientos', icon: Receipt, badge: undefined, badgeClass: '' },
               { id: 'historial' as const, label: 'Historial', icon: Folder, badge: undefined, badgeClass: '' },
               { id: 'cierre' as const, label: 'Cierre', icon: Lock, badge: undefined, badgeClass: '' },
@@ -361,6 +404,15 @@ export default function CajaPage() {
         <VehiculosCobradosHoy 
           vehiculos={vehiculosCobradosHoy || []} 
           loading={loadingCobradosHoy}
+          modo="hoy"
+        />
+      )}
+
+      {vistaActual === 'cobrados-recientes' && (
+        <VehiculosCobradosHoy
+          vehiculos={vehiculosCobradosRecientes || []}
+          loading={loadingCobradosRecientes}
+          modo="recientes"
         />
       )}
 
@@ -3990,15 +4042,26 @@ function ModalAnularMovimientoCaja({
 }
 
 // Componente de Vehículos Cobrados Hoy
-function VehiculosCobradosHoy({ vehiculos, loading }: { vehiculos: Vehiculo[], loading: boolean }) {
+function VehiculosCobradosHoy({
+  vehiculos,
+  loading,
+  modo = 'hoy',
+  permitirCambioMetodo,
+}: {
+  vehiculos: Vehiculo[],
+  loading: boolean,
+  modo?: 'hoy' | 'recientes',
+  permitirCambioMetodo?: boolean,
+}) {
   const { user } = useAuth();
   const [vehiculoSeleccionado, setVehiculoSeleccionado] = useState<Vehiculo | null>(null);
   const [vehiculoCorreccion, setVehiculoCorreccion] = useState<Vehiculo | null>(null);
   const rolActual = user && 'rol' in user ? String((user as { rol?: string }).rol || '').toLowerCase() : '';
   const puedeCorregirFactura = rolActual === 'administrador';
+  const permiteCambioMetodo = permitirCambioMetodo ?? (modo === 'hoy');
 
   if (loading) {
-    return <LoadingSpinner message="Cargando vehículos cobrados del día..." />;
+    return <LoadingSpinner message={modo === 'hoy' ? 'Cargando vehículos cobrados del día...' : 'Cargando cobros recientes...'} />;
   }
 
   if (vehiculos.length === 0) {
@@ -4008,10 +4071,10 @@ function VehiculosCobradosHoy({ vehiculos, loading }: { vehiculos: Vehiculo[], l
           <CheckCircle2 className="w-20 h-20 text-gray-400" />
         </div>
         <h3 className="text-2xl font-bold text-gray-900 mb-2">
-          No hay cobros hoy
+          {modo === 'hoy' ? 'No hay cobros hoy' : 'No hay cobros en los últimos 7 días'}
         </h3>
         <p className="text-gray-600">
-          Aún no se han registrado cobros en esta caja
+          {modo === 'hoy' ? 'Aún no se han registrado cobros en esta caja' : 'No se encontraron cobros recientes en la sede activa'}
         </p>
       </div>
     );
@@ -4021,7 +4084,9 @@ function VehiculosCobradosHoy({ vehiculos, loading }: { vehiculos: Vehiculo[], l
     <div>
       <div className="mb-4">
         <p className="text-sm text-gray-600">
-          Vehículos cobrados hoy. Puedes cambiar el método de pago solo el mismo día del cobro.
+          {modo === 'hoy'
+            ? 'Vehículos cobrados hoy. Puedes cambiar el método de pago solo el mismo día del cobro.'
+            : 'Cobros de los últimos 7 días. Usa esta vista para corrección de factura dentro de la ventana permitida.'}
         </p>
         {puedeCorregirFactura && (
           <p className="mt-1 text-xs text-slate-500">
@@ -4079,13 +4144,15 @@ function VehiculosCobradosHoy({ vehiculos, loading }: { vehiculos: Vehiculo[], l
             </div>
 
             <div className="grid grid-cols-1 gap-2">
-              <button
-                onClick={() => setVehiculoSeleccionado(vehiculo)}
-                className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-sm transition-colors inline-flex items-center justify-center gap-2"
-              >
-                <RefreshCw className="w-4 h-4" />
-                Cambiar Método de Pago
-              </button>
+              {permiteCambioMetodo && (
+                <button
+                  onClick={() => setVehiculoSeleccionado(vehiculo)}
+                  className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-sm transition-colors inline-flex items-center justify-center gap-2"
+                >
+                  <RefreshCw className="w-4 h-4" />
+                  Cambiar Método de Pago
+                </button>
+              )}
               {puedeCorregirFactura && (
                 <button
                   onClick={() => setVehiculoCorreccion(vehiculo)}
@@ -4184,6 +4251,7 @@ function ModalCorregirFacturaEmitida({ vehiculo, onClose }: { vehiculo: Vehiculo
       );
       setTimeout(() => {
         queryClient.invalidateQueries({ queryKey: ['vehiculos-cobrados-hoy'] });
+        queryClient.invalidateQueries({ queryKey: ['vehiculos-cobrados-recientes', 7] });
         queryClient.invalidateQueries({ queryKey: ['caja-resumen-tiempo-real'] });
         queryClient.invalidateQueries({ queryKey: ['vehiculo-factura-correcciones', vehiculo.id] });
       }, 300);
@@ -4429,6 +4497,7 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
       // Defer query invalidations
       setTimeout(() => {
         queryClient.invalidateQueries({ queryKey: ['vehiculos-cobrados-hoy'] });
+        queryClient.invalidateQueries({ queryKey: ['vehiculos-cobrados-recientes', 7] });
         queryClient.invalidateQueries({ queryKey: ['caja-resumen-tiempo-real'] });
       }, 300);
       

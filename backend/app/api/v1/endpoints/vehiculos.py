@@ -32,6 +32,7 @@ from app.models.tenant import Tenant
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo, MetodoPago
 from app.models.factus import TenantFactusSettings, FacturaElectronica, FacturaCorreccion
 from app.models.runt_metrica import RuntConsultaMetrica
+from app.models.runt_cache import RuntConsultaCache
 from app.services.factus_tenant_settings import (
     creds_complete_for_active_env,
     active_auth_encrypted,
@@ -132,6 +133,8 @@ ESTADOS_COBRO_EFECTIVO = [
     EstadoVehiculo.COMPLETADO,
 ]
 MAX_COBRADOS_HOY_RESPONSE = 250
+FACTURA_CORRECCION_VENTANA_DIAS = 7
+MAX_COBRADOS_RECIENTES_DIAS = 30
 
 
 def _co_today_date() -> date:
@@ -200,6 +203,21 @@ class VehiculoFotoResponse(BaseModel):
     total_fotos: int
     index: int
     foto: str | None = None
+
+
+class HistorialClienteSugerenciaResponse(BaseModel):
+    encontrado: bool
+    fuente: str | None = None
+    vehiculo_id: str | None = None
+    placa: str | None = None
+    cliente_nombre: str | None = None
+    cliente_tipo_documento: str | None = None
+    cliente_documento: str | None = None
+    cliente_telefono: str | None = None
+    cliente_email: str | None = None
+    cliente_direccion: str | None = None
+    cliente_factus_municipality_id: int | None = None
+    fecha_ultima_atencion: datetime | None = None
 
 
 def _map_metodo_pago_factus_credit_note(metodo_pago: str | None) -> str:
@@ -479,6 +497,129 @@ def _guardar_metrica_runt(
         db.rollback()
 
 
+def _normalize_runt_doc_type(value: str | None) -> str:
+    raw = str(value or "").strip().upper()
+    return raw if raw in {"CC", "CE", "PA", "NIT"} else ""
+
+
+def _normalize_runt_doc_number(value: str | None) -> str:
+    return re.sub(r"[^A-Z0-9]", "", str(value or "").strip().upper())[:30]
+
+
+def _normalize_runt_plate(value: str | None) -> str:
+    return re.sub(r"[^A-Z0-9]", "", str(value or "").strip().upper())[:12]
+
+
+def _buscar_cache_runt_interno(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    placa: str,
+    doc_type: str,
+    doc_number: str,
+) -> dict[str, Any] | None:
+    if int(settings.RUNT_INTERNAL_CACHE_TTL_SECONDS or 0) <= 0:
+        return None
+
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    row: RuntConsultaCache | None = None
+
+    if placa and doc_type and doc_number:
+        row = (
+            db.query(RuntConsultaCache)
+            .filter(
+                RuntConsultaCache.tenant_id == tenant_id,
+                RuntConsultaCache.placa_consultada == placa,
+                RuntConsultaCache.document_type == doc_type,
+                RuntConsultaCache.document_number_normalized == doc_number,
+                RuntConsultaCache.expires_at >= now_utc,
+            )
+            .order_by(RuntConsultaCache.created_at.desc())
+            .first()
+        )
+
+    if row is None and placa and not doc_number:
+        row = (
+            db.query(RuntConsultaCache)
+            .filter(
+                RuntConsultaCache.tenant_id == tenant_id,
+                RuntConsultaCache.placa_consultada == placa,
+                RuntConsultaCache.expires_at >= now_utc,
+            )
+            .order_by(RuntConsultaCache.created_at.desc())
+            .first()
+        )
+
+    if row is None:
+        return None
+
+    payload = row.payload_json if isinstance(row.payload_json, dict) else {}
+    out = dict(payload)
+    out["cached"] = True
+    out.setdefault("observaciones", [])
+    if isinstance(out["observaciones"], list):
+        out["observaciones"] = [
+            *[str(x) for x in out["observaciones"] if str(x).strip()],
+            "Resultado obtenido desde caché interno del CDA.",
+        ]
+    row.cached_hits = int(row.cached_hits or 0) + 1
+    row.last_hit_at = now_utc
+    db.commit()
+    return out
+
+
+def _guardar_cache_runt_interno(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    sucursal_id: UUID | None,
+    placa: str,
+    doc_type: str,
+    doc_number: str,
+    provider_resolved: str,
+    result: dict[str, Any],
+) -> None:
+    ttl = int(settings.RUNT_INTERNAL_CACHE_TTL_SECONDS or 0)
+    if ttl <= 0:
+        return
+    if not isinstance(result, dict):
+        return
+    placa_norm = _normalize_runt_plate(placa or result.get("placa_consultada"))
+    if len(placa_norm) < 5:
+        return
+
+    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+    expires_at = now_utc + timedelta(seconds=ttl)
+    safe_payload = dict(result)
+    safe_payload["cached"] = False
+    row = (
+        db.query(RuntConsultaCache)
+        .filter(
+            RuntConsultaCache.tenant_id == tenant_id,
+            RuntConsultaCache.placa_consultada == placa_norm,
+            RuntConsultaCache.document_type == (doc_type or None),
+            RuntConsultaCache.document_number_normalized == (doc_number or None),
+        )
+        .order_by(RuntConsultaCache.created_at.desc())
+        .first()
+    )
+    if row is None:
+        row = RuntConsultaCache(
+            tenant_id=tenant_id,
+            sucursal_id=sucursal_id,
+            placa_consultada=placa_norm,
+            document_type=doc_type or None,
+            document_number_normalized=doc_number or None,
+        )
+        db.add(row)
+    row.provider_resolved = (provider_resolved or "unknown")[:30]
+    row.encontrado = bool(result.get("encontrado"))
+    row.payload_json = safe_payload
+    row.expires_at = expires_at
+    row.last_hit_at = now_utc
+    db.commit()
+
+
 @router.get("/consulta-runt/{placa}", response_model=VehiculoConsultaRuntResponse)
 def consultar_runt_por_placa(
     placa: str,
@@ -493,6 +634,40 @@ def consultar_runt_por_placa(
     No registra ni modifica vehículos.
     """
     provider = (settings.RUNT_LOOKUP_PROVIDER or "verifik").strip().lower()
+    placa_norm = _normalize_runt_plate(placa)
+    doc_type_norm = _normalize_runt_doc_type(document_type)
+    doc_number_norm = _normalize_runt_doc_number(document_number)
+    cache_hit = _buscar_cache_runt_interno(
+        db,
+        tenant_id=current_user.tenant_id,
+        placa=placa_norm,
+        doc_type=doc_type_norm,
+        doc_number=doc_number_norm,
+    )
+    if cache_hit is not None:
+        _guardar_metrica_runt(
+            db,
+            tenant_id=current_user.tenant_id,
+            sucursal_id=active_sucursal_id,
+            usuario_id=current_user.id,
+            placa=placa,
+            document_type=document_type,
+            document_number=document_number,
+            provider_configured=provider,
+            provider_resolved=str(cache_hit.get("proveedor") or "internal_cache"),
+            providers_attempted=["internal_cache"],
+            fallback_used=False,
+            status="success" if bool(cache_hit.get("encontrado")) else "empty",
+            encontrado=bool(cache_hit.get("encontrado")),
+            cached=True,
+            estimated_cost_cop=Decimal("0"),
+            estimated_cost_usd=Decimal("0"),
+            resolved_cost_cop=Decimal("0"),
+            resolved_cost_usd=Decimal("0"),
+            fx_rate_usd_cop_applied=Decimal(str(settings.RUNT_FX_USD_COP or 0)),
+        )
+        return cache_hit
+
     doc_number_digits = re.sub(r"\D", "", (document_number or "").strip())
     can_try_verifik_fallback = bool(
         settings.RUNT_FALLBACK_TO_VERIFIK_ON_EMPTY and settings.VERIFIK_ENABLED and doc_number_digits
@@ -541,6 +716,16 @@ def consultar_runt_por_placa(
                     resolved_cost_usd=placa_cost_usd,
                     fx_rate_usd_cop_applied=fx_rate_applied,
                 )
+                _guardar_cache_runt_interno(
+                    db,
+                    tenant_id=current_user.tenant_id,
+                    sucursal_id=active_sucursal_id,
+                    placa=placa_norm,
+                    doc_type=doc_type_norm,
+                    doc_number=doc_number_norm,
+                    provider_resolved="placaapi",
+                    result=placaapi_result,
+                )
                 return placaapi_result
             if can_try_verifik_fallback:
                 fallback_used = True
@@ -580,6 +765,16 @@ def consultar_runt_por_placa(
                         fallback_extra_cost_usd=placa_cost_usd,
                         fx_rate_usd_cop_applied=fx_rate_applied,
                     )
+                    _guardar_cache_runt_interno(
+                        db,
+                        tenant_id=current_user.tenant_id,
+                        sucursal_id=active_sucursal_id,
+                        placa=placa_norm,
+                        doc_type=doc_type_norm or _normalize_runt_doc_type(str(verifik_result.get("document_type") or "")),
+                        doc_number=doc_number_norm or _normalize_runt_doc_number(str(verifik_result.get("document_number") or "")),
+                        provider_resolved="verifik",
+                        result=verifik_result,
+                    )
                     return verifik_result
                 except VerifikRuntError:
                     _guardar_metrica_runt(
@@ -605,6 +800,16 @@ def consultar_runt_por_placa(
                         fallback_extra_cost_usd=verifik_cost_usd,
                         fx_rate_usd_cop_applied=fx_rate_applied,
                     )
+                    _guardar_cache_runt_interno(
+                        db,
+                        tenant_id=current_user.tenant_id,
+                        sucursal_id=active_sucursal_id,
+                        placa=placa_norm,
+                        doc_type=doc_type_norm,
+                        doc_number=doc_number_norm,
+                        provider_resolved="placaapi",
+                        result=placaapi_result,
+                    )
                     return placaapi_result
             _guardar_metrica_runt(
                 db,
@@ -626,6 +831,16 @@ def consultar_runt_por_placa(
                 resolved_cost_cop=placa_cost_cop,
                 resolved_cost_usd=placa_cost_usd,
                 fx_rate_usd_cop_applied=fx_rate_applied,
+            )
+            _guardar_cache_runt_interno(
+                db,
+                tenant_id=current_user.tenant_id,
+                sucursal_id=active_sucursal_id,
+                placa=placa_norm,
+                doc_type=doc_type_norm,
+                doc_number=doc_number_norm,
+                provider_resolved="placaapi",
+                result=placaapi_result,
             )
             return placaapi_result
         attempted.append("verifik")
@@ -660,6 +875,16 @@ def consultar_runt_por_placa(
             resolved_cost_cop=verifik_cost_cop,
             resolved_cost_usd=verifik_cost_usd,
             fx_rate_usd_cop_applied=fx_rate_applied,
+        )
+        _guardar_cache_runt_interno(
+            db,
+            tenant_id=current_user.tenant_id,
+            sucursal_id=active_sucursal_id,
+            placa=placa_norm,
+            doc_type=doc_type_norm or _normalize_runt_doc_type(str(verifik_result.get("document_type") or "")),
+            doc_number=doc_number_norm or _normalize_runt_doc_number(str(verifik_result.get("document_number") or "")),
+            provider_resolved="verifik",
+            result=verifik_result,
         )
         return verifik_result
     except VerifikRuntError as exc:
@@ -728,6 +953,16 @@ def consultar_runt_por_placa(
                     fallback_extra_cost_usd=placa_cost_usd,
                     fx_rate_usd_cop_applied=fx_rate_applied,
                 )
+                _guardar_cache_runt_interno(
+                    db,
+                    tenant_id=current_user.tenant_id,
+                    sucursal_id=active_sucursal_id,
+                    placa=placa_norm,
+                    doc_type=doc_type_norm or _normalize_runt_doc_type(str(verifik_result.get("document_type") or "")),
+                    doc_number=doc_number_norm or _normalize_runt_doc_number(str(verifik_result.get("document_number") or "")),
+                    provider_resolved="verifik",
+                    result=verifik_result,
+                )
                 return verifik_result
             except VerifikRuntError:
                 pass
@@ -764,6 +999,96 @@ def _filtro_vehiculo_sede(q, tenant_id, sucursal_id: UUID):
         VehiculoProceso.tenant_id == tenant_id,
         VehiculoProceso.sucursal_id == sucursal_id,
     )
+
+
+@router.get("/historial-cliente-sugerencia", response_model=HistorialClienteSugerenciaResponse)
+def obtener_historial_cliente_sugerencia(
+    placa: str | None = Query(default=None),
+    cliente_tipo_documento: str | None = Query(default=None),
+    cliente_documento: str | None = Query(default=None),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_recepcionista_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
+):
+    placa_norm = re.sub(r"[^A-Z0-9]", "", str(placa or "").upper()).strip()
+    doc_tipo_norm = str(cliente_tipo_documento or "").strip().upper()
+    doc_raw = str(cliente_documento or "").strip().upper()
+    doc_norm = re.sub(r"[^A-Z0-9]", "", doc_raw)
+
+    if len(placa_norm) < 5 and len(doc_norm) < 5:
+        return HistorialClienteSugerenciaResponse(encontrado=False)
+
+    def _row_to_response(row: VehiculoProceso, fuente: str) -> HistorialClienteSugerenciaResponse:
+        return HistorialClienteSugerenciaResponse(
+            encontrado=True,
+            fuente=fuente,
+            vehiculo_id=str(row.id),
+            placa=row.placa,
+            cliente_nombre=row.cliente_nombre,
+            cliente_tipo_documento=row.cliente_tipo_documento,
+            cliente_documento=row.cliente_documento,
+            cliente_telefono=row.cliente_telefono,
+            cliente_email=row.cliente_email,
+            cliente_direccion=row.cliente_direccion,
+            cliente_factus_municipality_id=row.cliente_factus_municipality_id,
+            fecha_ultima_atencion=row.fecha_pago or row.fecha_registro,
+        )
+
+    def _buscar_por_placa(solo_sucursal: bool) -> VehiculoProceso | None:
+        if len(placa_norm) < 5:
+            return None
+        q = db.query(VehiculoProceso).filter(
+            VehiculoProceso.tenant_id == current_user.tenant_id,
+            func.upper(func.coalesce(VehiculoProceso.placa, "")) == placa_norm,
+        )
+        if solo_sucursal:
+            q = q.filter(VehiculoProceso.sucursal_id == active_sucursal_id)
+        return (
+            q.order_by(
+                func.coalesce(VehiculoProceso.fecha_pago, VehiculoProceso.fecha_registro).desc(),
+                VehiculoProceso.fecha_registro.desc(),
+            )
+            .first()
+        )
+
+    def _buscar_por_documento(solo_sucursal: bool) -> VehiculoProceso | None:
+        if len(doc_norm) < 5:
+            return None
+        q = db.query(VehiculoProceso).filter(
+            VehiculoProceso.tenant_id == current_user.tenant_id,
+            func.regexp_replace(
+                func.upper(func.coalesce(VehiculoProceso.cliente_documento, "")),
+                "[^A-Z0-9]",
+                "",
+                "g",
+            )
+            == doc_norm,
+        )
+        if solo_sucursal:
+            q = q.filter(VehiculoProceso.sucursal_id == active_sucursal_id)
+        if doc_tipo_norm in {"CC", "CE", "PA", "NIT"}:
+            q = q.filter(func.upper(func.coalesce(VehiculoProceso.cliente_tipo_documento, "")) == doc_tipo_norm)
+        return (
+            q.order_by(
+                func.coalesce(VehiculoProceso.fecha_pago, VehiculoProceso.fecha_registro).desc(),
+                VehiculoProceso.fecha_registro.desc(),
+            )
+            .first()
+        )
+
+    row = _buscar_por_placa(solo_sucursal=True)
+    if row:
+        return _row_to_response(row, "placa_sucursal")
+    row = _buscar_por_documento(solo_sucursal=True)
+    if row:
+        return _row_to_response(row, "documento_sucursal")
+    row = _buscar_por_placa(solo_sucursal=False)
+    if row:
+        return _row_to_response(row, "placa_tenant")
+    row = _buscar_por_documento(solo_sucursal=False)
+    if row:
+        return _row_to_response(row, "documento_tenant")
+    return HistorialClienteSugerenciaResponse(encontrado=False)
 
 
 def _build_reinspeccion_context_for_origen(
@@ -2493,10 +2818,16 @@ def corregir_factura_emitida(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="El vehículo no tiene factura emitida para corregir.",
         )
-    if _utc_naive_to_co_date(vehiculo.fecha_pago) != _co_today_date():
+    fecha_pago_co = _utc_naive_to_co_date(vehiculo.fecha_pago)
+    hoy_co = _co_today_date()
+    fecha_inicio_permitida = hoy_co - timedelta(days=FACTURA_CORRECCION_VENTANA_DIAS - 1)
+    if not fecha_pago_co or fecha_pago_co < fecha_inicio_permitida or fecha_pago_co > hoy_co:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Solo se permiten correcciones de factura para cobros del mismo día.",
+            detail=(
+                "Solo se permiten correcciones de factura para cobros "
+                f"dentro de los últimos {FACTURA_CORRECCION_VENTANA_DIAS} días."
+            ),
         )
     correccion_exitosa_previa = (
         db.query(FacturaCorreccion)
@@ -2587,13 +2918,6 @@ def corregir_factura_emitida(
         (payload.cliente_direccion or "").strip() if payload.cliente_direccion is not None else vehiculo.cliente_direccion
     ) or None
     proposed_valor_preventiva = valor_rtm_original
-    if payload.valor_preventiva_nuevo is not None:
-        proposed_valor_preventiva = Decimal(str(payload.valor_preventiva_nuevo))
-    if proposed_valor_preventiva.as_tuple().exponent < 0:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="El valor corregido de PREVENTIVA debe enviarse sin decimales (pesos COP enteros).",
-        )
     if motivo == "valor":
         if (vehiculo.tipo_vehiculo or "").strip().lower() != "preventiva":
             raise HTTPException(
@@ -2604,6 +2928,12 @@ def corregir_factura_emitida(
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Debes indicar el valor correcto para PREVENTIVA.",
+            )
+        proposed_valor_preventiva = Decimal(str(payload.valor_preventiva_nuevo))
+        if proposed_valor_preventiva.as_tuple().exponent < 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="El valor corregido de PREVENTIVA debe enviarse sin decimales (pesos COP enteros).",
             )
         if proposed_valor_preventiva <= 0:
             raise HTTPException(
@@ -3047,9 +3377,25 @@ def listar_cobrados_hoy(
     Esto evita perder visibilidad de cobros de la mañana cuando una caja se cerró
     y se abrió una nueva en el mismo día.
     """
-    current_role = current_user.rol.value if hasattr(current_user.rol, "value") else str(current_user.rol)
     inicio_hoy_utc, fin_hoy_utc = _co_day_utc_bounds(_co_today_date())
+    return _listar_cobrados_en_rango(
+        db=db,
+        current_user=current_user,
+        active_sucursal_id=active_sucursal_id,
+        desde_utc=inicio_hoy_utc,
+        hasta_utc=fin_hoy_utc,
+    )
 
+
+def _listar_cobrados_en_rango(
+    *,
+    db: Session,
+    current_user: Usuario,
+    active_sucursal_id: UUID,
+    desde_utc: datetime,
+    hasta_utc: datetime,
+) -> List[VehiculoCobradoHoyResponse]:
+    current_role = current_user.rol.value if hasattr(current_user.rol, "value") else str(current_user.rol)
     base_query = _filtro_vehiculo_sede(
         db.query(VehiculoProceso),
         current_user.tenant_id,
@@ -3057,8 +3403,8 @@ def listar_cobrados_hoy(
     ).filter(
         and_(
             VehiculoProceso.estado.in_(ESTADOS_COBRO_EFECTIVO),
-            VehiculoProceso.fecha_pago >= inicio_hoy_utc,
-            VehiculoProceso.fecha_pago < fin_hoy_utc,
+            VehiculoProceso.fecha_pago >= desde_utc,
+            VehiculoProceso.fecha_pago < hasta_utc,
         )
     )
 
@@ -3090,6 +3436,30 @@ def listar_cobrados_hoy(
         )
         for vehiculo in vehiculos
     ]
+
+
+@router.get("/cobrados-recientes", response_model=List[VehiculoCobradoHoyResponse])
+def listar_cobrados_recientes(
+    dias: int = Query(default=FACTURA_CORRECCION_VENTANA_DIAS, ge=1, le=MAX_COBRADOS_RECIENTES_DIAS),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_cajero_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
+):
+    """
+    Lista cobros recientes por ventana en días calendario Colombia.
+    Por defecto usa 7 días para soportar correcciones de factura en ese rango.
+    """
+    hoy_co = _co_today_date()
+    fecha_inicio = hoy_co - timedelta(days=dias - 1)
+    inicio_utc, _ = _co_day_utc_bounds(fecha_inicio)
+    _, fin_hoy_utc = _co_day_utc_bounds(hoy_co)
+    return _listar_cobrados_en_rango(
+        db=db,
+        current_user=current_user,
+        active_sucursal_id=active_sucursal_id,
+        desde_utc=inicio_utc,
+        hasta_utc=fin_hoy_utc,
+    )
 
 
 @router.put("/{vehiculo_id}/cambiar-metodo-pago")
