@@ -4169,7 +4169,7 @@ function ModalCorregirFacturaEmitida({ vehiculo, onClose }: { vehiculo: Vehiculo
         payload.cliente_direccion = clienteDireccion.trim() || '';
       }
       if (motivo === 'valor' && esPreventivaVehiculo) {
-        const valorNuevo = parseInt((valorPreventivaNuevo || '').trim(), 10);
+        const valorNuevo = Number(valorPreventivaNuevo || 0);
         if (valorNuevo > 0) {
           payload.valor_preventiva_nuevo = valorNuevo;
         }

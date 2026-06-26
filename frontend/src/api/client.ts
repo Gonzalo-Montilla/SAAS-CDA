@@ -8,7 +8,6 @@ import { getStoredTenantLoginPath } from '../utils/authRedirect';
  */
 function resolveApiBaseUrl(): string {
   const raw = import.meta.env.VITE_API_URL?.trim() ?? '';
-  const normalizeHost = (host: string): string => host.replace(/^www\./i, '').toLowerCase();
   if (import.meta.env.DEV) {
     if (!raw) return '/api/v1';
     if (raw.startsWith('/')) return raw;
@@ -18,18 +17,7 @@ function resolveApiBaseUrl(): string {
     }
     return '/api/v1';
   }
-  if (!raw) return '/api/v1';
-  if (raw.startsWith('/')) return raw;
-  try {
-    const configured = new URL(raw);
-    const current = new URL(window.location.origin);
-    if (normalizeHost(configured.hostname) === normalizeHost(current.hostname)) {
-      return `${current.origin}${configured.pathname}${configured.search}`;
-    }
-  } catch {
-    // Si no es URL válida, usamos el valor tal cual.
-  }
-  return raw;
+  return raw || 'http://127.0.0.1:8000/api/v1';
 }
 
 const API_URL = resolveApiBaseUrl();
