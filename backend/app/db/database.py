@@ -1265,6 +1265,43 @@ def ensure_factus_schema(db):
     )
     db.execute(
         text(
+            """
+            CREATE TABLE IF NOT EXISTS facturas_correcciones (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                vehiculo_proceso_id UUID NOT NULL REFERENCES vehiculos_proceso(id) ON DELETE CASCADE,
+                factura_electronica_original_id UUID REFERENCES facturas_electronicas(id) ON DELETE SET NULL,
+                factura_electronica_nueva_id UUID REFERENCES facturas_electronicas(id) ON DELETE SET NULL,
+                motivo VARCHAR(40) NOT NULL,
+                estado VARCHAR(20) NOT NULL DEFAULT 'completed',
+                error_detalle TEXT,
+                factura_original_numero VARCHAR(80),
+                factura_original_factus_bill_id INTEGER,
+                nota_credito_numero VARCHAR(80),
+                nota_credito_factus_id INTEGER,
+                factura_nueva_numero VARCHAR(80),
+                factura_nueva_factus_bill_id INTEGER,
+                before_json TEXT,
+                after_json TEXT,
+                ejecutado_por_usuario_id UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_facturas_correcciones_tenant ON facturas_correcciones(tenant_id)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_facturas_correcciones_vehiculo ON facturas_correcciones(vehiculo_proceso_id)"
+        )
+    )
+    db.execute(
+        text(
             "CREATE UNIQUE INDEX IF NOT EXISTS ux_documentos_soporte_tenant_mod_mov "
             "ON documentos_soporte_electronicos(tenant_id, source_module, movimiento_id)"
         )
@@ -1682,6 +1719,71 @@ def ensure_runt_metricas_schema(db):
     )
 
 
+def ensure_runt_cache_schema(db):
+    """
+    Cache persistente de respuestas RUNT por tenant para disminuir costo por consultas repetidas.
+    """
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS runt_consultas_cache (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                sucursal_id UUID REFERENCES sucursales(id) ON DELETE SET NULL,
+                placa_consultada VARCHAR(12) NOT NULL,
+                document_type VARCHAR(10),
+                document_number_normalized VARCHAR(30),
+                provider_resolved VARCHAR(30) NOT NULL DEFAULT 'unknown',
+                encontrado BOOLEAN NOT NULL DEFAULT FALSE,
+                payload_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                cached_hits INTEGER NOT NULL DEFAULT 0,
+                last_hit_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                expires_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE runt_consultas_cache ADD COLUMN IF NOT EXISTS payload_json JSONB NOT NULL DEFAULT '{}'::jsonb"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE runt_consultas_cache ADD COLUMN IF NOT EXISTS cached_hits INTEGER NOT NULL DEFAULT 0"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE runt_consultas_cache ADD COLUMN IF NOT EXISTS last_hit_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE runt_consultas_cache ADD COLUMN IF NOT EXISTS expires_at TIMESTAMP WITHOUT TIME ZONE"
+        )
+    )
+    db.execute(text("UPDATE runt_consultas_cache SET expires_at = COALESCE(expires_at, NOW())"))
+    db.execute(text("ALTER TABLE runt_consultas_cache ALTER COLUMN expires_at SET NOT NULL"))
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_runt_cache_tenant_placa ON runt_consultas_cache(tenant_id, placa_consultada)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_runt_cache_tenant_doc ON runt_consultas_cache(tenant_id, document_type, document_number_normalized)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_runt_cache_tenant_expires ON runt_consultas_cache(tenant_id, expires_at DESC)"
+        )
+    )
+
+
 def ensure_iva_provision_schema(db):
     db.execute(
         text(
@@ -2082,6 +2184,165 @@ def ensure_sarlaft_schema(db):
                 "mode": row[2] or "manual",
             },
         )
+
+
+def ensure_exogena_schema(db):
+    """
+    Esquema base de Exógena (Sprint 1).
+    """
+    bind = db.get_bind()
+    if bind.dialect.name != "postgresql":
+        return
+
+    db.execute(
+        text(
+            """
+            ALTER TABLE tenants
+            ADD COLUMN IF NOT EXISTS exogena_enabled BOOLEAN NOT NULL DEFAULT FALSE
+            """
+        )
+    )
+
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS exogena_parametros_anuales (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                anio VARCHAR(4) NOT NULL,
+                uvt_anual INTEGER NOT NULL DEFAULT 0,
+                topes_por_formato_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                version_normativa VARCHAR(50),
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_by UUID REFERENCES usuarios(id),
+                CONSTRAINT ux_exogena_parametros_tenant_anio UNIQUE (tenant_id, anio)
+            )
+            """
+        )
+    )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_exogena_param_tenant ON exogena_parametros_anuales(tenant_id)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_exogena_param_anio ON exogena_parametros_anuales(anio)"))
+
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS exogena_mapeos (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                anio VARCHAR(4) NOT NULL,
+                formato VARCHAR(10) NOT NULL,
+                cuenta_contable VARCHAR(30) NOT NULL,
+                concepto VARCHAR(20) NOT NULL,
+                categoria VARCHAR(80) NOT NULL DEFAULT '',
+                saldo_a_reportar VARCHAR(30) NOT NULL DEFAULT 'saldo_final',
+                source_rule VARCHAR(255),
+                activo VARCHAR(10) NOT NULL DEFAULT 'si',
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_by UUID REFERENCES usuarios(id),
+                CONSTRAINT ux_exogena_mapeo_tenant_anio_formato_cuenta_concepto_categoria UNIQUE (
+                    tenant_id, anio, formato, cuenta_contable, concepto, categoria
+                )
+            )
+            """
+        )
+    )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_exogena_mapeos_tenant ON exogena_mapeos(tenant_id)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_exogena_mapeos_anio ON exogena_mapeos(anio)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_exogena_mapeos_formato ON exogena_mapeos(formato)"))
+
+    db.execute(
+        text(
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_type WHERE typname = 'exogenaexecutionstatus'
+                ) THEN
+                    CREATE TYPE exogenaexecutionstatus AS ENUM ('pending', 'success', 'error');
+                END IF;
+            END$$;
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS exogena_ejecuciones (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                anio VARCHAR(4) NOT NULL,
+                formato VARCHAR(10) NOT NULL,
+                status exogenaexecutionstatus NOT NULL DEFAULT 'pending',
+                total_rows INTEGER NOT NULL DEFAULT 0,
+                total_errors INTEGER NOT NULL DEFAULT 0,
+                total_warnings INTEGER NOT NULL DEFAULT 0,
+                archivo_relpath VARCHAR(512),
+                archivo_sha256 VARCHAR(64),
+                omitidos_relpath VARCHAR(512),
+                omitidos_sha256 VARCHAR(64),
+                omitidos_rows INTEGER NOT NULL DEFAULT 0,
+                fuente_resumen_json JSONB NOT NULL DEFAULT '[]'::jsonb,
+                error_message TEXT,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                created_by UUID REFERENCES usuarios(id)
+            )
+            """
+        )
+    )
+    db.execute(text("ALTER TABLE exogena_mapeos ALTER COLUMN source_rule TYPE VARCHAR(255)"))
+    db.execute(text("ALTER TABLE exogena_ejecuciones ADD COLUMN IF NOT EXISTS omitidos_relpath VARCHAR(512)"))
+    db.execute(text("ALTER TABLE exogena_ejecuciones ADD COLUMN IF NOT EXISTS omitidos_sha256 VARCHAR(64)"))
+    db.execute(
+        text("ALTER TABLE exogena_ejecuciones ADD COLUMN IF NOT EXISTS omitidos_rows INTEGER NOT NULL DEFAULT 0")
+    )
+    db.execute(
+        text(
+            "ALTER TABLE exogena_ejecuciones ADD COLUMN IF NOT EXISTS fuente_resumen_json JSONB NOT NULL DEFAULT '[]'::jsonb"
+        )
+    )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_exogena_ejec_tenant ON exogena_ejecuciones(tenant_id)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_exogena_ejec_anio ON exogena_ejecuciones(anio)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_exogena_ejec_formato ON exogena_ejecuciones(formato)"))
+
+    db.execute(
+        text(
+            """
+            DO $$
+            BEGIN
+                IF NOT EXISTS (
+                    SELECT 1 FROM pg_type WHERE typname = 'exogenavalidationseverity'
+                ) THEN
+                    CREATE TYPE exogenavalidationseverity AS ENUM ('error', 'warning');
+                END IF;
+            END$$;
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS exogena_validaciones (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                ejecucion_id UUID REFERENCES exogena_ejecuciones(id) ON DELETE CASCADE,
+                anio VARCHAR(4) NOT NULL,
+                formato VARCHAR(10) NOT NULL,
+                severidad exogenavalidationseverity NOT NULL,
+                codigo VARCHAR(60) NOT NULL,
+                mensaje TEXT NOT NULL,
+                referencia_origen VARCHAR(200),
+                metadata_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_exogena_val_tenant ON exogena_validaciones(tenant_id)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_exogena_val_ejec ON exogena_validaciones(ejecucion_id)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_exogena_val_anio ON exogena_validaciones(anio)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_exogena_val_formato ON exogena_validaciones(formato)"))
 
 
 def ensure_nomina_schema(db):
@@ -2514,6 +2775,7 @@ def init_db():
     from app.models.proveedor_catalogo import ProveedorCatalogo  # noqa: F401 — register model
     from app.models.dse_retencion_motor import DseRetencionTasaConcepto, DseUvtPorAnio  # noqa: F401
     from app.models.runt_metrica import RuntConsultaMetrica  # noqa: F401
+    from app.models.runt_cache import RuntConsultaCache  # noqa: F401
     from app.models.sarlaft_profile import SarlaftProfile  # noqa: F401
     from app.models.sarlaft_case import SarlaftCase  # noqa: F401
     from app.models.sarlaft_case_party import SarlaftCaseParty  # noqa: F401
@@ -2525,6 +2787,12 @@ def init_db():
     from app.models.sarlaft_intercda_job import SarlaftIntercdaJob  # noqa: F401
     from app.models.sarlaft_intercda_signal import SarlaftIntercdaSignal  # noqa: F401
     from app.models.iva_provision import IvaProvisionRegistro  # noqa: F401
+    from app.models.exogena import (  # noqa: F401
+        ExogenaAnualParametro,
+        ExogenaMapeo,
+        ExogenaEjecucion,
+        ExogenaValidacion,
+    )
     nomina_available = True
     try:
         from app.models.nomina import (
@@ -2574,8 +2842,10 @@ def init_db():
         ensure_quality_survey_invites_sucursal_schema(db)
         ensure_tenant_documentos_schema(db)
         ensure_runt_metricas_schema(db)
+        ensure_runt_cache_schema(db)
         ensure_iva_provision_schema(db)
         ensure_sarlaft_schema(db)
+        ensure_exogena_schema(db)
         if nomina_available:
             ensure_nomina_schema(db)
         db.commit()

@@ -212,6 +212,7 @@ export default function SaaSBackoffice() {
   const [tenantCoreRepresentante, setTenantCoreRepresentante] = useState('');
   const [tenantCoreCelular, setTenantCoreCelular] = useState('');
   const [tenantCoreNominaEnabled, setTenantCoreNominaEnabled] = useState(false);
+  const [tenantCoreExogenaEnabled, setTenantCoreExogenaEnabled] = useState(false);
   const [tenantCoreSarlaftEnabled, setTenantCoreSarlaftEnabled] = useState(false);
   const [tenantCoreSarlaftMode, setTenantCoreSarlaftMode] = useState<'manual' | 'api'>('manual');
   const [tenantCoreError, setTenantCoreError] = useState('');
@@ -571,6 +572,7 @@ export default function SaaSBackoffice() {
     setTenantCoreRepresentante(profile.nombre_representante || '');
     setTenantCoreCelular(profile.celular || '');
     setTenantCoreNominaEnabled(Boolean(profile.nomina_enabled));
+    setTenantCoreExogenaEnabled(Boolean(profile.exogena_enabled));
     setTenantCoreSarlaftEnabled(Boolean(profile.sarlaft_enabled));
     setTenantCoreSarlaftMode((profile.sarlaft_mode === 'api' ? 'api' : 'manual') as 'manual' | 'api');
     setTenantCoreError('');
@@ -676,6 +678,7 @@ export default function SaaSBackoffice() {
         nombre_representante: tenantCoreRepresentante.trim() || null,
         celular: tenantCoreCelular.trim() || null,
         nomina_enabled: tenantCoreNominaEnabled,
+        exogena_enabled: tenantCoreExogenaEnabled,
         sarlaft_enabled: tenantCoreSarlaftEnabled,
         sarlaft_mode: tenantCoreSarlaftMode,
       });
@@ -3541,6 +3544,30 @@ export default function SaaSBackoffice() {
                                 </label>
                                 <label className="md:col-span-2 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2">
                                   <div>
+                                    <p className="text-sm font-semibold text-slate-800">Módulo Exógena</p>
+                                    <p className="text-xs text-slate-500">
+                                      Controla acceso al módulo de exógena para el CDA.
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={tenantCoreExogenaEnabled}
+                                    onClick={() => tenantCoreEditMode && setTenantCoreExogenaEnabled((prev) => !prev)}
+                                    disabled={!tenantCoreEditMode}
+                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition ${
+                                      tenantCoreExogenaEnabled ? 'bg-emerald-600' : 'bg-slate-300'
+                                    } ${tenantCoreEditMode ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
+                                  >
+                                    <span
+                                      className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${
+                                        tenantCoreExogenaEnabled ? 'translate-x-5' : 'translate-x-1'
+                                      }`}
+                                    />
+                                  </button>
+                                </label>
+                                <label className="md:col-span-2 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2">
+                                  <div>
                                     <p className="text-sm font-semibold text-slate-800">Módulo SARLAFT</p>
                                     <p className="text-xs text-slate-500">
                                       Controla acceso al módulo SARLAFT para el CDA.
@@ -3607,6 +3634,7 @@ export default function SaaSBackoffice() {
                                           setTenantCoreRepresentante(profile.nombre_representante || '');
                                           setTenantCoreCelular(profile.celular || '');
                                           setTenantCoreNominaEnabled(Boolean(profile.nomina_enabled));
+                                          setTenantCoreExogenaEnabled(Boolean(profile.exogena_enabled));
                                           setTenantCoreSarlaftEnabled(Boolean(profile.sarlaft_enabled));
                                           setTenantCoreSarlaftMode((profile.sarlaft_mode === 'api' ? 'api' : 'manual') as 'manual' | 'api');
                                         }

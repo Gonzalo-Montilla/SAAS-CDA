@@ -116,6 +116,12 @@ class Settings(BaseSettings):
     PLACAAPI_USERNAME: str = Field(default="", env="PLACAAPI_USERNAME")
     PLACAAPI_TIMEOUT_SECONDS: float = Field(default=15.0, ge=1.0, le=60.0, env="PLACAAPI_TIMEOUT_SECONDS")
     PLACAAPI_CACHE_TTL_SECONDS: int = Field(default=600, ge=0, le=86400, env="PLACAAPI_CACHE_TTL_SECONDS")
+    RUNT_INTERNAL_CACHE_TTL_SECONDS: int = Field(
+        default=2592000,
+        ge=0,
+        le=7776000,
+        env="RUNT_INTERNAL_CACHE_TTL_SECONDS",
+    )
     RUNT_FX_MODE: str = Field(default="auto", env="RUNT_FX_MODE")  # auto | manual
     RUNT_FX_USD_COP: float = Field(default=4000.0, ge=0.0, env="RUNT_FX_USD_COP")
     RUNT_FX_AUTO_TTL_SECONDS: int = Field(default=21600, ge=60, le=86400, env="RUNT_FX_AUTO_TTL_SECONDS")

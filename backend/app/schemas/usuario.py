@@ -86,6 +86,10 @@ class UsuarioResponse(BaseModel):
         default=False,
         description="Indica si el módulo de nómina está habilitado para el tenant.",
     )
+    tenant_exogena_enabled: bool = Field(
+        default=False,
+        description="Indica si el módulo de exógena está habilitado para el tenant.",
+    )
     tenant_sarlaft_enabled: bool = Field(
         default=False,
         description="Indica si el módulo SARLAFT está habilitado para el tenant.",

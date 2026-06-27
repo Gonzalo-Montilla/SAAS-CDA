@@ -1,5 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSearchParams } from 'react-router-dom';
 import { BarChart3, TrendingUp, TrendingDown, Wallet, Building2, FileText, Download, DollarSign, ArrowUpCircle, ArrowDownCircle, CalendarDays, TimerReset, AlertTriangle, GaugeCircle, Receipt, Landmark, X, Lock, Printer, FileCheck, Eye, Info } from 'lucide-react';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -198,6 +199,8 @@ const REPORTES_SECCIONES: { id: ReportesSeccion; label: string; hint: string }[]
   { id: 'provisiones', label: 'Provisiones IVA', hint: 'IVA causado por ventas y control de provisionado por periodo' },
   { id: 'detalle', label: 'Detalle', hint: 'Movimientos y trámites con exportación CSV' },
 ];
+
+const REPORTES_SECCIONES_SET = new Set<ReportesSeccion>(REPORTES_SECCIONES.map((s) => s.id));
 
 function movimientoElegibleDocumentoSoporte(m: Movimiento): boolean {
   const esEgresoCajaManual =
@@ -414,6 +417,7 @@ function anotarMovimientosMixtosParaCsv(rows: Movimiento[]): Array<Movimiento & 
 }
 
 export default function ReportesPage() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const brand = useBrand();
@@ -499,6 +503,23 @@ export default function ReportesPage() {
   const dashboardQueryString = useMemo(
     () => `fecha=${fechaSeleccionada}${sedeQuerySuffix}`,
     [fechaSeleccionada, sedeQuerySuffix],
+  );
+
+  useEffect(() => {
+    const seccionParam = (searchParams.get('seccion') || '').trim().toLowerCase() as ReportesSeccion;
+    if (REPORTES_SECCIONES_SET.has(seccionParam) && seccionParam !== reportesSeccion) {
+      setReportesSeccion(seccionParam);
+    }
+  }, [searchParams, reportesSeccion]);
+
+  const seleccionarSeccion = useCallback(
+    (next: ReportesSeccion) => {
+      setReportesSeccion(next);
+      const updated = new URLSearchParams(searchParams);
+      updated.set('seccion', next);
+      setSearchParams(updated, { replace: true });
+    },
+    [searchParams, setSearchParams],
   );
 
   // Query principal: Dashboard general
@@ -1333,7 +1354,7 @@ export default function ReportesPage() {
                   type="button"
                   role="tab"
                   aria-selected={active}
-                  onClick={() => setReportesSeccion(s.id)}
+                  onClick={() => seleccionarSeccion(s.id)}
                   className={`min-w-[5.5rem] shrink-0 rounded-t-lg px-3 py-2.5 text-sm font-semibold transition-colors sm:min-w-0 sm:px-4 ${
                     active
                       ? 'border-b-2 border-primary-600 bg-primary-50/70 text-primary-900'

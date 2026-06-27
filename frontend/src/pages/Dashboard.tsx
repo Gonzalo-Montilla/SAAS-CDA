@@ -23,6 +23,7 @@ import {
   FileStack,
   BookUser,
   ReceiptText,
+  FileSpreadsheet,
 } from 'lucide-react';
 const WIZARD_KEY = 'cdasoft_sedes_wizard_dismissed';
 
@@ -35,11 +36,13 @@ export default function Dashboard() {
   const [wizardBusy, setWizardBusy] = useState(false);
   const [wizardError, setWizardError] = useState<string | null>(null);
   const [showNominaBlockedModal, setShowNominaBlockedModal] = useState(false);
+  const [showExogenaBlockedModal, setShowExogenaBlockedModal] = useState(false);
   const [showSarlaftBlockedModal, setShowSarlaftBlockedModal] = useState(false);
 
   const tenantUser: Usuario | null =
     user && 'tenant_id' in user ? (user as Usuario) : null;
   const nominaEnabled = Boolean(tenantUser?.tenant_nomina_enabled);
+  const exogenaEnabled = Boolean(tenantUser?.tenant_exogena_enabled);
   const sarlaftEnabled = Boolean(tenantUser?.tenant_sarlaft_enabled);
   const canOpenSarlaft =
     tenantUser?.rol === 'administrador' || tenantUser?.rol === 'oficial_cumplimiento';
@@ -47,9 +50,14 @@ export default function Dashboard() {
     tenantUser?.rol === 'administrador' || tenantUser?.rol === 'contador';
 
   useEffect(() => {
-    const navState = location.state as { nominaLocked?: boolean; sarlaftLocked?: boolean } | null;
+    const navState = location.state as { nominaLocked?: boolean; exogenaLocked?: boolean; sarlaftLocked?: boolean } | null;
     if (navState?.nominaLocked) {
       setShowNominaBlockedModal(true);
+      navigate(location.pathname, { replace: true, state: null });
+      return;
+    }
+    if (navState?.exogenaLocked) {
+      setShowExogenaBlockedModal(true);
       navigate(location.pathname, { replace: true, state: null });
       return;
     }
@@ -328,6 +336,25 @@ export default function Dashboard() {
               </button>
 
               <button
+                onClick={() => {
+                  if (!exogenaEnabled) {
+                    setShowExogenaBlockedModal(true);
+                    return;
+                  }
+                  navigate('/contador');
+                }}
+                className="card-pos text-left group animate-fade-in animate-delay-300"
+              >
+                <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-cyan-100 text-cyan-700 mb-4 group-hover:bg-cyan-600 group-hover:text-white transition-all duration-300">
+                  <FileSpreadsheet className="w-8 h-8 icon-hover" />
+                </div>
+                <h3 className="text-xl font-bold text-slate-900 mb-2">Contador</h3>
+                <p className="text-slate-600 text-sm">
+                  Exógena y procesos contables del CDA
+                </p>
+              </button>
+
+              <button
                 onClick={() => navigate('/reportes')}
                 className="card-pos text-left group animate-fade-in"
               >
@@ -470,6 +497,20 @@ export default function Dashboard() {
         onClose={() => setShowSarlaftBlockedModal(false)}
         onPrimaryAction={() => {
           setShowSarlaftBlockedModal(false);
+          navigate('/soporte');
+        }}
+      />
+
+      <AccessRestrictedModal
+        open={showExogenaBlockedModal}
+        title="Módulo no habilitado"
+        message="No tienes habilitado el módulo de exógena. Si deseas habilitarlo, escribe a soporte."
+        badgeText="Acceso restringido"
+        closeLabel="Cerrar"
+        primaryLabel="Ir a soporte"
+        onClose={() => setShowExogenaBlockedModal(false)}
+        onPrimaryAction={() => {
+          setShowExogenaBlockedModal(false);
           navigate('/soporte');
         }}
       />

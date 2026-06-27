@@ -304,6 +304,30 @@ def require_nomina_enabled_for_tenant(
     return current_user
 
 
+def require_exogena_enabled_for_tenant(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+) -> Usuario:
+    """
+    Bloquea el módulo de Exógena cuando no está habilitado para el tenant.
+    """
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    if tenant is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Tenant no encontrado",
+        )
+    if not bool(getattr(tenant, "exogena_enabled", False)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=(
+                "No tienes habilitado el módulo de exógena. "
+                "Si deseas habilitarlo, escribe a soporte."
+            ),
+        )
+    return current_user
+
+
 def require_sarlaft_enabled_for_tenant(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),

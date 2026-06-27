@@ -80,6 +80,50 @@ class FacturaElectronica(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
 
 
+class FacturaCorreccion(Base):
+    """Historial de correcciones por factura emitida (NC + reemisión)."""
+
+    __tablename__ = "facturas_correcciones"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    vehiculo_proceso_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("vehiculos_proceso.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    factura_electronica_original_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("facturas_electronicas.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    factura_electronica_nueva_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("facturas_electronicas.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
+    motivo = Column(String(40), nullable=False)
+    estado = Column(String(20), nullable=False, default="completed")  # completed | failed
+    error_detalle = Column(Text, nullable=True)
+
+    factura_original_numero = Column(String(80), nullable=True)
+    factura_original_factus_bill_id = Column(Integer, nullable=True)
+    nota_credito_numero = Column(String(80), nullable=True)
+    nota_credito_factus_id = Column(Integer, nullable=True)
+    factura_nueva_numero = Column(String(80), nullable=True)
+    factura_nueva_factus_bill_id = Column(Integer, nullable=True)
+
+    before_json = Column(Text, nullable=True)
+    after_json = Column(Text, nullable=True)
+    ejecutado_por_usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="SET NULL"), nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+
 class DocumentoSoporteElectronico(Base):
     """Documento soporte DIAN emitido por el comprador (CDA) vía Factus, vinculado a un egreso."""
 

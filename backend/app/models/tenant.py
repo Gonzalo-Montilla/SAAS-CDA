@@ -39,6 +39,7 @@ class Tenant(Base):
     last_payment_at = Column(DateTime, nullable=True)
     nomina_enabled = Column(Boolean, nullable=False, default=False)
     sarlaft_enabled = Column(Boolean, nullable=False, default=False)
+    exogena_enabled = Column(Boolean, nullable=False, default=False)
     sarlaft_mode = Column(String(20), nullable=False, default="manual")
 
     # Facturación electrónica (Factus / DIAN): matriz / por defecto del CDA
