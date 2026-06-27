@@ -28,6 +28,7 @@ const Organizacion = lazy(() => import('./pages/Organizacion'));
 const Soporte = lazy(() => import('./pages/Soporte'));
 const Documentos = lazy(() => import('./pages/Documentos'));
 const Nomina = lazy(() => import('./pages/Nomina'));
+const Contador = lazy(() => import('./pages/Contador'));
 const Sarlaft = lazy(() => import('./pages/Sarlaft'));
 const Calidad = lazy(() => import('./pages/Calidad'));
 const CalidadEncuesta = lazy(() => import('./pages/CalidadEncuesta'));
@@ -54,12 +55,14 @@ function ProtectedRoute({
   requiredScope,
   requiredTenantRoles,
   requireNominaEnabled,
+  requireExogenaEnabled,
   requireSarlaftEnabled,
 }: {
   children: ReactNode;
   requiredScope?: AuthScope;
   requiredTenantRoles?: TenantRole[];
   requireNominaEnabled?: boolean;
+  requireExogenaEnabled?: boolean;
   requireSarlaftEnabled?: boolean;
 }) {
   const { isAuthenticated, loading, authScope, user } = useAuth();
@@ -95,6 +98,13 @@ function ProtectedRoute({
     const nominaEnabled = Boolean((user as { tenant_nomina_enabled?: boolean } | null)?.tenant_nomina_enabled);
     if (!nominaEnabled) {
       return <Navigate to="/dashboard" replace state={{ nominaLocked: true }} />;
+    }
+  }
+
+  if (requiredScope === 'tenant' && requireExogenaEnabled) {
+    const exogenaEnabled = Boolean((user as { tenant_exogena_enabled?: boolean } | null)?.tenant_exogena_enabled);
+    if (!exogenaEnabled) {
+      return <Navigate to="/dashboard" replace state={{ exogenaLocked: true }} />;
     }
   }
 
@@ -249,6 +259,18 @@ function App() {
                   requireNominaEnabled
                 >
                   <Nomina />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/contador"
+              element={
+                <ProtectedRoute
+                  requiredScope="tenant"
+                  requiredTenantRoles={['administrador', 'contador']}
+                  requireExogenaEnabled
+                >
+                  <Contador />
                 </ProtectedRoute>
               }
             />

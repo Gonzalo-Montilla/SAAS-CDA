@@ -18,10 +18,11 @@ from app.core.deps import get_db, get_contador_or_admin
 from app.core.sucursal_scope import resolve_reporte_sucursal_id, get_principal_sucursal_id
 from app.models.usuario import Usuario
 from app.models.caja import MovimientoCaja, Caja, EstadoCaja
-from app.models.tesoreria import MovimientoTesoreria, TipoMovimientoTesoreria
+from app.models.tesoreria import MovimientoTesoreria, TipoMovimientoTesoreria, CategoriaEgresoTesoreria
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo
 from app.models.tarifa import Tarifa
 from app.models.sucursal import Sucursal
+from app.models.proveedor_catalogo import ProveedorCatalogo
 from app.models.factus import DocumentoSoporteElectronico, FacturaElectronica, FacturaCorreccion
 from app.models.iva_provision import IvaProvisionRegistro
 from app.models.appointment import Appointment
@@ -1993,3 +1994,1996 @@ def listar_cierres_caja_reporte(
             )
         )
     return out
+
+
+class CxcClienteItem(BaseModel):
+    cliente_nombre: str
+    cliente_documento: str
+    cliente_telefono: Optional[str] = None
+    cliente_email: Optional[str] = None
+    sucursal_nombre: Optional[str] = None
+    tramites_pendientes: int
+    monto_pendiente_total: Decimal
+    antiguedad_max_dias: int
+    fecha_registro_mas_antigua: Optional[datetime] = None
+    placas: list[str] = Field(default_factory=list)
+
+
+class CxcGeneralClienteResponse(BaseModel):
+    fecha_corte: str
+    resumen: dict
+    clientes: list[CxcClienteItem]
+
+
+@router.get("/cxc-general-cliente", response_model=CxcGeneralClienteResponse)
+def cxc_general_por_cliente(
+    request: Request,
+    fecha_corte: Optional[date] = Query(None, description="Fecha de corte (default: hoy)."),
+    sucursal_id: Optional[UUID] = Query(None),
+    consolidar_todas: bool = Query(False),
+    limit: int = Query(500, ge=1, le=2000),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """
+    Cartera operativa por cliente: trámites registrados y aún no pagados al corte.
+    Se agrupa por tercero para dar vista rápida de CxC en operación CDA.
+    """
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=sucursal_id,
+        consolidar_todas=consolidar_todas,
+    )
+    tid = current_user.tenant_id
+
+    corte_local = fecha_corte or datetime.now(REPORT_TZ).date()
+    corte_dt_utc = (
+        datetime.combine(corte_local, time.max, tzinfo=REPORT_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+
+    pendientes = (
+        db.query(VehiculoProceso)
+        .filter(
+            _vp_scope(
+                tid,
+                scope_sid,
+                VehiculoProceso.fecha_registro <= corte_dt_utc,
+                VehiculoProceso.fecha_pago.is_(None),
+                VehiculoProceso.total_cobrado > 0,
+                _no_pruebas_auditoria_clause(),
+            )
+        )
+        .order_by(VehiculoProceso.fecha_registro.asc())
+        .all()
+    )
+
+    if not pendientes:
+        return CxcGeneralClienteResponse(
+            fecha_corte=corte_local.isoformat(),
+            resumen={
+                "total_clientes": 0,
+                "total_tramites_pendientes": 0,
+                "saldo_total_pendiente": Decimal("0"),
+            },
+            clientes=[],
+        )
+
+    sucursal_ids = {v.sucursal_id for v in pendientes if v.sucursal_id}
+    sucursal_names: dict[UUID, str] = {}
+    if sucursal_ids:
+        for sid, sname in db.query(Sucursal.id, Sucursal.nombre).filter(Sucursal.id.in_(list(sucursal_ids))).all():
+            sucursal_names[sid] = sname
+
+    grouped: dict[tuple[str, str], dict] = {}
+    for v in pendientes:
+        doc = (v.cliente_documento or "").strip()
+        nombre = (v.cliente_nombre or "").strip() or "Cliente sin nombre"
+        key = (doc or "SIN_DOCUMENTO", nombre.upper())
+        saldo = Decimal(str(v.total_cobrado or 0))
+        fecha_reg = _as_utc_aware(v.fecha_registro)
+        fecha_local = _as_report_tz(fecha_reg)
+        antiguedad_dias = 0
+        if fecha_local is not None:
+            antiguedad_dias = max((corte_local - fecha_local.date()).days, 0)
+
+        if key not in grouped:
+            grouped[key] = {
+                "cliente_nombre": nombre,
+                "cliente_documento": doc or "SIN_DOCUMENTO",
+                "cliente_telefono": (v.cliente_telefono or "").strip() or None,
+                "cliente_email": (v.cliente_email or "").strip() or None,
+                "sucursal_nombre": sucursal_names.get(v.sucursal_id) if v.sucursal_id else None,
+                "tramites_pendientes": 0,
+                "monto_pendiente_total": Decimal("0"),
+                "antiguedad_max_dias": 0,
+                "fecha_registro_mas_antigua": fecha_reg,
+                "placas": [],
+            }
+        item = grouped[key]
+        item["tramites_pendientes"] += 1
+        item["monto_pendiente_total"] = Decimal(str(item["monto_pendiente_total"])) + saldo
+        item["antiguedad_max_dias"] = max(int(item["antiguedad_max_dias"]), antiguedad_dias)
+        prev_fecha = item.get("fecha_registro_mas_antigua")
+        if prev_fecha is None or (fecha_reg is not None and fecha_reg < prev_fecha):
+            item["fecha_registro_mas_antigua"] = fecha_reg
+        if v.placa:
+            placas = item["placas"]
+            if v.placa not in placas and len(placas) < 5:
+                placas.append(v.placa)
+
+    clientes = [
+        CxcClienteItem(
+            cliente_nombre=item["cliente_nombre"],
+            cliente_documento=item["cliente_documento"],
+            cliente_telefono=item["cliente_telefono"],
+            cliente_email=item["cliente_email"],
+            sucursal_nombre=item["sucursal_nombre"],
+            tramites_pendientes=int(item["tramites_pendientes"]),
+            monto_pendiente_total=Decimal(str(item["monto_pendiente_total"])),
+            antiguedad_max_dias=int(item["antiguedad_max_dias"]),
+            fecha_registro_mas_antigua=_as_utc_aware(item["fecha_registro_mas_antigua"]),
+            placas=item["placas"],
+        )
+        for item in grouped.values()
+    ]
+    clientes.sort(
+        key=lambda c: (
+            Decimal(str(c.monto_pendiente_total)),
+            c.antiguedad_max_dias,
+            c.tramites_pendientes,
+        ),
+        reverse=True,
+    )
+    if len(clientes) > limit:
+        clientes = clientes[:limit]
+
+    saldo_total = sum((Decimal(str(c.monto_pendiente_total)) for c in clientes), Decimal("0"))
+    total_tramites = sum((int(c.tramites_pendientes) for c in clientes), 0)
+
+    return CxcGeneralClienteResponse(
+        fecha_corte=corte_local.isoformat(),
+        resumen={
+            "total_clientes": len(clientes),
+            "total_tramites_pendientes": total_tramites,
+            "saldo_total_pendiente": saldo_total,
+        },
+        clientes=clientes,
+    )
+
+
+class CxpProveedorItem(BaseModel):
+    proveedor_nombre: str
+    proveedor_documento: str
+    proveedor_tipo_documento: Optional[str] = None
+    proveedor_email: Optional[str] = None
+    proveedor_telefono: Optional[str] = None
+    proveedor_direccion: Optional[str] = None
+    sucursal_nombre: Optional[str] = None
+    desde_catalogo: bool = False
+    proveedor_catalogo_id: Optional[UUID] = None
+    concepto_retencion_dse: Optional[str] = None
+    movimientos_egreso: int
+    valor_egresado_total: Decimal
+    fecha_ultimo_egreso: Optional[datetime] = None
+    referencias_comprobante: list[str] = Field(default_factory=list)
+
+
+class CxpGeneralProveedorResponse(BaseModel):
+    periodo: str
+    resumen: dict
+    proveedores: list[CxpProveedorItem]
+
+
+@router.get("/cxp-general-proveedor", response_model=CxpGeneralProveedorResponse)
+def cxp_general_por_proveedor(
+    request: Request,
+    fecha_inicio: Optional[date] = Query(None),
+    fecha_fin: Optional[date] = Query(None),
+    sucursal_id: Optional[UUID] = Query(None),
+    consolidar_todas: bool = Query(False),
+    limit: int = Query(500, ge=1, le=2000),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """
+    Reporte operativo de CxP por proveedor, basado en egresos de tesorería:
+    prioriza datos del catálogo de proveedores cuando exista vínculo `proveedor_catalogo_id`.
+    """
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=sucursal_id,
+        consolidar_todas=consolidar_todas,
+    )
+    tid = current_user.tenant_id
+
+    if (fecha_inicio is None) != (fecha_fin is None):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Debe enviar fecha_inicio y fecha_fin juntas para filtro por rango.",
+        )
+
+    if fecha_inicio and fecha_fin:
+        if fecha_inicio > fecha_fin:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="fecha_inicio no puede ser mayor que fecha_fin.",
+            )
+        inicio_local = fecha_inicio
+        fin_local = fecha_fin
+    else:
+        today_local = datetime.now(REPORT_TZ).date()
+        inicio_local = today_local.replace(day=1)
+        fin_local = today_local
+
+    inicio_utc = (
+        datetime.combine(inicio_local, time.min, tzinfo=REPORT_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+    fin_utc = (
+        datetime.combine(fin_local, time.max, tzinfo=REPORT_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+    periodo_label = f"{inicio_local.isoformat()} a {fin_local.isoformat()}"
+
+    rows = (
+        db.query(MovimientoTesoreria)
+        .filter(
+            _mt_scope(
+                tid,
+                scope_sid,
+                MovimientoTesoreria.tipo == TipoMovimientoTesoreria.EGRESO,
+                MovimientoTesoreria.fecha_movimiento >= inicio_utc,
+                MovimientoTesoreria.fecha_movimiento <= fin_utc,
+                or_(
+                    MovimientoTesoreria.proveedor_catalogo_id.isnot(None),
+                    MovimientoTesoreria.categoria_egreso == CategoriaEgresoTesoreria.PROVEEDORES,
+                    MovimientoTesoreria.beneficiario.isnot(None),
+                ),
+            )
+        )
+        .order_by(MovimientoTesoreria.fecha_movimiento.desc())
+        .all()
+    )
+
+    if not rows:
+        return CxpGeneralProveedorResponse(
+            periodo=periodo_label,
+            resumen={
+                "total_proveedores": 0,
+                "total_movimientos": 0,
+                "valor_egresado_total": Decimal("0"),
+            },
+            proveedores=[],
+        )
+
+    proveedor_ids = {r.proveedor_catalogo_id for r in rows if r.proveedor_catalogo_id}
+    proveedores_catalogo: dict[UUID, ProveedorCatalogo] = {}
+    if proveedor_ids:
+        for p in (
+            db.query(ProveedorCatalogo)
+            .filter(
+                ProveedorCatalogo.tenant_id == tid,
+                ProveedorCatalogo.id.in_(list(proveedor_ids)),
+            )
+            .all()
+        ):
+            proveedores_catalogo[p.id] = p
+
+    sucursal_ids = {r.sucursal_id for r in rows if r.sucursal_id}
+    sucursal_names: dict[UUID, str] = {}
+    if sucursal_ids:
+        for sid, sname in db.query(Sucursal.id, Sucursal.nombre).filter(Sucursal.id.in_(list(sucursal_ids))).all():
+            sucursal_names[sid] = sname
+
+    grouped: dict[str, dict] = {}
+    for r in rows:
+        prov = proveedores_catalogo.get(r.proveedor_catalogo_id) if r.proveedor_catalogo_id else None
+        if prov is not None:
+            key = f"cat:{prov.id}"
+            nombre = (prov.razon_social_rut or prov.alias or "").strip() or "Proveedor catalogado"
+            doc = (prov.numero_identificacion or "").strip() or "SIN_DOCUMENTO"
+            tipo_doc = (prov.tipo_identificacion or "").strip() or None
+            email = (prov.email or "").strip() or None
+            telefono = (prov.telefono or "").strip() or None
+            direccion = (prov.direccion or "").strip() or None
+            concepto_ret = (prov.concepto_retencion_dse or "").strip() or None
+            desde_catalogo = True
+            proveedor_catalogo_id = prov.id
+        else:
+            doc_manual = (r.beneficiario_numero_identificacion or "").strip()
+            nombre_manual = (r.beneficiario or "").strip() or "Proveedor no catalogado"
+            key = f"manual:{doc_manual or 'SIN_DOCUMENTO'}:{nombre_manual.upper()}"
+            nombre = nombre_manual
+            doc = doc_manual or "SIN_DOCUMENTO"
+            tipo_doc = (r.beneficiario_tipo_identificacion or "").strip() or None
+            email = (r.beneficiario_email or "").strip() or None
+            telefono = (r.beneficiario_telefono or "").strip() or None
+            direccion = (r.beneficiario_direccion or "").strip() or None
+            concepto_ret = None
+            desde_catalogo = False
+            proveedor_catalogo_id = None
+
+        if key not in grouped:
+            grouped[key] = {
+                "proveedor_nombre": nombre,
+                "proveedor_documento": doc,
+                "proveedor_tipo_documento": tipo_doc,
+                "proveedor_email": email,
+                "proveedor_telefono": telefono,
+                "proveedor_direccion": direccion,
+                "sucursal_nombre": sucursal_names.get(r.sucursal_id) if r.sucursal_id else None,
+                "desde_catalogo": desde_catalogo,
+                "proveedor_catalogo_id": proveedor_catalogo_id,
+                "concepto_retencion_dse": concepto_ret,
+                "movimientos_egreso": 0,
+                "valor_egresado_total": Decimal("0"),
+                "fecha_ultimo_egreso": _as_utc_aware(r.fecha_movimiento),
+                "referencias_comprobante": [],
+            }
+        item = grouped[key]
+        egreso_abs = abs(Decimal(str(r.monto or 0)))
+        item["movimientos_egreso"] += 1
+        item["valor_egresado_total"] = Decimal(str(item["valor_egresado_total"])) + egreso_abs
+        if item["fecha_ultimo_egreso"] is None or (
+            _as_utc_aware(r.fecha_movimiento) is not None
+            and _as_utc_aware(r.fecha_movimiento) > item["fecha_ultimo_egreso"]
+        ):
+            item["fecha_ultimo_egreso"] = _as_utc_aware(r.fecha_movimiento)
+        comp = (r.numero_comprobante or "").strip()
+        if comp and comp not in item["referencias_comprobante"] and len(item["referencias_comprobante"]) < 5:
+            item["referencias_comprobante"].append(comp)
+
+    proveedores = [
+        CxpProveedorItem(
+            proveedor_nombre=i["proveedor_nombre"],
+            proveedor_documento=i["proveedor_documento"],
+            proveedor_tipo_documento=i["proveedor_tipo_documento"],
+            proveedor_email=i["proveedor_email"],
+            proveedor_telefono=i["proveedor_telefono"],
+            proveedor_direccion=i["proveedor_direccion"],
+            sucursal_nombre=i["sucursal_nombre"],
+            desde_catalogo=bool(i["desde_catalogo"]),
+            proveedor_catalogo_id=i["proveedor_catalogo_id"],
+            concepto_retencion_dse=i["concepto_retencion_dse"],
+            movimientos_egreso=int(i["movimientos_egreso"]),
+            valor_egresado_total=Decimal(str(i["valor_egresado_total"])),
+            fecha_ultimo_egreso=_as_utc_aware(i["fecha_ultimo_egreso"]),
+            referencias_comprobante=i["referencias_comprobante"],
+        )
+        for i in grouped.values()
+    ]
+    proveedores.sort(
+        key=lambda p: (
+            Decimal(str(p.valor_egresado_total)),
+            p.movimientos_egreso,
+        ),
+        reverse=True,
+    )
+    if len(proveedores) > limit:
+        proveedores = proveedores[:limit]
+
+    total_egresado = sum((Decimal(str(p.valor_egresado_total)) for p in proveedores), Decimal("0"))
+    total_movs = sum((int(p.movimientos_egreso) for p in proveedores), 0)
+
+    return CxpGeneralProveedorResponse(
+        periodo=periodo_label,
+        resumen={
+            "total_proveedores": len(proveedores),
+            "total_movimientos": total_movs,
+            "valor_egresado_total": total_egresado,
+        },
+        proveedores=proveedores,
+    )
+
+
+class VentaVendedorItem(BaseModel):
+    vendedor_id: Optional[UUID] = None
+    vendedor_nombre: str
+    sucursal_nombre: Optional[str] = None
+    tramites_vendidos: int
+    total_vendido: Decimal
+    ticket_promedio: Decimal
+    primera_venta_at: Optional[datetime] = None
+    ultima_venta_at: Optional[datetime] = None
+    placas: list[str] = Field(default_factory=list)
+    metodos_pago: dict = Field(default_factory=dict)
+
+
+class VentasVendedorResponse(BaseModel):
+    periodo: str
+    resumen: dict
+    vendedores: list[VentaVendedorItem]
+
+
+@router.get("/ventas-por-vendedor", response_model=VentasVendedorResponse)
+def ventas_por_vendedor(
+    request: Request,
+    fecha: Optional[date] = Query(None, description="Fecha específica (default: hoy)."),
+    fecha_inicio: Optional[date] = Query(None, description="Fecha inicio para rango"),
+    fecha_fin: Optional[date] = Query(None, description="Fecha fin para rango"),
+    sucursal_id: Optional[UUID] = Query(None),
+    consolidar_todas: bool = Query(False),
+    limit: int = Query(300, ge=1, le=2000),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """
+    Ventas por vendedor/cajero, agrupadas por usuario de cobro.
+    Si no existe `cobrado_por`, usa `registrado_por` como fallback operativo.
+    """
+    try:
+        fecha_inicio_dt, fecha_fin_dt, etiqueta_fecha = resolve_report_date_window(
+            fecha=fecha,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=sucursal_id,
+        consolidar_todas=consolidar_todas,
+    )
+    tid = current_user.tenant_id
+
+    ventas = (
+        db.query(VehiculoProceso)
+        .filter(
+            _vp_scope(
+                tid,
+                scope_sid,
+                VehiculoProceso.fecha_pago.isnot(None),
+                VehiculoProceso.total_cobrado > 0,
+                VehiculoProceso.fecha_pago >= fecha_inicio_dt,
+                VehiculoProceso.fecha_pago <= fecha_fin_dt,
+                _no_pruebas_auditoria_clause(),
+            )
+        )
+        .order_by(VehiculoProceso.fecha_pago.asc())
+        .all()
+    )
+
+    if not ventas:
+        return VentasVendedorResponse(
+            periodo=etiqueta_fecha,
+            resumen={
+                "total_vendedores": 0,
+                "total_tramites": 0,
+                "total_vendido": Decimal("0"),
+                "ticket_promedio_general": Decimal("0"),
+            },
+            vendedores=[],
+        )
+
+    user_ids: set[UUID] = set()
+    sucursal_ids: set[UUID] = set()
+    for v in ventas:
+        if v.cobrado_por:
+            user_ids.add(v.cobrado_por)
+        if v.registrado_por:
+            user_ids.add(v.registrado_por)
+        if v.sucursal_id:
+            sucursal_ids.add(v.sucursal_id)
+    users_map: dict[UUID, str] = {}
+    if user_ids:
+        for u in db.query(Usuario).filter(Usuario.id.in_(list(user_ids))).all():
+            users_map[u.id] = (u.nombre_completo or "").strip() or "Usuario"
+    sucursal_names: dict[UUID, str] = {}
+    if sucursal_ids:
+        for sid, sname in db.query(Sucursal.id, Sucursal.nombre).filter(Sucursal.id.in_(list(sucursal_ids))).all():
+            sucursal_names[sid] = sname
+
+    grouped: dict[str, dict] = {}
+    for v in ventas:
+        vendedor_id = v.cobrado_por or v.registrado_por
+        vendedor_nombre = users_map.get(vendedor_id, "Sin vendedor asignado") if vendedor_id else "Sin vendedor asignado"
+        key = str(vendedor_id) if vendedor_id else "sin_vendedor"
+        venta_total = Decimal(str(v.total_cobrado or 0))
+        fecha_pago_utc = _as_utc_aware(v.fecha_pago)
+        metodo = str(v.metodo_pago or "").strip() or "sin_metodo"
+
+        if key not in grouped:
+            grouped[key] = {
+                "vendedor_id": vendedor_id,
+                "vendedor_nombre": vendedor_nombre,
+                "sucursal_nombre": sucursal_names.get(v.sucursal_id) if v.sucursal_id else None,
+                "tramites_vendidos": 0,
+                "total_vendido": Decimal("0"),
+                "primera_venta_at": fecha_pago_utc,
+                "ultima_venta_at": fecha_pago_utc,
+                "placas": [],
+                "metodos_pago": defaultdict(Decimal),
+            }
+        item = grouped[key]
+        item["tramites_vendidos"] += 1
+        item["total_vendido"] = Decimal(str(item["total_vendido"])) + venta_total
+        if item["primera_venta_at"] is None or (fecha_pago_utc is not None and fecha_pago_utc < item["primera_venta_at"]):
+            item["primera_venta_at"] = fecha_pago_utc
+        if item["ultima_venta_at"] is None or (fecha_pago_utc is not None and fecha_pago_utc > item["ultima_venta_at"]):
+            item["ultima_venta_at"] = fecha_pago_utc
+        if v.placa and v.placa not in item["placas"] and len(item["placas"]) < 6:
+            item["placas"].append(v.placa)
+        item["metodos_pago"][metodo] += venta_total
+
+    vendedores = []
+    for i in grouped.values():
+        tramites = int(i["tramites_vendidos"])
+        total = Decimal(str(i["total_vendido"]))
+        ticket = (total / Decimal(tramites)).quantize(Decimal("0.01")) if tramites > 0 else Decimal("0")
+        metodos = {
+            k: Decimal(str(v)).quantize(Decimal("0.01"))
+            for k, v in sorted(i["metodos_pago"].items(), key=lambda kv: kv[1], reverse=True)
+        }
+        vendedores.append(
+            VentaVendedorItem(
+                vendedor_id=i["vendedor_id"],
+                vendedor_nombre=i["vendedor_nombre"],
+                sucursal_nombre=i["sucursal_nombre"],
+                tramites_vendidos=tramites,
+                total_vendido=total.quantize(Decimal("0.01")),
+                ticket_promedio=ticket,
+                primera_venta_at=_as_utc_aware(i["primera_venta_at"]),
+                ultima_venta_at=_as_utc_aware(i["ultima_venta_at"]),
+                placas=i["placas"],
+                metodos_pago=metodos,
+            )
+        )
+
+    vendedores.sort(
+        key=lambda x: (Decimal(str(x.total_vendido)), x.tramites_vendidos),
+        reverse=True,
+    )
+    if len(vendedores) > limit:
+        vendedores = vendedores[:limit]
+
+    total_vendido = sum((Decimal(str(v.total_vendido)) for v in vendedores), Decimal("0"))
+    total_tramites = sum((int(v.tramites_vendidos) for v in vendedores), 0)
+    ticket_general = (
+        (total_vendido / Decimal(total_tramites)).quantize(Decimal("0.01"))
+        if total_tramites > 0
+        else Decimal("0")
+    )
+
+    return VentasVendedorResponse(
+        periodo=etiqueta_fecha,
+        resumen={
+            "total_vendedores": len(vendedores),
+            "total_tramites": total_tramites,
+            "total_vendido": total_vendido.quantize(Decimal("0.01")),
+            "ticket_promedio_general": ticket_general,
+        },
+        vendedores=vendedores,
+    )
+
+
+class VentaSucursalItem(BaseModel):
+    sucursal_id: Optional[UUID] = None
+    sucursal_nombre: str
+    sucursal_codigo: Optional[str] = None
+    tramites_vendidos: int
+    total_vendido: Decimal
+    ticket_promedio: Decimal
+    vendedores_unicos: int
+    primera_venta_at: Optional[datetime] = None
+    ultima_venta_at: Optional[datetime] = None
+    placas: list[str] = Field(default_factory=list)
+    metodos_pago: dict = Field(default_factory=dict)
+
+
+class VentasSucursalResponse(BaseModel):
+    periodo: str
+    resumen: dict
+    sucursales: list[VentaSucursalItem]
+
+
+@router.get("/ventas-por-sucursal", response_model=VentasSucursalResponse)
+def ventas_por_sucursal(
+    request: Request,
+    fecha: Optional[date] = Query(None, description="Fecha específica (default: hoy)."),
+    fecha_inicio: Optional[date] = Query(None, description="Fecha inicio para rango"),
+    fecha_fin: Optional[date] = Query(None, description="Fecha fin para rango"),
+    sucursal_id: Optional[UUID] = Query(None),
+    consolidar_todas: bool = Query(False),
+    limit: int = Query(100, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """
+    Ventas por sucursal (centro operativo), con total vendido y ticket promedio.
+    """
+    try:
+        fecha_inicio_dt, fecha_fin_dt, etiqueta_fecha = resolve_report_date_window(
+            fecha=fecha,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=sucursal_id,
+        consolidar_todas=consolidar_todas,
+    )
+    tid = current_user.tenant_id
+    principal_sid = get_principal_sucursal_id(db, tid)
+
+    ventas = (
+        db.query(VehiculoProceso)
+        .filter(
+            _vp_scope(
+                tid,
+                scope_sid,
+                VehiculoProceso.fecha_pago.isnot(None),
+                VehiculoProceso.total_cobrado > 0,
+                VehiculoProceso.fecha_pago >= fecha_inicio_dt,
+                VehiculoProceso.fecha_pago <= fecha_fin_dt,
+                _no_pruebas_auditoria_clause(),
+            )
+        )
+        .order_by(VehiculoProceso.fecha_pago.asc())
+        .all()
+    )
+
+    if not ventas:
+        return VentasSucursalResponse(
+            periodo=etiqueta_fecha,
+            resumen={
+                "total_sucursales": 0,
+                "total_tramites": 0,
+                "total_vendido": Decimal("0"),
+                "ticket_promedio_general": Decimal("0"),
+            },
+            sucursales=[],
+        )
+
+    sid_set = {v.sucursal_id for v in ventas if v.sucursal_id}
+    if principal_sid is not None:
+        sid_set.add(principal_sid)
+    suc_map: dict[UUID, Sucursal] = {}
+    if sid_set:
+        for s in db.query(Sucursal).filter(Sucursal.id.in_(list(sid_set))).all():
+            suc_map[s.id] = s
+
+    grouped: dict[str, dict] = {}
+    for v in ventas:
+        sid = v.sucursal_id or principal_sid
+        key = str(sid) if sid is not None else "sin_sede"
+        suc = suc_map.get(sid) if sid is not None else None
+        nombre = (getattr(suc, "nombre", None) or "").strip() or (
+            "Sede principal" if v.sucursal_id is None else "Sin sede"
+        )
+        codigo = (getattr(suc, "codigo", None) or "").strip() or None
+        venta_total = Decimal(str(v.total_cobrado or 0))
+        fecha_pago_utc = _as_utc_aware(v.fecha_pago)
+        metodo = str(v.metodo_pago or "").strip() or "sin_metodo"
+        vendedor_id = v.cobrado_por or v.registrado_por
+
+        if key not in grouped:
+            grouped[key] = {
+                "sucursal_id": sid,
+                "sucursal_nombre": nombre,
+                "sucursal_codigo": codigo,
+                "tramites_vendidos": 0,
+                "total_vendido": Decimal("0"),
+                "primera_venta_at": fecha_pago_utc,
+                "ultima_venta_at": fecha_pago_utc,
+                "vendedores_ids": set(),
+                "placas": [],
+                "metodos_pago": defaultdict(Decimal),
+            }
+        item = grouped[key]
+        item["tramites_vendidos"] += 1
+        item["total_vendido"] = Decimal(str(item["total_vendido"])) + venta_total
+        if item["primera_venta_at"] is None or (fecha_pago_utc is not None and fecha_pago_utc < item["primera_venta_at"]):
+            item["primera_venta_at"] = fecha_pago_utc
+        if item["ultima_venta_at"] is None or (fecha_pago_utc is not None and fecha_pago_utc > item["ultima_venta_at"]):
+            item["ultima_venta_at"] = fecha_pago_utc
+        if vendedor_id:
+            item["vendedores_ids"].add(vendedor_id)
+        if v.placa and v.placa not in item["placas"] and len(item["placas"]) < 8:
+            item["placas"].append(v.placa)
+        item["metodos_pago"][metodo] += venta_total
+
+    sucursales = []
+    for i in grouped.values():
+        tramites = int(i["tramites_vendidos"])
+        total = Decimal(str(i["total_vendido"]))
+        ticket = (total / Decimal(tramites)).quantize(Decimal("0.01")) if tramites > 0 else Decimal("0")
+        metodos = {
+            k: Decimal(str(v)).quantize(Decimal("0.01"))
+            for k, v in sorted(i["metodos_pago"].items(), key=lambda kv: kv[1], reverse=True)
+        }
+        sucursales.append(
+            VentaSucursalItem(
+                sucursal_id=i["sucursal_id"],
+                sucursal_nombre=i["sucursal_nombre"],
+                sucursal_codigo=i["sucursal_codigo"],
+                tramites_vendidos=tramites,
+                total_vendido=total.quantize(Decimal("0.01")),
+                ticket_promedio=ticket,
+                vendedores_unicos=len(i["vendedores_ids"]),
+                primera_venta_at=_as_utc_aware(i["primera_venta_at"]),
+                ultima_venta_at=_as_utc_aware(i["ultima_venta_at"]),
+                placas=i["placas"],
+                metodos_pago=metodos,
+            )
+        )
+
+    sucursales.sort(
+        key=lambda x: (Decimal(str(x.total_vendido)), x.tramites_vendidos),
+        reverse=True,
+    )
+    if len(sucursales) > limit:
+        sucursales = sucursales[:limit]
+
+    total_vendido = sum((Decimal(str(s.total_vendido)) for s in sucursales), Decimal("0"))
+    total_tramites = sum((int(s.tramites_vendidos) for s in sucursales), 0)
+    ticket_general = (
+        (total_vendido / Decimal(total_tramites)).quantize(Decimal("0.01"))
+        if total_tramites > 0
+        else Decimal("0")
+    )
+
+    return VentasSucursalResponse(
+        periodo=etiqueta_fecha,
+        resumen={
+            "total_sucursales": len(sucursales),
+            "total_tramites": total_tramites,
+            "total_vendido": total_vendido.quantize(Decimal("0.01")),
+            "ticket_promedio_general": ticket_general,
+        },
+        sucursales=sucursales,
+    )
+
+
+class EstadoSituacionGerencialResponse(BaseModel):
+    fecha_corte: str
+    alcance: str
+    notas: list[str] = Field(default_factory=list)
+    activos: dict
+    pasivos: dict
+    patrimonio: dict
+
+
+@router.get("/estado-situacion-gerencial", response_model=EstadoSituacionGerencialResponse)
+def estado_situacion_gerencial(
+    request: Request,
+    fecha_corte: Optional[date] = Query(None, description="Fecha de corte (default: hoy)."),
+    sucursal_id: Optional[UUID] = Query(None),
+    consolidar_todas: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """
+    Estado de situación financiera gerencial preliminar (uso interno):
+    - Activos: efectivo equivalente + CxC operativa.
+    - Pasivos: CxP en cero mientras no exista módulo formal de obligaciones por pagar.
+    - Patrimonio estimado: Activo - Pasivo.
+    """
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=sucursal_id,
+        consolidar_todas=consolidar_todas,
+    )
+    tid = current_user.tenant_id
+
+    corte_local = fecha_corte or datetime.now(REPORT_TZ).date()
+    corte_utc = (
+        datetime.combine(corte_local, time.max, tzinfo=REPORT_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+
+    saldo_caja = (
+        db.query(func.sum(MovimientoCaja.monto))
+        .filter(
+            _mc_scope(
+                db,
+                tid,
+                scope_sid,
+                MovimientoCaja.created_at <= corte_utc,
+            )
+        )
+        .scalar()
+        or Decimal("0")
+    )
+    saldo_tesoreria = (
+        db.query(func.sum(MovimientoTesoreria.monto))
+        .filter(
+            _mt_scope(
+                tid,
+                scope_sid,
+                MovimientoTesoreria.fecha_movimiento <= corte_utc,
+            )
+        )
+        .scalar()
+        or Decimal("0")
+    )
+    efectivo_equivalente = Decimal(str(saldo_caja or 0)) + Decimal(str(saldo_tesoreria or 0))
+
+    cxc_operativa = (
+        db.query(func.sum(VehiculoProceso.total_cobrado))
+        .filter(
+            _vp_scope(
+                tid,
+                scope_sid,
+                VehiculoProceso.fecha_registro <= corte_utc,
+                VehiculoProceso.fecha_pago.is_(None),
+                VehiculoProceso.total_cobrado > 0,
+                _no_pruebas_auditoria_clause(),
+            )
+        )
+        .scalar()
+        or Decimal("0")
+    )
+    cxc_operativa = Decimal(str(cxc_operativa or 0))
+
+    activo_total = efectivo_equivalente + cxc_operativa
+    cxp_proveedores = Decimal("0")
+    pasivo_total = cxp_proveedores
+    patrimonio_estimado = activo_total - pasivo_total
+
+    return EstadoSituacionGerencialResponse(
+        fecha_corte=corte_local.isoformat(),
+        alcance="gerencial_preliminar",
+        notas=[
+            "Este reporte es de uso gerencial interno y no reemplaza estados financieros oficiales NIIF.",
+            "CxP proveedores se muestra en cero hasta implementar el módulo formal de obligaciones por pagar.",
+            "Los saldos se calculan con base en movimientos de caja/tesorería y cartera operativa (vehículos sin pago).",
+        ],
+        activos={
+            "efectivo_equivalente": efectivo_equivalente.quantize(Decimal("0.01")),
+            "cxc_operativa": cxc_operativa.quantize(Decimal("0.01")),
+            "total_activos": activo_total.quantize(Decimal("0.01")),
+        },
+        pasivos={
+            "cxp_proveedores": cxp_proveedores.quantize(Decimal("0.01")),
+            "total_pasivos": pasivo_total.quantize(Decimal("0.01")),
+        },
+        patrimonio={
+            "patrimonio_estimado": patrimonio_estimado.quantize(Decimal("0.01")),
+        },
+    )
+
+
+class BalancePruebaCuentaItem(BaseModel):
+    codigo: str
+    nombre: str
+    naturaleza: str
+    debito: Decimal
+    credito: Decimal
+    saldo: Decimal
+    origenes: list[str] = Field(default_factory=list)
+
+
+class BalancePruebaGerencialResponse(BaseModel):
+    fecha_corte: str
+    alcance: str
+    notas: list[str] = Field(default_factory=list)
+    resumen: dict
+    cuentas: list[BalancePruebaCuentaItem]
+
+
+@router.get("/balance-prueba-gerencial", response_model=BalancePruebaGerencialResponse)
+def balance_prueba_gerencial(
+    request: Request,
+    fecha_corte: Optional[date] = Query(None, description="Fecha de corte (default: hoy)."),
+    sucursal_id: Optional[UUID] = Query(None),
+    consolidar_todas: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """
+    Balance de prueba gerencial preliminar (interno), armado desde movimientos reales
+    de Caja y Tesorería con reglas de mapeo contable explícitas.
+    """
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=sucursal_id,
+        consolidar_todas=consolidar_todas,
+    )
+    tid = current_user.tenant_id
+
+    corte_local = fecha_corte or datetime.now(REPORT_TZ).date()
+    corte_utc = (
+        datetime.combine(corte_local, time.max, tzinfo=REPORT_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+
+    def _is_efectivo(metodo_raw: object) -> bool:
+        m = str(getattr(metodo_raw, "value", metodo_raw) or "").strip().lower()
+        return m == "efectivo"
+
+    def _asset_account_for_move(*, metodo_raw: object, ingresa_efectivo: bool | None = None) -> tuple[str, str]:
+        if ingresa_efectivo is False:
+            return ("111005", "Bancos")
+        return ("110505", "Caja general") if _is_efectivo(metodo_raw) else ("111005", "Bancos")
+
+    def _gasto_cuenta_tesoreria(cat_raw: object) -> tuple[str, str]:
+        cat = str(getattr(cat_raw, "value", cat_raw) or "").strip().lower()
+        mapping = {
+            "nomina": ("510506", "Gastos de personal"),
+            "arriendo": ("512001", "Arrendamientos"),
+            "servicios_publicos": ("513505", "Servicios publicos"),
+            "mantenimiento": ("514595", "Mantenimiento y reparaciones"),
+            "impuestos": ("511595", "Impuestos asumidos"),
+            "compra_inventario": ("143505", "Inventarios de operacion"),
+            "proveedores": ("519595", "Gastos operacionales varios"),
+            "otros_gastos": ("519595", "Gastos operacionales varios"),
+            "ajuste_correccion": ("539595", "Ajustes y correcciones"),
+        }
+        return mapping.get(cat, ("519595", "Gastos operacionales varios"))
+
+    def _ingreso_cuenta_caja(tipo_raw: object) -> tuple[str, str]:
+        t = str(getattr(tipo_raw, "value", tipo_raw) or "").strip().lower()
+        if t in {"rtm", "comision_soat"}:
+            return ("413595", "Ingresos de operacion CDA")
+        return ("429595", "Ingresos diversos")
+
+    cuentas: dict[str, dict] = {}
+
+    def _acc(codigo: str, nombre: str, naturaleza: str, deb: Decimal, cred: Decimal, origen: str):
+        if codigo not in cuentas:
+            cuentas[codigo] = {
+                "codigo": codigo,
+                "nombre": nombre,
+                "naturaleza": naturaleza,
+                "debito": Decimal("0"),
+                "credito": Decimal("0"),
+                "origenes": set(),
+            }
+        cuentas[codigo]["debito"] += Decimal(str(deb or 0))
+        cuentas[codigo]["credito"] += Decimal(str(cred or 0))
+        if origen:
+            cuentas[codigo]["origenes"].add(origen)
+
+    movs_caja = (
+        db.query(MovimientoCaja)
+        .filter(
+            _mc_scope(
+                db,
+                tid,
+                scope_sid,
+                MovimientoCaja.created_at <= corte_utc,
+            )
+        )
+        .all()
+    )
+    for m in movs_caja:
+        amount = abs(Decimal(str(m.monto or 0)))
+        if amount <= 0:
+            continue
+        asset_code, asset_name = _asset_account_for_move(
+            metodo_raw=m.metodo_pago,
+            ingresa_efectivo=bool(getattr(m, "ingresa_efectivo", True)),
+        )
+        if Decimal(str(m.monto or 0)) > 0:
+            rev_code, rev_name = _ingreso_cuenta_caja(getattr(m, "tipo", ""))
+            _acc(asset_code, asset_name, "debito", amount, Decimal("0"), "caja")
+            _acc(rev_code, rev_name, "credito", Decimal("0"), amount, "caja")
+        else:
+            tipo_raw = str(getattr(getattr(m, "tipo", None), "value", getattr(m, "tipo", "")) or "").strip().lower()
+            if tipo_raw == "devolucion":
+                gasto_code, gasto_name = ("417595", "Devoluciones en ventas")
+            elif tipo_raw == "ajuste":
+                gasto_code, gasto_name = ("539595", "Ajustes y correcciones")
+            else:
+                gasto_code, gasto_name = ("519595", "Gastos operacionales varios")
+            _acc(gasto_code, gasto_name, "debito", amount, Decimal("0"), "caja")
+            _acc(asset_code, asset_name, "debito", Decimal("0"), amount, "caja")
+
+    movs_tes = (
+        db.query(MovimientoTesoreria)
+        .filter(
+            _mt_scope(
+                tid,
+                scope_sid,
+                MovimientoTesoreria.fecha_movimiento <= corte_utc,
+            )
+        )
+        .all()
+    )
+    for m in movs_tes:
+        amount = abs(Decimal(str(m.monto or 0)))
+        if amount <= 0:
+            continue
+        asset_code, asset_name = _asset_account_for_move(metodo_raw=m.metodo_pago)
+        if Decimal(str(m.monto or 0)) > 0:
+            cat_ing = str(getattr(getattr(m, "categoria_ingreso", None), "value", getattr(m, "categoria_ingreso", "")) or "").strip().lower()
+            if cat_ing == "traslado_caja":
+                contra_code, contra_name = ("110505", "Caja general")
+            else:
+                contra_code, contra_name = ("429595", "Ingresos diversos")
+            _acc(asset_code, asset_name, "debito", amount, Decimal("0"), "tesoreria")
+            _acc(contra_code, contra_name, "credito", Decimal("0"), amount, "tesoreria")
+        else:
+            gasto_code, gasto_name = _gasto_cuenta_tesoreria(getattr(m, "categoria_egreso", ""))
+            _acc(gasto_code, gasto_name, "debito", amount, Decimal("0"), "tesoreria")
+            _acc(asset_code, asset_name, "debito", Decimal("0"), amount, "tesoreria")
+
+    out: list[BalancePruebaCuentaItem] = []
+    total_deb = Decimal("0")
+    total_cred = Decimal("0")
+    for code in sorted(cuentas.keys()):
+        row = cuentas[code]
+        deb = Decimal(str(row["debito"])).quantize(Decimal("0.01"))
+        cred = Decimal(str(row["credito"])).quantize(Decimal("0.01"))
+        naturaleza = row["naturaleza"]
+        saldo = (deb - cred) if naturaleza == "debito" else (cred - deb)
+        total_deb += deb
+        total_cred += cred
+        out.append(
+            BalancePruebaCuentaItem(
+                codigo=code,
+                nombre=row["nombre"],
+                naturaleza=naturaleza,
+                debito=deb,
+                credito=cred,
+                saldo=saldo.quantize(Decimal("0.01")),
+                origenes=sorted(list(row["origenes"])),
+            )
+        )
+
+    diferencia = (total_deb - total_cred).quantize(Decimal("0.01"))
+    return BalancePruebaGerencialResponse(
+        fecha_corte=corte_local.isoformat(),
+        alcance="gerencial_preliminar",
+        notas=[
+            "Este balance de prueba es gerencial preliminar para control interno, no estado oficial NIIF.",
+            "Se construye desde movimientos reales de caja y tesoreria con mapeo de cuentas de control.",
+            "No incluye aún devengos, depreciaciones ni obligaciones contables fuera de los módulos operativos.",
+        ],
+        resumen={
+            "total_debitos": total_deb.quantize(Decimal("0.01")),
+            "total_creditos": total_cred.quantize(Decimal("0.01")),
+            "diferencia_debito_credito": diferencia,
+            "cuadre_ok": bool(diferencia == Decimal("0.00")),
+            "total_cuentas": len(out),
+        },
+        cuentas=out,
+    )
+
+
+class BalancePruebaTerceroItem(BaseModel):
+    codigo_cuenta: str
+    nombre_cuenta: str
+    tercero_tipo_documento: str
+    tercero_documento: str
+    tercero_nombre: str
+    debito: Decimal
+    credito: Decimal
+    saldo: Decimal
+    origenes: list[str] = Field(default_factory=list)
+
+
+class BalancePruebaTerceroGerencialResponse(BaseModel):
+    fecha_corte: str
+    alcance: str
+    notas: list[str] = Field(default_factory=list)
+    resumen: dict
+    filas: list[BalancePruebaTerceroItem]
+
+
+@router.get("/balance-prueba-tercero-gerencial", response_model=BalancePruebaTerceroGerencialResponse)
+def balance_prueba_tercero_gerencial(
+    request: Request,
+    fecha_corte: Optional[date] = Query(None, description="Fecha de corte (default: hoy)."),
+    sucursal_id: Optional[UUID] = Query(None),
+    consolidar_todas: bool = Query(False),
+    limit: int = Query(2000, ge=1, le=20000),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """
+    Balance de prueba por tercero (gerencial preliminar):
+    agrupa por cuenta + tercero para trazabilidad operativa.
+    """
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=sucursal_id,
+        consolidar_todas=consolidar_todas,
+    )
+    tid = current_user.tenant_id
+
+    corte_local = fecha_corte or datetime.now(REPORT_TZ).date()
+    corte_utc = (
+        datetime.combine(corte_local, time.max, tzinfo=REPORT_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+
+    def _is_efectivo(metodo_raw: object) -> bool:
+        m = str(getattr(metodo_raw, "value", metodo_raw) or "").strip().lower()
+        return m == "efectivo"
+
+    def _asset_account_for_move(*, metodo_raw: object, ingresa_efectivo: bool | None = None) -> tuple[str, str]:
+        if ingresa_efectivo is False:
+            return ("111005", "Bancos")
+        return ("110505", "Caja general") if _is_efectivo(metodo_raw) else ("111005", "Bancos")
+
+    def _gasto_cuenta_tesoreria(cat_raw: object) -> tuple[str, str]:
+        cat = str(getattr(cat_raw, "value", cat_raw) or "").strip().lower()
+        mapping = {
+            "nomina": ("510506", "Gastos de personal"),
+            "arriendo": ("512001", "Arrendamientos"),
+            "servicios_publicos": ("513505", "Servicios publicos"),
+            "mantenimiento": ("514595", "Mantenimiento y reparaciones"),
+            "impuestos": ("511595", "Impuestos asumidos"),
+            "compra_inventario": ("143505", "Inventarios de operacion"),
+            "proveedores": ("519595", "Gastos operacionales varios"),
+            "otros_gastos": ("519595", "Gastos operacionales varios"),
+            "ajuste_correccion": ("539595", "Ajustes y correcciones"),
+        }
+        return mapping.get(cat, ("519595", "Gastos operacionales varios"))
+
+    def _ingreso_cuenta_caja(tipo_raw: object) -> tuple[str, str]:
+        t = str(getattr(tipo_raw, "value", tipo_raw) or "").strip().lower()
+        if t in {"rtm", "comision_soat"}:
+            return ("413595", "Ingresos de operacion CDA")
+        return ("429595", "Ingresos diversos")
+
+    grouped: dict[tuple[str, str, str], dict] = {}
+
+    def _acc(
+        *,
+        codigo: str,
+        nombre: str,
+        tercero_tipo_documento: str,
+        tercero_documento: str,
+        tercero_nombre: str,
+        deb: Decimal,
+        cred: Decimal,
+        origen: str,
+    ):
+        third_key = (
+            (tercero_tipo_documento or "NA").strip().upper()[:20] or "NA",
+            (tercero_documento or "SIN_DOCUMENTO").strip().upper()[:80] or "SIN_DOCUMENTO",
+            (tercero_nombre or "SIN TERCERO").strip().upper()[:300] or "SIN TERCERO",
+        )
+        key = (codigo, third_key[0], third_key[1] + "|" + third_key[2])
+        if key not in grouped:
+            grouped[key] = {
+                "codigo_cuenta": codigo,
+                "nombre_cuenta": nombre,
+                "tercero_tipo_documento": third_key[0],
+                "tercero_documento": third_key[1],
+                "tercero_nombre": third_key[2],
+                "debito": Decimal("0"),
+                "credito": Decimal("0"),
+                "origenes": set(),
+            }
+        grouped[key]["debito"] += Decimal(str(deb or 0))
+        grouped[key]["credito"] += Decimal(str(cred or 0))
+        grouped[key]["origenes"].add(origen)
+
+    veh_by_id: dict[UUID, VehiculoProceso] = {}
+    movs_caja = (
+        db.query(MovimientoCaja)
+        .filter(
+            _mc_scope(
+                db,
+                tid,
+                scope_sid,
+                MovimientoCaja.created_at <= corte_utc,
+            )
+        )
+        .all()
+    )
+    veh_ids = {m.vehiculo_id for m in movs_caja if m.vehiculo_id}
+    if veh_ids:
+        for v in db.query(VehiculoProceso).filter(VehiculoProceso.id.in_(list(veh_ids))).all():
+            veh_by_id[v.id] = v
+
+    for m in movs_caja:
+        amount = abs(Decimal(str(m.monto or 0)))
+        if amount <= 0:
+            continue
+        asset_code, asset_name = _asset_account_for_move(
+            metodo_raw=m.metodo_pago,
+            ingresa_efectivo=bool(getattr(m, "ingresa_efectivo", True)),
+        )
+
+        veh = veh_by_id.get(m.vehiculo_id) if m.vehiculo_id else None
+        if veh:
+            td = (veh.cliente_tipo_documento or "NA").strip().upper()
+            nd = (veh.cliente_documento or "SIN_DOCUMENTO").strip()
+            nm = (veh.cliente_nombre or "SIN TERCERO").strip()
+        else:
+            td = (m.beneficiario_tipo_identificacion or "NA").strip().upper()
+            nd = (m.beneficiario_numero_identificacion or "SIN_DOCUMENTO").strip()
+            nm = (m.beneficiario or "SIN TERCERO").strip()
+
+        if Decimal(str(m.monto or 0)) > 0:
+            rev_code, rev_name = _ingreso_cuenta_caja(getattr(m, "tipo", ""))
+            _acc(
+                codigo=asset_code,
+                nombre=asset_name,
+                tercero_tipo_documento=td,
+                tercero_documento=nd,
+                tercero_nombre=nm,
+                deb=amount,
+                cred=Decimal("0"),
+                origen="caja",
+            )
+            _acc(
+                codigo=rev_code,
+                nombre=rev_name,
+                tercero_tipo_documento=td,
+                tercero_documento=nd,
+                tercero_nombre=nm,
+                deb=Decimal("0"),
+                cred=amount,
+                origen="caja",
+            )
+        else:
+            tipo_raw = str(getattr(getattr(m, "tipo", None), "value", getattr(m, "tipo", "")) or "").strip().lower()
+            if tipo_raw == "devolucion":
+                gasto_code, gasto_name = ("417595", "Devoluciones en ventas")
+            elif tipo_raw == "ajuste":
+                gasto_code, gasto_name = ("539595", "Ajustes y correcciones")
+            else:
+                gasto_code, gasto_name = ("519595", "Gastos operacionales varios")
+            _acc(
+                codigo=gasto_code,
+                nombre=gasto_name,
+                tercero_tipo_documento=td,
+                tercero_documento=nd,
+                tercero_nombre=nm,
+                deb=amount,
+                cred=Decimal("0"),
+                origen="caja",
+            )
+            _acc(
+                codigo=asset_code,
+                nombre=asset_name,
+                tercero_tipo_documento=td,
+                tercero_documento=nd,
+                tercero_nombre=nm,
+                deb=Decimal("0"),
+                cred=amount,
+                origen="caja",
+            )
+
+    movs_tes = (
+        db.query(MovimientoTesoreria)
+        .filter(
+            _mt_scope(
+                tid,
+                scope_sid,
+                MovimientoTesoreria.fecha_movimiento <= corte_utc,
+            )
+        )
+        .all()
+    )
+    for m in movs_tes:
+        amount = abs(Decimal(str(m.monto or 0)))
+        if amount <= 0:
+            continue
+        asset_code, asset_name = _asset_account_for_move(metodo_raw=m.metodo_pago)
+        td = (m.beneficiario_tipo_identificacion or "NA").strip().upper()
+        nd = (m.beneficiario_numero_identificacion or "SIN_DOCUMENTO").strip()
+        nm = (m.beneficiario or "SIN TERCERO").strip()
+        if Decimal(str(m.monto or 0)) > 0:
+            cat_ing = str(getattr(getattr(m, "categoria_ingreso", None), "value", getattr(m, "categoria_ingreso", "")) or "").strip().lower()
+            if cat_ing == "traslado_caja":
+                contra_code, contra_name = ("110505", "Caja general")
+            else:
+                contra_code, contra_name = ("429595", "Ingresos diversos")
+            _acc(
+                codigo=asset_code,
+                nombre=asset_name,
+                tercero_tipo_documento=td,
+                tercero_documento=nd,
+                tercero_nombre=nm,
+                deb=amount,
+                cred=Decimal("0"),
+                origen="tesoreria",
+            )
+            _acc(
+                codigo=contra_code,
+                nombre=contra_name,
+                tercero_tipo_documento=td,
+                tercero_documento=nd,
+                tercero_nombre=nm,
+                deb=Decimal("0"),
+                cred=amount,
+                origen="tesoreria",
+            )
+        else:
+            gasto_code, gasto_name = _gasto_cuenta_tesoreria(getattr(m, "categoria_egreso", ""))
+            _acc(
+                codigo=gasto_code,
+                nombre=gasto_name,
+                tercero_tipo_documento=td,
+                tercero_documento=nd,
+                tercero_nombre=nm,
+                deb=amount,
+                cred=Decimal("0"),
+                origen="tesoreria",
+            )
+            _acc(
+                codigo=asset_code,
+                nombre=asset_name,
+                tercero_tipo_documento=td,
+                tercero_documento=nd,
+                tercero_nombre=nm,
+                deb=Decimal("0"),
+                cred=amount,
+                origen="tesoreria",
+            )
+
+    rows: list[BalancePruebaTerceroItem] = []
+    total_deb = Decimal("0")
+    total_cred = Decimal("0")
+    for k in sorted(grouped.keys(), key=lambda x: (x[0], x[1], x[2])):
+        g = grouped[k]
+        deb = Decimal(str(g["debito"])).quantize(Decimal("0.01"))
+        cred = Decimal(str(g["credito"])).quantize(Decimal("0.01"))
+        saldo = (deb - cred).quantize(Decimal("0.01"))
+        total_deb += deb
+        total_cred += cred
+        rows.append(
+            BalancePruebaTerceroItem(
+                codigo_cuenta=g["codigo_cuenta"],
+                nombre_cuenta=g["nombre_cuenta"],
+                tercero_tipo_documento=g["tercero_tipo_documento"],
+                tercero_documento=g["tercero_documento"],
+                tercero_nombre=g["tercero_nombre"],
+                debito=deb,
+                credito=cred,
+                saldo=saldo,
+                origenes=sorted(list(g["origenes"])),
+            )
+        )
+
+    if len(rows) > limit:
+        rows = rows[:limit]
+
+    diferencia = (total_deb - total_cred).quantize(Decimal("0.01"))
+    return BalancePruebaTerceroGerencialResponse(
+        fecha_corte=corte_local.isoformat(),
+        alcance="gerencial_preliminar",
+        notas=[
+            "Reporte gerencial preliminar, no equivalente al auxiliar contable NIIF oficial.",
+            "Agrupa por cuenta y tercero usando fuentes operativas de caja, tesoreria y ventas.",
+            "Terceros sin dato tributario completo se consolidan como SIN_DOCUMENTO/SIN TERCERO.",
+        ],
+        resumen={
+            "total_debitos": total_deb.quantize(Decimal("0.01")),
+            "total_creditos": total_cred.quantize(Decimal("0.01")),
+            "diferencia_debito_credito": diferencia,
+            "cuadre_ok": bool(diferencia == Decimal("0.00")),
+            "total_filas": len(rows),
+        },
+        filas=rows,
+    )
+
+
+class EstadoResultadoGerencialResponse(BaseModel):
+    periodo: str
+    alcance: str
+    notas: list[str] = Field(default_factory=list)
+    ingresos: dict
+    gastos: dict
+    resultado: dict
+
+
+@router.get("/estado-resultado-gerencial", response_model=EstadoResultadoGerencialResponse)
+def estado_resultado_gerencial(
+    request: Request,
+    fecha: Optional[date] = Query(None, description="Fecha específica (default: hoy)."),
+    fecha_inicio: Optional[date] = Query(None, description="Fecha inicio para rango"),
+    fecha_fin: Optional[date] = Query(None, description="Fecha fin para rango"),
+    sucursal_id: Optional[UUID] = Query(None),
+    consolidar_todas: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """
+    Estado de resultado integral gerencial preliminar (uso interno).
+    Basado en ventas cobradas + movimientos de caja/tesorería.
+    """
+    try:
+        fecha_inicio_dt, fecha_fin_dt, etiqueta_fecha = resolve_report_date_window(
+            fecha=fecha,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=sucursal_id,
+        consolidar_todas=consolidar_todas,
+    )
+    tid = current_user.tenant_id
+
+    ventas = (
+        db.query(VehiculoProceso)
+        .filter(
+            _vp_scope(
+                tid,
+                scope_sid,
+                VehiculoProceso.fecha_pago.isnot(None),
+                VehiculoProceso.total_cobrado > 0,
+                VehiculoProceso.fecha_pago >= fecha_inicio_dt,
+                VehiculoProceso.fecha_pago <= fecha_fin_dt,
+                _no_pruebas_auditoria_clause(),
+            )
+        )
+        .all()
+    )
+    ingresos_operacionales = sum((Decimal(str(v.total_cobrado or 0)) for v in ventas), Decimal("0"))
+
+    caja_egresos = (
+        db.query(MovimientoCaja)
+        .filter(
+            _mc_scope(
+                db,
+                tid,
+                scope_sid,
+                MovimientoCaja.created_at >= fecha_inicio_dt,
+                MovimientoCaja.created_at <= fecha_fin_dt,
+                MovimientoCaja.monto < 0,
+            )
+        )
+        .all()
+    )
+    contra_ingresos = Decimal("0")
+    gastos_caja = Decimal("0")
+    for m in caja_egresos:
+        amount = abs(Decimal(str(m.monto or 0)))
+        t = str(getattr(getattr(m, "tipo", None), "value", getattr(m, "tipo", "")) or "").strip().lower()
+        if t == "devolucion":
+            contra_ingresos += amount
+        else:
+            gastos_caja += amount
+
+    tes_ingresos = (
+        db.query(MovimientoTesoreria)
+        .filter(
+            _mt_scope(
+                tid,
+                scope_sid,
+                MovimientoTesoreria.fecha_movimiento >= fecha_inicio_dt,
+                MovimientoTesoreria.fecha_movimiento <= fecha_fin_dt,
+                MovimientoTesoreria.tipo == TipoMovimientoTesoreria.INGRESO,
+            )
+        )
+        .all()
+    )
+    otros_ingresos = Decimal("0")
+    otros_ingresos_detalle: dict[str, Decimal] = defaultdict(Decimal)
+    for m in tes_ingresos:
+        cat = str(getattr(getattr(m, "categoria_ingreso", None), "value", getattr(m, "categoria_ingreso", "")) or "").strip().lower()
+        if cat == "traslado_caja":
+            continue
+        amt = Decimal(str(m.monto or 0))
+        if amt > 0:
+            otros_ingresos += amt
+            key = cat or "sin_categoria"
+            otros_ingresos_detalle[key] += amt
+
+    tes_egresos = (
+        db.query(MovimientoTesoreria)
+        .filter(
+            _mt_scope(
+                tid,
+                scope_sid,
+                MovimientoTesoreria.fecha_movimiento >= fecha_inicio_dt,
+                MovimientoTesoreria.fecha_movimiento <= fecha_fin_dt,
+                MovimientoTesoreria.tipo == TipoMovimientoTesoreria.EGRESO,
+            )
+        )
+        .all()
+    )
+    gastos_tesoreria = Decimal("0")
+    gastos_tesoreria_detalle: dict[str, Decimal] = defaultdict(Decimal)
+    for m in tes_egresos:
+        amt = abs(Decimal(str(m.monto or 0)))
+        if amt <= 0:
+            continue
+        gastos_tesoreria += amt
+        key = str(getattr(getattr(m, "categoria_egreso", None), "value", getattr(m, "categoria_egreso", "")) or "").strip().lower() or "sin_categoria"
+        gastos_tesoreria_detalle[key] += amt
+
+    ingresos_netos_operacionales = ingresos_operacionales - contra_ingresos
+    gastos_operacionales = gastos_caja + gastos_tesoreria
+    utilidad_operacional = ingresos_netos_operacionales - gastos_operacionales
+    resultado_antes_impuestos = utilidad_operacional + otros_ingresos
+    impuesto_estimado = Decimal("0")
+    resultado_neto_estimado = resultado_antes_impuestos - impuesto_estimado
+    base_margen = ingresos_netos_operacionales if ingresos_netos_operacionales != 0 else Decimal("1")
+    margen_neto_pct = (resultado_neto_estimado / base_margen) * Decimal("100")
+
+    return EstadoResultadoGerencialResponse(
+        periodo=etiqueta_fecha,
+        alcance="gerencial_preliminar",
+        notas=[
+            "Este reporte es de uso gerencial interno y no reemplaza estado de resultado NIIF oficial.",
+            "Ingresos operacionales se calculan con trámites cobrados; traslados internos de tesorería no se cuentan como ingreso.",
+            "Impuesto a la renta estimado se muestra en 0 hasta integrar módulo tributario/contable formal.",
+        ],
+        ingresos={
+            "operacionales_brutos": ingresos_operacionales.quantize(Decimal("0.01")),
+            "contra_ingresos": contra_ingresos.quantize(Decimal("0.01")),
+            "operacionales_netos": ingresos_netos_operacionales.quantize(Decimal("0.01")),
+            "otros_ingresos": otros_ingresos.quantize(Decimal("0.01")),
+            "otros_ingresos_detalle": {
+                k: Decimal(str(v)).quantize(Decimal("0.01"))
+                for k, v in sorted(otros_ingresos_detalle.items(), key=lambda x: x[0])
+            },
+        },
+        gastos={
+            "gastos_caja": gastos_caja.quantize(Decimal("0.01")),
+            "gastos_tesoreria": gastos_tesoreria.quantize(Decimal("0.01")),
+            "gastos_tesoreria_detalle": {
+                k: Decimal(str(v)).quantize(Decimal("0.01"))
+                for k, v in sorted(gastos_tesoreria_detalle.items(), key=lambda x: x[0])
+            },
+            "gastos_operacionales_totales": gastos_operacionales.quantize(Decimal("0.01")),
+        },
+        resultado={
+            "utilidad_operacional": utilidad_operacional.quantize(Decimal("0.01")),
+            "resultado_antes_impuestos": resultado_antes_impuestos.quantize(Decimal("0.01")),
+            "impuesto_estimado": impuesto_estimado.quantize(Decimal("0.01")),
+            "resultado_neto_estimado": resultado_neto_estimado.quantize(Decimal("0.01")),
+            "margen_neto_pct": margen_neto_pct.quantize(Decimal("0.01")),
+        },
+    )
+
+
+class EstadoFlujoEfectivoGerencialResponse(BaseModel):
+    periodo: str
+    alcance: str
+    notas: list[str] = Field(default_factory=list)
+    saldos: dict
+    operacion: dict
+    inversion: dict
+    financiacion: dict
+    internos: dict
+    conciliacion: dict
+
+
+@router.get("/estado-flujo-efectivo-gerencial", response_model=EstadoFlujoEfectivoGerencialResponse)
+def estado_flujo_efectivo_gerencial(
+    request: Request,
+    fecha: Optional[date] = Query(None, description="Fecha específica (default: hoy)."),
+    fecha_inicio: Optional[date] = Query(None, description="Fecha inicio para rango"),
+    fecha_fin: Optional[date] = Query(None, description="Fecha fin para rango"),
+    sucursal_id: Optional[UUID] = Query(None),
+    consolidar_todas: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """
+    Estado de flujo de efectivo gerencial preliminar (método directo simplificado).
+    """
+    try:
+        fecha_inicio_dt, fecha_fin_dt, etiqueta_fecha = resolve_report_date_window(
+            fecha=fecha,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=sucursal_id,
+        consolidar_todas=consolidar_todas,
+    )
+    tid = current_user.tenant_id
+    inicio_prev = fecha_inicio_dt - timedelta(microseconds=1)
+
+    saldo_caja_ini = (
+        db.query(func.sum(MovimientoCaja.monto))
+        .filter(_mc_scope(db, tid, scope_sid, MovimientoCaja.created_at <= inicio_prev))
+        .scalar()
+        or Decimal("0")
+    )
+    saldo_tes_ini = (
+        db.query(func.sum(MovimientoTesoreria.monto))
+        .filter(_mt_scope(tid, scope_sid, MovimientoTesoreria.fecha_movimiento <= inicio_prev))
+        .scalar()
+        or Decimal("0")
+    )
+    saldo_inicial = Decimal(str(saldo_caja_ini or 0)) + Decimal(str(saldo_tes_ini or 0))
+
+    saldo_caja_fin = (
+        db.query(func.sum(MovimientoCaja.monto))
+        .filter(_mc_scope(db, tid, scope_sid, MovimientoCaja.created_at <= fecha_fin_dt))
+        .scalar()
+        or Decimal("0")
+    )
+    saldo_tes_fin = (
+        db.query(func.sum(MovimientoTesoreria.monto))
+        .filter(_mt_scope(tid, scope_sid, MovimientoTesoreria.fecha_movimiento <= fecha_fin_dt))
+        .scalar()
+        or Decimal("0")
+    )
+    saldo_final = Decimal(str(saldo_caja_fin or 0)) + Decimal(str(saldo_tes_fin or 0))
+
+    operacion_entradas = Decimal("0")
+    operacion_salidas = Decimal("0")
+    inversion_entradas = Decimal("0")
+    inversion_salidas = Decimal("0")
+    financiacion_entradas = Decimal("0")
+    financiacion_salidas = Decimal("0")
+    internos_traslados = Decimal("0")
+
+    movs_caja = (
+        db.query(MovimientoCaja)
+        .filter(
+            _mc_scope(
+                db,
+                tid,
+                scope_sid,
+                MovimientoCaja.created_at >= fecha_inicio_dt,
+                MovimientoCaja.created_at <= fecha_fin_dt,
+            )
+        )
+        .all()
+    )
+    for m in movs_caja:
+        amt = Decimal(str(m.monto or 0))
+        if amt > 0:
+            operacion_entradas += amt
+        elif amt < 0:
+            operacion_salidas += abs(amt)
+
+    movs_tes = (
+        db.query(MovimientoTesoreria)
+        .filter(
+            _mt_scope(
+                tid,
+                scope_sid,
+                MovimientoTesoreria.fecha_movimiento >= fecha_inicio_dt,
+                MovimientoTesoreria.fecha_movimiento <= fecha_fin_dt,
+            )
+        )
+        .all()
+    )
+    for m in movs_tes:
+        amt = Decimal(str(m.monto or 0))
+        if amt == 0:
+            continue
+        tipo = str(getattr(getattr(m, "tipo", None), "value", getattr(m, "tipo", "")) or "").strip().lower()
+        cat_ing = str(getattr(getattr(m, "categoria_ingreso", None), "value", getattr(m, "categoria_ingreso", "")) or "").strip().lower()
+        cat_egr = str(getattr(getattr(m, "categoria_egreso", None), "value", getattr(m, "categoria_egreso", "")) or "").strip().lower()
+
+        if tipo == "ingreso":
+            if cat_ing == "traslado_caja":
+                internos_traslados += abs(amt)
+            elif cat_ing in {"prestamo", "aporte_socio"}:
+                financiacion_entradas += abs(amt)
+            else:
+                operacion_entradas += abs(amt)
+        elif tipo == "egreso":
+            if cat_egr in {"compra_inventario"}:
+                inversion_salidas += abs(amt)
+            else:
+                operacion_salidas += abs(amt)
+
+    flujo_operacion_neto = operacion_entradas - operacion_salidas
+    flujo_inversion_neto = inversion_entradas - inversion_salidas
+    flujo_financiacion_neto = financiacion_entradas - financiacion_salidas
+    variacion_neta_periodo = flujo_operacion_neto + flujo_inversion_neto + flujo_financiacion_neto
+    conciliacion_esperada = saldo_inicial + variacion_neta_periodo
+    diferencia_conciliacion = saldo_final - conciliacion_esperada
+
+    return EstadoFlujoEfectivoGerencialResponse(
+        periodo=etiqueta_fecha,
+        alcance="gerencial_preliminar",
+        notas=[
+            "Reporte gerencial preliminar (método directo simplificado), no reemplaza flujo NIIF oficial.",
+            "Los traslados internos caja->tesorería se muestran por separado para control y no alteran el flujo neto consolidado.",
+            "Clasificación de actividades se basa en categorías operativas actuales del sistema.",
+        ],
+        saldos={
+            "saldo_inicial": saldo_inicial.quantize(Decimal("0.01")),
+            "saldo_final": saldo_final.quantize(Decimal("0.01")),
+            "variacion_neta": variacion_neta_periodo.quantize(Decimal("0.01")),
+        },
+        operacion={
+            "entradas": operacion_entradas.quantize(Decimal("0.01")),
+            "salidas": operacion_salidas.quantize(Decimal("0.01")),
+            "neto": flujo_operacion_neto.quantize(Decimal("0.01")),
+        },
+        inversion={
+            "entradas": inversion_entradas.quantize(Decimal("0.01")),
+            "salidas": inversion_salidas.quantize(Decimal("0.01")),
+            "neto": flujo_inversion_neto.quantize(Decimal("0.01")),
+        },
+        financiacion={
+            "entradas": financiacion_entradas.quantize(Decimal("0.01")),
+            "salidas": financiacion_salidas.quantize(Decimal("0.01")),
+            "neto": flujo_financiacion_neto.quantize(Decimal("0.01")),
+        },
+        internos={
+            "traslados_caja_tesoreria": internos_traslados.quantize(Decimal("0.01")),
+        },
+        conciliacion={
+            "saldo_inicial_mas_flujos": conciliacion_esperada.quantize(Decimal("0.01")),
+            "saldo_final_real": saldo_final.quantize(Decimal("0.01")),
+            "diferencia_conciliacion": diferencia_conciliacion.quantize(Decimal("0.01")),
+            "conciliacion_ok": bool(diferencia_conciliacion.quantize(Decimal("0.01")) == Decimal("0.00")),
+        },
+    )
+
+
+class EstadoCambiosPatrimonioGerencialResponse(BaseModel):
+    periodo: str
+    alcance: str
+    notas: list[str] = Field(default_factory=list)
+    patrimonio: dict
+    movimientos: dict
+    conciliacion: dict
+
+
+@router.get("/estado-cambios-patrimonio-gerencial", response_model=EstadoCambiosPatrimonioGerencialResponse)
+def estado_cambios_patrimonio_gerencial(
+    request: Request,
+    fecha: Optional[date] = Query(None, description="Fecha específica (default: hoy)."),
+    fecha_inicio: Optional[date] = Query(None, description="Fecha inicio para rango"),
+    fecha_fin: Optional[date] = Query(None, description="Fecha fin para rango"),
+    sucursal_id: Optional[UUID] = Query(None),
+    consolidar_todas: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """
+    Estado de cambios en el patrimonio gerencial preliminar (uso interno).
+    """
+    try:
+        fecha_inicio_dt, fecha_fin_dt, etiqueta_fecha = resolve_report_date_window(
+            fecha=fecha,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=sucursal_id,
+        consolidar_todas=consolidar_todas,
+    )
+    tid = current_user.tenant_id
+    inicio_prev = fecha_inicio_dt - timedelta(microseconds=1)
+
+    # Patrimonio inicial/final estimado con la misma base del estado de situación gerencial.
+    saldo_caja_ini = (
+        db.query(func.sum(MovimientoCaja.monto))
+        .filter(_mc_scope(db, tid, scope_sid, MovimientoCaja.created_at <= inicio_prev))
+        .scalar()
+        or Decimal("0")
+    )
+    saldo_tes_ini = (
+        db.query(func.sum(MovimientoTesoreria.monto))
+        .filter(_mt_scope(tid, scope_sid, MovimientoTesoreria.fecha_movimiento <= inicio_prev))
+        .scalar()
+        or Decimal("0")
+    )
+    cxc_ini = (
+        db.query(func.sum(VehiculoProceso.total_cobrado))
+        .filter(
+            _vp_scope(
+                tid,
+                scope_sid,
+                VehiculoProceso.fecha_registro <= inicio_prev,
+                VehiculoProceso.fecha_pago.is_(None),
+                VehiculoProceso.total_cobrado > 0,
+                _no_pruebas_auditoria_clause(),
+            )
+        )
+        .scalar()
+        or Decimal("0")
+    )
+    patrimonio_inicial = Decimal(str(saldo_caja_ini or 0)) + Decimal(str(saldo_tes_ini or 0)) + Decimal(str(cxc_ini or 0))
+
+    saldo_caja_fin = (
+        db.query(func.sum(MovimientoCaja.monto))
+        .filter(_mc_scope(db, tid, scope_sid, MovimientoCaja.created_at <= fecha_fin_dt))
+        .scalar()
+        or Decimal("0")
+    )
+    saldo_tes_fin = (
+        db.query(func.sum(MovimientoTesoreria.monto))
+        .filter(_mt_scope(tid, scope_sid, MovimientoTesoreria.fecha_movimiento <= fecha_fin_dt))
+        .scalar()
+        or Decimal("0")
+    )
+    cxc_fin = (
+        db.query(func.sum(VehiculoProceso.total_cobrado))
+        .filter(
+            _vp_scope(
+                tid,
+                scope_sid,
+                VehiculoProceso.fecha_registro <= fecha_fin_dt,
+                VehiculoProceso.fecha_pago.is_(None),
+                VehiculoProceso.total_cobrado > 0,
+                _no_pruebas_auditoria_clause(),
+            )
+        )
+        .scalar()
+        or Decimal("0")
+    )
+    patrimonio_final_real = Decimal(str(saldo_caja_fin or 0)) + Decimal(str(saldo_tes_fin or 0)) + Decimal(str(cxc_fin or 0))
+
+    # Resultado neto estimado del periodo (misma base del estado de resultado gerencial).
+    ventas = (
+        db.query(VehiculoProceso)
+        .filter(
+            _vp_scope(
+                tid,
+                scope_sid,
+                VehiculoProceso.fecha_pago.isnot(None),
+                VehiculoProceso.total_cobrado > 0,
+                VehiculoProceso.fecha_pago >= fecha_inicio_dt,
+                VehiculoProceso.fecha_pago <= fecha_fin_dt,
+                _no_pruebas_auditoria_clause(),
+            )
+        )
+        .all()
+    )
+    ingresos_operacionales = sum((Decimal(str(v.total_cobrado or 0)) for v in ventas), Decimal("0"))
+
+    caja_egresos = (
+        db.query(MovimientoCaja)
+        .filter(
+            _mc_scope(
+                db,
+                tid,
+                scope_sid,
+                MovimientoCaja.created_at >= fecha_inicio_dt,
+                MovimientoCaja.created_at <= fecha_fin_dt,
+                MovimientoCaja.monto < 0,
+            )
+        )
+        .all()
+    )
+    contra_ingresos = Decimal("0")
+    gastos_caja = Decimal("0")
+    for m in caja_egresos:
+        amt = abs(Decimal(str(m.monto or 0)))
+        tipo = str(getattr(getattr(m, "tipo", None), "value", getattr(m, "tipo", "")) or "").strip().lower()
+        if tipo == "devolucion":
+            contra_ingresos += amt
+        else:
+            gastos_caja += amt
+
+    tes_ingresos = (
+        db.query(MovimientoTesoreria)
+        .filter(
+            _mt_scope(
+                tid,
+                scope_sid,
+                MovimientoTesoreria.fecha_movimiento >= fecha_inicio_dt,
+                MovimientoTesoreria.fecha_movimiento <= fecha_fin_dt,
+                MovimientoTesoreria.tipo == TipoMovimientoTesoreria.INGRESO,
+            )
+        )
+        .all()
+    )
+    otros_ingresos = Decimal("0")
+    aportes_socios = Decimal("0")
+    ajustes_patrimoniales_pos = Decimal("0")
+    for m in tes_ingresos:
+        cat = str(getattr(getattr(m, "categoria_ingreso", None), "value", getattr(m, "categoria_ingreso", "")) or "").strip().lower()
+        amt = Decimal(str(m.monto or 0))
+        if amt <= 0:
+            continue
+        if cat == "traslado_caja":
+            continue
+        if cat == "aporte_socio":
+            aportes_socios += amt
+            continue
+        if cat == "ajuste_correccion":
+            ajustes_patrimoniales_pos += amt
+            continue
+        otros_ingresos += amt
+
+    tes_egresos = (
+        db.query(MovimientoTesoreria)
+        .filter(
+            _mt_scope(
+                tid,
+                scope_sid,
+                MovimientoTesoreria.fecha_movimiento >= fecha_inicio_dt,
+                MovimientoTesoreria.fecha_movimiento <= fecha_fin_dt,
+                MovimientoTesoreria.tipo == TipoMovimientoTesoreria.EGRESO,
+            )
+        )
+        .all()
+    )
+    gastos_tesoreria = Decimal("0")
+    retiros_socios = Decimal("0")
+    ajustes_patrimoniales_neg = Decimal("0")
+    for m in tes_egresos:
+        cat = str(getattr(getattr(m, "categoria_egreso", None), "value", getattr(m, "categoria_egreso", "")) or "").strip().lower()
+        amt = abs(Decimal(str(m.monto or 0)))
+        if amt <= 0:
+            continue
+        concepto = str(m.concepto or "").strip().lower()
+        is_retiro_socio = any(token in concepto for token in ("retiro socio", "retiro socios", "dividendo", "distribucion utilidad", "utilidades socios"))
+        if is_retiro_socio:
+            retiros_socios += amt
+            continue
+        if cat == "ajuste_correccion":
+            ajustes_patrimoniales_neg += amt
+            continue
+        gastos_tesoreria += amt
+
+    ingresos_netos_operacionales = ingresos_operacionales - contra_ingresos
+    gastos_operacionales = gastos_caja + gastos_tesoreria
+    resultado_neto_estimado = ingresos_netos_operacionales + otros_ingresos - gastos_operacionales
+    ajustes_patrimoniales_netos = ajustes_patrimoniales_pos - ajustes_patrimoniales_neg
+
+    patrimonio_final_estimado = patrimonio_inicial + resultado_neto_estimado + aportes_socios - retiros_socios + ajustes_patrimoniales_netos
+    diferencia_conciliacion = patrimonio_final_real - patrimonio_final_estimado
+
+    return EstadoCambiosPatrimonioGerencialResponse(
+        periodo=etiqueta_fecha,
+        alcance="gerencial_preliminar",
+        notas=[
+            "Reporte gerencial preliminar de uso interno; no reemplaza estado de cambios en el patrimonio NIIF oficial.",
+            "El patrimonio base se estima con efectivo (caja/tesorería) + CxC operativa, sin módulo formal de pasivos patrimoniales.",
+            "Retiros de socios se detectan por texto del concepto en egresos; validar redacción operativa para mejor precisión.",
+        ],
+        patrimonio={
+            "patrimonio_inicial_estimado": patrimonio_inicial.quantize(Decimal("0.01")),
+            "patrimonio_final_estimado": patrimonio_final_estimado.quantize(Decimal("0.01")),
+            "patrimonio_final_real": patrimonio_final_real.quantize(Decimal("0.01")),
+        },
+        movimientos={
+            "resultado_neto_estimado_periodo": resultado_neto_estimado.quantize(Decimal("0.01")),
+            "aportes_socios": aportes_socios.quantize(Decimal("0.01")),
+            "retiros_socios": retiros_socios.quantize(Decimal("0.01")),
+            "ajustes_patrimoniales_netos": ajustes_patrimoniales_netos.quantize(Decimal("0.01")),
+        },
+        conciliacion={
+            "patrimonio_inicial_mas_cambios": patrimonio_final_estimado.quantize(Decimal("0.01")),
+            "patrimonio_final_real": patrimonio_final_real.quantize(Decimal("0.01")),
+            "diferencia_conciliacion": diferencia_conciliacion.quantize(Decimal("0.01")),
+            "conciliacion_ok": bool(diferencia_conciliacion.quantize(Decimal("0.01")) == Decimal("0.00")),
+        },
+    )

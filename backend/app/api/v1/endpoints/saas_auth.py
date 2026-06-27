@@ -131,6 +131,7 @@ class SaaSTenantSummary(BaseModel):
     last_payment_at: datetime | None = None
     activo: bool
     nomina_enabled: bool = False
+    exogena_enabled: bool = False
     sarlaft_enabled: bool = False
     sarlaft_mode: str = "manual"
     login_url: str
@@ -195,6 +196,7 @@ class SaaSTenantCoreDataPatch(BaseModel):
     nombre_representante: str | None = Field(default=None, max_length=200)
     celular: str | None = Field(default=None, max_length=30)
     nomina_enabled: bool | None = None
+    exogena_enabled: bool | None = None
     sarlaft_enabled: bool | None = None
     sarlaft_mode: str | None = Field(default=None, pattern="^(manual|api)$")
 
@@ -914,6 +916,7 @@ def list_saas_tenants(
             last_payment_at=tenant.last_payment_at,
             activo=tenant.activo,
             nomina_enabled=bool(getattr(tenant, "nomina_enabled", False)),
+            exogena_enabled=bool(getattr(tenant, "exogena_enabled", False)),
             sarlaft_enabled=bool(getattr(tenant, "sarlaft_enabled", False)),
             sarlaft_mode=(getattr(tenant, "sarlaft_mode", None) or "manual"),
             login_url=f"{base_url}/{tenant.slug}",
@@ -983,6 +986,7 @@ def get_saas_tenant_profile(
         last_payment_at=tenant.last_payment_at,
         activo=tenant.activo,
         nomina_enabled=bool(getattr(tenant, "nomina_enabled", False)),
+        exogena_enabled=bool(getattr(tenant, "exogena_enabled", False)),
         sarlaft_enabled=bool(getattr(tenant, "sarlaft_enabled", False)),
         sarlaft_mode=(getattr(tenant, "sarlaft_mode", None) or "manual"),
         login_url=f"{base_url}/{tenant.slug}",
@@ -1130,6 +1134,8 @@ def patch_saas_tenant_core_data(
         tenant.celular = phone or None
     if "nomina_enabled" in data and data["nomina_enabled"] is not None:
         tenant.nomina_enabled = bool(data["nomina_enabled"])
+    if "exogena_enabled" in data and data["exogena_enabled"] is not None:
+        tenant.exogena_enabled = bool(data["exogena_enabled"])
     if "sarlaft_enabled" in data and data["sarlaft_enabled"] is not None:
         tenant.sarlaft_enabled = bool(data["sarlaft_enabled"])
     if "sarlaft_mode" in data and data["sarlaft_mode"] is not None:
