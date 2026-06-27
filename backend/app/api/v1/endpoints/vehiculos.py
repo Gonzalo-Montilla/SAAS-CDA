@@ -518,7 +518,8 @@ def _buscar_cache_runt_interno(
     doc_type: str,
     doc_number: str,
 ) -> dict[str, Any] | None:
-    if int(settings.RUNT_INTERNAL_CACHE_TTL_SECONDS or 0) <= 0:
+    ttl_cfg = int(getattr(settings, "RUNT_INTERNAL_CACHE_TTL_SECONDS", 0) or 0)
+    if ttl_cfg <= 0:
         return None
 
     try:
@@ -586,7 +587,7 @@ def _guardar_cache_runt_interno(
     provider_resolved: str,
     result: dict[str, Any],
 ) -> None:
-    ttl = int(settings.RUNT_INTERNAL_CACHE_TTL_SECONDS or 0)
+    ttl = int(getattr(settings, "RUNT_INTERNAL_CACHE_TTL_SECONDS", 0) or 0)
     if ttl <= 0:
         return
     if not isinstance(result, dict):
