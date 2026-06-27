@@ -16,6 +16,7 @@ export interface ExogenaMapeo {
 export interface ExogenaConfigResponse {
   anio: string;
   uvt_anual: number;
+  topes_por_formato_json?: Record<string, unknown>;
   version_normativa?: string | null;
   mapeos: ExogenaMapeo[];
 }
