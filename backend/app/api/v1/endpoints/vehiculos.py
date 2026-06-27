@@ -521,51 +521,58 @@ def _buscar_cache_runt_interno(
     if int(settings.RUNT_INTERNAL_CACHE_TTL_SECONDS or 0) <= 0:
         return None
 
-    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-    row: RuntConsultaCache | None = None
+    try:
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        row: RuntConsultaCache | None = None
 
-    if placa and doc_type and doc_number:
-        row = (
-            db.query(RuntConsultaCache)
-            .filter(
-                RuntConsultaCache.tenant_id == tenant_id,
-                RuntConsultaCache.placa_consultada == placa,
-                RuntConsultaCache.document_type == doc_type,
-                RuntConsultaCache.document_number_normalized == doc_number,
-                RuntConsultaCache.expires_at >= now_utc,
+        if placa and doc_type and doc_number:
+            row = (
+                db.query(RuntConsultaCache)
+                .filter(
+                    RuntConsultaCache.tenant_id == tenant_id,
+                    RuntConsultaCache.placa_consultada == placa,
+                    RuntConsultaCache.document_type == doc_type,
+                    RuntConsultaCache.document_number_normalized == doc_number,
+                    RuntConsultaCache.expires_at >= now_utc,
+                )
+                .order_by(RuntConsultaCache.created_at.desc())
+                .first()
             )
-            .order_by(RuntConsultaCache.created_at.desc())
-            .first()
-        )
 
-    if row is None and placa and not doc_number:
-        row = (
-            db.query(RuntConsultaCache)
-            .filter(
-                RuntConsultaCache.tenant_id == tenant_id,
-                RuntConsultaCache.placa_consultada == placa,
-                RuntConsultaCache.expires_at >= now_utc,
+        if row is None and placa and not doc_number:
+            row = (
+                db.query(RuntConsultaCache)
+                .filter(
+                    RuntConsultaCache.tenant_id == tenant_id,
+                    RuntConsultaCache.placa_consultada == placa,
+                    RuntConsultaCache.expires_at >= now_utc,
+                )
+                .order_by(RuntConsultaCache.created_at.desc())
+                .first()
             )
-            .order_by(RuntConsultaCache.created_at.desc())
-            .first()
-        )
 
-    if row is None:
+        if row is None:
+            return None
+
+        payload = row.payload_json if isinstance(row.payload_json, dict) else {}
+        out = dict(payload)
+        out["cached"] = True
+        out.setdefault("observaciones", [])
+        if isinstance(out["observaciones"], list):
+            out["observaciones"] = [
+                *[str(x) for x in out["observaciones"] if str(x).strip()],
+                "Resultado obtenido desde caché interno del CDA.",
+            ]
+        row.cached_hits = int(row.cached_hits or 0) + 1
+        row.last_hit_at = now_utc
+        db.commit()
+        return out
+    except OperationalError:
+        db.rollback()
         return None
-
-    payload = row.payload_json if isinstance(row.payload_json, dict) else {}
-    out = dict(payload)
-    out["cached"] = True
-    out.setdefault("observaciones", [])
-    if isinstance(out["observaciones"], list):
-        out["observaciones"] = [
-            *[str(x) for x in out["observaciones"] if str(x).strip()],
-            "Resultado obtenido desde caché interno del CDA.",
-        ]
-    row.cached_hits = int(row.cached_hits or 0) + 1
-    row.last_hit_at = now_utc
-    db.commit()
-    return out
+    except Exception:
+        db.rollback()
+        return None
 
 
 def _guardar_cache_runt_interno(
@@ -588,36 +595,41 @@ def _guardar_cache_runt_interno(
     if len(placa_norm) < 5:
         return
 
-    now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
-    expires_at = now_utc + timedelta(seconds=ttl)
-    safe_payload = dict(result)
-    safe_payload["cached"] = False
-    row = (
-        db.query(RuntConsultaCache)
-        .filter(
-            RuntConsultaCache.tenant_id == tenant_id,
-            RuntConsultaCache.placa_consultada == placa_norm,
-            RuntConsultaCache.document_type == (doc_type or None),
-            RuntConsultaCache.document_number_normalized == (doc_number or None),
+    try:
+        now_utc = datetime.now(timezone.utc).replace(tzinfo=None)
+        expires_at = now_utc + timedelta(seconds=ttl)
+        safe_payload = dict(result)
+        safe_payload["cached"] = False
+        row = (
+            db.query(RuntConsultaCache)
+            .filter(
+                RuntConsultaCache.tenant_id == tenant_id,
+                RuntConsultaCache.placa_consultada == placa_norm,
+                RuntConsultaCache.document_type == (doc_type or None),
+                RuntConsultaCache.document_number_normalized == (doc_number or None),
+            )
+            .order_by(RuntConsultaCache.created_at.desc())
+            .first()
         )
-        .order_by(RuntConsultaCache.created_at.desc())
-        .first()
-    )
-    if row is None:
-        row = RuntConsultaCache(
-            tenant_id=tenant_id,
-            sucursal_id=sucursal_id,
-            placa_consultada=placa_norm,
-            document_type=doc_type or None,
-            document_number_normalized=doc_number or None,
-        )
-        db.add(row)
-    row.provider_resolved = (provider_resolved or "unknown")[:30]
-    row.encontrado = bool(result.get("encontrado"))
-    row.payload_json = safe_payload
-    row.expires_at = expires_at
-    row.last_hit_at = now_utc
-    db.commit()
+        if row is None:
+            row = RuntConsultaCache(
+                tenant_id=tenant_id,
+                sucursal_id=sucursal_id,
+                placa_consultada=placa_norm,
+                document_type=doc_type or None,
+                document_number_normalized=doc_number or None,
+            )
+            db.add(row)
+        row.provider_resolved = (provider_resolved or "unknown")[:30]
+        row.encontrado = bool(result.get("encontrado"))
+        row.payload_json = safe_payload
+        row.expires_at = expires_at
+        row.last_hit_at = now_utc
+        db.commit()
+    except OperationalError:
+        db.rollback()
+    except Exception:
+        db.rollback()
 
 
 @router.get("/consulta-runt/{placa}", response_model=VehiculoConsultaRuntResponse)
