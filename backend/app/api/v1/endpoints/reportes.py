@@ -23,9 +23,16 @@ from app.models.vehiculo import VehiculoProceso, EstadoVehiculo
 from app.models.tarifa import Tarifa
 from app.models.sucursal import Sucursal
 from app.models.proveedor_catalogo import ProveedorCatalogo
-from app.models.factus import DocumentoSoporteElectronico, FacturaElectronica, FacturaCorreccion
+from app.models.factus import DocumentoSoporteElectronico, FacturaElectronica, FacturaCorreccion, TenantFactusSettings
 from app.models.iva_provision import IvaProvisionRegistro
 from app.models.appointment import Appointment
+from app.models.tenant import Tenant
+from app.integrations.factus_client import FactusAPIError, format_factus_error_for_user
+from app.integrations.factus_emit import (
+    emitir_y_persistir_factura_cobro,
+    validar_datos_cliente_para_factus,
+)
+from app.services.factus_tenant_settings import creds_complete_for_active_env
 
 router = APIRouter()
 REPORT_TZ = get_app_timezone()
@@ -3756,6 +3763,37 @@ class EstadoCambiosPatrimonioGerencialResponse(BaseModel):
     conciliacion: dict
 
 
+class FacturacionContingenciaItem(BaseModel):
+    vehiculo_id: UUID
+    fecha_pago: Optional[str] = None
+    sucursal_id: Optional[UUID] = None
+    sucursal_nombre: Optional[str] = None
+    placa: str
+    cliente_nombre: str
+    cliente_documento: str
+    total_cobrado: Decimal
+    metodo_pago: str
+    numero_factura_dian: Optional[str] = None
+    motivo_pendiente: str
+    puede_emitir: bool
+
+
+class FacturacionContingenciaListResponse(BaseModel):
+    total: int
+    dias_consulta: int
+    modo_factus_activo: bool
+    credenciales_factus_ok: bool
+    items: list[FacturacionContingenciaItem]
+
+
+class FacturacionContingenciaEmitResponse(BaseModel):
+    vehiculo_id: UUID
+    numero_factura_dian: str
+    cufe: Optional[str] = None
+    public_url: Optional[str] = None
+    emitted_at: str
+
+
 @router.get("/estado-cambios-patrimonio-gerencial", response_model=EstadoCambiosPatrimonioGerencialResponse)
 def estado_cambios_patrimonio_gerencial(
     request: Request,
@@ -3986,4 +4024,221 @@ def estado_cambios_patrimonio_gerencial(
             "diferencia_conciliacion": diferencia_conciliacion.quantize(Decimal("0.01")),
             "conciliacion_ok": bool(diferencia_conciliacion.quantize(Decimal("0.01")) == Decimal("0.00")),
         },
+    )
+
+
+@router.get("/facturacion-contingencia", response_model=FacturacionContingenciaListResponse)
+def listar_facturacion_contingencia(
+    request: Request,
+    dias: int = Query(30, ge=1, le=365),
+    limit: int = Query(200, ge=1, le=1000),
+    sucursal_id: Optional[UUID] = Query(None),
+    consolidar_todas: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=sucursal_id,
+        consolidar_todas=consolidar_todas,
+    )
+    tenant_id = current_user.tenant_id
+    desde_dt = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=dias)
+
+    fs = (
+        db.query(TenantFactusSettings)
+        .filter(TenantFactusSettings.tenant_id == tenant_id)
+        .first()
+    )
+    modo_factus_activo = bool(fs is not None and fs.modo == "factus")
+    credenciales_factus_ok = bool(fs is not None and creds_complete_for_active_env(fs))
+    puede_emitir = modo_factus_activo and credenciales_factus_ok
+
+    rows = (
+        db.query(VehiculoProceso, Sucursal.nombre.label("sucursal_nombre"))
+        .outerjoin(Sucursal, Sucursal.id == VehiculoProceso.sucursal_id)
+        .outerjoin(
+            FacturaElectronica,
+            and_(
+                FacturaElectronica.tenant_id == tenant_id,
+                FacturaElectronica.vehiculo_proceso_id == VehiculoProceso.id,
+            ),
+        )
+        .filter(
+            _vp_scope(
+                tenant_id,
+                scope_sid,
+                VehiculoProceso.fecha_pago.isnot(None),
+                VehiculoProceso.total_cobrado > 0,
+                VehiculoProceso.fecha_pago >= desde_dt,
+                _no_reinspeccion_exenta_clause(),
+                _no_pruebas_auditoria_clause(),
+            ),
+            FacturaElectronica.id.is_(None),
+        )
+        .order_by(VehiculoProceso.fecha_pago.desc(), VehiculoProceso.fecha_registro.desc())
+        .limit(limit)
+        .all()
+    )
+
+    items: list[FacturacionContingenciaItem] = []
+    for vehiculo, sucursal_nombre in rows:
+        motivo_pendiente = (
+            "cobro_manual_sin_factura_electronica"
+            if (vehiculo.numero_factura_dian or "").strip()
+            else "cobro_sin_numero_factura"
+        )
+        items.append(
+            FacturacionContingenciaItem(
+                vehiculo_id=vehiculo.id,
+                fecha_pago=_iso_utc(vehiculo.fecha_pago),
+                sucursal_id=vehiculo.sucursal_id,
+                sucursal_nombre=sucursal_nombre,
+                placa=vehiculo.placa,
+                cliente_nombre=vehiculo.cliente_nombre,
+                cliente_documento=vehiculo.cliente_documento,
+                total_cobrado=Decimal(str(vehiculo.total_cobrado or 0)),
+                metodo_pago=str(vehiculo.metodo_pago or "efectivo"),
+                numero_factura_dian=vehiculo.numero_factura_dian,
+                motivo_pendiente=motivo_pendiente,
+                puede_emitir=puede_emitir,
+            )
+        )
+
+    return FacturacionContingenciaListResponse(
+        total=len(items),
+        dias_consulta=dias,
+        modo_factus_activo=modo_factus_activo,
+        credenciales_factus_ok=credenciales_factus_ok,
+        items=items,
+    )
+
+
+@router.post(
+    "/facturacion-contingencia/{vehiculo_id}/emitir",
+    response_model=FacturacionContingenciaEmitResponse,
+)
+def emitir_factura_contingencia(
+    vehiculo_id: UUID,
+    request: Request,
+    sucursal_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=sucursal_id,
+        consolidar_todas=False,
+    )
+    tenant_id = current_user.tenant_id
+
+    vehiculo = (
+        db.query(VehiculoProceso)
+        .filter(_vp_scope(tenant_id, scope_sid, VehiculoProceso.id == vehiculo_id))
+        .first()
+    )
+    if not vehiculo:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cobro no encontrado para este alcance de sede.")
+    if vehiculo.fecha_pago is None or Decimal(str(vehiculo.total_cobrado or 0)) <= 0:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El cobro no está en estado pagado válido.")
+    if bool(getattr(vehiculo, "reinspeccion_exenta", False)) or (str(vehiculo.tipo_vehiculo or "").strip().lower() == "pruebas_auditoria"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Este tipo de cobro no requiere factura electrónica de contingencia.",
+        )
+
+    factura_existente = (
+        db.query(FacturaElectronica)
+        .filter(
+            FacturaElectronica.tenant_id == tenant_id,
+            FacturaElectronica.vehiculo_proceso_id == vehiculo.id,
+        )
+        .order_by(FacturaElectronica.created_at.desc())
+        .first()
+    )
+    if factura_existente is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Este cobro ya tiene una factura electrónica registrada en Factus.",
+        )
+
+    fs = (
+        db.query(TenantFactusSettings)
+        .filter(TenantFactusSettings.tenant_id == tenant_id)
+        .first()
+    )
+    if fs is None or fs.modo != "factus":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El tenant no está en modo Factus. Active Factus para emitir la factura de contingencia.",
+        )
+    if not creds_complete_for_active_env(fs):
+        env_name = "pruebas" if bool(getattr(fs, "use_sandbox", True)) else "producción"
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Credenciales Factus incompletas para el ambiente activo ({env_name}).",
+        )
+
+    tenant_row = db.query(Tenant).filter(Tenant.id == tenant_id).first()
+    if tenant_row is None:
+        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Tenant no encontrado.")
+
+    active_sucursal_id = vehiculo.sucursal_id or get_principal_sucursal_id(db, tenant_id)
+    if active_sucursal_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se encontró sede para emitir la factura de contingencia.",
+        )
+
+    try:
+        validar_datos_cliente_para_factus(vehiculo)
+        tarifa_emit = None
+        if (vehiculo.tipo_vehiculo or "").strip().lower() != "preventiva":
+            tarifa_ref = _obtener_tarifa_referencia_para_vehiculo(db, vehiculo=vehiculo)
+            if tarifa_ref is not None:
+                suma_t = Decimal(str(tarifa_ref.valor_rtm or 0)) + Decimal(str(tarifa_ref.valor_terceros or 0))
+                if abs(suma_t - Decimal(str(vehiculo.valor_rtm or 0))) <= Decimal("1"):
+                    tarifa_emit = tarifa_ref
+
+        numero_factura, cufe, public_url = emitir_y_persistir_factura_cobro(
+            db,
+            vehiculo=vehiculo,
+            tenant=tenant_row,
+            fs=fs,
+            active_sucursal_id=active_sucursal_id,
+            metodo_pago=str(vehiculo.metodo_pago or "efectivo"),
+            tarifa=tarifa_emit,
+            emitido_por_usuario_id=current_user.id,
+        )
+        vehiculo.numero_factura_dian = numero_factura
+        db.commit()
+    except FactusAPIError as exc:
+        db.rollback()
+        code = exc.status_code if exc.status_code and 100 <= exc.status_code < 600 else status.HTTP_502_BAD_GATEWAY
+        raise HTTPException(status_code=code, detail=f"Factus: {format_factus_error_for_user(exc)}") from exc
+    except ValueError as exc:
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"No se pudo emitir la factura de contingencia: {str(exc)}",
+        ) from exc
+
+    return FacturacionContingenciaEmitResponse(
+        vehiculo_id=vehiculo.id,
+        numero_factura_dian=numero_factura,
+        cufe=cufe,
+        public_url=public_url,
+        emitted_at=datetime.now(timezone.utc).isoformat(),
     )

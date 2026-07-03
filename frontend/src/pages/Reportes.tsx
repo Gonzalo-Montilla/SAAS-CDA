@@ -5,7 +5,12 @@ import { BarChart3, TrendingUp, TrendingDown, Wallet, Building2, FileText, Downl
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import apiClient from '../api/client';
-import { reportesApi, type AgendamientoMetricasResponse, type CierreCajaReporteItem } from '../api/reportes';
+import {
+  reportesApi,
+  type AgendamientoMetricasResponse,
+  type CierreCajaReporteItem,
+  type FacturacionContingenciaListResponse,
+} from '../api/reportes';
 import { tesoreriaApi } from '../api/tesoreria';
 import { cajasApi } from '../api/cajas';
 import { vehiculosApi } from '../api/vehiculos';
@@ -188,7 +193,15 @@ interface ProvisionIvaData {
 
 type ReporteSedeScope = 'activa' | 'todas' | 'sucursal';
 
-type ReportesSeccion = 'resumen' | 'finanzas' | 'operacion' | 'citas' | 'cierres' | 'provisiones' | 'detalle';
+type ReportesSeccion =
+  | 'resumen'
+  | 'finanzas'
+  | 'operacion'
+  | 'citas'
+  | 'cierres'
+  | 'provisiones'
+  | 'contingencia'
+  | 'detalle';
 
 const REPORTES_SECCIONES: { id: ReportesSeccion; label: string; hint: string }[] = [
   { id: 'resumen', label: 'Resumen', hint: 'KPIs del día, comparativo por sede y tendencia de ingresos' },
@@ -197,6 +210,11 @@ const REPORTES_SECCIONES: { id: ReportesSeccion; label: string; hint: string }[]
   { id: 'citas', label: 'Citas', hint: 'Métricas de agendamiento del tenant' },
   { id: 'cierres', label: 'Cierres caja', hint: 'Historial de cierres por cajero y sede (auditoría)' },
   { id: 'provisiones', label: 'Provisiones IVA', hint: 'IVA causado por ventas y control de provisionado por periodo' },
+  {
+    id: 'contingencia',
+    label: 'Contingencia',
+    hint: 'Cobros sin factura electrónica para emisión individual cuando Factus se normaliza',
+  },
   { id: 'detalle', label: 'Detalle', hint: 'Movimientos y trámites con exportación CSV' },
 ];
 
@@ -457,6 +475,7 @@ export default function ReportesPage() {
   const [cajaEgresoPdfLoadingId, setCajaEgresoPdfLoadingId] = useState<string | null>(null);
   const [dsEmitLoadingId, setDsEmitLoadingId] = useState<string | null>(null);
   const [dsPdfLoadingId, setDsPdfLoadingId] = useState<string | null>(null);
+  const [contingenciaEmitLoadingId, setContingenciaEmitLoadingId] = useState<string | null>(null);
   const rangoInvalido = modoVista === 'rango' && fechaInicio > fechaFin;
   const periodoActual = modoVista === 'rango' ? `${fechaInicio} a ${fechaFin}` : fechaSeleccionada;
   const reportesEnabled = !rangoInvalido;
@@ -735,6 +754,72 @@ export default function ReportesPage() {
           ? String((error.response.data as { detail: unknown }).detail)
           : 'No se pudo marcar la provisión de IVA del rango seleccionado.';
       showToast('error', 'Provisión IVA', message);
+    },
+  });
+
+  const contingenciaParams = useMemo(() => {
+    const params: {
+      dias: number;
+      consolidarTodas?: boolean;
+      sucursalId?: string;
+      limit?: number;
+    } = {
+      dias: 45,
+      limit: 300,
+    };
+    if (puedeElegirSedeReporte) {
+      if (reporteSedeScope === 'todas') {
+        params.consolidarTodas = true;
+      } else if (reporteSedeScope === 'sucursal' && reporteSedeId.trim()) {
+        params.sucursalId = reporteSedeId.trim();
+      }
+    }
+    return params;
+  }, [puedeElegirSedeReporte, reporteSedeId, reporteSedeScope]);
+
+  const {
+    data: facturacionContingenciaData,
+    isFetching: isFetchingFacturacionContingencia,
+    isError: isErrorFacturacionContingencia,
+  } = useQuery<FacturacionContingenciaListResponse>({
+    queryKey: ['reportes-facturacion-contingencia', contingenciaParams, reportesSeccion],
+    queryFn: () => reportesApi.getFacturacionContingencia(contingenciaParams),
+    enabled: reportesEnabled && reportesSeccion === 'contingencia',
+    refetchInterval: reportesSeccion === 'contingencia' ? 60000 : false,
+  });
+
+  const emitirFacturaContingenciaMutation = useMutation({
+    mutationFn: async (payload: { vehiculoId: string; sucursalId?: string | null }) =>
+      reportesApi.emitirFacturaContingencia(payload.vehiculoId, { sucursalId: payload.sucursalId }),
+    onMutate: (payload: { vehiculoId: string }) => {
+      setContingenciaEmitLoadingId(payload.vehiculoId);
+    },
+    onSuccess: async (resp) => {
+      await queryClient.invalidateQueries({ queryKey: ['reportes-facturacion-contingencia'] });
+      await queryClient.invalidateQueries({ queryKey: ['tramites-detallados'] });
+      showToast(
+        'success',
+        'Factura emitida',
+        `Factura ${resp.numero_factura_dian} generada correctamente desde contingencia.`,
+      );
+    },
+    onError: (error: unknown) => {
+      const message =
+        error &&
+        typeof error === 'object' &&
+        'response' in error &&
+        error.response &&
+        typeof error.response === 'object' &&
+        'data' in error.response &&
+        error.response.data &&
+        typeof error.response.data === 'object' &&
+        'detail' in error.response.data
+          ? String((error.response.data as { detail: unknown }).detail)
+          : 'No se pudo emitir la factura de contingencia.';
+      showToast('error', 'Facturación contingencia', message);
+    },
+    onSettled: () => {
+      setContingenciaEmitLoadingId(null);
     },
   });
 
@@ -2173,6 +2258,142 @@ export default function ReportesPage() {
           <p className="mt-3 text-xs text-slate-500">
             Fuente: IVA calculado por venta. Use “Marcar rango como provisionado” para registrar oficialmente el periodo provisionado.
           </p>
+        </div>
+        )}
+
+        {reportesSeccion === 'contingencia' && (
+        <div className="card-pos border border-slate-200/90">
+          <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <h3 className="flex items-center gap-2 text-xl font-bold text-slate-900">
+                <Receipt className="h-6 w-6 text-primary-600" />
+                Facturación en contingencia
+              </h3>
+              <p className="mt-1 max-w-3xl text-sm text-slate-600">
+                Lista de cobros pagados sin factura electrónica Factus. Use <strong>Generar factura</strong> para regularizar
+                cada caso cuando Factus ya esté disponible.
+              </p>
+            </div>
+            <button
+              type="button"
+              disabled={rangoInvalido || (facturacionContingenciaData?.items.length || 0) === 0}
+              onClick={() => exportarCSV(facturacionContingenciaData?.items || [], 'facturacion_contingencia')}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <Download className="h-4 w-4" />
+              Exportar CSV
+            </button>
+          </div>
+
+          <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-4">
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Pendientes</p>
+              <p className="mt-1 text-xl font-bold text-slate-900">{facturacionContingenciaData?.total || 0}</p>
+            </div>
+            <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-indigo-700">Ventana</p>
+              <p className="mt-1 text-xl font-bold text-indigo-800">
+                {facturacionContingenciaData?.dias_consulta || 45} días
+              </p>
+            </div>
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Modo Factus</p>
+              <p className="mt-1 text-sm font-bold text-emerald-800">
+                {facturacionContingenciaData?.modo_factus_activo ? 'Activo' : 'No activo'}
+              </p>
+            </div>
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-amber-700">Credenciales</p>
+              <p className="mt-1 text-sm font-bold text-amber-800">
+                {facturacionContingenciaData?.credenciales_factus_ok ? 'Completas' : 'Incompletas'}
+              </p>
+            </div>
+          </div>
+
+          {isErrorFacturacionContingencia && (
+            <p className="mb-3 rounded-lg border border-red-100 bg-red-50 px-3 py-2 text-sm text-red-800">
+              No se pudo cargar la bandeja de facturación en contingencia.
+            </p>
+          )}
+          {isFetchingFacturacionContingencia && (
+            <p className="mb-3 text-sm text-slate-500">Actualizando pendientes de contingencia...</p>
+          )}
+
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="min-w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-left text-xs font-semibold uppercase tracking-wide text-slate-600">
+                  <th className="px-3 py-3">Fecha pago</th>
+                  <th className="px-3 py-3">Placa</th>
+                  <th className="px-3 py-3">Cliente</th>
+                  <th className="px-3 py-3 text-right">Total</th>
+                  <th className="px-3 py-3">Método</th>
+                  <th className="px-3 py-3">Factura actual</th>
+                  <th className="px-3 py-3">Motivo</th>
+                  <th className="px-3 py-3 text-center">Acción</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(facturacionContingenciaData?.items || []).length === 0 && !isFetchingFacturacionContingencia && (
+                  <tr>
+                    <td colSpan={8} className="px-3 py-8 text-center text-slate-500">
+                      Sin cobros pendientes por contingencia en el rango actual.
+                    </td>
+                  </tr>
+                )}
+                {(facturacionContingenciaData?.items || []).map((item) => (
+                  <tr key={item.vehiculo_id} className="border-t border-slate-100 hover:bg-slate-50/80">
+                    <td className="px-3 py-2.5 text-slate-700">
+                      {item.fecha_pago
+                        ? new Date(item.fecha_pago).toLocaleString('es-CO', {
+                            dateStyle: 'short',
+                            timeStyle: 'short',
+                          })
+                        : '—'}
+                    </td>
+                    <td className="px-3 py-2.5 font-semibold text-slate-900">{item.placa}</td>
+                    <td className="px-3 py-2.5 text-slate-700">
+                      <span className="block">{item.cliente_nombre}</span>
+                      <span className="text-xs text-slate-500">{item.cliente_documento}</span>
+                    </td>
+                    <td className="px-3 py-2.5 text-right tabular-nums font-semibold text-slate-900">
+                      {formatCOP(item.total_cobrado)}
+                    </td>
+                    <td className="px-3 py-2.5 text-slate-700">{formatearMetodoPagoEtiqueta(item.metodo_pago)}</td>
+                    <td className="px-3 py-2.5 text-slate-700">{item.numero_factura_dian || '—'}</td>
+                    <td className="px-3 py-2.5">
+                      <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold text-amber-800">
+                        {item.motivo_pendiente === 'cobro_manual_sin_factura_electronica'
+                          ? 'Manual sin FE'
+                          : 'Sin número de factura'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2.5 text-center">
+                      <button
+                        type="button"
+                        disabled={
+                          !item.puede_emitir ||
+                          emitirFacturaContingenciaMutation.isLoading ||
+                          contingenciaEmitLoadingId === item.vehiculo_id
+                        }
+                        onClick={() =>
+                          emitirFacturaContingenciaMutation.mutate({
+                            vehiculoId: item.vehiculo_id,
+                            sucursalId: item.sucursal_id ?? null,
+                          })
+                        }
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+                        title={!item.puede_emitir ? 'Debe activar modo Factus y completar credenciales para emitir.' : ''}
+                      >
+                        <Receipt className="h-3.5 w-3.5" />
+                        {contingenciaEmitLoadingId === item.vehiculo_id ? 'Generando...' : 'Generar factura'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
         )}
 

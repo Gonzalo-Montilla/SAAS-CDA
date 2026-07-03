@@ -328,6 +328,37 @@ export interface EstadoCambiosPatrimonioGerencialResponse {
   };
 }
 
+export interface FacturacionContingenciaItem {
+  vehiculo_id: string;
+  fecha_pago?: string | null;
+  sucursal_id?: string | null;
+  sucursal_nombre?: string | null;
+  placa: string;
+  cliente_nombre: string;
+  cliente_documento: string;
+  total_cobrado: number;
+  metodo_pago: string;
+  numero_factura_dian?: string | null;
+  motivo_pendiente: string;
+  puede_emitir: boolean;
+}
+
+export interface FacturacionContingenciaListResponse {
+  total: number;
+  dias_consulta: number;
+  modo_factus_activo: boolean;
+  credenciales_factus_ok: boolean;
+  items: FacturacionContingenciaItem[];
+}
+
+export interface FacturacionContingenciaEmitResponse {
+  vehiculo_id: string;
+  numero_factura_dian: string;
+  cufe?: string | null;
+  public_url?: string | null;
+  emitted_at: string;
+}
+
 export const reportesApi = {
   getAgendamientoMetricas: async (queryParams: string): Promise<AgendamientoMetricasResponse> => {
     const response = await apiClient.get<AgendamientoMetricasResponse>(
@@ -548,6 +579,37 @@ export const reportesApi = {
     const suffix = qp.toString();
     const response = await apiClient.get<EstadoCambiosPatrimonioGerencialResponse>(
       `/reportes/estado-cambios-patrimonio-gerencial${suffix ? `?${suffix}` : ''}`,
+    );
+    return response.data;
+  },
+
+  getFacturacionContingencia: async (params?: {
+    dias?: number;
+    consolidarTodas?: boolean;
+    sucursalId?: string;
+    limit?: number;
+  }): Promise<FacturacionContingenciaListResponse> => {
+    const qp = new URLSearchParams();
+    if (params?.dias != null) qp.set('dias', String(params.dias));
+    if (params?.consolidarTodas) qp.set('consolidar_todas', 'true');
+    if (params?.sucursalId) qp.set('sucursal_id', params.sucursalId);
+    if (params?.limit != null) qp.set('limit', String(params.limit));
+    const suffix = qp.toString();
+    const response = await apiClient.get<FacturacionContingenciaListResponse>(
+      `/reportes/facturacion-contingencia${suffix ? `?${suffix}` : ''}`,
+    );
+    return response.data;
+  },
+
+  emitirFacturaContingencia: async (
+    vehiculoId: string,
+    params?: { sucursalId?: string | null },
+  ): Promise<FacturacionContingenciaEmitResponse> => {
+    const qp = new URLSearchParams();
+    if (params?.sucursalId) qp.set('sucursal_id', params.sucursalId);
+    const suffix = qp.toString();
+    const response = await apiClient.post<FacturacionContingenciaEmitResponse>(
+      `/reportes/facturacion-contingencia/${vehiculoId}/emitir${suffix ? `?${suffix}` : ''}`,
     );
     return response.data;
   },
