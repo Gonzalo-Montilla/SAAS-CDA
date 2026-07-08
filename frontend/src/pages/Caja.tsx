@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -4063,9 +4063,76 @@ function VehiculosCobradosHoy({
   const { user } = useAuth();
   const [vehiculoSeleccionado, setVehiculoSeleccionado] = useState<Vehiculo | null>(null);
   const [vehiculoCorreccion, setVehiculoCorreccion] = useState<Vehiculo | null>(null);
+  const [filtroTexto, setFiltroTexto] = useState('');
+  const [filtroEstadoFactura, setFiltroEstadoFactura] = useState<
+    'todos' | 'con_factura' | 'sin_factura' | 'corregida' | 'correccion_fallida'
+  >('todos');
+  const [fechaDesde, setFechaDesde] = useState('');
+  const [fechaHasta, setFechaHasta] = useState('');
+  const [pagina, setPagina] = useState(1);
   const rolActual = user && 'rol' in user ? String((user as { rol?: string }).rol || '').toLowerCase() : '';
   const puedeCorregirFactura = rolActual === 'administrador';
   const permiteCambioMetodo = permitirCambioMetodo ?? (modo === 'hoy');
+  const PAGE_SIZE = 24;
+
+  const toInputDate = (iso?: string): string => {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    return `${yyyy}-${mm}-${dd}`;
+  };
+
+  const vehiculosFiltrados = useMemo(() => {
+    const texto = filtroTexto.trim().toLowerCase();
+    return vehiculos.filter((v) => {
+      if (texto) {
+        const candidato = [
+          v.placa || '',
+          v.cliente_nombre || '',
+          v.cliente_documento || '',
+          v.numero_factura_dian || '',
+        ]
+          .join(' ')
+          .toLowerCase();
+        if (!candidato.includes(texto)) return false;
+      }
+
+      if (filtroEstadoFactura === 'con_factura' && !String(v.numero_factura_dian || '').trim()) return false;
+      if (filtroEstadoFactura === 'sin_factura' && String(v.numero_factura_dian || '').trim()) return false;
+      if (filtroEstadoFactura === 'corregida' && !Boolean(v.factura_corregida)) return false;
+      if (filtroEstadoFactura === 'correccion_fallida' && v.factura_correccion_estado !== 'failed') return false;
+
+      if (fechaDesde || fechaHasta) {
+        const fechaPago = toInputDate(v.fecha_pago);
+        if (!fechaPago) return false;
+        if (fechaDesde && fechaPago < fechaDesde) return false;
+        if (fechaHasta && fechaPago > fechaHasta) return false;
+      }
+      return true;
+    });
+  }, [vehiculos, filtroTexto, filtroEstadoFactura, fechaDesde, fechaHasta]);
+
+  const totalPaginas = Math.max(1, Math.ceil(vehiculosFiltrados.length / PAGE_SIZE));
+  const paginaActual = Math.min(pagina, totalPaginas);
+  const vehiculosPagina = useMemo(() => {
+    const inicio = (paginaActual - 1) * PAGE_SIZE;
+    return vehiculosFiltrados.slice(inicio, inicio + PAGE_SIZE);
+  }, [vehiculosFiltrados, paginaActual]);
+
+  useEffect(() => {
+    setPagina(1);
+  }, [filtroTexto, filtroEstadoFactura, fechaDesde, fechaHasta, modo]);
+
+  const limpiarFiltros = () => {
+    setFiltroTexto('');
+    setFiltroEstadoFactura('todos');
+    setFechaDesde('');
+    setFechaHasta('');
+    setPagina(1);
+  };
 
   if (loading) {
     return <LoadingSpinner message={modo === 'hoy' ? 'Cargando vehículos cobrados del día...' : 'Cargando cobros recientes...'} />;
@@ -4102,8 +4169,65 @@ function VehiculosCobradosHoy({
         )}
       </div>
 
+      <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-5">
+          <div className="xl:col-span-2">
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+              Buscar (placa, documento, factura)
+            </label>
+            <input
+              value={filtroTexto}
+              onChange={(e) => setFiltroTexto(e.target.value)}
+              className="input-pos"
+              placeholder="Ej: SQC095, 10548228, CDAF12345"
+            />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">
+              Estado factura
+            </label>
+            <select
+              value={filtroEstadoFactura}
+              onChange={(e) => setFiltroEstadoFactura(e.target.value as typeof filtroEstadoFactura)}
+              className="input-pos"
+            >
+              <option value="todos">Todos</option>
+              <option value="con_factura">Con factura</option>
+              <option value="sin_factura">Sin factura</option>
+              <option value="corregida">Corregida</option>
+              <option value="correccion_fallida">Corrección fallida</option>
+            </select>
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">Fecha desde</label>
+            <input type="date" value={fechaDesde} onChange={(e) => setFechaDesde(e.target.value)} className="input-pos" />
+          </div>
+          <div>
+            <label className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">Fecha hasta</label>
+            <input type="date" value={fechaHasta} onChange={(e) => setFechaHasta(e.target.value)} className="input-pos" />
+          </div>
+        </div>
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
+          <p>
+            Mostrando {vehiculosPagina.length} de {vehiculosFiltrados.length} registros filtrados ({vehiculos.length} totales).
+          </p>
+          <button
+            type="button"
+            onClick={limpiarFiltros}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 font-semibold text-slate-700 hover:bg-slate-100"
+          >
+            Limpiar filtros
+          </button>
+        </div>
+      </div>
+
+      {vehiculosFiltrados.length === 0 ? (
+        <div className="rounded-xl border border-slate-200 bg-white px-4 py-10 text-center text-slate-600">
+          No hay resultados con los filtros aplicados.
+        </div>
+      ) : (
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-        {vehiculos.map((vehiculo) => (
+        {vehiculosPagina.map((vehiculo) => (
           <div key={vehiculo.id} className="card-pos hover:shadow-lg transition-shadow">
             <div className="flex justify-between items-start mb-3">
               <div>
@@ -4175,6 +4299,31 @@ function VehiculosCobradosHoy({
           </div>
         ))}
       </div>
+      )}
+
+      {vehiculosFiltrados.length > PAGE_SIZE && (
+        <div className="mt-4 flex items-center justify-center gap-3">
+          <button
+            type="button"
+            onClick={() => setPagina((p) => Math.max(1, p - 1))}
+            disabled={paginaActual <= 1}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Anterior
+          </button>
+          <span className="text-sm text-slate-600">
+            Página {paginaActual} de {totalPaginas}
+          </span>
+          <button
+            type="button"
+            onClick={() => setPagina((p) => Math.min(totalPaginas, p + 1))}
+            disabled={paginaActual >= totalPaginas}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-sm font-semibold text-slate-700 disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Siguiente
+          </button>
+        </div>
+      )}
 
       {/* Modal de cambio de método */}
       {vehiculoSeleccionado && (
