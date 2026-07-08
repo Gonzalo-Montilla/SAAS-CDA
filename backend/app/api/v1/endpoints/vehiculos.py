@@ -133,6 +133,7 @@ ESTADOS_COBRO_EFECTIVO = [
     EstadoVehiculo.COMPLETADO,
 ]
 MAX_COBRADOS_HOY_RESPONSE = 250
+MAX_COBRADOS_RECIENTES_RESPONSE = 3000
 FACTURA_CORRECCION_VENTANA_DIAS = 30
 MAX_COBRADOS_RECIENTES_DIAS = 30
 
@@ -3424,6 +3425,7 @@ def _listar_cobrados_en_rango(
     active_sucursal_id: UUID,
     desde_utc: datetime,
     hasta_utc: datetime,
+    response_limit: int = MAX_COBRADOS_HOY_RESPONSE,
 ) -> List[VehiculoCobradoHoyResponse]:
     current_role = current_user.rol.value if hasattr(current_user.rol, "value") else str(current_user.rol)
     base_query = _filtro_vehiculo_sede(
@@ -3442,7 +3444,7 @@ def _listar_cobrados_en_rango(
         vehiculos = (
             base_query
             .order_by(VehiculoProceso.fecha_pago.desc())
-            .limit(MAX_COBRADOS_HOY_RESPONSE)
+            .limit(response_limit)
             .all()
         )
     else:
@@ -3450,7 +3452,7 @@ def _listar_cobrados_en_rango(
             base_query
             .filter(VehiculoProceso.cobrado_por == current_user.id)
             .order_by(VehiculoProceso.fecha_pago.desc())
-            .limit(MAX_COBRADOS_HOY_RESPONSE)
+            .limit(response_limit)
             .all()
         )
 
@@ -3489,6 +3491,7 @@ def listar_cobrados_recientes(
         active_sucursal_id=active_sucursal_id,
         desde_utc=inicio_utc,
         hasta_utc=fin_hoy_utc,
+        response_limit=MAX_COBRADOS_RECIENTES_RESPONSE,
     )
 
 
