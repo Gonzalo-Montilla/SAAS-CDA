@@ -133,7 +133,7 @@ ESTADOS_COBRO_EFECTIVO = [
     EstadoVehiculo.COMPLETADO,
 ]
 MAX_COBRADOS_HOY_RESPONSE = 250
-FACTURA_CORRECCION_VENTANA_DIAS = 7
+FACTURA_CORRECCION_VENTANA_DIAS = 30
 MAX_COBRADOS_RECIENTES_DIAS = 30
 
 
@@ -2833,15 +2833,32 @@ def corregir_factura_emitida(
         )
     fecha_pago_co = _utc_naive_to_co_date(vehiculo.fecha_pago)
     hoy_co = _co_today_date()
-    fecha_inicio_permitida = hoy_co - timedelta(days=FACTURA_CORRECCION_VENTANA_DIAS - 1)
-    if not fecha_pago_co or fecha_pago_co < fecha_inicio_permitida or fecha_pago_co > hoy_co:
+    if not fecha_pago_co or fecha_pago_co > hoy_co:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=(
-                "Solo se permiten correcciones de factura para cobros "
-                f"dentro de los últimos {FACTURA_CORRECCION_VENTANA_DIAS} días."
-            ),
+            detail="La fecha de cobro no es válida para corrección de factura.",
         )
+    if motivo == "valor":
+        mismo_mes_calendario = (
+            fecha_pago_co.year == hoy_co.year and fecha_pago_co.month == hoy_co.month
+        )
+        if not mismo_mes_calendario:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "La corrección por valor solo se permite para cobros del mismo mes calendario."
+                ),
+            )
+    else:
+        fecha_inicio_permitida = hoy_co - timedelta(days=FACTURA_CORRECCION_VENTANA_DIAS - 1)
+        if fecha_pago_co < fecha_inicio_permitida:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Solo se permiten correcciones de factura para cobros "
+                    f"dentro de los últimos {FACTURA_CORRECCION_VENTANA_DIAS} días."
+                ),
+            )
     correccion_exitosa_previa = (
         db.query(FacturaCorreccion)
         .filter(
@@ -3460,7 +3477,7 @@ def listar_cobrados_recientes(
 ):
     """
     Lista cobros recientes por ventana en días calendario Colombia.
-    Por defecto usa 7 días para soportar correcciones de factura en ese rango.
+    Por defecto usa 30 días para soportar correcciones de factura en ese rango.
     """
     hoy_co = _co_today_date()
     fecha_inicio = hoy_co - timedelta(days=dias - 1)

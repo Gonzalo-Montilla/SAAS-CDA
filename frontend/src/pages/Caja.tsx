@@ -90,6 +90,7 @@ const saveBlobAsFile = (blob: Blob, filename: string): void => {
 };
 
 export default function CajaPage() {
+  const COBROS_RECIENTES_DIAS = 30;
   const queryClient = useQueryClient();
   const { user } = useAuth();
   const [vistaActual, setVistaActual] = useState<'apertura' | 'cobros' | 'cobrados-hoy' | 'cobrados-recientes' | 'movimientos' | 'cierre' | 'historial'>('cobros');
@@ -139,8 +140,8 @@ export default function CajaPage() {
     retry: 1,
   });
   const { data: vehiculosCobradosRecientes, isLoading: loadingCobradosRecientes } = useQuery({
-    queryKey: ['vehiculos-cobrados-recientes', 7],
-    queryFn: () => vehiculosApi.obtenerCobradosRecientes(7),
+    queryKey: ['vehiculos-cobrados-recientes', COBROS_RECIENTES_DIAS],
+    queryFn: () => vehiculosApi.obtenerCobradosRecientes(COBROS_RECIENTES_DIAS),
     enabled: !!cajaActiva || (esAdmin && mostrarCobrosRecientesSinCaja),
     refetchInterval: 30000,
     staleTime: 10000,
@@ -231,7 +232,7 @@ export default function CajaPage() {
               >
                 <div>
                   <p className="text-sm font-semibold text-slate-900">
-                    Cobros últimos 7 días {Array.isArray(vehiculosCobradosRecientes) ? `(${vehiculosCobradosRecientes.length})` : ''}
+                    Cobros últimos {COBROS_RECIENTES_DIAS} días {Array.isArray(vehiculosCobradosRecientes) ? `(${vehiculosCobradosRecientes.length})` : ''}
                   </p>
                   <p className="text-xs text-slate-600">
                     Revisión y corrección de facturas en ventana operativa.
@@ -360,7 +361,13 @@ export default function CajaPage() {
             [
               { id: 'cobros' as const, label: 'Pendientes', icon: Banknote, badge: vehiculosPendientes?.length, badgeClass: 'bg-rose-100 text-rose-800' },
               { id: 'cobrados-hoy' as const, label: 'Cobros hoy', icon: CheckCircle2, badge: vehiculosCobradosHoy?.length, badgeClass: 'bg-emerald-100 text-emerald-800' },
-              { id: 'cobrados-recientes' as const, label: 'Cobros 7 días', icon: Clock, badge: vehiculosCobradosRecientes?.length, badgeClass: 'bg-amber-100 text-amber-800' },
+              {
+                id: 'cobrados-recientes' as const,
+                label: `Cobros ${COBROS_RECIENTES_DIAS} días`,
+                icon: Clock,
+                badge: vehiculosCobradosRecientes?.length,
+                badgeClass: 'bg-amber-100 text-amber-800',
+              },
               { id: 'movimientos' as const, label: 'Movimientos', icon: Receipt, badge: undefined, badgeClass: '' },
               { id: 'historial' as const, label: 'Historial', icon: Folder, badge: undefined, badgeClass: '' },
               { id: 'cierre' as const, label: 'Cierre', icon: Lock, badge: undefined, badgeClass: '' },
@@ -4071,7 +4078,7 @@ function VehiculosCobradosHoy({
           <CheckCircle2 className="w-20 h-20 text-gray-400" />
         </div>
         <h3 className="text-2xl font-bold text-gray-900 mb-2">
-          {modo === 'hoy' ? 'No hay cobros hoy' : 'No hay cobros en los últimos 7 días'}
+          {modo === 'hoy' ? 'No hay cobros hoy' : 'No hay cobros en los últimos 30 días'}
         </h3>
         <p className="text-gray-600">
           {modo === 'hoy' ? 'Aún no se han registrado cobros en esta caja' : 'No se encontraron cobros recientes en la sede activa'}
@@ -4086,7 +4093,7 @@ function VehiculosCobradosHoy({
         <p className="text-sm text-gray-600">
           {modo === 'hoy'
             ? 'Vehículos cobrados hoy. Puedes cambiar el método de pago solo el mismo día del cobro.'
-            : 'Cobros de los últimos 7 días. Usa esta vista para corrección de factura dentro de la ventana permitida.'}
+            : 'Cobros de los últimos 30 días. Usa esta vista para corrección de factura dentro de la ventana permitida.'}
         </p>
         {puedeCorregirFactura && (
           <p className="mt-1 text-xs text-slate-500">
@@ -4251,7 +4258,7 @@ function ModalCorregirFacturaEmitida({ vehiculo, onClose }: { vehiculo: Vehiculo
       );
       setTimeout(() => {
         queryClient.invalidateQueries({ queryKey: ['vehiculos-cobrados-hoy'] });
-        queryClient.invalidateQueries({ queryKey: ['vehiculos-cobrados-recientes', 7] });
+        queryClient.invalidateQueries({ queryKey: ['vehiculos-cobrados-recientes', 30] });
         queryClient.invalidateQueries({ queryKey: ['caja-resumen-tiempo-real'] });
         queryClient.invalidateQueries({ queryKey: ['vehiculo-factura-correcciones', vehiculo.id] });
       }, 300);
@@ -4328,6 +4335,11 @@ function ModalCorregirFacturaEmitida({ vehiculo, onClose }: { vehiculo: Vehiculo
               {!esPreventivaVehiculo && (
                 <p className="text-xs text-slate-500 mt-2">
                   El motivo <span className="font-semibold">valor</span> solo está disponible para servicio preventiva.
+                </p>
+              )}
+              {esPreventivaVehiculo && motivo === 'valor' && (
+                <p className="text-xs text-slate-500 mt-2">
+                  Para cambios de <span className="font-semibold">valor</span>, la venta debe estar en el mismo mes calendario.
                 </p>
               )}
             </div>
@@ -4497,7 +4509,7 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
       // Defer query invalidations
       setTimeout(() => {
         queryClient.invalidateQueries({ queryKey: ['vehiculos-cobrados-hoy'] });
-        queryClient.invalidateQueries({ queryKey: ['vehiculos-cobrados-recientes', 7] });
+        queryClient.invalidateQueries({ queryKey: ['vehiculos-cobrados-recientes', 30] });
         queryClient.invalidateQueries({ queryKey: ['caja-resumen-tiempo-real'] });
       }, 300);
       

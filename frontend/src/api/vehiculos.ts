@@ -259,7 +259,7 @@ export const vehiculosApi = {
   },
 
   // Obtener vehículos cobrados en ventana reciente (Caja)
-  obtenerCobradosRecientes: async (dias: number = 7): Promise<Vehiculo[]> => {
+  obtenerCobradosRecientes: async (dias: number = 30): Promise<Vehiculo[]> => {
     const response = await apiClient.get<Vehiculo[]>('/vehiculos/cobrados-recientes', {
       params: { dias },
     });
