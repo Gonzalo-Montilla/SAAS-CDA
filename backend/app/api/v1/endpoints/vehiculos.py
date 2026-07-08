@@ -11,7 +11,7 @@ from io import BytesIO
 from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, load_only
 from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import OperationalError
 from datetime import datetime, date, time as dt_time, timezone, timedelta
@@ -133,7 +133,7 @@ ESTADOS_COBRO_EFECTIVO = [
     EstadoVehiculo.COMPLETADO,
 ]
 MAX_COBRADOS_HOY_RESPONSE = 250
-MAX_COBRADOS_RECIENTES_RESPONSE = 3000
+MAX_COBRADOS_RECIENTES_RESPONSE = 2000
 FACTURA_CORRECCION_VENTANA_DIAS = 30
 MAX_COBRADOS_RECIENTES_DIAS = 30
 
@@ -3432,6 +3432,21 @@ def _listar_cobrados_en_rango(
         db.query(VehiculoProceso),
         current_user.tenant_id,
         active_sucursal_id,
+    ).options(
+        load_only(
+            VehiculoProceso.id,
+            VehiculoProceso.placa,
+            VehiculoProceso.tipo_vehiculo,
+            VehiculoProceso.cliente_nombre,
+            VehiculoProceso.cliente_documento,
+            VehiculoProceso.cliente_telefono,
+            VehiculoProceso.cliente_email,
+            VehiculoProceso.cliente_direccion,
+            VehiculoProceso.metodo_pago,
+            VehiculoProceso.total_cobrado,
+            VehiculoProceso.numero_factura_dian,
+            VehiculoProceso.fecha_pago,
+        )
     ).filter(
         and_(
             VehiculoProceso.estado.in_(ESTADOS_COBRO_EFECTIVO),
