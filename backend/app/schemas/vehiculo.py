@@ -3,7 +3,7 @@ Schemas de Vehículos en Proceso
 """
 import re
 
-from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator
+from pydantic import BaseModel, Field, ConfigDict, EmailStr, field_validator, model_validator
 from decimal import Decimal
 from datetime import datetime
 from typing import Optional, Literal, Any
@@ -68,6 +68,18 @@ def _normalizar_documento_cliente(v, doc_type: str) -> str:
     return re.sub(r"[^A-Z0-9]", "", raw.upper())[:20]
 
 
+def _parece_nit_colombiano(documento: str) -> bool:
+    s = str(documento or "").strip().upper()
+    if not s:
+        return False
+    digits = re.sub(r"\D", "", s)
+    if not digits:
+        return False
+    # Regla operativa acordada (sin DV/guion):
+    # NIT de 9 dígitos iniciando en 1/2/8/9.
+    return len(digits) == 9 and digits[0] in {"1", "2", "8", "9"}
+
+
 class VehiculoRegistro(BaseModel):
     """Registro de vehículo por recepción"""
     placa: str = Field(min_length=5, max_length=10)
@@ -116,6 +128,20 @@ class VehiculoRegistro(BaseModel):
         doc_type = _normalizar_tipo_documento_cliente(info.data.get("cliente_tipo_documento", "CC"))
         return _normalizar_documento_cliente(v, doc_type)
 
+    @model_validator(mode="after")
+    def validar_consistencia_documento(self):
+        doc_type = _normalizar_tipo_documento_cliente(self.cliente_tipo_documento)
+        doc_number = str(self.cliente_documento or "").strip()
+        if doc_type != "NIT" and _parece_nit_colombiano(doc_number):
+            raise ValueError(
+                "Tipo de documento no coincide: el número parece un NIT. Cambie el tipo de documento a NIT."
+            )
+        if doc_type == "NIT" and not _parece_nit_colombiano(doc_number):
+            raise ValueError(
+                "Tipo de documento no coincide: para NIT use 9 dígitos válidos."
+            )
+        return self
+
 
 class VehiculoEdicion(BaseModel):
     """Edición de vehículo registrado (antes de cobrar)"""
@@ -162,6 +188,20 @@ class VehiculoEdicion(BaseModel):
     def normalize_doc_number_edit(cls, v, info):
         doc_type = _normalizar_tipo_documento_cliente(info.data.get("cliente_tipo_documento", "CC"))
         return _normalizar_documento_cliente(v, doc_type)
+
+    @model_validator(mode="after")
+    def validar_consistencia_documento(self):
+        doc_type = _normalizar_tipo_documento_cliente(self.cliente_tipo_documento)
+        doc_number = str(self.cliente_documento or "").strip()
+        if doc_type != "NIT" and _parece_nit_colombiano(doc_number):
+            raise ValueError(
+                "Tipo de documento no coincide: el número parece un NIT. Cambie el tipo de documento a NIT."
+            )
+        if doc_type == "NIT" and not _parece_nit_colombiano(doc_number):
+            raise ValueError(
+                "Tipo de documento no coincide: para NIT use 9 dígitos válidos."
+            )
+        return self
 
 
 class VehiculoCobro(BaseModel):

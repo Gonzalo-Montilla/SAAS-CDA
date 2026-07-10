@@ -926,7 +926,10 @@ def consultar_runt_por_placa(
             fx_rate_usd_cop_applied=fx_rate_applied,
             error_detail=str(exc),
         )
-        status_code = exc.status_code if exc.status_code and 100 <= exc.status_code < 600 else 400
+        raw_status_code = exc.status_code if exc.status_code and 100 <= exc.status_code < 600 else 400
+        # Normalizamos errores 5xx de proveedor externo para no exponer "500 interno"
+        # cuando el fallo realmente ocurre fuera de CDASOFT.
+        status_code = 502 if raw_status_code >= 500 else raw_status_code
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
     except PlacaApiRuntError as exc:
         if provider == "placaapi" and can_try_verifik_fallback:
@@ -1004,7 +1007,10 @@ def consultar_runt_por_placa(
             fx_rate_usd_cop_applied=fx_rate_applied,
             error_detail=str(exc),
         )
-        status_code = exc.status_code if exc.status_code and 100 <= exc.status_code < 600 else 400
+        raw_status_code = exc.status_code if exc.status_code and 100 <= exc.status_code < 600 else 400
+        # Normalizamos errores 5xx de proveedor externo para no exponer "500 interno"
+        # cuando el fallo realmente ocurre fuera de CDASOFT.
+        status_code = 502 if raw_status_code >= 500 else raw_status_code
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
 
 

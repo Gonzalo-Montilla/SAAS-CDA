@@ -394,6 +394,29 @@ export default function Recepcion() {
     }
     return upper.replace(/[^A-Z0-9]/g, '').slice(0, 20);
   };
+  const esNitOperativoColombia = (documento: string): boolean => {
+    const s = (documento || '').trim().toUpperCase();
+    if (!s) return false;
+    const digits = s.replace(/\D/g, '');
+    if (!digits) return false;
+    // Regla operativa acordada (sin DV/guion):
+    // NIT de 9 dígitos iniciando en 1/2/8/9.
+    return digits.length === 9 && ['1', '2', '8', '9'].includes(digits[0]);
+  };
+  const validarConsistenciaDocumentoCliente = (
+    tipo: VehiculoRegistro['cliente_tipo_documento'],
+    documento: string
+  ): string | null => {
+    const normalized = (documento || '').trim().toUpperCase();
+    if (!normalized) return null;
+    if (tipo !== 'NIT' && esNitOperativoColombia(normalized)) {
+      return 'El número de documento parece un NIT. Cambia el tipo de documento a NIT para continuar.';
+    }
+    if (tipo === 'NIT' && !esNitOperativoColombia(normalized)) {
+      return 'El número de documento no corresponde a un NIT válido (9 dígitos). Verifica y corrige para continuar.';
+    }
+    return null;
+  };
 
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -818,24 +841,39 @@ export default function Recepcion() {
       }),
     onSuccess: (data, variables) => {
       setRuntSugerencia(data);
+      const docTypeFromQuery =
+        variables.documentType && ['CC', 'CE', 'PA', 'NIT'].includes(variables.documentType)
+          ? (variables.documentType as 'CC' | 'CE' | 'PA' | 'NIT')
+          : formData.cliente_tipo_documento;
+      const docTypeResolved =
+        data.document_type && ['CC', 'CE', 'PA', 'NIT'].includes(data.document_type)
+          ? (data.document_type as 'CC' | 'CE' | 'PA' | 'NIT')
+          : docTypeFromQuery;
+      const documentFromResponse = data.document_number ? String(data.document_number) : '';
+      const documentFromQuery = variables.documentNumber ? String(variables.documentNumber) : '';
+      const finalDocument = (documentFromResponse || documentFromQuery).trim();
+      const normalizedFromRunt = finalDocument
+        ? normalizarDocumentoCliente(finalDocument, docTypeResolved)
+        : '';
+      const inconsistenciaRunt = normalizedFromRunt
+        ? validarConsistenciaDocumentoCliente(docTypeResolved, normalizedFromRunt)
+        : null;
+
+      if (inconsistenciaRunt) {
+        showToast(
+          'warning',
+          'Tipo de documento no coincide',
+          inconsistenciaRunt
+        );
+      }
+
       setFormData((prev) => {
-        const docTypeFromQuery =
-          variables.documentType && ['CC', 'CE', 'PA', 'NIT'].includes(variables.documentType)
-            ? (variables.documentType as 'CC' | 'CE' | 'PA' | 'NIT')
-            : prev.cliente_tipo_documento;
-        const docTypeResolved =
-          data.document_type && ['CC', 'CE', 'PA', 'NIT'].includes(data.document_type)
-            ? (data.document_type as 'CC' | 'CE' | 'PA' | 'NIT')
-            : docTypeFromQuery;
-        const documentFromResponse = data.document_number ? String(data.document_number) : '';
-        const documentFromQuery = variables.documentNumber ? String(variables.documentNumber) : '';
-        const finalDocument = (documentFromResponse || documentFromQuery).trim();
         return {
           ...prev,
-          cliente_tipo_documento: docTypeResolved,
-          cliente_documento: finalDocument
-            ? normalizarDocumentoCliente(finalDocument, docTypeResolved)
-            : prev.cliente_documento,
+          cliente_tipo_documento: inconsistenciaRunt ? prev.cliente_tipo_documento : docTypeResolved,
+          cliente_documento: inconsistenciaRunt
+            ? prev.cliente_documento
+            : normalizedFromRunt || prev.cliente_documento,
           cliente_nombre: data.titular_nombre ? String(data.titular_nombre).toUpperCase() : prev.cliente_nombre,
         };
       });
@@ -860,12 +898,21 @@ export default function Recepcion() {
     },
     onError: (error: any) => {
       const errorMessage = error?.response?.data?.detail || 'No fue posible consultar RUNT en este momento.';
+      const statusCode = Number(error?.response?.status || 0);
       setRuntSugerencia(null);
-      showToast(
-        'error',
-        'Error consultando RUNT',
-        typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage)
-      );
+      if (statusCode >= 500) {
+        showToast(
+          'warning',
+          'Proveedor RUNT no disponible',
+          'El proveedor externo rechazó o no pudo procesar la consulta. Intenta nuevamente o continúa con registro manual.'
+        );
+      } else {
+        showToast(
+          'error',
+          'Error consultando RUNT',
+          typeof errorMessage === 'string' ? errorMessage : JSON.stringify(errorMessage)
+        );
+      }
     },
   });
 
@@ -1240,6 +1287,23 @@ export default function Recepcion() {
       showToast('warning', 'Placa incompleta', 'Ingresa una placa válida antes de consultar.');
       return;
     }
+    const documentInputRaw = (consultaRunt.document_number || '').trim();
+    const documentNormalizedForCheck = normalizarDocumentoCliente(
+      documentInputRaw,
+      consultaRunt.document_type as VehiculoRegistro['cliente_tipo_documento']
+    );
+    const inconsistenciaConsulta = validarConsistenciaDocumentoCliente(
+      consultaRunt.document_type as VehiculoRegistro['cliente_tipo_documento'],
+      documentNormalizedForCheck
+    );
+    if (inconsistenciaConsulta) {
+      showToast(
+        'warning',
+        'Tipo de documento no coincide',
+        inconsistenciaConsulta
+      );
+      return;
+    }
     const documentNumber = (consultaRunt.document_number || '').replace(/\D/g, '');
     consultarRuntMutation.mutate({
       placa,
@@ -1477,11 +1541,19 @@ export default function Recepcion() {
     const clienteEmailNormalizado = (formData.cliente_email || '').trim().toLowerCase();
     const telDigits = (formData.cliente_telefono || '').replace(/\D/g, '');
     if (telDigits.length < 7) {
-      alert('Ingrese un celular válido (mínimo 7 dígitos).');
+      showToast('warning', 'Celular inválido', 'Ingrese un celular válido (mínimo 7 dígitos).');
       return;
     }
     if (!clienteEmailNormalizado || !clienteEmailNormalizado.includes('@')) {
-      alert('Ingrese un correo electrónico válido.');
+      showToast('warning', 'Correo inválido', 'Ingrese un correo electrónico válido.');
+      return;
+    }
+    const inconsistenciaDocumento = validarConsistenciaDocumentoCliente(
+      formData.cliente_tipo_documento,
+      formData.cliente_documento
+    );
+    if (inconsistenciaDocumento) {
+      showToast('warning', 'Tipo de documento no coincide', inconsistenciaDocumento);
       return;
     }
     const dirCliente = (formData.cliente_direccion || '').trim();
@@ -2896,10 +2968,15 @@ export default function Recepcion() {
                   value={formData.cliente_tipo_documento}
                   onChange={(e) => {
                     const nextDocType = e.target.value as VehiculoRegistro['cliente_tipo_documento'];
+                    const docActual = normalizarDocumentoCliente(formData.cliente_documento, nextDocType);
+                    const inconsistencia = validarConsistenciaDocumentoCliente(nextDocType, docActual);
+                    if (inconsistencia) {
+                      showToast('warning', 'Tipo de documento no coincide', inconsistencia);
+                    }
                     setFormData((prev) => ({
                       ...prev,
                       cliente_tipo_documento: nextDocType,
-                      cliente_documento: normalizarDocumentoCliente(prev.cliente_documento, nextDocType),
+                      cliente_documento: docActual,
                     }));
                   }}
                   required
@@ -2925,6 +3002,15 @@ export default function Recepcion() {
                       'cliente_documento',
                       normalizarDocumentoCliente(e.target.value, formData.cliente_tipo_documento)
                     );
+                  }}
+                  onBlur={() => {
+                    const inconsistencia = validarConsistenciaDocumentoCliente(
+                      formData.cliente_tipo_documento,
+                      formData.cliente_documento
+                    );
+                    if (inconsistencia) {
+                      showToast('warning', 'Tipo de documento no coincide', inconsistencia);
+                    }
                   }}
                   maxLength={20}
                   required
