@@ -11,6 +11,8 @@ export interface RuntMetricasProviderRow {
 
 export interface RuntMetricasSummary {
   periodo_dias: number;
+  from_date?: string;
+  to_date?: string;
   total_consultas: number;
   success_count: number;
   empty_count: number;
@@ -43,6 +45,9 @@ export interface RuntMetricasSummary {
     placaapi_resueltas: number;
     placaapi_costo_resuelto_cop: number;
     placaapi_costo_resuelto_usd: number;
+    coresoft_resueltas: number;
+    coresoft_costo_resuelto_cop: number;
+    coresoft_costo_resuelto_usd: number;
     verifik_resueltas: number;
     verifik_costo_resuelto_cop: number;
     verifik_costo_resuelto_usd: number;
@@ -51,9 +56,18 @@ export interface RuntMetricasSummary {
 }
 
 export const runtMetricasApi = {
-  getSummary: async (days: number = 30, tenantId?: string): Promise<RuntMetricasSummary> => {
+  getSummary: async (
+    days: number = 30,
+    tenantId?: string,
+    range?: { fromDateIso?: string; toDateIso?: string }
+  ): Promise<RuntMetricasSummary> => {
     const response = await apiClient.get<RuntMetricasSummary>('/runt-metricas/summary', {
-      params: { days, tenant_id: tenantId || undefined },
+      params: {
+        days,
+        tenant_id: tenantId || undefined,
+        from_date: range?.fromDateIso || undefined,
+        to_date: range?.toDateIso || undefined,
+      },
     });
     return response.data;
   },

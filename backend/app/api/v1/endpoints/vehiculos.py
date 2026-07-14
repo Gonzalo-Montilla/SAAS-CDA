@@ -48,6 +48,7 @@ from app.integrations.factus_client import (
     validate_credit_note,
 )
 from app.integrations.placaapi_runt import PlacaApiRuntError, consultar_placaapi_por_placa
+from app.integrations.coresoft_runt import CoreSoftRuntError, consultar_coresoft_runt_por_placa
 from app.integrations.verifik_runt import VerifikRuntError, consultar_runt_vehiculo_por_placa
 from app.integrations.factus_emit import (
     build_validate_body,
@@ -424,6 +425,9 @@ def _runt_provider_cost(provider: str, *, cached: bool) -> tuple[Decimal, Decima
     if p == "placaapi":
         usd = Decimal(str(settings.RUNT_COST_PLACAAPI_USD or 0))
         cop_fallback = Decimal(str(settings.RUNT_COST_PLACAAPI_COP or 0))
+    elif p == "coresoft":
+        usd = Decimal(str(settings.RUNT_COST_CORESOFT_USD or 0))
+        cop_fallback = Decimal(str(settings.RUNT_COST_CORESOFT_COP or 0))
     elif p == "verifik":
         usd = Decimal(str(settings.RUNT_COST_VERIFIK_USD or 0))
         cop_fallback = Decimal(str(settings.RUNT_COST_VERIFIK_COP or 0))
@@ -644,7 +648,7 @@ def consultar_runt_por_placa(
     active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
-    Consulta externa por placa (Verifik o PlacaAPI), normalizada para autocompletado en recepción.
+    Consulta externa por placa (PlacaAPI, CoreSoft o Verifik), normalizada para autocompletado en recepción.
     No registra ni modifica vehículos.
     """
     provider = (settings.RUNT_LOOKUP_PROVIDER or "verifik").strip().lower()
@@ -683,6 +687,9 @@ def consultar_runt_por_placa(
         return cache_hit
 
     doc_number_digits = re.sub(r"\D", "", (document_number or "").strip())
+    can_try_coresoft_fallback = bool(
+        settings.RUNT_FALLBACK_TO_CORESOFT_ON_EMPTY and settings.CORESOFT_ENABLED and doc_number_digits
+    )
     can_try_verifik_fallback = bool(
         settings.RUNT_FALLBACK_TO_VERIFIK_ON_EMPTY and settings.VERIFIK_ENABLED and doc_number_digits
     )
@@ -693,6 +700,8 @@ def consultar_runt_por_placa(
     fx_rate_applied = Decimal(str(settings.RUNT_FX_USD_COP or 0))
     placa_cost_cop = Decimal("0")
     placa_cost_usd = Decimal("0")
+    coresoft_cost_cop = Decimal("0")
+    coresoft_cost_usd = Decimal("0")
     verifik_cost_cop = Decimal("0")
     verifik_cost_usd = Decimal("0")
     try:
@@ -741,6 +750,57 @@ def consultar_runt_por_placa(
                     result=placaapi_result,
                 )
                 return placaapi_result
+            if can_try_coresoft_fallback:
+                fallback_used = True
+                attempted.append("coresoft")
+                try:
+                    coresoft_result = consultar_coresoft_runt_por_placa(
+                        placa,
+                        documento=document_number or "",
+                    )
+                    cop, usd, fx = _runt_provider_cost("coresoft", cached=bool(coresoft_result.get("cached")))
+                    estimated_cost_cop += cop
+                    estimated_cost_usd += usd
+                    fx_rate_applied = fx
+                    coresoft_cost_cop += cop
+                    coresoft_cost_usd += usd
+                    if bool(coresoft_result.get("encontrado")):
+                        _guardar_metrica_runt(
+                            db,
+                            tenant_id=current_user.tenant_id,
+                            sucursal_id=active_sucursal_id,
+                            usuario_id=current_user.id,
+                            placa=placa,
+                            document_type=document_type,
+                            document_number=document_number,
+                            provider_configured=provider,
+                            provider_resolved="coresoft",
+                            providers_attempted=attempted,
+                            fallback_used=True,
+                            status="success",
+                            encontrado=True,
+                            cached=bool(coresoft_result.get("cached")),
+                            estimated_cost_cop=estimated_cost_cop,
+                            estimated_cost_usd=estimated_cost_usd,
+                            resolved_cost_cop=coresoft_cost_cop,
+                            resolved_cost_usd=coresoft_cost_usd,
+                            fallback_extra_cost_cop=placa_cost_cop,
+                            fallback_extra_cost_usd=placa_cost_usd,
+                            fx_rate_usd_cop_applied=fx_rate_applied,
+                        )
+                        _guardar_cache_runt_interno(
+                            db,
+                            tenant_id=current_user.tenant_id,
+                            sucursal_id=active_sucursal_id,
+                            placa=placa_norm,
+                            doc_type=doc_type_norm or _normalize_runt_doc_type(str(coresoft_result.get("document_type") or "")),
+                            doc_number=doc_number_norm or _normalize_runt_doc_number(str(coresoft_result.get("document_number") or "")),
+                            provider_resolved="coresoft",
+                            result=coresoft_result,
+                        )
+                        return coresoft_result
+                except CoreSoftRuntError:
+                    pass
             if can_try_verifik_fallback:
                 fallback_used = True
                 attempted.append("verifik")
@@ -775,8 +835,8 @@ def consultar_runt_por_placa(
                         estimated_cost_usd=estimated_cost_usd,
                         resolved_cost_cop=verifik_cost_cop,
                         resolved_cost_usd=verifik_cost_usd,
-                        fallback_extra_cost_cop=placa_cost_cop,
-                        fallback_extra_cost_usd=placa_cost_usd,
+                        fallback_extra_cost_cop=placa_cost_cop + coresoft_cost_cop,
+                        fallback_extra_cost_usd=placa_cost_usd + coresoft_cost_usd,
                         fx_rate_usd_cop_applied=fx_rate_applied,
                     )
                     _guardar_cache_runt_interno(
@@ -791,40 +851,7 @@ def consultar_runt_por_placa(
                     )
                     return verifik_result
                 except VerifikRuntError:
-                    _guardar_metrica_runt(
-                        db,
-                        tenant_id=current_user.tenant_id,
-                        sucursal_id=active_sucursal_id,
-                        usuario_id=current_user.id,
-                        placa=placa,
-                        document_type=document_type,
-                        document_number=document_number,
-                        provider_configured=provider,
-                        provider_resolved="placaapi",
-                        providers_attempted=attempted,
-                        fallback_used=True,
-                        status="empty",
-                        encontrado=False,
-                        cached=bool(placaapi_result.get("cached")),
-                        estimated_cost_cop=estimated_cost_cop,
-                        estimated_cost_usd=estimated_cost_usd,
-                        resolved_cost_cop=placa_cost_cop,
-                        resolved_cost_usd=placa_cost_usd,
-                        fallback_extra_cost_cop=verifik_cost_cop,
-                        fallback_extra_cost_usd=verifik_cost_usd,
-                        fx_rate_usd_cop_applied=fx_rate_applied,
-                    )
-                    _guardar_cache_runt_interno(
-                        db,
-                        tenant_id=current_user.tenant_id,
-                        sucursal_id=active_sucursal_id,
-                        placa=placa_norm,
-                        doc_type=doc_type_norm,
-                        doc_number=doc_number_norm,
-                        provider_resolved="placaapi",
-                        result=placaapi_result,
-                    )
-                    return placaapi_result
+                    pass
             _guardar_metrica_runt(
                 db,
                 tenant_id=current_user.tenant_id,
@@ -844,6 +871,8 @@ def consultar_runt_por_placa(
                 estimated_cost_usd=estimated_cost_usd,
                 resolved_cost_cop=placa_cost_cop,
                 resolved_cost_usd=placa_cost_usd,
+                fallback_extra_cost_cop=coresoft_cost_cop + verifik_cost_cop,
+                fallback_extra_cost_usd=coresoft_cost_usd + verifik_cost_usd,
                 fx_rate_usd_cop_applied=fx_rate_applied,
             )
             _guardar_cache_runt_interno(
@@ -857,6 +886,131 @@ def consultar_runt_por_placa(
                 result=placaapi_result,
             )
             return placaapi_result
+        if provider == "coresoft":
+            attempted.append("coresoft")
+            coresoft_result = consultar_coresoft_runt_por_placa(
+                placa,
+                documento=document_number or "",
+            )
+            cop, usd, fx = _runt_provider_cost("coresoft", cached=bool(coresoft_result.get("cached")))
+            estimated_cost_cop += cop
+            estimated_cost_usd += usd
+            fx_rate_applied = fx
+            coresoft_cost_cop += cop
+            coresoft_cost_usd += usd
+            if bool(coresoft_result.get("encontrado")):
+                _guardar_metrica_runt(
+                    db,
+                    tenant_id=current_user.tenant_id,
+                    sucursal_id=active_sucursal_id,
+                    usuario_id=current_user.id,
+                    placa=placa,
+                    document_type=document_type,
+                    document_number=document_number,
+                    provider_configured=provider,
+                    provider_resolved="coresoft",
+                    providers_attempted=attempted,
+                    fallback_used=False,
+                    status="success",
+                    encontrado=True,
+                    cached=bool(coresoft_result.get("cached")),
+                    estimated_cost_cop=estimated_cost_cop,
+                    estimated_cost_usd=estimated_cost_usd,
+                    resolved_cost_cop=coresoft_cost_cop,
+                    resolved_cost_usd=coresoft_cost_usd,
+                    fx_rate_usd_cop_applied=fx_rate_applied,
+                )
+                _guardar_cache_runt_interno(
+                    db,
+                    tenant_id=current_user.tenant_id,
+                    sucursal_id=active_sucursal_id,
+                    placa=placa_norm,
+                    doc_type=doc_type_norm or _normalize_runt_doc_type(str(coresoft_result.get("document_type") or "")),
+                    doc_number=doc_number_norm or _normalize_runt_doc_number(str(coresoft_result.get("document_number") or "")),
+                    provider_resolved="coresoft",
+                    result=coresoft_result,
+                )
+                return coresoft_result
+            if can_try_verifik_fallback:
+                fallback_used = True
+                attempted.append("verifik")
+                verifik_result = consultar_runt_vehiculo_por_placa(
+                    placa,
+                    document_type=document_type,
+                    document_number=document_number,
+                )
+                cop, usd, fx = _runt_provider_cost("verifik", cached=bool(verifik_result.get("cached")))
+                estimated_cost_cop += cop
+                estimated_cost_usd += usd
+                fx_rate_applied = fx
+                verifik_cost_cop += cop
+                verifik_cost_usd += usd
+                _guardar_metrica_runt(
+                    db,
+                    tenant_id=current_user.tenant_id,
+                    sucursal_id=active_sucursal_id,
+                    usuario_id=current_user.id,
+                    placa=placa,
+                    document_type=document_type,
+                    document_number=document_number,
+                    provider_configured=provider,
+                    provider_resolved="verifik",
+                    providers_attempted=attempted,
+                    fallback_used=True,
+                    status="success" if bool(verifik_result.get("encontrado")) else "empty",
+                    encontrado=bool(verifik_result.get("encontrado")),
+                    cached=bool(verifik_result.get("cached")),
+                    estimated_cost_cop=estimated_cost_cop,
+                    estimated_cost_usd=estimated_cost_usd,
+                    resolved_cost_cop=verifik_cost_cop,
+                    resolved_cost_usd=verifik_cost_usd,
+                    fallback_extra_cost_cop=coresoft_cost_cop,
+                    fallback_extra_cost_usd=coresoft_cost_usd,
+                    fx_rate_usd_cop_applied=fx_rate_applied,
+                )
+                _guardar_cache_runt_interno(
+                    db,
+                    tenant_id=current_user.tenant_id,
+                    sucursal_id=active_sucursal_id,
+                    placa=placa_norm,
+                    doc_type=doc_type_norm or _normalize_runt_doc_type(str(verifik_result.get("document_type") or "")),
+                    doc_number=doc_number_norm or _normalize_runt_doc_number(str(verifik_result.get("document_number") or "")),
+                    provider_resolved="verifik",
+                    result=verifik_result,
+                )
+                return verifik_result
+            _guardar_metrica_runt(
+                db,
+                tenant_id=current_user.tenant_id,
+                sucursal_id=active_sucursal_id,
+                usuario_id=current_user.id,
+                placa=placa,
+                document_type=document_type,
+                document_number=document_number,
+                provider_configured=provider,
+                provider_resolved="coresoft",
+                providers_attempted=attempted,
+                fallback_used=False,
+                status="empty",
+                encontrado=False,
+                cached=bool(coresoft_result.get("cached")),
+                estimated_cost_cop=estimated_cost_cop,
+                estimated_cost_usd=estimated_cost_usd,
+                resolved_cost_cop=coresoft_cost_cop,
+                resolved_cost_usd=coresoft_cost_usd,
+                fx_rate_usd_cop_applied=fx_rate_applied,
+            )
+            _guardar_cache_runt_interno(
+                db,
+                tenant_id=current_user.tenant_id,
+                sucursal_id=active_sucursal_id,
+                placa=placa_norm,
+                doc_type=doc_type_norm,
+                doc_number=doc_number_norm,
+                provider_resolved="coresoft",
+                result=coresoft_result,
+            )
+            return coresoft_result
         attempted.append("verifik")
         verifik_result = consultar_runt_vehiculo_por_placa(
             placa,
@@ -921,8 +1075,8 @@ def consultar_runt_por_placa(
             estimated_cost_usd=estimated_cost_usd,
             resolved_cost_cop=verifik_cost_cop,
             resolved_cost_usd=verifik_cost_usd,
-            fallback_extra_cost_cop=placa_cost_cop,
-            fallback_extra_cost_usd=placa_cost_usd,
+            fallback_extra_cost_cop=placa_cost_cop + coresoft_cost_cop,
+            fallback_extra_cost_usd=placa_cost_usd + coresoft_cost_usd,
             fx_rate_usd_cop_applied=fx_rate_applied,
             error_detail=str(exc),
         )
@@ -931,7 +1085,137 @@ def consultar_runt_por_placa(
         # cuando el fallo realmente ocurre fuera de CDASOFT.
         status_code = 502 if raw_status_code >= 500 else raw_status_code
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+    except CoreSoftRuntError as exc:
+        if provider == "coresoft" and can_try_verifik_fallback:
+            try:
+                attempted.append("verifik")
+                fallback_used = True
+                verifik_result = consultar_runt_vehiculo_por_placa(
+                    placa,
+                    document_type=document_type,
+                    document_number=document_number,
+                )
+                cop, usd, fx = _runt_provider_cost("verifik", cached=bool(verifik_result.get("cached")))
+                estimated_cost_cop += cop
+                estimated_cost_usd += usd
+                fx_rate_applied = fx
+                verifik_cost_cop += cop
+                verifik_cost_usd += usd
+                _guardar_metrica_runt(
+                    db,
+                    tenant_id=current_user.tenant_id,
+                    sucursal_id=active_sucursal_id,
+                    usuario_id=current_user.id,
+                    placa=placa,
+                    document_type=document_type,
+                    document_number=document_number,
+                    provider_configured=provider,
+                    provider_resolved="verifik",
+                    providers_attempted=attempted,
+                    fallback_used=True,
+                    status="success" if bool(verifik_result.get("encontrado")) else "empty",
+                    encontrado=bool(verifik_result.get("encontrado")),
+                    cached=bool(verifik_result.get("cached")),
+                    estimated_cost_cop=estimated_cost_cop,
+                    estimated_cost_usd=estimated_cost_usd,
+                    resolved_cost_cop=verifik_cost_cop,
+                    resolved_cost_usd=verifik_cost_usd,
+                    fallback_extra_cost_cop=coresoft_cost_cop,
+                    fallback_extra_cost_usd=coresoft_cost_usd,
+                    fx_rate_usd_cop_applied=fx_rate_applied,
+                )
+                _guardar_cache_runt_interno(
+                    db,
+                    tenant_id=current_user.tenant_id,
+                    sucursal_id=active_sucursal_id,
+                    placa=placa_norm,
+                    doc_type=doc_type_norm or _normalize_runt_doc_type(str(verifik_result.get("document_type") or "")),
+                    doc_number=doc_number_norm or _normalize_runt_doc_number(str(verifik_result.get("document_number") or "")),
+                    provider_resolved="verifik",
+                    result=verifik_result,
+                )
+                return verifik_result
+            except VerifikRuntError:
+                pass
+        _guardar_metrica_runt(
+            db,
+            tenant_id=current_user.tenant_id,
+            sucursal_id=active_sucursal_id,
+            usuario_id=current_user.id,
+            placa=placa,
+            document_type=document_type,
+            document_number=document_number,
+            provider_configured=provider,
+            provider_resolved="coresoft",
+            providers_attempted=attempted or ["coresoft"],
+            fallback_used=fallback_used,
+            status="error",
+            encontrado=False,
+            cached=False,
+            estimated_cost_cop=estimated_cost_cop,
+            estimated_cost_usd=estimated_cost_usd,
+            resolved_cost_cop=coresoft_cost_cop,
+            resolved_cost_usd=coresoft_cost_usd,
+            fallback_extra_cost_cop=verifik_cost_cop,
+            fallback_extra_cost_usd=verifik_cost_usd,
+            fx_rate_usd_cop_applied=fx_rate_applied,
+            error_detail=str(exc),
+        )
+        raw_status_code = exc.status_code if exc.status_code and 100 <= exc.status_code < 600 else 400
+        status_code = 502 if raw_status_code >= 500 else raw_status_code
+        raise HTTPException(status_code=status_code, detail=str(exc)) from exc
     except PlacaApiRuntError as exc:
+        if provider == "placaapi" and can_try_coresoft_fallback:
+            try:
+                attempted.append("coresoft")
+                fallback_used = True
+                coresoft_result = consultar_coresoft_runt_por_placa(
+                    placa,
+                    documento=document_number or "",
+                )
+                cop, usd, fx = _runt_provider_cost("coresoft", cached=bool(coresoft_result.get("cached")))
+                estimated_cost_cop += cop
+                estimated_cost_usd += usd
+                fx_rate_applied = fx
+                coresoft_cost_cop += cop
+                coresoft_cost_usd += usd
+                if bool(coresoft_result.get("encontrado")):
+                    _guardar_metrica_runt(
+                        db,
+                        tenant_id=current_user.tenant_id,
+                        sucursal_id=active_sucursal_id,
+                        usuario_id=current_user.id,
+                        placa=placa,
+                        document_type=document_type,
+                        document_number=document_number,
+                        provider_configured=provider,
+                        provider_resolved="coresoft",
+                        providers_attempted=attempted,
+                        fallback_used=True,
+                        status="success",
+                        encontrado=True,
+                        cached=bool(coresoft_result.get("cached")),
+                        estimated_cost_cop=estimated_cost_cop,
+                        estimated_cost_usd=estimated_cost_usd,
+                        resolved_cost_cop=coresoft_cost_cop,
+                        resolved_cost_usd=coresoft_cost_usd,
+                        fallback_extra_cost_cop=placa_cost_cop,
+                        fallback_extra_cost_usd=placa_cost_usd,
+                        fx_rate_usd_cop_applied=fx_rate_applied,
+                    )
+                    _guardar_cache_runt_interno(
+                        db,
+                        tenant_id=current_user.tenant_id,
+                        sucursal_id=active_sucursal_id,
+                        placa=placa_norm,
+                        doc_type=doc_type_norm or _normalize_runt_doc_type(str(coresoft_result.get("document_type") or "")),
+                        doc_number=doc_number_norm or _normalize_runt_doc_number(str(coresoft_result.get("document_number") or "")),
+                        provider_resolved="coresoft",
+                        result=coresoft_result,
+                    )
+                    return coresoft_result
+            except CoreSoftRuntError:
+                pass
         if provider == "placaapi" and can_try_verifik_fallback:
             try:
                 attempted.append("verifik")
@@ -966,8 +1250,8 @@ def consultar_runt_por_placa(
                     estimated_cost_usd=estimated_cost_usd,
                     resolved_cost_cop=verifik_cost_cop,
                     resolved_cost_usd=verifik_cost_usd,
-                    fallback_extra_cost_cop=placa_cost_cop,
-                    fallback_extra_cost_usd=placa_cost_usd,
+                    fallback_extra_cost_cop=placa_cost_cop + coresoft_cost_cop,
+                    fallback_extra_cost_usd=placa_cost_usd + coresoft_cost_usd,
                     fx_rate_usd_cop_applied=fx_rate_applied,
                 )
                 _guardar_cache_runt_interno(
@@ -1002,8 +1286,8 @@ def consultar_runt_por_placa(
             estimated_cost_usd=estimated_cost_usd,
             resolved_cost_cop=placa_cost_cop,
             resolved_cost_usd=placa_cost_usd,
-            fallback_extra_cost_cop=verifik_cost_cop,
-            fallback_extra_cost_usd=verifik_cost_usd,
+            fallback_extra_cost_cop=coresoft_cost_cop + verifik_cost_cop,
+            fallback_extra_cost_usd=coresoft_cost_usd + verifik_cost_usd,
             fx_rate_usd_cop_applied=fx_rate_applied,
             error_detail=str(exc),
         )

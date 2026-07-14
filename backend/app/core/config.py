@@ -107,8 +107,16 @@ class Settings(BaseSettings):
         env="VERIFIK_RUNT_DEFAULT_DOCUMENT_TYPE",
     )
     VERIFIK_RUNT_CACHE_TTL_SECONDS: int = Field(default=600, ge=0, le=86400, env="VERIFIK_RUNT_CACHE_TTL_SECONDS")
+    # Integración RUNT alternativa (CoreSoft) para fallback de costo controlado.
+    CORESOFT_ENABLED: bool = Field(default=False, env="CORESOFT_ENABLED")
+    CORESOFT_BASE_URL: str = Field(default="https://coresoft.solutions", env="CORESOFT_BASE_URL")
+    CORESOFT_API_KEY: str = Field(default="", env="CORESOFT_API_KEY")
+    CORESOFT_TIMEOUT_SECONDS: float = Field(default=15.0, ge=1.0, le=60.0, env="CORESOFT_TIMEOUT_SECONDS")
+    CORESOFT_RUNT_SERVICE_PATH: str = Field(default="/api/runt", env="CORESOFT_RUNT_SERVICE_PATH")
+    CORESOFT_RUNT_CACHE_TTL_SECONDS: int = Field(default=600, ge=0, le=86400, env="CORESOFT_RUNT_CACHE_TTL_SECONDS")
     # Proveedor alterno económico para autocompletar datos técnicos del vehículo por placa.
     RUNT_LOOKUP_PROVIDER: str = Field(default="verifik", env="RUNT_LOOKUP_PROVIDER")
+    RUNT_FALLBACK_TO_CORESOFT_ON_EMPTY: bool = Field(default=True, env="RUNT_FALLBACK_TO_CORESOFT_ON_EMPTY")
     RUNT_FALLBACK_TO_VERIFIK_ON_EMPTY: bool = Field(default=True, env="RUNT_FALLBACK_TO_VERIFIK_ON_EMPTY")
     PLACAAPI_ENABLED: bool = Field(default=False, env="PLACAAPI_ENABLED")
     PLACAAPI_BASE_URL: str = Field(default="https://www.regcheck.org.uk", env="PLACAAPI_BASE_URL")
@@ -130,9 +138,11 @@ class Settings(BaseSettings):
         env="RUNT_FX_AUTO_URL",
     )
     RUNT_COST_PLACAAPI_USD: float = Field(default=0.02, ge=0.0, env="RUNT_COST_PLACAAPI_USD")
+    RUNT_COST_CORESOFT_USD: float = Field(default=0.0, ge=0.0, env="RUNT_COST_CORESOFT_USD")
     RUNT_COST_VERIFIK_USD: float = Field(default=0.20, ge=0.0, env="RUNT_COST_VERIFIK_USD")
     # Compatibilidad temporal: fallback si no hay costos USD configurados.
     RUNT_COST_PLACAAPI_COP: float = Field(default=74.0, ge=0.0, env="RUNT_COST_PLACAAPI_COP")
+    RUNT_COST_CORESOFT_COP: float = Field(default=79.33, ge=0.0, env="RUNT_COST_CORESOFT_COP")
     RUNT_COST_VERIFIK_COP: float = Field(default=740.0, ge=0.0, env="RUNT_COST_VERIFIK_COP")
 
     # SARLAFT - OpenSanctions (screening externo)

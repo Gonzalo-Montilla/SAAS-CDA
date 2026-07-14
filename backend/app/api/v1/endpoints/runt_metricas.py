@@ -6,7 +6,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy import and_, func, case
 from sqlalchemy.orm import Session
 
@@ -27,15 +27,32 @@ def _window(days: int) -> tuple[datetime, datetime]:
     return start, end
 
 
+def _as_naive_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value
+    return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
 @router.get("/summary")
 def resumen_metricas_runt(
     days: int = Query(default=30, ge=0, le=365),
+    from_date: datetime | None = Query(default=None, description="Fecha inicio (inclusive, UTC)."),
+    to_date: datetime | None = Query(default=None, description="Fecha fin (inclusive, UTC)."),
     tenant_id: Optional[UUID] = Query(default=None),
     sucursal_id: Optional[UUID] = Query(default=None),
     db: Session = Depends(get_db),
     current_user: SaaSUser = Depends(require_saas_role(["owner", "finanzas", "comercial", "soporte"])),
 ):
-    start_dt, end_dt = _window(days)
+    custom_range = from_date is not None or to_date is not None
+    if custom_range:
+        end_dt = _as_naive_utc(to_date) or datetime.now(timezone.utc).replace(tzinfo=None)
+        start_dt = _as_naive_utc(from_date) or (end_dt - timedelta(days=30))
+        if start_dt > end_dt:
+            raise HTTPException(status_code=400, detail="from_date no puede ser mayor que to_date")
+    else:
+        start_dt, end_dt = _window(days)
     base = [
         RuntConsultaMetrica.created_at >= start_dt,
         RuntConsultaMetrica.created_at <= end_dt,
@@ -278,6 +295,51 @@ def resumen_metricas_runt(
                     case(
                         (
                             and_(
+                                RuntConsultaMetrica.provider_resolved == "coresoft",
+                                RuntConsultaMetrica.status == "success",
+                            ),
+                            1,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            and_(
+                                RuntConsultaMetrica.provider_resolved == "coresoft",
+                                RuntConsultaMetrica.status == "success",
+                            ),
+                            resolved_cost_cop_effective,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            and_(
+                                RuntConsultaMetrica.provider_resolved == "coresoft",
+                                RuntConsultaMetrica.status == "success",
+                            ),
+                            resolved_cost_usd_effective,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (
+                            and_(
                                 RuntConsultaMetrica.provider_resolved == "verifik",
                                 RuntConsultaMetrica.status == "success",
                             ),
@@ -342,15 +404,20 @@ def resumen_metricas_runt(
             "placaapi_resueltas": int(r[10] or 0),
             "placaapi_costo_resuelto_cop": float(r[11] or 0),
             "placaapi_costo_resuelto_usd": float(r[12] or 0),
-            "verifik_resueltas": int(r[13] or 0),
-            "verifik_costo_resuelto_cop": float(r[14] or 0),
-            "verifik_costo_resuelto_usd": float(r[15] or 0),
+            "coresoft_resueltas": int(r[13] or 0),
+            "coresoft_costo_resuelto_cop": float(r[14] or 0),
+            "coresoft_costo_resuelto_usd": float(r[15] or 0),
+            "verifik_resueltas": int(r[16] or 0),
+            "verifik_costo_resuelto_cop": float(r[17] or 0),
+            "verifik_costo_resuelto_usd": float(r[18] or 0),
         }
         for r in tenant_rows
     ]
 
     return {
         "periodo_dias": days,
+        "from_date": start_dt.isoformat(),
+        "to_date": end_dt.isoformat(),
         "total_consultas": int(total),
         "success_count": int(success),
         "empty_count": int(empty),

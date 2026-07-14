@@ -83,6 +83,7 @@ const TABLE_DENSITY_STORAGE_KEY = 'saas_backoffice_table_density';
 type TenantProfileSection = 'brandAccess' | 'sedes' | 'factus' | 'billing' | 'payments' | 'users';
 type CheckoutSessionsViewTab = 'all' | 'pending' | 'paid' | 'fe_issue';
 const OPENSANCTIONS_CUSTOM_WINDOW = -1;
+const RUNT_CUSTOM_WINDOW = -1;
 const BOGOTA_TIME_ZONE = 'America/Bogota';
 const BOGOTA_UTC_OFFSET_HOURS = -5;
 
@@ -134,6 +135,11 @@ export default function SaaSBackoffice() {
   const [activeModule, setActiveModule] = useState<BackofficeModule>('resumen');
   const [runtMetricasDays, setRuntMetricasDays] = useState<number>(30);
   const [runtMetricasTenantId, setRuntMetricasTenantId] = useState<string>('');
+  const [runtDateFrom, setRuntDateFrom] = useState<string>(() => {
+    const today = toBogotaYmd(new Date());
+    return shiftYmd(today, -29);
+  });
+  const [runtDateTo, setRuntDateTo] = useState<string>(() => toBogotaYmd(new Date()));
   const [opensanctionsDays, setOpensanctionsDays] = useState<number>(30);
   const [opensanctionsDateFrom, setOpensanctionsDateFrom] = useState<string>(() => {
     const today = toBogotaYmd(new Date());
@@ -236,28 +242,38 @@ export default function SaaSBackoffice() {
 
   const getTenantProviderEfficiency = (
     row: RuntMetricasSummary['by_tenant'][number],
-  ): { placaapi: boolean; verifik: boolean } => {
+  ): { placaapi: boolean; coresoft: boolean; verifik: boolean } => {
     const placaapiResueltas = Number(row.placaapi_resueltas || 0);
+    const coresoftResueltas = Number(row.coresoft_resueltas || 0);
     const verifikResueltas = Number(row.verifik_resueltas || 0);
-    if (placaapiResueltas <= 0 && verifikResueltas <= 0) {
-      return { placaapi: false, verifik: false };
+    const candidates: Array<{ key: 'placaapi' | 'coresoft' | 'verifik'; promedio: number }> = [];
+    if (placaapiResueltas > 0) {
+      candidates.push({
+        key: 'placaapi',
+        promedio: Number(row.placaapi_costo_resuelto_cop || 0) / placaapiResueltas,
+      });
     }
-    if (placaapiResueltas > 0 && verifikResueltas <= 0) {
-      return { placaapi: true, verifik: false };
+    if (coresoftResueltas > 0) {
+      candidates.push({
+        key: 'coresoft',
+        promedio: Number(row.coresoft_costo_resuelto_cop || 0) / coresoftResueltas,
+      });
     }
-    if (verifikResueltas > 0 && placaapiResueltas <= 0) {
-      return { placaapi: false, verifik: true };
+    if (verifikResueltas > 0) {
+      candidates.push({
+        key: 'verifik',
+        promedio: Number(row.verifik_costo_resuelto_cop || 0) / verifikResueltas,
+      });
     }
-    const placaapiPromedio = Number(row.placaapi_costo_resuelto_cop || 0) / placaapiResueltas;
-    const verifikPromedio = Number(row.verifik_costo_resuelto_cop || 0) / verifikResueltas;
-    const delta = Math.abs(placaapiPromedio - verifikPromedio);
-    // Si son prácticamente iguales, se marcan ambos para evitar sesgo visual.
-    if (delta <= 0.01) {
-      return { placaapi: true, verifik: true };
+    if (candidates.length === 0) {
+      return { placaapi: false, coresoft: false, verifik: false };
     }
+    const minPromedio = Math.min(...candidates.map((c) => c.promedio));
+    const delta = 0.01;
     return {
-      placaapi: placaapiPromedio < verifikPromedio,
-      verifik: verifikPromedio < placaapiPromedio,
+      placaapi: candidates.some((c) => c.key === 'placaapi' && Math.abs(c.promedio - minPromedio) <= delta),
+      coresoft: candidates.some((c) => c.key === 'coresoft' && Math.abs(c.promedio - minPromedio) <= delta),
+      verifik: candidates.some((c) => c.key === 'verifik' && Math.abs(c.promedio - minPromedio) <= delta),
     };
   };
 
@@ -476,12 +492,25 @@ export default function SaaSBackoffice() {
     },
   });
 
+  const runtCustomRangeInvalid =
+    runtMetricasDays === RUNT_CUSTOM_WINDOW && (!runtDateFrom || !runtDateTo || runtDateFrom > runtDateTo);
+
   const runtMetricasQuery = useQuery({
-    queryKey: ['saas-runt-metricas-summary', runtMetricasDays, runtMetricasTenantId],
+    queryKey: ['saas-runt-metricas-summary', runtMetricasDays, runtMetricasTenantId, runtDateFrom, runtDateTo],
     queryFn: async () => {
+      if (runtMetricasDays === RUNT_CUSTOM_WINDOW) {
+        return runtMetricasApi.getSummary(
+          30,
+          runtMetricasTenantId || undefined,
+          {
+            fromDateIso: bogotaDayStartUtcIso(runtDateFrom),
+            toDateIso: bogotaDayEndUtcIso(runtDateTo),
+          }
+        );
+      }
       return runtMetricasApi.getSummary(runtMetricasDays, runtMetricasTenantId || undefined);
     },
-    enabled: activeModule === 'runt_metricas',
+    enabled: activeModule === 'runt_metricas' && !runtCustomRangeInvalid,
     refetchInterval: activeModule === 'runt_metricas' ? 30000 : false,
   });
 
@@ -1366,6 +1395,7 @@ export default function SaaSBackoffice() {
                   <option value={7}>7 días</option>
                   <option value={30}>30 días</option>
                   <option value={90}>90 días</option>
+                  <option value={RUNT_CUSTOM_WINDOW}>Rango personalizado</option>
                 </select>
               </label>
               <label className="text-sm text-slate-700 md:col-span-2">
@@ -1384,6 +1414,33 @@ export default function SaaSBackoffice() {
                 </select>
               </label>
             </div>
+            {runtMetricasDays === RUNT_CUSTOM_WINDOW && (
+              <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                <label className="text-sm text-slate-700">
+                  Desde (fecha local Colombia)
+                  <input
+                    type="date"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    value={runtDateFrom}
+                    onChange={(e) => setRuntDateFrom(e.target.value)}
+                  />
+                </label>
+                <label className="text-sm text-slate-700">
+                  Hasta (fecha local Colombia)
+                  <input
+                    type="date"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    value={runtDateTo}
+                    onChange={(e) => setRuntDateTo(e.target.value)}
+                  />
+                </label>
+              </div>
+            )}
+            {runtCustomRangeInvalid && (
+              <p className="mb-3 text-sm text-amber-700">
+                Define un rango válido: la fecha inicial debe ser menor o igual a la final.
+              </p>
+            )}
 
             {runtMetricasQuery.isLoading && <LoadingBlock lines={4} />}
             {runtMetricasQuery.isError && (
@@ -1391,6 +1448,33 @@ export default function SaaSBackoffice() {
             )}
             {runtMetricasQuery.data && (
               <div className="space-y-4">
+                {(() => {
+                  const data = runtMetricasQuery.data;
+                  const verifikRow = data.by_provider.find((x) => String(x.provider || '').toLowerCase() === 'verifik');
+                  const verifikConsultas = Number(verifikRow?.consultas || 0);
+                  return (
+                    <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                      <div className={`rounded-lg border px-3 py-2 text-xs ${
+                        data.success_rate_pct < 85 ? 'border-red-200 bg-red-50 text-red-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                      }`}>
+                        <p className="font-semibold">Salud de resolución</p>
+                        <p>{data.success_rate_pct < 85 ? 'Alerta: éxito bajo (meta >= 85%)' : 'OK: tasa de éxito saludable'}</p>
+                      </div>
+                      <div className={`rounded-lg border px-3 py-2 text-xs ${
+                        data.fallback_rate_pct > 40 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-sky-200 bg-sky-50 text-sky-800'
+                      }`}>
+                        <p className="font-semibold">Uso de fallback</p>
+                        <p>{data.fallback_rate_pct > 40 ? 'Alerta: fallback alto (revisar proveedor principal)' : 'OK: fallback controlado'}</p>
+                      </div>
+                      <div className={`rounded-lg border px-3 py-2 text-xs ${
+                        verifikConsultas > 0 ? 'border-violet-200 bg-violet-50 text-violet-800' : 'border-slate-200 bg-slate-50 text-slate-700'
+                      }`}>
+                        <p className="font-semibold">Respaldo del respaldo</p>
+                        <p>{verifikConsultas > 0 ? `Verifik activo (${verifikConsultas} consultas en periodo)` : 'Sin uso de Verifik en el periodo'}</p>
+                      </div>
+                    </div>
+                  );
+                })()}
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
                   <div className="kpi-card">
                     <p className="kpi-label">Consultas</p>
@@ -1428,6 +1512,12 @@ export default function SaaSBackoffice() {
                     </p>
                   </div>
                 </div>
+                {runtMetricasQuery.data.from_date && runtMetricasQuery.data.to_date && (
+                  <p className="text-xs text-slate-500">
+                    Periodo: {new Date(runtMetricasQuery.data.from_date).toLocaleDateString('es-CO', { timeZone: BOGOTA_TIME_ZONE })} -{' '}
+                    {new Date(runtMetricasQuery.data.to_date).toLocaleDateString('es-CO', { timeZone: BOGOTA_TIME_ZONE })}
+                  </p>
+                )}
 
                 <div className="section-card p-4 border border-slate-200">
                   <div className="flex items-center gap-2 mb-2">
@@ -1479,6 +1569,8 @@ export default function SaaSBackoffice() {
                           <th>No resueltas</th>
                           <th>PlacaAPI resueltas</th>
                           <th>Costo PlacaAPI (COP / USD)</th>
+                          <th>CoreSoft resueltas</th>
+                          <th>Costo CoreSoft (COP / USD)</th>
                           <th>Verifik resueltas</th>
                           <th>Costo Verifik (COP / USD)</th>
                           <th>Costo total (COP / USD)</th>
@@ -1487,7 +1579,7 @@ export default function SaaSBackoffice() {
                       <tbody>
                         {runtMetricasQuery.data.by_tenant.length === 0 ? (
                           <tr>
-                            <td colSpan={9} className="text-slate-500">
+                            <td colSpan={11} className="text-slate-500">
                               Sin datos en el período seleccionado.
                             </td>
                           </tr>
@@ -1515,6 +1607,20 @@ export default function SaaSBackoffice() {
                                 </span>
                                 <span className="block text-xs text-slate-500">{formatUsd(row.placaapi_costo_resuelto_usd)}</span>
                                 {efficiency.placaapi && (
+                                  <span className="mt-1 inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 ring-1 ring-emerald-200/70">
+                                    Más eficiente
+                                  </span>
+                                )}
+                              </td>
+                              <td>
+                                {row.coresoft_resueltas}
+                              </td>
+                              <td>
+                                <span className={efficiency.coresoft ? 'font-semibold text-emerald-700' : undefined}>
+                                  {formatCurrency(row.coresoft_costo_resuelto_cop)}
+                                </span>
+                                <span className="block text-xs text-slate-500">{formatUsd(row.coresoft_costo_resuelto_usd)}</span>
+                                {efficiency.coresoft && (
                                   <span className="mt-1 inline-flex rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-800 ring-1 ring-emerald-200/70">
                                     Más eficiente
                                   </span>
