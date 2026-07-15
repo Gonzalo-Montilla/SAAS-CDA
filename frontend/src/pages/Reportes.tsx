@@ -823,30 +823,43 @@ export default function ReportesPage() {
     },
   });
 
-  // Filtrar movimientos localmente
-  const movimientosFiltrados = (movimientosData?.movimientos || []).filter((m: Movimiento) => {
-    const cumpleTipo = filtroTipo === 'todos' || m.tipo_movimiento === filtroTipo;
-    const cumpleMetodo = filtroMetodo === 'todos' || m.metodo_pago === filtroMetodo;
-    const q = filtroConcepto.toLowerCase();
-    const cumpleTexto =
-      filtroConcepto === '' ||
-      m.concepto.toLowerCase().includes(q) ||
-      (m.beneficiario && m.beneficiario.toLowerCase().includes(q)) ||
-      (m.beneficiario_tipo_identificacion &&
-        m.beneficiario_tipo_identificacion.toLowerCase().includes(q)) ||
-      (m.beneficiario_numero_identificacion &&
-        m.beneficiario_numero_identificacion.toLowerCase().includes(q)) ||
-      (m.numero_comprobante && m.numero_comprobante.toLowerCase().includes(q));
-    return cumpleTipo && cumpleMetodo && cumpleTexto;
-  });
+  // Filtrar movimientos localmente (memoizado para evitar recálculo en cada render).
+  const movimientosFiltrados = useMemo(() => {
+    const movimientos = movimientosData?.movimientos || [];
+    const q = filtroConcepto.trim().toLowerCase();
+    const sinFiltroTipo = filtroTipo === 'todos';
+    const sinFiltroMetodo = filtroMetodo === 'todos';
+    const sinFiltroTexto = q === '';
+    if (sinFiltroTipo && sinFiltroMetodo && sinFiltroTexto) return movimientos;
+    return movimientos.filter((m: Movimiento) => {
+      const cumpleTipo = sinFiltroTipo || m.tipo_movimiento === filtroTipo;
+      const cumpleMetodo = sinFiltroMetodo || m.metodo_pago === filtroMetodo;
+      const cumpleTexto =
+        sinFiltroTexto ||
+        m.concepto.toLowerCase().includes(q) ||
+        (m.beneficiario && m.beneficiario.toLowerCase().includes(q)) ||
+        (m.beneficiario_tipo_identificacion &&
+          m.beneficiario_tipo_identificacion.toLowerCase().includes(q)) ||
+        (m.beneficiario_numero_identificacion &&
+          m.beneficiario_numero_identificacion.toLowerCase().includes(q)) ||
+        (m.numero_comprobante && m.numero_comprobante.toLowerCase().includes(q));
+      return cumpleTipo && cumpleMetodo && cumpleTexto;
+    });
+  }, [movimientosData?.movimientos, filtroTipo, filtroMetodo, filtroConcepto]);
   const movimientosMostrados = useMemo(
     () => (verDetalleContable ? movimientosFiltrados : compactarMovimientosMixtos(movimientosFiltrados)),
     [movimientosFiltrados, verDetalleContable]
   );
 
   // Obtener valores únicos para los filtros
-  const tiposUnicos: string[] = Array.from(new Set((movimientosData?.movimientos || []).map((m: Movimiento) => m.tipo_movimiento)));
-  const metodosUnicos: string[] = Array.from(new Set((movimientosData?.movimientos || []).map((m: Movimiento) => m.metodo_pago)));
+  const tiposUnicos: string[] = useMemo(
+    () => Array.from(new Set((movimientosData?.movimientos || []).map((m: Movimiento) => m.tipo_movimiento))),
+    [movimientosData?.movimientos],
+  );
+  const metodosUnicos: string[] = useMemo(
+    () => Array.from(new Set((movimientosData?.movimientos || []).map((m: Movimiento) => m.metodo_pago))),
+    [movimientosData?.movimientos],
+  );
 
   // Función para limpiar filtros
   const limpiarFiltros = () => {

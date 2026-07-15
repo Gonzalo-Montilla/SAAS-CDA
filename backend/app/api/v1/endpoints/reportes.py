@@ -4,7 +4,7 @@ Endpoints de Reportes - Dashboard General y Consolidados
 from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, load_only
 from sqlalchemy import func, and_, or_, cast, Date, String
 from datetime import datetime, timedelta, date, time, timezone
 from decimal import Decimal
@@ -726,9 +726,42 @@ def obtener_movimientos_detallados(
     movimientos_caja = (
         db.query(MovimientoCaja)
         .options(
-            joinedload(MovimientoCaja.usuario),
-            joinedload(MovimientoCaja.caja),
-            joinedload(MovimientoCaja.usuario_anulacion),
+            load_only(
+                MovimientoCaja.id,
+                MovimientoCaja.caja_id,
+                MovimientoCaja.vehiculo_id,
+                MovimientoCaja.tipo,
+                MovimientoCaja.monto,
+                MovimientoCaja.metodo_pago,
+                MovimientoCaja.concepto,
+                MovimientoCaja.ingresa_efectivo,
+                MovimientoCaja.created_at,
+                MovimientoCaja.created_by,
+                MovimientoCaja.beneficiario,
+                MovimientoCaja.beneficiario_tipo_identificacion,
+                MovimientoCaja.beneficiario_numero_identificacion,
+                MovimientoCaja.beneficiario_direccion,
+                MovimientoCaja.beneficiario_email,
+                MovimientoCaja.beneficiario_telefono,
+                MovimientoCaja.beneficiario_factus_municipality_id,
+                MovimientoCaja.anulado,
+                MovimientoCaja.motivo_anulacion,
+                MovimientoCaja.anulado_por,
+                MovimientoCaja.fecha_anulacion,
+            ),
+            joinedload(MovimientoCaja.usuario).load_only(
+                Usuario.id,
+                Usuario.nombre_completo,
+            ),
+            joinedload(MovimientoCaja.caja).load_only(
+                Caja.id,
+                Caja.turno,
+                Caja.sucursal_id,
+            ),
+            joinedload(MovimientoCaja.usuario_anulacion).load_only(
+                Usuario.id,
+                Usuario.nombre_completo,
+            ),
         )
         .filter(
             _mc_scope_incluye_anulados(
@@ -748,10 +781,29 @@ def obtener_movimientos_detallados(
     fe_by_vid: dict = {}
     corr_by_vid: dict = {}
     if vids:
-        for v in db.query(VehiculoProceso).filter(VehiculoProceso.id.in_(vids)).all():
+        for v in (
+            db.query(VehiculoProceso)
+            .options(
+                load_only(
+                    VehiculoProceso.id,
+                    VehiculoProceso.numero_factura_dian,
+                )
+            )
+            .filter(VehiculoProceso.id.in_(vids))
+            .all()
+        ):
             vmap[v.id] = v
         for fe in (
             db.query(FacturaElectronica)
+            .options(
+                load_only(
+                    FacturaElectronica.vehiculo_proceso_id,
+                    FacturaElectronica.public_url,
+                    FacturaElectronica.emitido_por_usuario_id,
+                    FacturaElectronica.created_at,
+                    FacturaElectronica.pdf_storage_relpath,
+                )
+            )
             .filter(FacturaElectronica.vehiculo_proceso_id.in_(vids))
             .order_by(FacturaElectronica.created_at.desc())
             .all()
@@ -760,6 +812,17 @@ def obtener_movimientos_detallados(
                 fe_by_vid[fe.vehiculo_proceso_id] = fe
         for corr in (
             db.query(FacturaCorreccion)
+            .options(
+                load_only(
+                    FacturaCorreccion.vehiculo_proceso_id,
+                    FacturaCorreccion.estado,
+                    FacturaCorreccion.motivo,
+                    FacturaCorreccion.created_at,
+                    FacturaCorreccion.factura_original_numero,
+                    FacturaCorreccion.nota_credito_numero,
+                    FacturaCorreccion.factura_nueva_numero,
+                )
+            )
             .filter(
                 FacturaCorreccion.tenant_id == tid,
                 FacturaCorreccion.vehiculo_proceso_id.in_(vids),
@@ -773,7 +836,34 @@ def obtener_movimientos_detallados(
     movimientos_tesoreria = (
         db.query(MovimientoTesoreria)
         .options(
-            joinedload(MovimientoTesoreria.usuario),
+            load_only(
+                MovimientoTesoreria.id,
+                MovimientoTesoreria.sucursal_id,
+                MovimientoTesoreria.tipo,
+                MovimientoTesoreria.categoria_ingreso,
+                MovimientoTesoreria.categoria_egreso,
+                MovimientoTesoreria.monto,
+                MovimientoTesoreria.concepto,
+                MovimientoTesoreria.metodo_pago,
+                MovimientoTesoreria.numero_comprobante,
+                MovimientoTesoreria.fecha_movimiento,
+                MovimientoTesoreria.created_by,
+                MovimientoTesoreria.beneficiario,
+                MovimientoTesoreria.beneficiario_tipo_identificacion,
+                MovimientoTesoreria.beneficiario_numero_identificacion,
+                MovimientoTesoreria.beneficiario_direccion,
+                MovimientoTesoreria.beneficiario_email,
+                MovimientoTesoreria.beneficiario_telefono,
+                MovimientoTesoreria.beneficiario_factus_municipality_id,
+                MovimientoTesoreria.anulado,
+                MovimientoTesoreria.motivo_anulacion,
+                MovimientoTesoreria.anulado_por,
+                MovimientoTesoreria.fecha_anulacion,
+            ),
+            joinedload(MovimientoTesoreria.usuario).load_only(
+                Usuario.id,
+                Usuario.nombre_completo,
+            ),
         )
         .filter(
             _mt_scope_incluye_anulados(
@@ -810,6 +900,20 @@ def obtener_movimientos_detallados(
     if ds_conditions:
         for r in (
             db.query(DocumentoSoporteElectronico)
+            .options(
+                load_only(
+                    DocumentoSoporteElectronico.source_module,
+                    DocumentoSoporteElectronico.movimiento_id,
+                    DocumentoSoporteElectronico.numero_documento,
+                    DocumentoSoporteElectronico.public_url,
+                    DocumentoSoporteElectronico.emitido_por_usuario_id,
+                    DocumentoSoporteElectronico.created_at,
+                    DocumentoSoporteElectronico.pdf_storage_relpath,
+                    DocumentoSoporteElectronico.concepto_retencion_dse,
+                    DocumentoSoporteElectronico.retencion_calculada_cop,
+                    DocumentoSoporteElectronico.retencion_calculo_anio,
+                )
+            )
             .filter(DocumentoSoporteElectronico.tenant_id == tid, or_(*ds_conditions))
             .all()
         ):
@@ -826,7 +930,12 @@ def obtener_movimientos_detallados(
             uids_emit.add(uid)
     unames: dict = {}
     if uids_emit:
-        for u in db.query(Usuario).filter(Usuario.id.in_(uids_emit)).all():
+        for u in (
+            db.query(Usuario)
+            .options(load_only(Usuario.id, Usuario.nombre_completo))
+            .filter(Usuario.id.in_(uids_emit))
+            .all()
+        ):
             unames[u.id] = u.nombre_completo
 
     sucursal_ids: set[UUID] = set()
@@ -1511,7 +1620,27 @@ def obtener_tramites_detallados(
     # Obtener vehículos del rango
     vehiculos = (
         db.query(VehiculoProceso)
-        .options(joinedload(VehiculoProceso.registrador))
+        .options(
+            load_only(
+                VehiculoProceso.id,
+                VehiculoProceso.sucursal_id,
+                VehiculoProceso.placa,
+                VehiculoProceso.tipo_vehiculo,
+                VehiculoProceso.cliente_nombre,
+                VehiculoProceso.cliente_documento,
+                VehiculoProceso.valor_rtm,
+                VehiculoProceso.comision_soat,
+                VehiculoProceso.total_cobrado,
+                VehiculoProceso.metodo_pago,
+                VehiculoProceso.estado,
+                VehiculoProceso.fecha_registro,
+                VehiculoProceso.registrado_por,
+            ),
+            joinedload(VehiculoProceso.registrador).load_only(
+                Usuario.id,
+                Usuario.nombre_completo,
+            ),
+        )
         .filter(
             _vp_scope(
                 tid,
@@ -1529,6 +1658,17 @@ def obtener_tramites_detallados(
     if veh_ids:
         corr_rows = (
             db.query(FacturaCorreccion)
+            .options(
+                load_only(
+                    FacturaCorreccion.vehiculo_proceso_id,
+                    FacturaCorreccion.estado,
+                    FacturaCorreccion.motivo,
+                    FacturaCorreccion.created_at,
+                    FacturaCorreccion.factura_original_numero,
+                    FacturaCorreccion.nota_credito_numero,
+                    FacturaCorreccion.factura_nueva_numero,
+                )
+            )
             .filter(
                 FacturaCorreccion.tenant_id == tid,
                 FacturaCorreccion.vehiculo_proceso_id.in_(veh_ids),
