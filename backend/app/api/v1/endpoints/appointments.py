@@ -57,6 +57,8 @@ class AppointmentSlot(BaseModel):
 
 class PublicAppointmentCreateRequest(BaseModel):
     cliente_nombre: str = Field(min_length=3, max_length=200)
+    cliente_tipo_documento: Optional[str] = Field(default=None, max_length=10)
+    cliente_documento: Optional[str] = Field(default=None, max_length=50)
     cliente_email: Optional[EmailStr] = None
     cliente_celular: Optional[str] = Field(default=None, max_length=30)
     placa: str = Field(min_length=5, max_length=10)
@@ -87,6 +89,26 @@ class PublicAppointmentCreateRequest(BaseModel):
             return value
         return str(value).strip().lower()
 
+    @field_validator("cliente_tipo_documento", mode="before")
+    @classmethod
+    def normalize_doc_type(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip().upper()
+        if not normalized:
+            return None
+        if normalized not in {"CC", "CE", "PA", "NIT"}:
+            raise ValueError("Tipo de documento inválido. Use CC, CE, PA o NIT.")
+        return normalized
+
+    @field_validator("cliente_documento", mode="before")
+    @classmethod
+    def normalize_doc_number(cls, value):
+        if value is None:
+            return None
+        normalized = str(value).strip().upper()
+        return normalized or None
+
 
 class InternalAppointmentCreateRequest(PublicAppointmentCreateRequest):
     source: str = Field(default="manual")
@@ -95,6 +117,8 @@ class InternalAppointmentCreateRequest(PublicAppointmentCreateRequest):
 class AppointmentResponse(BaseModel):
     id: str
     cliente_nombre: str
+    cliente_tipo_documento: Optional[str] = None
+    cliente_documento: Optional[str] = None
     cliente_email: Optional[str] = None
     cliente_celular: Optional[str] = None
     placa: str
@@ -118,6 +142,8 @@ def _appointment_to_response(row: Appointment) -> AppointmentResponse:
     return AppointmentResponse(
         id=str(row.id),
         cliente_nombre=row.cliente_nombre,
+        cliente_tipo_documento=row.cliente_tipo_documento,
+        cliente_documento=row.cliente_documento,
         cliente_email=row.cliente_email,
         cliente_celular=row.cliente_celular,
         placa=row.placa,
@@ -165,6 +191,20 @@ def _build_slot_datetimes(target_date: date) -> list[datetime]:
     return slots
 
 
+def _ensure_slot_allowed(target_date: date, target_time: time) -> datetime:
+    scheduled_at = datetime.combine(target_date, target_time).replace(second=0, microsecond=0)
+    allowed_slots = _build_slot_datetimes(target_date)
+    if scheduled_at not in allowed_slots:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Hora fuera de franjas permitidas. "
+                f"Usa intervalos de {SLOT_MINUTES} minutos entre {START_HOUR:02d}:00 y {END_HOUR:02d}:00."
+            ),
+        )
+    return scheduled_at
+
+
 def _get_tenant_or_404(db: Session, tenant_slug: str) -> Tenant:
     tenant = db.query(Tenant).filter(Tenant.slug == tenant_slug, Tenant.activo == True).first()
     if not tenant:
@@ -196,7 +236,10 @@ def _humanize_service(tipo_vehiculo: str) -> str:
         "liviano_particular": "Revisión técnico-mecánica vehículo liviano particular",
         "liviano_publico": "Revisión técnico-mecánica vehículo liviano público",
         "pesado": "Revisión técnico-mecánica vehículo pesado",
+        "pesado_particular": "Revisión técnico-mecánica vehículo pesado particular",
+        "pesado_publico": "Revisión técnico-mecánica vehículo pesado público",
         "preventiva": "Servicio preventiva",
+        "pruebas_auditoria": "Pruebas de auditoría",
     }
     return mapping.get(normalized, normalized.replace("_", " ").title() or "Revisión técnico-mecánica")
 
@@ -425,9 +468,20 @@ def get_public_availability(
     tenant = _get_tenant_or_404(db, tenant_slug)
     target_date = _parse_date(fecha)
     slots = _build_slot_datetimes(target_date)
+    now = _now_colombia_naive()
 
     response: list[AppointmentSlot] = []
     for slot_dt in slots:
+        if slot_dt < now:
+            response.append(
+                AppointmentSlot(
+                    hora=slot_dt.strftime("%H:%M"),
+                    disponible=False,
+                    cupos_disponibles=0,
+                    ocupados=0,
+                )
+            )
+            continue
         ocupados = _count_slot_occupancy(db, tenant.id, slot_dt)
         cupos_disponibles = max(SLOT_CAPACITY - ocupados, 0)
         response.append(
@@ -450,7 +504,7 @@ def book_public_appointment(
     tenant = _get_tenant_or_404(db, tenant_slug)
     target_date = _parse_date(payload.fecha)
     target_time = _parse_time(payload.hora)
-    scheduled_at = datetime.combine(target_date, target_time).replace(second=0, microsecond=0)
+    scheduled_at = _ensure_slot_allowed(target_date, target_time)
 
     if scheduled_at < _now_colombia_naive():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No puedes agendar en una hora pasada")
@@ -462,6 +516,8 @@ def book_public_appointment(
     appointment = Appointment(
         tenant_id=tenant.id,
         cliente_nombre=payload.cliente_nombre.strip().upper(),
+        cliente_tipo_documento=(payload.cliente_tipo_documento or "").strip().upper() or None,
+        cliente_documento=(payload.cliente_documento or "").strip().upper() or None,
         cliente_email=(payload.cliente_email or "").strip().lower() or None,
         cliente_celular=(payload.cliente_celular or "").strip() or None,
         placa=payload.placa.strip().upper(),
@@ -520,7 +576,7 @@ def create_internal_appointment(
 ):
     target_date = _parse_date(payload.fecha)
     target_time = _parse_time(payload.hora)
-    scheduled_at = datetime.combine(target_date, target_time).replace(second=0, microsecond=0)
+    scheduled_at = _ensure_slot_allowed(target_date, target_time)
     if scheduled_at < _now_colombia_naive():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No puedes agendar en una hora pasada")
 
@@ -535,6 +591,8 @@ def create_internal_appointment(
     appointment = Appointment(
         tenant_id=current_user.tenant_id,
         cliente_nombre=payload.cliente_nombre.strip().upper(),
+        cliente_tipo_documento=(payload.cliente_tipo_documento or "").strip().upper() or None,
+        cliente_documento=(payload.cliente_documento or "").strip().upper() or None,
         cliente_email=(payload.cliente_email or "").strip().lower() or None,
         cliente_celular=(payload.cliente_celular or "").strip() or None,
         placa=payload.placa.strip().upper(),
@@ -658,7 +716,13 @@ def check_in_appointment(
     )
     if not appointment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Cita no encontrada")
+    if appointment.status not in ("scheduled", "confirmed"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo se puede hacer check-in en citas agendadas o confirmadas.",
+        )
     appointment.status = "checked_in"
+    appointment.reminder_status = "skipped"
     appointment.updated_at = _now_naive()
     db.commit()
     return {
@@ -668,6 +732,8 @@ def check_in_appointment(
             "placa": appointment.placa,
             "tipo_vehiculo": appointment.tipo_vehiculo,
             "cliente_nombre": appointment.cliente_nombre,
+            "cliente_tipo_documento": appointment.cliente_tipo_documento,
+            "cliente_documento": appointment.cliente_documento,
             "cliente_telefono": appointment.cliente_celular,
             "cliente_email": appointment.cliente_email,
         },

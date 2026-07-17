@@ -3,6 +3,7 @@ Utilidades para recordatorios de próxima RTM y control preventivo.
 """
 from datetime import datetime, timedelta, timezone
 from dateutil.relativedelta import relativedelta
+from zoneinfo import ZoneInfo
 
 from sqlalchemy.orm import Session
 
@@ -16,11 +17,13 @@ from app.utils.email import (
     generar_email_recordatorio_proxima_rtm,
 )
 
-REMINDER_MONTHS_AFTER_PAYMENT = 11
-PREVENTIVA_REMINDER_MONTHS_AFTER_PAYMENT = 2
+REMINDER_MONTHS_AFTER_PAYMENT = 12
+REMINDER_DAYS_BEFORE_DUE = 30
+PREVENTIVA_REMINDER_MONTHS_AFTER_PAYMENT = 4
 PREVENTIVA_REMINDER_DAYS_BEFORE_DUE = 7
 REMINDER_HOUR_LOCAL = 9
 STATUSES_PROCESSABLE = {"pending", "failed"}
+BOGOTA_TZ = ZoneInfo("America/Bogota")
 
 
 def utcnow_naive() -> datetime:
@@ -33,6 +36,16 @@ def _to_naive_utc(dt: datetime | None) -> datetime:
     if dt.tzinfo is None:
         return dt
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _utc_naive_to_bogota_naive(dt: datetime) -> datetime:
+    aware_utc = dt.replace(tzinfo=timezone.utc) if dt.tzinfo is None else dt.astimezone(timezone.utc)
+    return aware_utc.astimezone(BOGOTA_TZ).replace(tzinfo=None)
+
+
+def _bogota_naive_to_utc_naive(dt: datetime) -> datetime:
+    aware_local = dt.replace(tzinfo=BOGOTA_TZ) if dt.tzinfo is None else dt.astimezone(BOGOTA_TZ)
+    return aware_local.astimezone(timezone.utc).replace(tzinfo=None)
 
 
 def _humanize_service(tipo_vehiculo: str) -> str:
@@ -52,6 +65,7 @@ def _is_preventiva(tipo_vehiculo: str | None) -> bool:
 
 
 def _format_fecha_es(target_date: datetime) -> str:
+    local_dt = _utc_naive_to_bogota_naive(_to_naive_utc(target_date))
     months = [
         "enero",
         "febrero",
@@ -66,7 +80,16 @@ def _format_fecha_es(target_date: datetime) -> str:
         "noviembre",
         "diciembre",
     ]
-    return f"{target_date.day} de {months[target_date.month - 1]} de {target_date.year}"
+    return f"{local_dt.day} de {months[local_dt.month - 1]} de {local_dt.year}"
+
+
+def _rtm_anual_habilitado_por_cierre(vehiculo: VehiculoProceso) -> bool:
+    resultado = (getattr(vehiculo, "revision_cierre_resultado", "") or "").strip().lower()
+    if resultado == "aprobado":
+        return True
+    estado = getattr(vehiculo, "estado", None)
+    estado_str = (estado.value if hasattr(estado, "value") else str(estado or "")).strip().lower()
+    return estado_str in {"aprobado", "completado"}
 
 
 def schedule_rtm_renewal_reminder_for_vehicle(db: Session, vehiculo: VehiculoProceso) -> RTMRenewalReminder | None:
@@ -85,20 +108,30 @@ def schedule_rtm_renewal_reminder_for_vehicle(db: Session, vehiculo: VehiculoPro
     if not cliente_email:
         return None
 
-    paid_at = _to_naive_utc(vehiculo.fecha_pago)
+    paid_at_utc = _to_naive_utc(vehiculo.fecha_pago)
+    paid_at_local = _utc_naive_to_bogota_naive(paid_at_utc)
     if _is_preventiva(tipo_vehiculo):
-        # Preventiva: control cada 2 meses, recordar una semana antes.
-        next_due_at = paid_at + relativedelta(months=PREVENTIVA_REMINDER_MONTHS_AFTER_PAYMENT)
-        scheduled_send_at = (next_due_at - timedelta(days=PREVENTIVA_REMINDER_DAYS_BEFORE_DUE)).replace(
+        # Preventiva: control cada 4 meses, recordar una semana antes.
+        next_due_local = paid_at_local + relativedelta(months=PREVENTIVA_REMINDER_MONTHS_AFTER_PAYMENT)
+        scheduled_send_local = (next_due_local - timedelta(days=PREVENTIVA_REMINDER_DAYS_BEFORE_DUE)).replace(
             hour=REMINDER_HOUR_LOCAL,
             minute=0,
             second=0,
             microsecond=0,
         )
     else:
-        # RTM regular: recordar aproximadamente 1 mes antes del vencimiento anual.
-        next_due_at = paid_at + relativedelta(months=REMINDER_MONTHS_AFTER_PAYMENT)
-        scheduled_send_at = next_due_at.replace(hour=REMINDER_HOUR_LOCAL, minute=0, second=0, microsecond=0)
+        # RTM regular: vencimiento anual, recordar 30 días antes.
+        if not _rtm_anual_habilitado_por_cierre(vehiculo):
+            return None
+        next_due_local = paid_at_local + relativedelta(months=REMINDER_MONTHS_AFTER_PAYMENT)
+        scheduled_send_local = (next_due_local - timedelta(days=REMINDER_DAYS_BEFORE_DUE)).replace(
+            hour=REMINDER_HOUR_LOCAL,
+            minute=0,
+            second=0,
+            microsecond=0,
+        )
+    next_due_at = _bogota_naive_to_utc_naive(next_due_local)
+    scheduled_send_at = _bogota_naive_to_utc_naive(scheduled_send_local)
     if scheduled_send_at <= utcnow_naive():
         scheduled_send_at = utcnow_naive() + timedelta(minutes=10)
 
@@ -109,7 +142,7 @@ def schedule_rtm_renewal_reminder_for_vehicle(db: Session, vehiculo: VehiculoPro
         existing.cliente_nombre = (vehiculo.cliente_nombre or "").strip() or "Cliente"
         existing.cliente_email = cliente_email
         existing.cliente_celular = (vehiculo.cliente_telefono or "").strip() or None
-        existing.last_paid_at = paid_at
+        existing.last_paid_at = paid_at_utc
         existing.next_due_at = next_due_at
         existing.scheduled_send_at = scheduled_send_at
         existing.status = "pending"
@@ -128,7 +161,7 @@ def schedule_rtm_renewal_reminder_for_vehicle(db: Session, vehiculo: VehiculoPro
         cliente_nombre=(vehiculo.cliente_nombre or "").strip() or "Cliente",
         cliente_email=cliente_email,
         cliente_celular=(vehiculo.cliente_telefono or "").strip() or None,
-        last_paid_at=paid_at,
+        last_paid_at=paid_at_utc,
         next_due_at=next_due_at,
         scheduled_send_at=scheduled_send_at,
         status="pending",
@@ -138,6 +171,21 @@ def schedule_rtm_renewal_reminder_for_vehicle(db: Session, vehiculo: VehiculoPro
     )
     db.add(reminder)
     return reminder
+
+
+def disable_rtm_renewal_reminder_for_vehicle(
+    db: Session,
+    vehiculo: VehiculoProceso,
+    *,
+    reason: str = "deshabilitado",
+) -> RTMRenewalReminder | None:
+    row = db.query(RTMRenewalReminder).filter(RTMRenewalReminder.vehiculo_id == vehiculo.id).first()
+    if not row:
+        return None
+    row.status = "cancelled"
+    row.send_error = (reason or "deshabilitado")[:1000]
+    row.updated_at = utcnow_naive()
+    return row
 
 
 def process_due_rtm_renewal_reminders(db: Session, *, tenant_id=None, limit: int = 100) -> int:

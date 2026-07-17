@@ -293,6 +293,8 @@ export const sarlaftApi = {
   ): Promise<{ blob: Blob; filename: string; certificateCode: string | null }> => {
     const response = await apiClient.get(`/sarlaft/manual-checks/${manualCheckId}/certificate`, {
       responseType: 'blob',
+      // Primera emisión del certificado genera y firma PDF; puede tardar.
+      timeout: 210000,
     });
     const contentDisposition = response.headers['content-disposition'] as string | undefined;
     let filename = `sarlaft_certificado_${manualCheckId}.pdf`;

@@ -3,6 +3,8 @@ import type { AppointmentItem, AppointmentSlot } from '../types';
 
 export interface AppointmentCreatePayload {
   cliente_nombre: string;
+  cliente_tipo_documento?: 'CC' | 'CE' | 'PA' | 'NIT';
+  cliente_documento?: string;
   cliente_email?: string;
   cliente_celular?: string;
   placa: string;
@@ -47,6 +49,8 @@ export const appointmentsApi = {
       placa?: string;
       tipo_vehiculo?: string;
       cliente_nombre?: string;
+      cliente_tipo_documento?: 'CC' | 'CE' | 'PA' | 'NIT';
+      cliente_documento?: string;
       cliente_telefono?: string;
       cliente_email?: string;
     };
@@ -58,6 +62,8 @@ export const appointmentsApi = {
         placa?: string;
         tipo_vehiculo?: string;
         cliente_nombre?: string;
+        cliente_tipo_documento?: 'CC' | 'CE' | 'PA' | 'NIT';
+        cliente_documento?: string;
         cliente_telefono?: string;
         cliente_email?: string;
       };

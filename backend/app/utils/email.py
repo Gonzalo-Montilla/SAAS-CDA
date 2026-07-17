@@ -739,14 +739,18 @@ def generar_email_recordatorio_control_preventivo(
     fecha_sugerida: str,
     agendamiento_url: str | None = None,
 ) -> str:
-    """Recordatorio de control preventivo bimestral."""
+    """Recordatorio de control preventivo cuatrimestral."""
     body_html = f"""
     <p>Hola <strong>{nombre_cliente}</strong>,</p>
     <p>
-        Te recordamos que tu <strong>control preventivo</strong> está próximo a cumplirse.
-        Para mantener tu vehículo en óptimas condiciones, te recomendamos agendar tu próxima revisión.
+        En <strong>{nombre_cda}</strong> te estamos esperando para que realices tu
+        <strong>revisión preventiva</strong>. No te quedes sin ella.
     </p>
-    <p>En <strong>{nombre_cda}</strong> te acompañamos con un servicio ágil y confiable:</p>
+    <p>
+        El bienestar de tu vehículo no lo dejes al olvido: una revisión preventiva a tiempo
+        te ayuda a detectar novedades antes de que se vuelvan problemas mayores.
+    </p>
+    <p>Programa tu visita y ven a hacer tu revisión preventiva con nosotros:</p>
     <div class="highlight">
         <p style="margin:0 0 6px 0;">📍 <strong>Placa:</strong> {placa}</p>
         <p style="margin:0 0 6px 0;">🔧 <strong>Servicio:</strong> {tipo_servicio}</p>

@@ -16,7 +16,7 @@ from sqlalchemy import and_, func, or_
 from sqlalchemy.exc import OperationalError
 from datetime import datetime, date, time as dt_time, timezone, timedelta
 from zoneinfo import ZoneInfo
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from decimal import Decimal
 from uuid import UUID
 
@@ -123,6 +123,7 @@ from app.schemas.vehiculo import (
 router = APIRouter()
 REINSPECCION_MAX_INTENTOS = 3
 REINSPECCION_VENTANA_DIAS = 15
+RTM_OBLIGATORIA_BLOQUEO_DIAS = 365
 TIPO_VEHICULO_PRUEBAS_AUDITORIA = "pruebas_auditoria"
 COLOMBIA_TZ = ZoneInfo("America/Bogota")
 
@@ -1461,6 +1462,101 @@ def _build_reinspeccion_context_for_origen(
     }
 
 
+def _es_servicio_preventiva(tipo_vehiculo: Optional[str]) -> bool:
+    return (tipo_vehiculo or "").strip().lower() == "preventiva"
+
+
+def _debe_bloquear_duplicidad_en_proceso(
+    existente: Optional[VehiculoProceso],
+    *,
+    tipo_vehiculo_nuevo: Optional[str],
+) -> bool:
+    """
+    Regla operativa:
+    - Siempre bloquear si ya hay REGISTRADO para la placa (trámite activo en recepción).
+    - En PAGADO, permitir combinaciones que involucren PREVENTIVA
+      (preventiva<->preventiva, preventiva->obligatoria, obligatoria->preventiva).
+    - Mantener bloqueo para PAGADO no-preventiva contra nuevo no-preventiva.
+    """
+    if existente is None:
+        return False
+    if existente.estado == EstadoVehiculo.REGISTRADO:
+        return True
+    if existente.estado != EstadoVehiculo.PAGADO:
+        return False
+    if _es_servicio_preventiva(existente.tipo_vehiculo) or _es_servicio_preventiva(tipo_vehiculo_nuevo):
+        return False
+    return True
+
+
+def _es_servicio_obligatorio(tipo_vehiculo: Optional[str]) -> bool:
+    return not _es_servicio_preventiva(tipo_vehiculo) and not _es_prueba_auditoria(tipo_vehiculo)
+
+
+def _resolver_resultado_final_vehiculo(row: VehiculoProceso) -> str:
+    resultado = (row.revision_cierre_resultado or "").strip().lower()
+    if resultado:
+        return resultado
+    if row.estado == EstadoVehiculo.RECHAZADO:
+        return "rechazado"
+    if row.estado in (EstadoVehiculo.APROBADO, EstadoVehiculo.COMPLETADO):
+        return "aprobado"
+    return ""
+
+
+def _obtener_ultimo_servicio_obligatorio_por_placa(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    placa_upper: str,
+) -> Optional[VehiculoProceso]:
+    historial = (
+        db.query(VehiculoProceso)
+        .filter(
+            VehiculoProceso.tenant_id == tenant_id,
+            VehiculoProceso.placa == placa_upper,
+        )
+        .order_by(VehiculoProceso.fecha_registro.desc())
+        .all()
+    )
+    for row in historial:
+        if _es_servicio_obligatorio(getattr(row, "tipo_vehiculo", None)):
+            return row
+    return None
+
+
+def _validar_bloqueo_anual_obligatoria(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    placa_upper: str,
+) -> None:
+    ultimo_obligatorio = _obtener_ultimo_servicio_obligatorio_por_placa(
+        db,
+        tenant_id=tenant_id,
+        placa_upper=placa_upper,
+    )
+    if not ultimo_obligatorio:
+        return
+    if _resolver_resultado_final_vehiculo(ultimo_obligatorio) == "rechazado":
+        # Si quedó rechazado, el flujo válido es reinspección (ya controlado por elegibilidad).
+        return
+    fecha_base = _utc_naive_to_co_date(ultimo_obligatorio.fecha_pago or ultimo_obligatorio.fecha_registro)
+    if fecha_base is None:
+        return
+    dias_transcurridos = (_co_today_date() - fecha_base).days
+    if dias_transcurridos < RTM_OBLIGATORIA_BLOQUEO_DIAS:
+        dias_restantes = RTM_OBLIGATORIA_BLOQUEO_DIAS - dias_transcurridos
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Esta placa ya tiene una revisión obligatoria registrada en el último año "
+                f"({fecha_base.isoformat()}). Podrá registrarse nuevamente en {dias_restantes} día(s), "
+                "salvo que aplique reinspección por rechazo."
+            ),
+        )
+
+
 def _map_sarlaft_hits_count(raw_results: list[dict], threshold: float) -> tuple[int, float]:
     max_score = 0.0
     hit_count = 0
@@ -1995,21 +2091,17 @@ def consultar_elegibilidad_reinspeccion(
     if len(placa_upper) < 5:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Placa inválida")
 
-    latest = (
-        db.query(VehiculoProceso)
-        .filter(
-            VehiculoProceso.tenant_id == current_user.tenant_id,
-            VehiculoProceso.placa == placa_upper,
-        )
-        .order_by(VehiculoProceso.fecha_registro.desc())
-        .first()
+    latest = _obtener_ultimo_servicio_obligatorio_por_placa(
+        db,
+        tenant_id=current_user.tenant_id,
+        placa_upper=placa_upper,
     )
     if not latest:
         return ReinspeccionElegibilidadResponse(
             placa=placa_upper,
             tiene_historial=False,
             elegible_reingreso=False,
-            motivo="Sin historial previo para esta placa en el CDA.",
+            motivo="Sin historial previo de revisión obligatoria para esta placa en el CDA.",
         )
 
     origen = latest
@@ -2063,13 +2155,23 @@ def registrar_vehiculo(
         )
     ).first()
     
-    if vehiculo_existente:
+    if _debe_bloquear_duplicidad_en_proceso(
+        vehiculo_existente,
+        tipo_vehiculo_nuevo=vehiculo_data.tipo_vehiculo,
+    ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Ya existe un vehículo con placa {placa_upper} en estado {vehiculo_existente.estado}"
         )
 
     es_reingreso = bool(vehiculo_data.es_reingreso_rechazo_inicial)
+    es_servicio_obligatorio_nuevo = _es_servicio_obligatorio(vehiculo_data.tipo_vehiculo)
+    if es_servicio_obligatorio_nuevo and not es_reingreso:
+        _validar_bloqueo_anual_obligatoria(
+            db,
+            tenant_id=current_user.tenant_id,
+            placa_upper=placa_upper,
+        )
     reinspeccion_ctx: dict[str, Any] | None = None
     if es_reingreso:
         if vehiculo_data.reinspeccion_vehiculo_origen_id is None:
@@ -2349,7 +2451,10 @@ def editar_vehiculo(
             )
         ).first()
         
-        if vehiculo_existente:
+        if _debe_bloquear_duplicidad_en_proceso(
+            vehiculo_existente,
+            tipo_vehiculo_nuevo=vehiculo_data.tipo_vehiculo,
+        ):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail=f"Ya existe otro vehículo con placa {placa_upper} en estado {vehiculo_existente.estado}"
@@ -4071,6 +4176,12 @@ def descargar_recibo_pago_pdf(
         db.query(VehiculoProceso),
         current_user.tenant_id,
         active_sucursal_id,
+    ).options(
+        load_only(
+            VehiculoProceso.id,
+            VehiculoProceso.placa,
+            VehiculoProceso.observaciones,
+        )
     ).filter(VehiculoProceso.id == vid).first()
 
     if not vehiculo:

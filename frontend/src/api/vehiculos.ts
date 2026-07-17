@@ -210,6 +210,9 @@ export const vehiculosApi = {
   obtenerFotoVehiculo: async (vehiculoId: string, index: number = 0): Promise<VehiculoFotoResponse> => {
     const response = await apiClient.get<VehiculoFotoResponse>(`/vehiculos/${vehiculoId}/foto`, {
       params: { index },
+      // Las fotos viajan en base64 y pueden tardar más en redes lentas.
+      // Damos un margen mayor sin impactar el resto de endpoints.
+      timeout: 120000,
     });
     return response.data;
   },

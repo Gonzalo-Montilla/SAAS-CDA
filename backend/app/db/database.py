@@ -679,6 +679,8 @@ def ensure_appointments_schema(db):
     db.execute(text("ALTER TABLE IF EXISTS appointments ADD COLUMN IF NOT EXISTS reminder_sent_at TIMESTAMP WITHOUT TIME ZONE"))
     db.execute(text("ALTER TABLE IF EXISTS appointments ADD COLUMN IF NOT EXISTS reminder_attempted_at TIMESTAMP WITHOUT TIME ZONE"))
     db.execute(text("ALTER TABLE IF EXISTS appointments ADD COLUMN IF NOT EXISTS reminder_status VARCHAR(20)"))
+    db.execute(text("ALTER TABLE IF EXISTS appointments ADD COLUMN IF NOT EXISTS cliente_tipo_documento VARCHAR(10)"))
+    db.execute(text("ALTER TABLE IF EXISTS appointments ADD COLUMN IF NOT EXISTS cliente_documento VARCHAR(50)"))
 
     db.execute(text("UPDATE appointments SET reminder_status = COALESCE(reminder_status, 'pending')"))
     db.execute(text("UPDATE appointments SET public_token = COALESCE(NULLIF(public_token, ''), md5(random()::text || clock_timestamp()::text))"))
@@ -686,6 +688,7 @@ def ensure_appointments_schema(db):
     db.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ux_appointments_public_token ON appointments(public_token)"))
     db.execute(text("CREATE INDEX IF NOT EXISTS ix_appointments_reminder_scheduled_at ON appointments(reminder_scheduled_at)"))
     db.execute(text("CREATE INDEX IF NOT EXISTS ix_appointments_reminder_status ON appointments(reminder_status)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_appointments_cliente_documento ON appointments(cliente_documento)"))
 
 
 def ensure_rtm_reminders_schema(db):

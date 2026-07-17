@@ -169,13 +169,21 @@ export const documentosApi = {
   },
 
   descargarBlob: async (id: string): Promise<Blob> => {
-    const response = await apiClient.get(`/documentos/${id}/download`, { responseType: 'blob' });
+    const response = await apiClient.get(`/documentos/${id}/download`, {
+      responseType: 'blob',
+      // Documentos grandes en producción pueden tardar más en responder.
+      timeout: 120000,
+    });
     return response.data;
   },
 
   /** PDF generado en servidor (Office → PDF); 404 si aún no existe. */
   obtenerVistaPreviaPdf: async (id: string): Promise<Blob> => {
-    const response = await apiClient.get(`/documentos/${id}/preview`, { responseType: 'blob' });
+    const response = await apiClient.get(`/documentos/${id}/preview`, {
+      responseType: 'blob',
+      // La primera conversión Office -> PDF puede tomar más de 45s en servidores con carga.
+      timeout: 210000,
+    });
     return response.data;
   },
 

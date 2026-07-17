@@ -23,9 +23,14 @@ from app.models.tenant import Tenant
 from app.models.usuario import RolEnum, Usuario
 from app.models.vehiculo import EstadoVehiculo, VehiculoProceso
 from app.utils.quality import process_due_quality_invites, utcnow_naive
-from app.utils.rtm_reminders import process_due_rtm_renewal_reminders
+from app.utils.rtm_reminders import (
+    disable_rtm_renewal_reminder_for_vehicle,
+    process_due_rtm_renewal_reminders,
+    schedule_rtm_renewal_reminder_for_vehicle,
+)
 from app.utils.email import (
     enviar_email,
+    generar_email_recordatorio_control_preventivo,
     generar_email_recordatorio_proxima_rtm,
     generar_email_rechazo_reinspeccion_cliente,
 )
@@ -973,10 +978,23 @@ def mark_certificate_delivered(
         vehiculo.estado = EstadoVehiculo.APROBADO
         vehiculo.certificado_entregado_at = now
         vehiculo.certificado_entregado_por = current_user.id
+        # RTM anual: activar recordatorio solo con cierre aprobado/completado.
+        try:
+            schedule_rtm_renewal_reminder_for_vehicle(db, vehiculo)
+        except Exception as reminder_exc:
+            print(f"[WARN] No se pudo programar recordatorio RTM tras cierre aprobado: {reminder_exc}")
     else:
         vehiculo.estado = EstadoVehiculo.RECHAZADO
         vehiculo.certificado_entregado_at = None
         vehiculo.certificado_entregado_por = None
+        try:
+            disable_rtm_renewal_reminder_for_vehicle(
+                db,
+                vehiculo,
+                reason="Cierre rechazado: se cancela recordatorio anual",
+            )
+        except Exception as reminder_exc:
+            print(f"[WARN] No se pudo desactivar recordatorio RTM tras cierre rechazado: {reminder_exc}")
     db.commit()
     db.refresh(vehiculo)
 
@@ -1107,6 +1125,14 @@ def corregir_cierre_resultado(
     vehiculo.estado = EstadoVehiculo.RECHAZADO
     vehiculo.certificado_entregado_at = None
     vehiculo.certificado_entregado_por = None
+    try:
+        disable_rtm_renewal_reminder_for_vehicle(
+            db,
+            vehiculo,
+            reason="Corrección a rechazado: se cancela recordatorio anual",
+        )
+    except Exception as reminder_exc:
+        print(f"[WARN] No se pudo desactivar recordatorio RTM tras corrección de cierre: {reminder_exc}")
 
     synced_pending = None
     if payload.sincronizar_reintento_pendiente:
@@ -1320,15 +1346,27 @@ def send_rtm_reminder_now(
         else None
     )
 
-    html = generar_email_recordatorio_proxima_rtm(
-        nombre_cda=nombre_cda,
-        nombre_cliente=reminder.cliente_nombre,
-        placa=reminder.placa,
-        tipo_servicio=_humanize_service(reminder.tipo_vehiculo),
-        fecha_sugerida=_format_fecha_es(reminder.next_due_at),
-        agendamiento_url=agendamiento_url,
-    )
-    sent = enviar_email(reminder.cliente_email, f"{nombre_cda} - Recordatorio de próxima RTM", html)
+    if (reminder.tipo_vehiculo or "").strip().lower() == "preventiva":
+        html = generar_email_recordatorio_control_preventivo(
+            nombre_cda=nombre_cda,
+            nombre_cliente=reminder.cliente_nombre,
+            placa=reminder.placa,
+            tipo_servicio=_humanize_service(reminder.tipo_vehiculo),
+            fecha_sugerida=_format_fecha_es(reminder.next_due_at),
+            agendamiento_url=agendamiento_url,
+        )
+        subject = f"{nombre_cda} - Recordatorio de control preventivo"
+    else:
+        html = generar_email_recordatorio_proxima_rtm(
+            nombre_cda=nombre_cda,
+            nombre_cliente=reminder.cliente_nombre,
+            placa=reminder.placa,
+            tipo_servicio=_humanize_service(reminder.tipo_vehiculo),
+            fecha_sugerida=_format_fecha_es(reminder.next_due_at),
+            agendamiento_url=agendamiento_url,
+        )
+        subject = f"{nombre_cda} - Recordatorio de próxima RTM"
+    sent = enviar_email(reminder.cliente_email, subject, html)
     now = _now_naive()
     reminder.last_manual_sent_at = now
     reminder.last_management_at = now

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import {
   Ban,
+  CarFront,
   CalendarClock,
   CheckCircle2,
   Copy,
@@ -53,8 +54,11 @@ export default function Agendamiento() {
   const [fecha, setFecha] = useState(todayIso);
   const [statusFilter, setStatusFilter] = useState('');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
+  const [submitIntent, setSubmitIntent] = useState(false);
   const [form, setForm] = useState<AppointmentCreatePayload>({
     cliente_nombre: '',
+    cliente_tipo_documento: 'CC',
+    cliente_documento: '',
     cliente_email: '',
     cliente_celular: '',
     placa: '',
@@ -81,7 +85,17 @@ export default function Agendamiento() {
     mutationFn: () => appointmentsApi.createInternal(form),
     onSuccess: () => {
       setFeedback({ type: 'success', message: 'Cita creada correctamente.' });
-      setForm((prev) => ({ ...prev, cliente_nombre: '', cliente_email: '', cliente_celular: '', placa: '', notes: '' }));
+      setSubmitIntent(false);
+      setForm((prev) => ({
+        ...prev,
+        cliente_nombre: '',
+        cliente_tipo_documento: 'CC',
+        cliente_documento: '',
+        cliente_email: '',
+        cliente_celular: '',
+        placa: '',
+        notes: '',
+      }));
       queryClient.invalidateQueries({ queryKey: ['appointments'] });
     },
     onError: (error: any) => {
@@ -138,6 +152,8 @@ export default function Agendamiento() {
     setForm((prev) => ({
       ...prev,
       cliente_nombre: (prefill.cliente_nombre || prev.cliente_nombre || '').toUpperCase(),
+      cliente_tipo_documento: prefill.cliente_tipo_documento || prev.cliente_tipo_documento || 'CC',
+      cliente_documento: prefill.cliente_documento || prev.cliente_documento || '',
       cliente_email: (prefill.cliente_email || prev.cliente_email || '').toLowerCase(),
       cliente_celular: prefill.cliente_celular || prev.cliente_celular || '',
       placa: (prefill.placa || prev.placa || '').toUpperCase(),
@@ -169,6 +185,13 @@ export default function Agendamiento() {
   const whatsappShareUrl = publicLink
     ? `https://wa.me/?text=${encodeURIComponent(whatsappMessage)}`
     : '';
+  const formErrors = {
+    cliente_nombre: !form.cliente_nombre?.trim(),
+    placa: !form.placa?.trim(),
+    fecha: !form.fecha?.trim(),
+    hora: !form.hora?.trim(),
+  };
+  const hasFormErrors = Object.values(formErrors).some(Boolean);
 
   const fallbackCopyToClipboard = (text: string) => {
     const textarea = document.createElement('textarea');
@@ -225,7 +248,7 @@ export default function Agendamiento() {
             </ul>
           </div>
           <div className="mt-4 rounded-xl border border-slate-200 bg-white/90 p-3">
-            <p className="text-xs font-semibold text-slate-700 mb-2">Link público del tenant</p>
+            <p className="text-xs font-medium text-slate-600 mb-2">Link público del tenant</p>
             <div className="flex flex-col md:flex-row gap-2">
               <input
                 className="input-corporate flex-1 text-sm"
@@ -275,30 +298,93 @@ export default function Agendamiento() {
         )}
 
         <section className="section-card p-6">
-          <p className="text-sm font-semibold text-slate-800 mb-3">Nueva cita</p>
+          <p className="text-sm font-semibold text-slate-800 mb-1">Nueva cita</p>
+          <p className="text-xs text-slate-500 mb-4">
+            Registra datos del cliente y define franja de atención. Documento y correo ayudan a acelerar recepción y recordatorios.
+          </p>
           <form
-            className="grid grid-cols-1 md:grid-cols-3 gap-3"
+            className="grid grid-cols-1 md:grid-cols-4 gap-3"
             onSubmit={(e) => {
               e.preventDefault();
               setFeedback(null);
+              setSubmitIntent(true);
+              if (hasFormErrors) {
+                setFeedback({ type: 'error', message: 'Completa los campos obligatorios marcados con *.' });
+                return;
+              }
               createMutation.mutate();
             }}
           >
-            <input className="input-corporate uppercase" placeholder="Nombre cliente" value={form.cliente_nombre} onChange={(e) => setForm((p) => ({ ...p, cliente_nombre: e.target.value.toUpperCase() }))} required />
-            <input className="input-corporate" placeholder="Celular (opcional)" value={form.cliente_celular || ''} onChange={(e) => setForm((p) => ({ ...p, cliente_celular: e.target.value }))} />
-            <input className="input-corporate lowercase" type="email" placeholder="Correo (opcional)" value={form.cliente_email || ''} onChange={(e) => setForm((p) => ({ ...p, cliente_email: e.target.value.toLowerCase() }))} />
-            <input className="input-corporate" placeholder="Placa" value={form.placa} onChange={(e) => setForm((p) => ({ ...p, placa: e.target.value.toUpperCase() }))} required />
-            <select className="input-corporate" value={form.tipo_vehiculo} onChange={(e) => setForm((p) => ({ ...p, tipo_vehiculo: e.target.value }))}>
-              <option value="liviano_particular">Liviano particular</option>
-              <option value="moto">Moto</option>
-              <option value="liviano_publico">Liviano público</option>
-              <option value="pesado">Pesado</option>
-              <option value="preventiva">Preventiva</option>
-            </select>
-            <input className="input-corporate" type="date" value={form.fecha} onChange={(e) => setForm((p) => ({ ...p, fecha: e.target.value }))} required />
-            <input className="input-corporate" type="time" value={form.hora} onChange={(e) => setForm((p) => ({ ...p, hora: e.target.value }))} required />
-            <input className="input-corporate md:col-span-2" placeholder="Observaciones (opcional)" value={form.notes || ''} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} />
+            <div className="md:col-span-4 rounded-xl border border-slate-200 bg-slate-50/40 p-3">
+              <p className="text-xs font-medium text-slate-600 flex items-center gap-2">
+                <UserCheck className="w-3.5 h-3.5 text-slate-500" />
+                Datos del cliente
+              </p>
+              <p className="text-[11px] text-slate-400 mt-1">Los campos con * son obligatorios.</p>
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs font-medium text-slate-500 mb-1">Nombre cliente *</label>
+              <input className="input-corporate uppercase" placeholder="Ej: MIGUEL SIERRA" value={form.cliente_nombre} onChange={(e) => setForm((p) => ({ ...p, cliente_nombre: e.target.value.toUpperCase() }))} />
+              {submitIntent && formErrors.cliente_nombre && <p className="text-[11px] text-red-600 mt-1">Nombre cliente es obligatorio.</p>}
+            </div>
             <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Tipo documento</label>
+              <select className="input-corporate" value={form.cliente_tipo_documento || 'CC'} onChange={(e) => setForm((p) => ({ ...p, cliente_tipo_documento: e.target.value as 'CC' | 'CE' | 'PA' | 'NIT' }))}>
+                <option value="CC">CC</option>
+                <option value="CE">CE</option>
+                <option value="PA">PA</option>
+                <option value="NIT">NIT</option>
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Documento (opcional)</label>
+              <input className="input-corporate" placeholder="Ej: 1052071342" value={form.cliente_documento || ''} onChange={(e) => setForm((p) => ({ ...p, cliente_documento: e.target.value.toUpperCase() }))} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Celular (opcional)</label>
+              <input className="input-corporate" placeholder="Ej: 3001234567" value={form.cliente_celular || ''} onChange={(e) => setForm((p) => ({ ...p, cliente_celular: e.target.value }))} />
+            </div>
+            <div className="md:col-span-2">
+              <label className="block text-xs font-medium text-slate-500 mb-1">Correo (opcional)</label>
+              <input className="input-corporate lowercase" type="email" placeholder="cliente@correo.com" value={form.cliente_email || ''} onChange={(e) => setForm((p) => ({ ...p, cliente_email: e.target.value.toLowerCase() }))} />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Placa *</label>
+              <input className="input-corporate" placeholder="Ej: XHI56H" value={form.placa} onChange={(e) => setForm((p) => ({ ...p, placa: e.target.value.toUpperCase() }))} />
+              {submitIntent && formErrors.placa && <p className="text-[11px] text-red-600 mt-1">Placa es obligatoria.</p>}
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Servicio</label>
+              <select className="input-corporate" value={form.tipo_vehiculo} onChange={(e) => setForm((p) => ({ ...p, tipo_vehiculo: e.target.value }))}>
+                <option value="liviano_particular">Liviano particular</option>
+                <option value="moto">Moto</option>
+                <option value="liviano_publico">Liviano público</option>
+                <option value="pesado_particular">Pesado particular</option>
+                <option value="pesado_publico">Pesado público</option>
+                <option value="preventiva">Preventiva</option>
+              </select>
+            </div>
+            <div className="md:col-span-4 rounded-xl border border-slate-200 bg-slate-50/40 p-3 mt-1">
+              <p className="text-xs font-medium text-slate-600 flex items-center gap-2">
+                <CarFront className="w-3.5 h-3.5 text-slate-500" />
+                Programación de cita
+              </p>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Fecha *</label>
+              <input className="input-corporate" type="date" value={form.fecha} onChange={(e) => setForm((p) => ({ ...p, fecha: e.target.value }))} />
+              {submitIntent && formErrors.fecha && <p className="text-[11px] text-red-600 mt-1">Fecha es obligatoria.</p>}
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Hora *</label>
+              <input className="input-corporate" type="time" value={form.hora} onChange={(e) => setForm((p) => ({ ...p, hora: e.target.value }))} />
+              {submitIntent && formErrors.hora && <p className="text-[11px] text-red-600 mt-1">Hora es obligatoria.</p>}
+            </div>
+            <div className="md:col-span-3">
+              <label className="block text-xs font-medium text-slate-500 mb-1">Observaciones (opcional)</label>
+              <input className="input-corporate" placeholder="Ej: llega con 10 min de anticipación" value={form.notes || ''} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} />
+            </div>
+            <div className="md:self-end">
               <button type="submit" disabled={createMutation.isLoading} className="btn-corporate-primary w-full inline-flex items-center justify-center gap-2 disabled:opacity-60">
                 <Plus className="w-4 h-4" />
                 {createMutation.isLoading ? 'Guardando...' : 'Crear cita'}
@@ -310,11 +396,11 @@ export default function Agendamiento() {
         <section className="section-card p-6">
           <div className="flex flex-wrap items-end gap-3 mb-4">
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Fecha</label>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Fecha</label>
               <input type="date" className="input-corporate" value={fecha} onChange={(e) => setFecha(e.target.value)} />
             </div>
             <div>
-              <label className="block text-xs font-semibold text-slate-600 mb-1">Estado</label>
+              <label className="block text-xs font-medium text-slate-500 mb-1">Estado</label>
               <select className="input-corporate" value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
                 <option value="">Todos</option>
                 <option value="scheduled">Agendada</option>

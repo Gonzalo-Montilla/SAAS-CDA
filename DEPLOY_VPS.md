@@ -445,24 +445,81 @@ mkdir -p /var/www/cdasoft/repo/logs
 
 ## 15. Actualizar CDASOFT sin romper otros proyectos
 
-En el servidor:
+### 15.1 Protocolo fijo (obligatorio)
+
+No hagas deploy si falla alguno de estos puntos:
+
+- `main` está actualizado en remoto y fue validado en local/staging.
+- `git status --porcelain` está **vacío** tanto en local como en VPS.
+- Pull en VPS con `--ff-only` (evita merges inesperados durante deploy).
+- Prechecks backend (`py_compile` + `import-ok`) pasan antes de reiniciar servicio.
+- Existe tag estable de referencia para rollback rápido (ejemplo: `prod-stable-YYYY-MM-DD`).
+
+### 15.2 Flujo recomendado de despliegue
+
+En local (Windows/PC):
 
 ```bash
-cd /var/www/cdasoft/repo
-git pull
-cd backend
-source venv/bin/activate
-pip install -r requirements.txt
-deactivate
-sudo systemctl restart cdasoft-backend
+cd C:\Proyectos\SAAS-CDA
+git checkout main
+git pull --ff-only origin main
+git status --porcelain
 ```
 
-En tu PC, vuelve a generar `frontend/dist` con el `VITE_API_URL` correcto y sube solo `dist`:
+Si no está limpio, **detente** y no despliegues hasta resolver.
+
+Build frontend con URL final:
+
+```bash
+cd frontend
+npm run build
+```
+
+Subir solo `dist`:
 
 ```bash
 # ejemplo con rsync desde Git Bash / WSCP / scp
 rsync -avz --delete ./frontend/dist/ USUARIO@IP:/var/www/cdasoft/repo/frontend/dist/
 ```
+
+En VPS:
+
+```bash
+cd /var/www/cdasoft/repo
+git status --porcelain
+git pull --ff-only origin main
+cd backend
+sudo -u www-data ./venv/bin/python -m py_compile app/api/v1/endpoints/vehiculos.py app/api/v1/endpoints/exogena.py app/db/database.py app/models/factus.py app/models/exogena.py
+sudo -u www-data ./venv/bin/python -c "import app.main; print('import-ok')"
+sudo systemctl restart cdasoft-backend
+curl -s http://127.0.0.1:8010/health
+sudo chown -R www-data:www-data /var/www/cdasoft/repo/frontend/dist
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+### 15.3 Si el VPS no está limpio
+
+Si `git status --porcelain` en VPS muestra cambios locales:
+
+1. **No** ejecutes `git pull` todavía.
+2. Evalúa si son cambios operativos reales o basura temporal.
+3. Guarda temporalmente con `git stash push -m "vps-local-before-pull-YYYYMMDD"` solo si entiendes qué estás guardando.
+4. Luego sí: `git pull --ff-only origin main`.
+
+### 15.4 Rollback rápido (incidente)
+
+Si algo falla tras deploy:
+
+```bash
+cd /var/www/cdasoft/repo
+git fetch --tags
+git checkout prod-stable-2026-06-26
+cd backend
+sudo systemctl restart cdasoft-backend
+curl -s http://127.0.0.1:8010/health
+```
+
+Cuando estabilices, crea la rama/commit correcto para volver a `main` con trazabilidad.
 
 ---
 

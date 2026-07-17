@@ -763,6 +763,8 @@ export interface AppointmentSlot {
 export interface AppointmentItem {
   id: string;
   cliente_nombre: string;
+  cliente_tipo_documento?: 'CC' | 'CE' | 'PA' | 'NIT' | null;
+  cliente_documento?: string | null;
   cliente_email?: string | null;
   cliente_celular?: string | null;
   placa: string;

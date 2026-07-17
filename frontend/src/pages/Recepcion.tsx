@@ -647,6 +647,8 @@ export default function Recepcion() {
       placa?: string;
       tipo_vehiculo?: string;
       cliente_nombre?: string;
+      cliente_tipo_documento?: VehiculoRegistro['cliente_tipo_documento'];
+      cliente_documento?: string;
       cliente_telefono?: string;
       cliente_email?: string;
     } | null;
@@ -949,20 +951,41 @@ export default function Recepcion() {
     const tipoPrefill = allowedTipoVehiculo.has(tipoRaw)
       ? tipoRaw
       : (tipoMap[tipoRaw] || 'liviano_particular');
+    const docTipoPrefill =
+      prefill.cliente_tipo_documento && ['CC', 'CE', 'PA', 'NIT'].includes(prefill.cliente_tipo_documento)
+        ? (prefill.cliente_tipo_documento as VehiculoRegistro['cliente_tipo_documento'])
+        : null;
+    const docNumeroPrefill = docTipoPrefill
+      ? normalizarDocumentoCliente(prefill.cliente_documento || '', docTipoPrefill)
+      : '';
+    const inconsistenciaDocPrefill =
+      docTipoPrefill && docNumeroPrefill
+        ? validarConsistenciaDocumentoCliente(docTipoPrefill, docNumeroPrefill)
+        : null;
 
     setFormData((prev) => ({
       ...prev,
       placa: (prefill.placa || prev.placa || '').toUpperCase(),
       tipo_vehiculo: tipoPrefill,
       cliente_nombre: (prefill.cliente_nombre || prev.cliente_nombre || '').toUpperCase(),
+      cliente_tipo_documento: inconsistenciaDocPrefill
+        ? prev.cliente_tipo_documento
+        : (docTipoPrefill || prev.cliente_tipo_documento),
+      cliente_documento: inconsistenciaDocPrefill
+        ? prev.cliente_documento
+        : (docNumeroPrefill || prev.cliente_documento),
       cliente_telefono: prefill.cliente_telefono || prev.cliente_telefono || '',
       cliente_email: (prefill.cliente_email || prev.cliente_email || '').toLowerCase(),
     }));
 
+    if (inconsistenciaDocPrefill) {
+      showToast('warning', 'Documento del agendamiento inconsistente', inconsistenciaDocPrefill);
+    }
+
     showToast(
       'success',
       'Datos precargados desde Agendamiento.',
-      'Completa documento y demás campos para registrar el vehículo.',
+      'Valida documento y demás campos para registrar el vehículo.',
     );
 
     navigate(location.pathname, { replace: true, state: null });
@@ -3703,7 +3726,11 @@ export default function Recepcion() {
             <div className="flex items-start gap-3">
               <AlertTriangle className="w-6 h-6 text-amber-600 mt-0.5" />
               <div className="flex-1">
-                <h4 className="text-base font-bold text-slate-900">Posible reingreso por rechazo inicial</h4>
+                <h4 className="text-base font-bold text-slate-900">
+                  {reinspeccionInfo.elegible_reingreso
+                    ? 'Posible reingreso por rechazo inicial'
+                    : 'Historial de inspección detectado'}
+                </h4>
                 <p className="text-sm text-slate-700 mt-1">
                   La placa <span className="font-semibold">{reinspeccionInfo.placa}</span> ya tiene historial en este CDA.
                 </p>
