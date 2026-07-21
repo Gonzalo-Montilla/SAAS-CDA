@@ -26,6 +26,8 @@ class Tenant(Base):
     logo_url = Column(String(500), nullable=True)
     logo_calidad_url = Column(String(500), nullable=True)
     formato_prerevision_version = Column(String(50), nullable=True)
+    pos_receipt_enabled = Column(Boolean, nullable=False, default=False)
+    pos_receipt_width = Column(String(10), nullable=False, default="80mm")
     color_primario = Column(String(20), nullable=False, default="#2563eb")
     color_secundario = Column(String(20), nullable=False, default="#0f172a")
     plan_actual = Column(String(30), nullable=False, default="demo")

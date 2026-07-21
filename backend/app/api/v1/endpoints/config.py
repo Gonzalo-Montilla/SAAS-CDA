@@ -10,7 +10,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_admin, get_current_user, get_db
+from app.core.deps import get_admin, get_cajero_or_admin, get_current_user, get_db
 from app.core.config import settings
 from app.models.usuario import Usuario
 from app.models.tenant import Tenant
@@ -24,6 +24,23 @@ class TurnstilePublicOut(BaseModel):
 
     enabled: bool = Field(description="True si el backend exige captcha y hay site key + secret configurados.")
     site_key: str = Field(default="", description="Clave pública del widget Turnstile; vacía si está desactivado.")
+
+
+class PosReceiptSettingsOut(BaseModel):
+    tenant_enabled: bool
+    ticket_width: str
+    auto_prompt_after_payment: bool
+    tenant_name: str
+    tenant_logo_url: str | None = None
+    tenant_nit: str | None = None
+    tenant_direccion: str | None = None
+    tenant_telefono: str | None = None
+
+
+class PosReceiptSettingsPatch(BaseModel):
+    tenant_enabled: bool | None = None
+    ticket_width: str | None = Field(default=None, max_length=10)
+    auto_prompt_after_payment: bool | None = None
 
 
 @router.get("/turnstile-public", response_model=TurnstilePublicOut)
@@ -116,6 +133,73 @@ def obtener_urls_externas(
         "sicov_url": settings.SICOV_URL,
         "indra_url": settings.INDRA_URL
     }
+
+
+def _normalize_pos_ticket_width(value: str | None) -> str:
+    width = (value or "").strip().lower()
+    if width not in {"58mm", "80mm"}:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Ancho POS inválido. Use 58mm o 80mm.",
+        )
+    return width
+
+
+@router.get("/pos-receipt-settings", response_model=PosReceiptSettingsOut)
+def obtener_pos_receipt_settings(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_cajero_or_admin),
+):
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado")
+
+    ticket_width = (tenant.pos_receipt_width or "80mm").strip().lower()
+    if ticket_width not in {"58mm", "80mm"}:
+        ticket_width = "80mm"
+    return PosReceiptSettingsOut(
+        tenant_enabled=bool(tenant.pos_receipt_enabled),
+        ticket_width=ticket_width,
+        auto_prompt_after_payment=bool(current_user.pos_auto_print_prompt),
+        tenant_name=(tenant.nombre_comercial or tenant.nombre or "CDASOFT").strip(),
+        tenant_logo_url=tenant.logo_url,
+        tenant_nit=tenant.nit_cda,
+        tenant_direccion=tenant.direccion_facturacion,
+        tenant_telefono=tenant.celular,
+    )
+
+
+@router.patch("/pos-receipt-settings", response_model=PosReceiptSettingsOut)
+def actualizar_pos_receipt_settings(
+    payload: PosReceiptSettingsPatch,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_cajero_or_admin),
+):
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    if not tenant:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado")
+
+    data = payload.model_dump(exclude_unset=True)
+    if "tenant_enabled" in data:
+        tenant.pos_receipt_enabled = bool(data["tenant_enabled"])
+    if "ticket_width" in data and data["ticket_width"] is not None:
+        tenant.pos_receipt_width = _normalize_pos_ticket_width(data["ticket_width"])
+    if "auto_prompt_after_payment" in data:
+        current_user.pos_auto_print_prompt = bool(data["auto_prompt_after_payment"])
+
+    db.commit()
+    db.refresh(tenant)
+    db.refresh(current_user)
+    return PosReceiptSettingsOut(
+        tenant_enabled=bool(tenant.pos_receipt_enabled),
+        ticket_width=(tenant.pos_receipt_width or "80mm").strip().lower(),
+        auto_prompt_after_payment=bool(current_user.pos_auto_print_prompt),
+        tenant_name=(tenant.nombre_comercial or tenant.nombre or "CDASOFT").strip(),
+        tenant_logo_url=tenant.logo_url,
+        tenant_nit=tenant.nit_cda,
+        tenant_direccion=tenant.direccion_facturacion,
+        tenant_telefono=tenant.celular,
+    )
 
 
 @router.get("/tenant-logo")

@@ -1,5 +1,5 @@
 import apiClient from './client';
-import type { TenantFacturacionUbicacion, URLsExternas } from '../types';
+import type { PosReceiptSettings, TenantFacturacionUbicacion, URLsExternas } from '../types';
 
 export const configApi = {
   // Obtener URLs de sistemas externos (RUNT, SICOV, INDRA)
@@ -24,6 +24,16 @@ export const configApi = {
     payload: Partial<Pick<TenantFacturacionUbicacion, 'factus_municipality_id' | 'direccion_facturacion'>>
   ): Promise<TenantFacturacionUbicacion> => {
     const response = await apiClient.patch<TenantFacturacionUbicacion>('/config/facturacion-ubicacion', payload);
+    return response.data;
+  },
+
+  obtenerPosReceiptSettings: async (): Promise<PosReceiptSettings> => {
+    const response = await apiClient.get<PosReceiptSettings>('/config/pos-receipt-settings');
+    return response.data;
+  },
+
+  actualizarPosReceiptSettings: async (payload: Partial<PosReceiptSettings>): Promise<PosReceiptSettings> => {
+    const response = await apiClient.patch<PosReceiptSettings>('/config/pos-receipt-settings', payload);
     return response.data;
   },
 };

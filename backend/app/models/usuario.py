@@ -33,6 +33,7 @@ class Usuario(Base):
     nombre_completo = Column(String(200), nullable=False)
     rol = Column(SQLEnum(RolEnum), nullable=False, default=RolEnum.CAJERO)
     activo = Column(Boolean, default=True, nullable=False)
+    pos_auto_print_prompt = Column(Boolean, default=True, nullable=False)
     
     # Auditoría
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)

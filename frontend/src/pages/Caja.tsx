@@ -17,7 +17,7 @@ import { useToast } from '../contexts/ToastContext';
 import { formatCurrency } from '../utils/formatNumber';
 import { formatDateTimeShort, formatTime24, formatDateWithWeekday } from '../utils/formatDate';
 import { extractApiErrorMessage } from '../utils/apiError';
-import type { CajaApertura, MovimientoCaja, Vehiculo } from '../types';
+import type { CajaApertura, MovimientoCaja, PosReceiptSettings, Vehiculo } from '../types';
 import { 
   AlertTriangle, 
   RefreshCw, 
@@ -89,11 +89,217 @@ const saveBlobAsFile = (blob: Blob, filename: string): void => {
   window.URL.revokeObjectURL(downloadUrl);
 };
 
+type PosReceiptPrintPayload = {
+  nombreCda: string;
+  logoUrl?: string | null;
+  nitCda?: string | null;
+  direccionCda?: string | null;
+  telefonoCda?: string | null;
+  placa: string;
+  tipoVehiculo: string;
+  clienteNombre: string;
+  clienteDocumento: string;
+  valorRTM: number;
+  comisionSOAT: number;
+  totalCobrado: number;
+  metodoPago: string;
+  numeroFacturaDIAN: string;
+  fechaCobroISO: string;
+  cajeroNombre: string;
+  ticketWidth: '58mm' | '80mm';
+};
+
+const escapeHtml = (value: string): string =>
+  value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+
+const renderPosReceiptHtml = (payload: PosReceiptPrintPayload): string => {
+  const widthPx = payload.ticketWidth === '58mm' ? 220 : 300;
+  const is58 = payload.ticketWidth === '58mm';
+  const pageMarginMm = is58 ? 1.2 : 1.6;
+  const ticketPaddingTop = is58 ? 8 : 12;
+  const ticketPaddingSide = is58 ? 4 : 6;
+  const ticketPaddingBottom = is58 ? 4 : 6;
+  const logoTopMargin = is58 ? 2 : 4;
+  const logoBottomMargin = is58 ? 8 : 10;
+  const subMarginTop = is58 ? 4 : 6;
+  const hrMargin = is58 ? 7 : 9;
+  const sectionTitleMarginTop = is58 ? 1 : 2;
+  const sectionTitleMarginBottom = is58 ? 3 : 4;
+  const rowMargin = is58 ? 2 : 3;
+  const footMarginTop = is58 ? 8 : 10;
+  const footLineHeight = is58 ? 1.35 : 1.45;
+  const logoMaxHeight = is58 ? 56 : 70;
+  const fecha = new Date(payload.fechaCobroISO);
+  const clienteRows = [
+    ['PLACA', payload.placa],
+    ['TIPO', payload.tipoVehiculo.toUpperCase()],
+    ['CLIENTE', payload.clienteNombre.toUpperCase()],
+    ['DOC', payload.clienteDocumento],
+  ];
+  const costosRows = [
+    ['RTM', `$${formatCurrency(payload.valorRTM)}`],
+    ['SOAT', `$${formatCurrency(payload.comisionSOAT)}`],
+    ['TOTAL', `$${formatCurrency(payload.totalCobrado)}`],
+  ];
+  const controlRows = [
+    ['PAGO', payload.metodoPago.replaceAll('_', ' ').toUpperCase()],
+    ['FACTURA', payload.numeroFacturaDIAN || 'PENDIENTE'],
+    ['FECHA', `${formatDateWithWeekday(fecha)} ${formatTime24(fecha)}`],
+    ['CAJERO', payload.cajeroNombre.toUpperCase()],
+  ];
+  const renderRows = (rows: string[][]): string =>
+    rows
+      .map(
+        ([label, val]) => `
+      <div class="row">
+        <span class="k">${escapeHtml(label)}</span>
+        <span class="v">${escapeHtml(val)}</span>
+      </div>`,
+      )
+      .join('');
+
+  const normalizeLogo = (raw: string | null | undefined): string | null => {
+    const v = (raw || '').trim();
+    if (!v) return null;
+    if (v.startsWith('http://') || v.startsWith('https://') || v.startsWith('data:')) return v;
+    if (v.startsWith('/')) return v;
+    return `/${v.replace(/^\/+/, '')}`;
+  };
+  const logoSrc = normalizeLogo(payload.logoUrl);
+  const logoBlock = logoSrc
+    ? `<div class="logo-wrap"><img src="${escapeHtml(logoSrc)}" alt="Logo CDA" class="logo" /></div>`
+    : '';
+  const nitLine = (payload.nitCda || '').trim() ? `<div class="meta">NIT: ${escapeHtml((payload.nitCda || '').trim())}</div>` : '';
+  const direccionLine = (payload.direccionCda || '').trim()
+    ? `<div class="meta">${escapeHtml((payload.direccionCda || '').trim())}</div>`
+    : '';
+  const telefonoLine = (payload.telefonoCda || '').trim()
+    ? `<div class="meta">Tel: ${escapeHtml((payload.telefonoCda || '').trim())}</div>`
+    : '';
+
+  const clienteBlock = renderRows(clienteRows);
+  const costosBlock = renderRows(costosRows);
+  const controlBlock = renderRows(controlRows);
+
+  return `<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Recibo POS ${escapeHtml(payload.placa)}</title>
+  <style>
+    @page { size: auto; margin: ${pageMarginMm}mm; }
+    body { margin: 0; font-family: "Courier New", monospace; background: #fff; color: #111; }
+    .ticket { width: ${widthPx}px; margin: 0 auto; padding: ${ticketPaddingTop}px ${ticketPaddingSide}px ${ticketPaddingBottom}px; }
+    .logo-wrap { text-align: center; margin-top: ${logoTopMargin}px; margin-bottom: ${logoBottomMargin}px; }
+    .logo { max-width: ${widthPx - 24}px; max-height: ${logoMaxHeight}px; object-fit: contain; }
+    .title { text-align: center; font-weight: 700; font-size: 14px; text-transform: uppercase; }
+    .sub { text-align: center; font-size: 11px; margin: ${subMarginTop}px 0 4px; font-weight: 700; }
+    .meta { text-align: center; font-size: 10px; line-height: 1.35; margin: 1px 0; }
+    .hr { border-top: 1px dashed #222; margin: ${hrMargin}px 0; }
+    .section-title {
+      font-size: 11px;
+      font-weight: 800;
+      text-transform: uppercase;
+      text-align: center;
+      margin: ${sectionTitleMarginTop}px 0 ${sectionTitleMarginBottom}px;
+      letter-spacing: 0.3px;
+    }
+    .row { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; margin: ${rowMargin}px 0; }
+    .k { font-weight: 700; min-width: 64px; }
+    .v { text-align: right; word-break: break-word; }
+    .total { font-size: 13px; font-weight: 700; }
+    .foot { text-align: center; margin-top: ${footMarginTop}px; font-size: 10px; line-height: ${footLineHeight}; }
+    .foot-brand { font-weight: 800; }
+  </style>
+</head>
+<body>
+  <div class="ticket">
+    ${logoBlock}
+    <div class="title">${escapeHtml(payload.nombreCda)}</div>
+    ${nitLine}
+    ${direccionLine}
+    ${telefonoLine}
+    <div class="sub">RECIBO DE PAGO RTM</div>
+
+    <div class="hr"></div>
+    <div class="section-title">Datos del servicio</div>
+    ${clienteBlock}
+
+    <div class="hr"></div>
+    <div class="section-title">Detalle de costos</div>
+    ${costosBlock}
+
+    <div class="hr"></div>
+    <div class="section-title">Control de operación</div>
+    ${controlBlock}
+
+    <div class="hr"></div>
+    <div class="row total"><span>TOTAL</span><span>$${escapeHtml(formatCurrency(payload.totalCobrado))}</span></div>
+    <div class="hr"></div>
+
+    <div class="foot">
+      La factura electrónica llegará a su correo registrado.<br/>
+      Impreso por ${escapeHtml(payload.nombreCda)}.<br/>
+      <span class="foot-brand">CDASOFT.</span>
+    </div>
+  </div>
+</body>
+</html>`;
+};
+
+const imprimirReciboPos = (payload: PosReceiptPrintPayload): void => {
+  const popup = window.open('', '_blank', 'width=420,height=640');
+  if (!popup) {
+    throw new Error('No fue posible abrir la ventana de impresión. Verifica bloqueador de ventanas.');
+  }
+
+  let printed = false;
+  const triggerPrint = () => {
+    if (printed) return;
+    printed = true;
+    window.setTimeout(() => {
+      try {
+        popup.focus();
+        popup.print();
+      } catch {
+        // fallback silencioso: el flujo principal ya mostró la vista previa
+      }
+    }, 120);
+  };
+
+  popup.document.open();
+  popup.document.write(renderPosReceiptHtml(payload));
+  popup.document.close();
+
+  const logo = popup.document.querySelector('img.logo') as HTMLImageElement | null;
+  if (logo && !logo.complete) {
+    logo.addEventListener('load', triggerPrint, { once: true });
+    logo.addEventListener('error', triggerPrint, { once: true });
+    window.setTimeout(triggerPrint, 1400);
+    return;
+  }
+
+  if (popup.document.readyState === 'complete') {
+    triggerPrint();
+    return;
+  }
+
+  popup.addEventListener('load', triggerPrint, { once: true });
+  window.setTimeout(triggerPrint, 900);
+};
+
 export default function CajaPage() {
   const COBROS_RECIENTES_DIAS = 30;
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const [vistaActual, setVistaActual] = useState<'apertura' | 'cobros' | 'cobrados-hoy' | 'cobrados-recientes' | 'movimientos' | 'cierre' | 'historial'>('cobros');
+  const [vistaActual, setVistaActual] = useState<
+    'apertura' | 'cobros' | 'cobrados-hoy' | 'cobrados-recientes' | 'movimientos' | 'cierre' | 'historial' | 'impresion-pos'
+  >('cobros');
   const [mostrarModalGasto, setMostrarModalGasto] = useState(false);
   const [mostrarModalVentaSOAT, setMostrarModalVentaSOAT] = useState(false);
   const [mostrarCobrosHoySinCaja, setMostrarCobrosHoySinCaja] = useState(false);
@@ -370,6 +576,7 @@ export default function CajaPage() {
               },
               { id: 'movimientos' as const, label: 'Movimientos', icon: Receipt, badge: undefined, badgeClass: '' },
               { id: 'historial' as const, label: 'Historial', icon: Folder, badge: undefined, badgeClass: '' },
+              { id: 'impresion-pos' as const, label: 'Impresión POS', icon: Printer, badge: undefined, badgeClass: '' },
               { id: 'cierre' as const, label: 'Cierre', icon: Lock, badge: undefined, badgeClass: '' },
             ] as const
           ).map(({ id, label, icon: Icon, badge, badgeClass }) => {
@@ -439,6 +646,8 @@ export default function CajaPage() {
       {vistaActual === 'historial' && (
         <HistorialCajas />
       )}
+
+      {vistaActual === 'impresion-pos' && <PosReceiptSettingsPanel />}
 
       {/* Modal de Registro de Gasto */}
       {mostrarModalGasto && (
@@ -694,6 +903,13 @@ function VehiculosPendientes({
   const [busqueda, setBusqueda] = useState('');
   const [sarlaftEscalationNotice, setSarlaftEscalationNotice] = useState<string | null>(null);
   const [expandedExtras, setExpandedExtras] = useState<Record<string, boolean>>({});
+  const [posReceiptPayload, setPosReceiptPayload] = useState<PosReceiptPrintPayload | null>(null);
+  const { data: posReceiptSettings } = useQuery({
+    queryKey: ['pos-receipt-settings'],
+    queryFn: configApi.obtenerPosReceiptSettings,
+    staleTime: 60_000,
+    retry: 1,
+  });
 
   const valueOrDash = (value?: string | number | null): string => {
     if (value === null || value === undefined) return '—';
@@ -774,9 +990,20 @@ function VehiculosPendientes({
       </div>
     </div>
   ) : null;
+  const posPromptModal = posReceiptPayload ? (
+    <PosReceiptPromptModal
+      payload={posReceiptPayload}
+      onClose={() => setPosReceiptPayload(null)}
+    />
+  ) : null;
 
   if (loading) {
-    return <LoadingSpinner message="Cargando vehículos pendientes de cobro..." />;
+    return (
+      <>
+        <LoadingSpinner message="Cargando vehículos pendientes de cobro..." />
+        {posPromptModal}
+      </>
+    );
   }
 
   if (error) {
@@ -798,6 +1025,7 @@ function VehiculosPendientes({
           <RefreshCw className="w-5 h-5" />
           Reintentar
         </button>
+        {posPromptModal}
         {sarlaftEscalationModal}
       </div>
     );
@@ -824,6 +1052,7 @@ function VehiculosPendientes({
           <RefreshCw className="w-5 h-5" />
           Reintentar
         </button>
+        {posPromptModal}
         {sarlaftEscalationModal}
       </div>
     );
@@ -841,6 +1070,7 @@ function VehiculosPendientes({
         <p className="text-gray-600">
           Todos los vehículos registrados han sido cobrados
         </p>
+        {posPromptModal}
         {sarlaftEscalationModal}
       </div>
     );
@@ -905,6 +1135,7 @@ function VehiculosPendientes({
           >
             Limpiar búsqueda
           </button>
+          {posPromptModal}
         </div>
       ) : (
         <ErrorBoundary>
@@ -1043,9 +1274,12 @@ function VehiculosPendientes({
             vehiculo={vehiculoSeleccionado}
             onClose={() => setVehiculoSeleccionado(null)}
             onSarlaftEscalation={(message) => setSarlaftEscalationNotice(message)}
+            posReceiptSettings={posReceiptSettings}
+            onCobroExitoso={(payload) => setPosReceiptPayload(payload)}
           />
         </ErrorBoundary>
       )}
+      {posPromptModal}
       {sarlaftEscalationModal}
     </div>
   );
@@ -1056,10 +1290,14 @@ function ModalCobro({
   vehiculo,
   onClose,
   onSarlaftEscalation,
+  posReceiptSettings,
+  onCobroExitoso,
 }: {
   vehiculo: Vehiculo,
   onClose: () => void,
   onSarlaftEscalation: (message: string) => void,
+  posReceiptSettings?: PosReceiptSettings | null,
+  onCobroExitoso: (payload: PosReceiptPrintPayload | null) => void,
 }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
@@ -1224,6 +1462,29 @@ function ModalCobro({
         'Cobro registrado',
         `Recibo: ${nombreArchivo}${emailStatusNote.replace(/^\n+/, ' ').replace(/\n/g, ' ')}`,
       );
+      if (posReceiptSettings?.tenant_enabled && posReceiptSettings.auto_prompt_after_payment) {
+        onCobroExitoso({
+          nombreCda: posReceiptSettings.tenant_name || user?.tenant_branding?.nombre_comercial || 'CDASOFT',
+          logoUrl: posReceiptSettings.tenant_logo_url || user?.tenant_branding?.logo_url || null,
+          nitCda: posReceiptSettings.tenant_nit || null,
+          direccionCda: posReceiptSettings.tenant_direccion || null,
+          telefonoCda: posReceiptSettings.tenant_telefono || null,
+          placa: vehiculoCobrado.placa,
+          tipoVehiculo: vehiculoCobrado.tipo_vehiculo,
+          clienteNombre: vehiculoCobrado.cliente_nombre,
+          clienteDocumento: vehiculoCobrado.cliente_documento,
+          valorRTM: vehiculoCobrado.valor_rtm,
+          comisionSOAT: comisionFinal,
+          totalCobrado: totalAjustado,
+          metodoPago,
+          numeroFacturaDIAN: vehiculoCobrado.numero_factura_dian || numeroFactura || '',
+          fechaCobroISO: vehiculoCobrado.fecha_pago || new Date().toISOString(),
+          cajeroNombre: user?.nombre_completo || 'Cajero',
+          ticketWidth: posReceiptSettings.ticket_width || '80mm',
+        });
+      } else {
+        onCobroExitoso(null);
+      }
       if (vehiculoCobrado.sarlaft_alert_generated) {
         onSarlaftEscalation(
           vehiculoCobrado.sarlaft_alert_message ||
@@ -1944,6 +2205,157 @@ function ModalCobro({
               </button>
             </div>
           </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PosReceiptPromptModal({
+  payload,
+  onClose,
+}: {
+  payload: PosReceiptPrintPayload;
+  onClose: () => void;
+}) {
+  const { showToast } = useToast();
+
+  const handlePrint = () => {
+    try {
+      imprimirReciboPos(payload);
+      showToast('success', 'Impresión enviada', 'Se abrió la ventana de impresión para la tirilla POS.');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No fue posible abrir la impresión.';
+      showToast('error', 'Impresión POS', message);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[85] flex items-center justify-center bg-slate-900/65 backdrop-blur-sm p-4">
+      <div className="modal-panel w-full max-w-lg border border-amber-200 bg-white p-6">
+        <div className="mb-4 flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700">
+            <Printer className="h-5 w-5" />
+          </div>
+          <div>
+            <h4 className="text-lg font-bold text-slate-900">Imprimir tirilla POS</h4>
+            <p className="mt-1 text-sm text-slate-700">
+              Cobro registrado para la placa <strong>{payload.placa}</strong>. ¿Deseas imprimir la tirilla?
+            </p>
+          </div>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+          Formato: <strong>{payload.ticketWidth}</strong> · Método: <strong>{payload.metodoPago.replaceAll('_', ' ')}</strong> ·
+          Total: <strong>${formatCurrency(payload.totalCobrado)}</strong>
+        </div>
+        <div className="mt-5 flex gap-2 justify-end">
+          <button type="button" onClick={onClose} className="btn-corporate-muted px-4 py-2 rounded-lg">
+            Cerrar
+          </button>
+          <button
+            type="button"
+            onClick={handlePrint}
+            className="px-4 py-2 rounded-lg bg-amber-600 text-white font-semibold hover:bg-amber-700 inline-flex items-center gap-2"
+          >
+            <Printer className="w-4 h-4" />
+            Imprimir tirilla
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function PosReceiptSettingsPanel() {
+  const queryClient = useQueryClient();
+  const { showToast } = useToast();
+  const { data, isLoading } = useQuery({
+    queryKey: ['pos-receipt-settings'],
+    queryFn: configApi.obtenerPosReceiptSettings,
+    retry: 1,
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: configApi.actualizarPosReceiptSettings,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ['pos-receipt-settings'] });
+      showToast('success', 'Preferencias guardadas', 'La configuración de impresión POS quedó actualizada.');
+    },
+    onError: (error: unknown) => {
+      showToast('error', 'Error', extractApiErrorMessage(error, 'No se pudieron guardar las preferencias POS.'));
+    },
+  });
+
+  if (isLoading) {
+    return <LoadingSpinner message="Cargando configuración POS..." />;
+  }
+
+  if (!data) {
+    return (
+      <div className="section-card border border-amber-200 bg-amber-50 text-amber-900 p-4">
+        No fue posible cargar la configuración POS.
+      </div>
+    );
+  }
+
+  return (
+    <div className="section-card border border-slate-200 p-5 space-y-5">
+      <div>
+        <h3 className="text-lg font-semibold text-slate-900 inline-flex items-center gap-2">
+          <Printer className="w-5 h-5 text-amber-600" />
+          Impresión POS
+        </h3>
+        <p className="text-sm text-slate-600 mt-1">
+          Configura la tirilla POS sin afectar PDF ni facturación. La preferencia queda guardada.
+        </p>
+      </div>
+
+      <label className="flex items-start justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <div>
+          <p className="text-sm font-semibold text-slate-900">Habilitar recibo POS en este CDA</p>
+          <p className="text-xs text-slate-600">Si se desactiva, no aparecerá el modal de impresión post-cobro.</p>
+        </div>
+        <input
+          type="checkbox"
+          className="mt-1 h-5 w-5"
+          checked={data.tenant_enabled}
+          disabled={updateMutation.isLoading}
+          onChange={(e) => updateMutation.mutate({ tenant_enabled: e.target.checked })}
+        />
+      </label>
+
+      <label className="flex items-start justify-between gap-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <div>
+          <p className="text-sm font-semibold text-slate-900">Mostrar modal POS después de confirmar cobro</p>
+          <p className="text-xs text-slate-600">Preferencia personal de tu usuario (se recuerda en próximas sesiones).</p>
+        </div>
+        <input
+          type="checkbox"
+          className="mt-1 h-5 w-5"
+          checked={data.auto_prompt_after_payment}
+          disabled={updateMutation.isLoading}
+          onChange={(e) => updateMutation.mutate({ auto_prompt_after_payment: e.target.checked })}
+        />
+      </label>
+
+      <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <p className="text-sm font-semibold text-slate-900 mb-2">Ancho de tirilla</p>
+        <div className="flex gap-2">
+          {(['58mm', '80mm'] as const).map((width) => (
+            <button
+              key={width}
+              type="button"
+              className={`px-3 py-2 rounded-md border text-sm font-semibold ${
+                data.ticket_width === width
+                  ? 'border-amber-600 bg-amber-50 text-amber-900'
+                  : 'border-slate-300 bg-white text-slate-700'
+              }`}
+              disabled={updateMutation.isLoading}
+              onClick={() => updateMutation.mutate({ ticket_width: width })}
+            >
+              {width}
+            </button>
+          ))}
         </div>
       </div>
     </div>

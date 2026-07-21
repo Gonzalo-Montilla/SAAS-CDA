@@ -35,6 +35,17 @@ export interface TenantFacturacionUbicacion {
   direccion_facturacion: string | null;
 }
 
+export interface PosReceiptSettings {
+  tenant_enabled: boolean;
+  ticket_width: '58mm' | '80mm';
+  auto_prompt_after_payment: boolean;
+  tenant_name: string;
+  tenant_logo_url?: string | null;
+  tenant_nit?: string | null;
+  tenant_direccion?: string | null;
+  tenant_telefono?: string | null;
+}
+
 export interface TenantBillingInfo {
   gate: 'ok' | 'trial' | 'soft' | 'hard';
   subscription_status: string;

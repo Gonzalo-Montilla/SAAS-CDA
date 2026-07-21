@@ -49,6 +49,8 @@ def ensure_tenant_baseline_schema(db):
                 logo_url VARCHAR(500),
                 logo_calidad_url VARCHAR(500),
                 formato_prerevision_version VARCHAR(50),
+                pos_receipt_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                pos_receipt_width VARCHAR(10) NOT NULL DEFAULT '80mm',
                 color_primario VARCHAR(20) NOT NULL DEFAULT '#2563eb',
                 color_secundario VARCHAR(20) NOT NULL DEFAULT '#0f172a',
                 plan_actual VARCHAR(30) NOT NULL DEFAULT 'demo',
@@ -74,6 +76,8 @@ def ensure_tenant_baseline_schema(db):
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS logo_url VARCHAR(500)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS logo_calidad_url VARCHAR(500)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS formato_prerevision_version VARCHAR(50)"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS pos_receipt_enabled BOOLEAN"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS pos_receipt_width VARCHAR(10)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS color_primario VARCHAR(20)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS color_secundario VARCHAR(20)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS plan_actual VARCHAR(30)"))
@@ -105,6 +109,12 @@ def ensure_tenant_baseline_schema(db):
     db.execute(text("UPDATE tenants SET nomina_enabled = COALESCE(nomina_enabled, FALSE)"))
     db.execute(text("UPDATE tenants SET sarlaft_enabled = COALESCE(sarlaft_enabled, FALSE)"))
     db.execute(text("UPDATE tenants SET sarlaft_mode = COALESCE(NULLIF(sarlaft_mode, ''), 'manual')"))
+    db.execute(text("UPDATE tenants SET pos_receipt_enabled = COALESCE(pos_receipt_enabled, FALSE)"))
+    db.execute(
+        text(
+            "UPDATE tenants SET pos_receipt_width = COALESCE(NULLIF(pos_receipt_width, ''), '80mm')"
+        )
+    )
     db.execute(text("ALTER TABLE tenants ALTER COLUMN nombre_comercial SET NOT NULL"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN color_primario SET NOT NULL"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN color_secundario SET NOT NULL"))
@@ -115,6 +125,8 @@ def ensure_tenant_baseline_schema(db):
     db.execute(text("ALTER TABLE tenants ALTER COLUMN nomina_enabled SET NOT NULL"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN sarlaft_enabled SET NOT NULL"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN sarlaft_mode SET NOT NULL"))
+    db.execute(text("ALTER TABLE tenants ALTER COLUMN pos_receipt_enabled SET NOT NULL"))
+    db.execute(text("ALTER TABLE tenants ALTER COLUMN pos_receipt_width SET NOT NULL"))
 
     db.execute(
         text(
@@ -130,6 +142,8 @@ def ensure_tenant_baseline_schema(db):
                 celular,
                 nombre_comercial,
                 logo_url,
+                pos_receipt_enabled,
+                pos_receipt_width,
                 color_primario,
                 color_secundario,
                 plan_actual,
@@ -157,6 +171,8 @@ def ensure_tenant_baseline_schema(db):
                 NULL,
                 :tenant_name,
                 NULL,
+                FALSE,
+                '80mm',
                 '#2563eb',
                 '#0f172a',
                 'demo',
@@ -225,6 +241,9 @@ def ensure_tenant_baseline_schema(db):
     )
 
     db.execute(text("ALTER TABLE usuarios ALTER COLUMN tenant_id SET NOT NULL"))
+    db.execute(text("ALTER TABLE usuarios ADD COLUMN IF NOT EXISTS pos_auto_print_prompt BOOLEAN"))
+    db.execute(text("UPDATE usuarios SET pos_auto_print_prompt = COALESCE(pos_auto_print_prompt, TRUE)"))
+    db.execute(text("ALTER TABLE usuarios ALTER COLUMN pos_auto_print_prompt SET NOT NULL"))
 
     fk_exists = db.execute(
         text(
