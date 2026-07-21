@@ -44,9 +44,15 @@ import {
 const canRegisterInPerson = (row: QualityInviteItem) =>
   ['pending', 'no_email', 'sent', 'failed'].includes(row.status);
 
-const inviteCerradoAprobado = (row: QualityInviteItem) =>
-  row.revision_cierre_resultado === 'aprobado' ||
-  (!row.revision_cierre_resultado && !!row.certificado_entregado_at);
+const getInviteResultadoCierre = (row: QualityInviteItem): 'aprobado' | 'rechazado' | null => {
+  if (row.revision_cierre_resultado === 'aprobado' || row.revision_cierre_resultado === 'rechazado') {
+    return row.revision_cierre_resultado;
+  }
+  if (row.certificado_entregado_at) {
+    return 'aprobado';
+  }
+  return null;
+};
 
 const statusLabel = (status: string): string => {
   const map: Record<string, string> = {
@@ -166,6 +172,10 @@ export default function Calidad() {
   const [correccionMotivo, setCorreccionMotivo] = useState('');
   const [correccionSincronizar, setCorreccionSincronizar] = useState(true);
   const [correccionInviteId, setCorreccionInviteId] = useState<string | null>(null);
+  const correccionResultadoActual = confirmCorreccionInvite ? getInviteResultadoCierre(confirmCorreccionInvite) : null;
+  const correccionResultadoNuevo: 'aprobado' | 'rechazado' =
+    correccionResultadoActual === 'rechazado' ? 'aprobado' : 'rechazado';
+  const correccionEsHaciaRechazado = correccionResultadoNuevo === 'rechazado';
   const [inPersonRatings, setInPersonRatings] = useState<Record<QualitySurveyRatingKey, number>>(
     emptyQualitySurveyRatings
   );
@@ -381,7 +391,11 @@ export default function Calidad() {
       setCorreccionSincronizar(true);
       showToast(
         'success',
-        data.reintento_sincronizado ? 'Corrección aplicada' : 'Resultado corregido',
+        data.resultado_nuevo === 'aprobado'
+          ? 'Corregido a aprobado'
+          : data.reintento_sincronizado
+            ? 'Corrección aplicada'
+            : 'Corregido a rechazado',
         data.message
       );
       queryClient.invalidateQueries({ queryKey: ['quality-invites'] });
@@ -849,7 +863,7 @@ export default function Calidad() {
                               {row.revision_cierre_resultado === 'rechazado' ? 'Rechazado' : 'Aprobado'}
                             </span>
                             {puedeCorregirCierreInspeccion &&
-                              inviteCerradoAprobado(row) &&
+                              getInviteResultadoCierre(row) &&
                               row.correccion_cierre_disponible && (
                               <button
                                 type="button"
@@ -866,7 +880,9 @@ export default function Calidad() {
                                 <RotateCcw className="w-3.5 h-3.5" />
                                 {correctInspectionResultMutation.isLoading && correccionInviteId === row.id
                                   ? 'Corrigiendo...'
-                                  : 'Corregir a rechazado'}
+                                  : getInviteResultadoCierre(row) === 'rechazado'
+                                    ? 'Corregir a aprobado'
+                                    : 'Corregir a rechazado'}
                               </button>
                             )}
                           </>
@@ -1510,14 +1526,21 @@ export default function Calidad() {
               <div>
                 <p className="text-base font-semibold text-slate-900">Corregir resultado de inspección</p>
                 <p className="text-sm text-slate-600 mt-1">
-                  Cambiará el cierre de <span className="font-semibold text-slate-800">aprobado</span> a{' '}
-                  <span className="font-semibold text-slate-800">rechazado</span> para la placa{' '}
+                  Cambiará el cierre de <span className="font-semibold text-slate-800">{correccionResultadoActual || 'aprobado'}</span> a{' '}
+                  <span className="font-semibold text-slate-800">{correccionResultadoNuevo}</span> para la placa{' '}
                   <span className="font-semibold text-slate-800">{confirmCorreccionInvite.placa}</span>.
                 </p>
-                <p className="text-xs text-amber-700 mt-2">
-                  No revierte cobros ni facturas ya emitidas. Habilita reinspección sin cobro si hay un registro
-                  pendiente en Caja.
-                </p>
+                {correccionEsHaciaRechazado ? (
+                  <p className="text-xs text-amber-700 mt-2">
+                    No revierte cobros ni facturas ya emitidas. Habilita reinspección sin cobro si hay un registro
+                    pendiente en Caja.
+                  </p>
+                ) : (
+                  <p className="text-xs text-amber-700 mt-2">
+                    No revierte cobros ni facturas ya emitidas. Si existe un pendiente en Caja para esta placa,
+                    primero debes regularizarlo para evitar inconsistencias operativas.
+                  </p>
+                )}
               </div>
             </div>
             <div className="space-y-3 mb-4">
@@ -1528,18 +1551,20 @@ export default function Calidad() {
                 className="input-corporate min-h-[110px]"
                 maxLength={2000}
               />
-              <label className="flex items-start gap-2 text-sm text-slate-800">
-                <input
-                  type="checkbox"
-                  className="mt-0.5"
-                  checked={correccionSincronizar}
-                  onChange={(e) => setCorreccionSincronizar(e.target.checked)}
-                />
-                <span>
-                  Si existe un registro pendiente en Caja para esta placa, marcarlo automáticamente como reintento
-                  exento ($0).
-                </span>
-              </label>
+              {correccionEsHaciaRechazado && (
+                <label className="flex items-start gap-2 text-sm text-slate-800">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={correccionSincronizar}
+                    onChange={(e) => setCorreccionSincronizar(e.target.checked)}
+                  />
+                  <span>
+                    Si existe un registro pendiente en Caja para esta placa, marcarlo automáticamente como reintento
+                    exento ($0).
+                  </span>
+                </label>
+              )}
             </div>
             <div className="flex items-center justify-end gap-2">
               <button
@@ -1567,7 +1592,9 @@ export default function Calidad() {
                     inviteId: confirmCorreccionInvite.id,
                     payload: {
                       motivo,
-                      sincronizar_reintento_pendiente: correccionSincronizar,
+                      sincronizar_reintento_pendiente: correccionEsHaciaRechazado
+                        ? correccionSincronizar
+                        : false,
                     },
                   });
                 }}

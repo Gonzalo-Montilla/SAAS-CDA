@@ -54,7 +54,7 @@ export interface CorrectInspectionResultResponse {
   vehiculo_id: string;
   placa: string;
   resultado_anterior: string;
-  resultado_nuevo: 'rechazado';
+  resultado_nuevo: 'aprobado' | 'rechazado';
   reintento_sincronizado: boolean;
   reintento_vehiculo_id?: string | null;
   message: string;

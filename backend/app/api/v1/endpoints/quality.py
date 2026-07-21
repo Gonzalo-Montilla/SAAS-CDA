@@ -244,7 +244,7 @@ class CorrectInspectionResultResponse(BaseModel):
     vehiculo_id: str
     placa: str
     resultado_anterior: str
-    resultado_nuevo: Literal["rechazado"]
+    resultado_nuevo: Literal["aprobado", "rechazado"]
     reintento_sincronizado: bool
     reintento_vehiculo_id: str | None = None
     message: str
@@ -258,16 +258,21 @@ class RTMReminderTouchManagementRequest(BaseModel):
 _IN_PERSON_SUBMIT_STATUSES = frozenset({"pending", "no_email", "sent", "failed"})
 
 
-def _vehiculo_cerrado_como_aprobado(vehiculo: VehiculoProceso) -> bool:
+def _resolver_resultado_cierre_actual(vehiculo: VehiculoProceso) -> Literal["aprobado", "rechazado"] | None:
     resultado = (vehiculo.revision_cierre_resultado or "").strip().lower()
     if resultado == "aprobado":
-        return True
+        return "aprobado"
     if resultado == "rechazado":
-        return False
+        return "rechazado"
     if vehiculo.certificado_entregado_at is not None:
-        return True
+        return "aprobado"
     estado_raw = vehiculo.estado.value if hasattr(vehiculo.estado, "value") else str(vehiculo.estado)
-    return estado_raw.strip().lower() == "aprobado"
+    estado_norm = estado_raw.strip().lower()
+    if estado_norm == "aprobado":
+        return "aprobado"
+    if estado_norm == "rechazado":
+        return "rechazado"
+    return None
 
 
 def _correccion_cierre_disponible(
@@ -276,13 +281,36 @@ def _correccion_cierre_disponible(
     tenant_id: uuid.UUID,
     vehiculo: VehiculoProceso | None,
 ) -> bool:
-    if not vehiculo or not _vehiculo_cerrado_como_aprobado(vehiculo):
+    if not vehiculo:
+        return False
+    if _resolver_resultado_cierre_actual(vehiculo) not in {"aprobado", "rechazado"}:
         return False
     if vehiculo.estado == EstadoVehiculo.REGISTRADO:
         return False
     origen = _resolve_reinspeccion_origen(db, tenant_id=tenant_id, vehiculo=vehiculo)
     vence_at = origen.fecha_registro + timedelta(days=REINSPECCION_VENTANA_DIAS)
     return _now_naive() <= vence_at
+
+
+def _find_pending_registro_for_plate(
+    db: Session,
+    *,
+    tenant_id: uuid.UUID,
+    placa: str,
+    exclude_vehiculo_id: uuid.UUID,
+) -> VehiculoProceso | None:
+    return (
+        db.query(VehiculoProceso)
+        .filter(
+            VehiculoProceso.tenant_id == tenant_id,
+            VehiculoProceso.placa == placa,
+            VehiculoProceso.estado == EstadoVehiculo.REGISTRADO,
+            VehiculoProceso.fecha_pago.is_(None),
+            VehiculoProceso.id != exclude_vehiculo_id,
+        )
+        .order_by(VehiculoProceso.fecha_registro.desc())
+        .first()
+    )
 
 
 def _resolve_reinspeccion_origen(
@@ -353,6 +381,7 @@ def _audit_inspection_correction(
     request: Request,
     vehiculo: VehiculoProceso,
     resultado_anterior: str,
+    resultado_nuevo: str,
     motivo: str,
     synced_pending: VehiculoProceso | None,
     before_snapshot: dict[str, Any],
@@ -369,7 +398,7 @@ def _audit_inspection_correction(
             action=AuditAction.CORRECT_INSPECTION_RESULT.value,
             description=(
                 f"Corrección de resultado de inspección: {vehiculo.placa} "
-                f"({resultado_anterior} -> rechazado)"
+                f"({resultado_anterior} -> {resultado_nuevo})"
             ),
             usuario_id=current_user.id,
             usuario_email=current_user.email,
@@ -381,7 +410,7 @@ def _audit_inspection_correction(
                 "vehiculo_id": str(vehiculo.id),
                 "placa": vehiculo.placa,
                 "resultado_anterior": resultado_anterior,
-                "resultado_nuevo": "rechazado",
+                "resultado_nuevo": resultado_nuevo,
                 "motivo": motivo,
                 "before": before_snapshot,
                 "reintento_sincronizado": synced_pending is not None,
@@ -1083,10 +1112,11 @@ def corregir_cierre_resultado(
     if not vehiculo:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehículo no encontrado")
 
-    if not _vehiculo_cerrado_como_aprobado(vehiculo):
+    resultado_anterior = _resolver_resultado_cierre_actual(vehiculo)
+    if resultado_anterior not in {"aprobado", "rechazado"}:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Solo se puede corregir un cierre registrado como aprobado.",
+            detail="Solo se puede corregir un cierre registrado como aprobado o rechazado.",
         )
 
     if vehiculo.estado == EstadoVehiculo.REGISTRADO:
@@ -1096,7 +1126,7 @@ def corregir_cierre_resultado(
         )
 
     motivo = payload.motivo.strip()
-    resultado_anterior = (vehiculo.revision_cierre_resultado or "aprobado").strip().lower()
+    resultado_nuevo = "rechazado" if resultado_anterior == "aprobado" else "aprobado"
     origen = _resolve_reinspeccion_origen(db, tenant_id=current_user.tenant_id, vehiculo=vehiculo)
     now = _now_naive()
     vence_correccion = origen.fecha_registro + timedelta(days=REINSPECCION_VENTANA_DIAS)
@@ -1118,29 +1148,53 @@ def corregir_cierre_resultado(
         else None,
     }
 
-    vehiculo.revision_cierre_resultado = "rechazado"
+    if resultado_anterior == "rechazado":
+        pending_registro = _find_pending_registro_for_plate(
+            db,
+            tenant_id=current_user.tenant_id,
+            placa=vehiculo.placa,
+            exclude_vehiculo_id=vehiculo.id,
+        )
+        if pending_registro:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=(
+                    "Existe un registro pendiente en Caja para esta placa. "
+                    "Regulariza o cancela ese pendiente antes de corregir a aprobado."
+                ),
+            )
+
+    vehiculo.revision_cierre_resultado = resultado_nuevo
     vehiculo.revision_cierre_observacion = motivo
     vehiculo.revision_cierre_at = now
     vehiculo.revision_cierre_por = current_user.id
-    vehiculo.estado = EstadoVehiculo.RECHAZADO
-    vehiculo.certificado_entregado_at = None
-    vehiculo.certificado_entregado_por = None
-    try:
-        disable_rtm_renewal_reminder_for_vehicle(
-            db,
-            vehiculo,
-            reason="Corrección a rechazado: se cancela recordatorio anual",
-        )
-    except Exception as reminder_exc:
-        print(f"[WARN] No se pudo desactivar recordatorio RTM tras corrección de cierre: {reminder_exc}")
-
     synced_pending = None
-    if payload.sincronizar_reintento_pendiente:
-        synced_pending = _sync_pending_reinspeccion_registro(
-            db,
-            tenant_id=current_user.tenant_id,
-            origen=vehiculo,
-        )
+    if resultado_nuevo == "rechazado":
+        vehiculo.estado = EstadoVehiculo.RECHAZADO
+        vehiculo.certificado_entregado_at = None
+        vehiculo.certificado_entregado_por = None
+        try:
+            disable_rtm_renewal_reminder_for_vehicle(
+                db,
+                vehiculo,
+                reason="Corrección a rechazado: se cancela recordatorio anual",
+            )
+        except Exception as reminder_exc:
+            print(f"[WARN] No se pudo desactivar recordatorio RTM tras corrección de cierre: {reminder_exc}")
+        if payload.sincronizar_reintento_pendiente:
+            synced_pending = _sync_pending_reinspeccion_registro(
+                db,
+                tenant_id=current_user.tenant_id,
+                origen=vehiculo,
+            )
+    else:
+        vehiculo.estado = EstadoVehiculo.APROBADO
+        vehiculo.certificado_entregado_at = now
+        vehiculo.certificado_entregado_por = current_user.id
+        try:
+            schedule_rtm_renewal_reminder_for_vehicle(db, vehiculo)
+        except Exception as reminder_exc:
+            print(f"[WARN] No se pudo programar recordatorio RTM tras corrección a aprobado: {reminder_exc}")
 
     _audit_inspection_correction(
         db,
@@ -1148,6 +1202,7 @@ def corregir_cierre_resultado(
         request=request,
         vehiculo=vehiculo,
         resultado_anterior=resultado_anterior,
+        resultado_nuevo=resultado_nuevo,
         motivo=motivo,
         synced_pending=synced_pending,
         before_snapshot=before_snapshot,
@@ -1156,7 +1211,7 @@ def corregir_cierre_resultado(
     db.refresh(vehiculo)
 
     cliente_email = (vehiculo.cliente_email or "").strip().lower()
-    if cliente_email:
+    if resultado_nuevo == "rechazado" and cliente_email:
         try:
             tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
             nombre_cda = (
@@ -1177,14 +1232,18 @@ def corregir_cierre_resultado(
         except Exception as email_exc:
             print(f"[WARN] No se pudo enviar correo tras corrección de inspección: {email_exc}")
 
-    if synced_pending:
+    if resultado_nuevo == "rechazado" and synced_pending:
         message = (
             f"Resultado corregido a rechazado. Se actualizó el reintento pendiente en Caja "
             f"({synced_pending.placa}) a $0."
         )
-    else:
+    elif resultado_nuevo == "rechazado":
         message = (
             "Resultado corregido a rechazado. No se encontró un registro pendiente en Caja para sincronizar."
+        )
+    else:
+        message = (
+            "Resultado corregido a aprobado y certificado marcado como entregado."
         )
 
     return CorrectInspectionResultResponse(
@@ -1192,7 +1251,7 @@ def corregir_cierre_resultado(
         vehiculo_id=str(vehiculo.id),
         placa=vehiculo.placa or "",
         resultado_anterior=resultado_anterior,
-        resultado_nuevo="rechazado",
+        resultado_nuevo=resultado_nuevo,
         reintento_sincronizado=synced_pending is not None,
         reintento_vehiculo_id=str(synced_pending.id) if synced_pending else None,
         message=message,
