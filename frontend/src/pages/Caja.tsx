@@ -1302,6 +1302,7 @@ function ModalCobro({
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const { user } = useAuth();
+  const tenantUser = user && 'tenant_branding' in user ? user : null;
   const brand = useBrand();
   const isMountedRef = useRef(true);
   const metodoPagoFocusRef = useRef<HTMLButtonElement>(null);
@@ -1464,8 +1465,8 @@ function ModalCobro({
       );
       if (posReceiptSettings?.tenant_enabled && posReceiptSettings.auto_prompt_after_payment) {
         onCobroExitoso({
-          nombreCda: posReceiptSettings.tenant_name || user?.tenant_branding?.nombre_comercial || 'CDASOFT',
-          logoUrl: posReceiptSettings.tenant_logo_url || user?.tenant_branding?.logo_url || null,
+          nombreCda: posReceiptSettings.tenant_name || tenantUser?.tenant_branding?.nombre_comercial || 'CDASOFT',
+          logoUrl: posReceiptSettings.tenant_logo_url || tenantUser?.tenant_branding?.logo_url || null,
           nitCda: posReceiptSettings.tenant_nit || null,
           direccionCda: posReceiptSettings.tenant_direccion || null,
           telefonoCda: posReceiptSettings.tenant_telefono || null,
