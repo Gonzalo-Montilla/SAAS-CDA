@@ -193,27 +193,40 @@ const renderPosReceiptHtml = (payload: PosReceiptPrintPayload): string => {
   <title>Recibo POS ${escapeHtml(payload.placa)}</title>
   <style>
     @page { size: auto; margin: ${pageMarginMm}mm; }
-    body { margin: 0; font-family: "Courier New", monospace; background: #fff; color: #111; }
+    body {
+      margin: 0;
+      font-family: "Courier New", monospace;
+      background: #fff;
+      color: #000;
+      -webkit-print-color-adjust: exact;
+      print-color-adjust: exact;
+    }
     .ticket { width: ${widthPx}px; margin: 0 auto; padding: ${ticketPaddingTop}px ${ticketPaddingSide}px ${ticketPaddingBottom}px; }
     .logo-wrap { text-align: center; margin-top: ${logoTopMargin}px; margin-bottom: ${logoBottomMargin}px; }
-    .logo { max-width: ${widthPx - 24}px; max-height: ${logoMaxHeight}px; object-fit: contain; }
-    .title { text-align: center; font-weight: 700; font-size: 14px; text-transform: uppercase; }
-    .sub { text-align: center; font-size: 11px; margin: ${subMarginTop}px 0 4px; font-weight: 700; }
-    .meta { text-align: center; font-size: 10px; line-height: 1.35; margin: 1px 0; }
-    .hr { border-top: 1px dashed #222; margin: ${hrMargin}px 0; }
+    .logo {
+      max-width: ${widthPx - 24}px;
+      max-height: ${logoMaxHeight}px;
+      object-fit: contain;
+      image-rendering: -webkit-optimize-contrast;
+      image-rendering: crisp-edges;
+    }
+    .title { text-align: center; font-weight: 800; font-size: 14px; text-transform: uppercase; }
+    .sub { text-align: center; font-size: 11px; margin: ${subMarginTop}px 0 4px; font-weight: 800; }
+    .meta { text-align: center; font-size: 10px; line-height: 1.35; margin: 1px 0; font-weight: 700; }
+    .hr { border-top: 1.5px solid #000; margin: ${hrMargin}px 0; }
     .section-title {
       font-size: 11px;
-      font-weight: 800;
+      font-weight: 900;
       text-transform: uppercase;
       text-align: center;
       margin: ${sectionTitleMarginTop}px 0 ${sectionTitleMarginBottom}px;
       letter-spacing: 0.3px;
     }
-    .row { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; margin: ${rowMargin}px 0; }
-    .k { font-weight: 700; min-width: 64px; }
-    .v { text-align: right; word-break: break-word; }
-    .total { font-size: 13px; font-weight: 700; }
-    .foot { text-align: center; margin-top: ${footMarginTop}px; font-size: 10px; line-height: ${footLineHeight}; }
+    .row { display: flex; justify-content: space-between; gap: 8px; font-size: 11px; margin: ${rowMargin}px 0; color: #000; }
+    .k { font-weight: 800; min-width: 64px; }
+    .v { text-align: right; word-break: break-word; font-weight: 700; }
+    .total { font-size: 13px; font-weight: 900; color: #000; }
+    .foot { text-align: center; margin-top: ${footMarginTop}px; font-size: 10px; line-height: ${footLineHeight}; font-weight: 700; color: #000; }
     .foot-brand { font-weight: 800; }
   </style>
 </head>
