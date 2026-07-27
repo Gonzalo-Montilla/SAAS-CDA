@@ -5,9 +5,12 @@ import {
   Ban,
   CarFront,
   CalendarClock,
+  ChevronDown,
+  ChevronUp,
   CheckCircle2,
   Copy,
   ExternalLink,
+  Info,
   MessageCircle,
   Plus,
   UserCheck,
@@ -19,6 +22,7 @@ import { appointmentsApi, type AppointmentCreatePayload } from '../api/appointme
 import apiClient from '../api/client';
 import type { AppointmentItem } from '../types';
 import { useAuth } from '../contexts/AuthContext';
+import { formatCurrency } from '../utils/formatNumber';
 
 const statusMap: Record<string, { label: string; className: string }> = {
   scheduled: { label: 'Agendada', className: 'badge badge-info' },
@@ -29,6 +33,8 @@ const statusMap: Record<string, { label: string; className: string }> = {
 };
 
 const todayIso = new Date().toISOString().slice(0, 10);
+const currentYear = new Date().getFullYear();
+const AGENDAMIENTO_PANEL_PREF_KEY = 'agendamiento:show-top-panel';
 
 const sourceLabel = (source: string): string => {
   const s = (source || '').toLowerCase();
@@ -55,6 +61,17 @@ export default function Agendamiento() {
   const [statusFilter, setStatusFilter] = useState('');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [submitIntent, setSubmitIntent] = useState(false);
+  const [showAgendamientoPanel, setShowAgendamientoPanel] = useState(() => {
+    try {
+      const saved = localStorage.getItem(AGENDAMIENTO_PANEL_PREF_KEY);
+      if (saved === '0') return false;
+      if (saved === '1') return true;
+    } catch {
+      // Ignorar errores de almacenamiento y usar valor por defecto.
+    }
+    return true;
+  });
+  const [anoModelo, setAnoModelo] = useState('');
   const [form, setForm] = useState<AppointmentCreatePayload>({
     cliente_nombre: '',
     cliente_tipo_documento: 'CC',
@@ -67,6 +84,14 @@ export default function Agendamiento() {
     hora: '08:00',
     notes: '',
   });
+
+  const anoModeloNumber = Number(anoModelo || 0);
+  const canEstimate = Boolean(
+    form.tipo_vehiculo &&
+      /^\d{4}$/.test(anoModelo) &&
+      anoModeloNumber >= 1950 &&
+      anoModeloNumber <= currentYear + 1
+  );
 
   const query = useQuery({
     queryKey: ['appointments', fecha, statusFilter],
@@ -81,8 +106,18 @@ export default function Agendamiento() {
     },
   });
 
+  const estimatedRtmQuery = useQuery({
+    queryKey: ['internal-appointment-estimated-rtm', form.tipo_vehiculo, anoModelo],
+    enabled: canEstimate,
+    queryFn: () => appointmentsApi.getInternalEstimatedRtm(anoModeloNumber, form.tipo_vehiculo),
+  });
+
   const createMutation = useMutation({
-    mutationFn: () => appointmentsApi.createInternal(form),
+    mutationFn: () =>
+      appointmentsApi.createInternal({
+        ...form,
+        ano_modelo: anoModelo || undefined,
+      }),
     onSuccess: () => {
       setFeedback({ type: 'success', message: 'Cita creada correctamente.' });
       setSubmitIntent(false);
@@ -96,6 +131,7 @@ export default function Agendamiento() {
         placa: '',
         notes: '',
       }));
+      setAnoModelo('');
       queryClient.invalidateQueries({ queryKey: ['appointments'] });
     },
     onError: (error: any) => {
@@ -168,6 +204,14 @@ export default function Agendamiento() {
     navigate(location.pathname, { replace: true, state: {} });
   }, [location.pathname, location.state, navigate]);
 
+  useEffect(() => {
+    try {
+      localStorage.setItem(AGENDAMIENTO_PANEL_PREF_KEY, showAgendamientoPanel ? '1' : '0');
+    } catch {
+      // No bloquear UX por fallas de almacenamiento local.
+    }
+  }, [showAgendamientoPanel]);
+
   const stats = useMemo(() => {
     const rows = query.data || [];
     return {
@@ -188,6 +232,7 @@ export default function Agendamiento() {
   const formErrors = {
     cliente_nombre: !form.cliente_nombre?.trim(),
     placa: !form.placa?.trim(),
+    cliente_email: !form.cliente_email?.trim(),
     fecha: !form.fecha?.trim(),
     hora: !form.hora?.trim(),
   };
@@ -231,64 +276,81 @@ export default function Agendamiento() {
     <Layout title="Agendamiento">
       <div className="space-y-6">
         <section className="module-hero">
-          <p className="module-hero-title flex items-center gap-2">
-            <CalendarClock className="w-5 h-5 text-blue-600" />
-            Agenda de citas del CDA
-          </p>
-          <p className="module-hero-subtitle">
-            Gestiona citas creadas por link público y por el equipo comercial/recepción.
-          </p>
-          <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50/80 px-3 py-2 text-xs text-slate-700">
-            <p className="font-semibold text-slate-800 mb-1">Cómo funciona la agenda</p>
-            <ul className="list-disc list-inside space-y-0.5 text-slate-600">
-              <li>Franjas cada 30 minutos, de 08:00 a 17:00.</li>
-              <li>Hasta 4 citas activas por franja (agendada o confirmada); cancelar libera cupo.</li>
-              <li>Quién puede usar este módulo: recepción, comercial o administrador del CDA.</li>
-              <li>Si el cliente dejó correo, puede recibir confirmación y recordatorio automáticos.</li>
-            </ul>
-          </div>
-          <div className="mt-4 rounded-xl border border-slate-200 bg-white/90 p-3">
-            <p className="text-xs font-medium text-slate-600 mb-2">Link público del tenant</p>
-            <div className="flex flex-col md:flex-row gap-2">
-              <input
-                className="input-corporate flex-1 text-sm"
-                value={publicLink}
-                readOnly
-                placeholder="Cargando link público..."
-              />
-              <button
-                type="button"
-                onClick={handleCopyPublicLink}
-                className="btn-chip inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl shadow-sm hover:shadow transition-all duration-200 active:scale-[0.98] disabled:opacity-60"
-                disabled={!publicLink}
-                title={publicLink || 'Tenant sin slug disponible'}
-              >
-                <Copy className="w-4 h-4" />
-                Copiar link
-              </button>
-              <button
-                type="button"
-                onClick={() => window.open(publicLink, '_blank', 'noopener,noreferrer')}
-                className="btn-chip inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl shadow-sm hover:shadow transition-all duration-200 active:scale-[0.98] disabled:opacity-60"
-                disabled={!publicLink}
-              >
-                <ExternalLink className="w-4 h-4" />
-                Abrir
-              </button>
-              <button
-                type="button"
-                onClick={() => window.open(whatsappShareUrl, '_blank', 'noopener,noreferrer')}
-                className="btn-success-solid inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl transition-all duration-200 active:scale-[0.98] disabled:opacity-60"
-                disabled={!publicLink}
-              >
-                <MessageCircle className="w-4 h-4" />
-                Compartir WhatsApp
-              </button>
+          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-3">
+            <div>
+              <p className="module-hero-title flex items-center gap-2">
+                <CalendarClock className="w-5 h-5 text-blue-600" />
+                Agenda de citas del CDA
+              </p>
+              <p className="module-hero-subtitle">
+                Gestiona citas creadas por link público y por el equipo comercial/recepción.
+              </p>
             </div>
-            <p className="mt-2 text-xs text-slate-500">
-              Compártelo por WhatsApp o correo con tus clientes para que agenden directamente.
-            </p>
+            <button
+              type="button"
+              onClick={() => setShowAgendamientoPanel((prev) => !prev)}
+              className="btn-chip inline-flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg self-start"
+            >
+              {showAgendamientoPanel ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
+              {showAgendamientoPanel ? 'Ocultar panel' : 'Mostrar panel'}
+            </button>
           </div>
+
+          {showAgendamientoPanel && (
+            <>
+              <div className="mt-3 rounded-lg border border-blue-100 bg-blue-50/80 px-3 py-2 text-xs text-slate-700">
+                <p className="font-semibold text-slate-800 mb-1">Cómo funciona la agenda</p>
+                <ul className="list-disc list-inside space-y-0.5 text-slate-600">
+                  <li>Franjas cada 30 minutos, de 08:00 a 17:00.</li>
+                  <li>Hasta 4 citas activas por franja (agendada o confirmada); cancelar libera cupo.</li>
+                  <li>Quién puede usar este módulo: recepción, comercial o administrador del CDA.</li>
+                  <li>Correo obligatorio para confirmación de cita y recordatorios automáticos.</li>
+                </ul>
+              </div>
+              <div className="mt-4 rounded-xl border border-slate-200 bg-white/90 p-3">
+                <p className="text-xs font-medium text-slate-600 mb-2">Link público del tenant</p>
+                <div className="flex flex-col md:flex-row gap-2">
+                  <input
+                    className="input-corporate flex-1 text-sm"
+                    value={publicLink}
+                    readOnly
+                    placeholder="Cargando link público..."
+                  />
+                  <button
+                    type="button"
+                    onClick={handleCopyPublicLink}
+                    className="btn-chip inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl shadow-sm hover:shadow transition-all duration-200 active:scale-[0.98] disabled:opacity-60"
+                    disabled={!publicLink}
+                    title={publicLink || 'Tenant sin slug disponible'}
+                  >
+                    <Copy className="w-4 h-4" />
+                    Copiar link
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => window.open(publicLink, '_blank', 'noopener,noreferrer')}
+                    className="btn-chip inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl shadow-sm hover:shadow transition-all duration-200 active:scale-[0.98] disabled:opacity-60"
+                    disabled={!publicLink}
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                    Abrir
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => window.open(whatsappShareUrl, '_blank', 'noopener,noreferrer')}
+                    className="btn-success-solid inline-flex items-center justify-center gap-2 px-4 py-2 rounded-xl transition-all duration-200 active:scale-[0.98] disabled:opacity-60"
+                    disabled={!publicLink}
+                  >
+                    <MessageCircle className="w-4 h-4" />
+                    Compartir WhatsApp
+                  </button>
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  Compártelo por WhatsApp o correo con tus clientes para que agenden directamente.
+                </p>
+              </div>
+            </>
+          )}
         </section>
 
         {feedback && (
@@ -300,10 +362,10 @@ export default function Agendamiento() {
         <section className="section-card p-6">
           <p className="text-sm font-semibold text-slate-800 mb-1">Nueva cita</p>
           <p className="text-xs text-slate-500 mb-4">
-            Registra datos del cliente y define franja de atención. Documento y correo ayudan a acelerar recepción y recordatorios.
+            Registra datos del cliente y define franja de atención. El correo es obligatorio para confirmar y notificar la cita.
           </p>
           <form
-            className="grid grid-cols-1 md:grid-cols-4 gap-3"
+            className="grid grid-cols-1 md:grid-cols-4 gap-4"
             onSubmit={(e) => {
               e.preventDefault();
               setFeedback(null);
@@ -315,77 +377,157 @@ export default function Agendamiento() {
               createMutation.mutate();
             }}
           >
-            <div className="md:col-span-4 rounded-xl border border-slate-200 bg-slate-50/40 p-3">
-              <p className="text-xs font-medium text-slate-600 flex items-center gap-2">
-                <UserCheck className="w-3.5 h-3.5 text-slate-500" />
+            <div className="md:col-span-4 rounded-2xl border border-slate-200 bg-slate-50/40 p-4 space-y-3 transition-shadow transition-colors md:hover:shadow-sm md:hover:border-slate-300">
+              <p className="text-sm md:text-base font-bold text-slate-900 flex items-center justify-center gap-2 text-center">
+                <UserCheck className="w-4.5 h-4.5 text-slate-500" />
                 Datos del cliente
               </p>
-              <p className="text-[11px] text-slate-400 mt-1">Los campos con * son obligatorios.</p>
+              <p className="text-[11px] text-slate-400 -mt-1">Los campos con * son obligatorios.</p>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-medium text-slate-500 mb-1">
+                    Nombre cliente <span className="text-red-500">*</span>
+                  </label>
+                  <input className="input-corporate uppercase" placeholder="Ej: MIGUEL SIERRA" value={form.cliente_nombre} onChange={(e) => setForm((p) => ({ ...p, cliente_nombre: e.target.value.toUpperCase() }))} />
+                  {submitIntent && formErrors.cliente_nombre && <p className="text-[11px] text-red-600 mt-1">Nombre cliente es obligatorio.</p>}
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Tipo documento</label>
+                  <select className="input-corporate" value={form.cliente_tipo_documento || 'CC'} onChange={(e) => setForm((p) => ({ ...p, cliente_tipo_documento: e.target.value as 'CC' | 'CE' | 'PA' | 'NIT' }))}>
+                    <option value="CC">CC</option>
+                    <option value="CE">CE</option>
+                    <option value="PA">PA</option>
+                    <option value="NIT">NIT</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Documento (opcional)</label>
+                  <input className="input-corporate" placeholder="Ej: 1052071342" value={form.cliente_documento || ''} onChange={(e) => setForm((p) => ({ ...p, cliente_documento: e.target.value.toUpperCase() }))} />
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Celular (opcional)</label>
+                  <input className="input-corporate" placeholder="Ej: 3001234567" value={form.cliente_celular || ''} onChange={(e) => setForm((p) => ({ ...p, cliente_celular: e.target.value }))} />
+                </div>
+                <div className="md:col-span-2">
+                  <label className="block text-xs font-medium text-slate-500 mb-1">
+                    Correo <span className="text-red-500">*</span>
+                  </label>
+                  <input className="input-corporate lowercase" required type="email" placeholder="cliente@correo.com" value={form.cliente_email || ''} onChange={(e) => setForm((p) => ({ ...p, cliente_email: e.target.value.toLowerCase() }))} />
+                  {submitIntent && formErrors.cliente_email && <p className="text-[11px] text-red-600 mt-1">Correo es obligatorio.</p>}
+                </div>
+              </div>
             </div>
-            <div className="md:col-span-2">
-              <label className="block text-xs font-medium text-slate-500 mb-1">Nombre cliente *</label>
-              <input className="input-corporate uppercase" placeholder="Ej: MIGUEL SIERRA" value={form.cliente_nombre} onChange={(e) => setForm((p) => ({ ...p, cliente_nombre: e.target.value.toUpperCase() }))} />
-              {submitIntent && formErrors.cliente_nombre && <p className="text-[11px] text-red-600 mt-1">Nombre cliente es obligatorio.</p>}
+
+            <div className="md:col-span-4 rounded-2xl border border-slate-200 bg-white p-4 space-y-3 transition-shadow transition-colors md:hover:shadow-sm md:hover:border-slate-300">
+              <p className="text-sm md:text-base font-bold text-slate-900 flex items-center justify-center gap-2 text-center">
+                <CarFront className="w-4.5 h-4.5 text-slate-500" />
+                Datos del vehículo y valor estimado
+              </p>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">
+                    Placa <span className="text-red-500">*</span>
+                  </label>
+                  <input className="input-corporate" placeholder="Ej: XHI56H" value={form.placa} onChange={(e) => setForm((p) => ({ ...p, placa: e.target.value.toUpperCase() }))} />
+                  {submitIntent && formErrors.placa && <p className="text-[11px] text-red-600 mt-1">Placa es obligatoria.</p>}
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Servicio</label>
+                  <select className="input-corporate" value={form.tipo_vehiculo} onChange={(e) => setForm((p) => ({ ...p, tipo_vehiculo: e.target.value }))}>
+                    <option value="liviano_particular">Liviano particular</option>
+                    <option value="moto">Moto</option>
+                    <option value="liviano_publico">Liviano público</option>
+                    <option value="pesado_particular">Pesado particular</option>
+                    <option value="pesado_publico">Pesado público</option>
+                    <option value="preventiva">Preventiva</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Modelo/Año (informativo)</label>
+                  <input
+                    className="input-corporate"
+                    type="number"
+                    min={1950}
+                    max={currentYear + 1}
+                    placeholder="Ej: 2018"
+                    value={anoModelo}
+                    onChange={(e) => setAnoModelo(e.target.value)}
+                  />
+                </div>
+              </div>
+              <div className="w-full md:w-[78%] mx-auto rounded-xl border border-amber-200 bg-amber-100/80 p-2.5 text-center">
+                <p className="text-xs font-semibold text-amber-900">Valor estimado RTM (informativo)</p>
+                {estimatedRtmQuery.isLoading && <p className="text-xs text-amber-800 mt-1">Calculando valor estimado…</p>}
+                {!canEstimate && (
+                  <p className="text-xs text-amber-800 mt-1">
+                    Selecciona tipo de vehículo y digita un modelo/año válido para estimar.
+                  </p>
+                )}
+                {canEstimate && estimatedRtmQuery.isError && (
+                  <p className="text-xs text-amber-800 mt-1">
+                    No fue posible estimar en este momento. Puedes crear la cita sin problema.
+                  </p>
+                )}
+                {canEstimate &&
+                  !estimatedRtmQuery.isLoading &&
+                  !estimatedRtmQuery.isError &&
+                  estimatedRtmQuery.data?.disponible &&
+                  typeof estimatedRtmQuery.data.valor_total === 'number' && (
+                    <p className="text-2xl font-extrabold text-center text-amber-950 tracking-tight mt-2">
+                      Valor estimado del servicio: ${formatCurrency(estimatedRtmQuery.data.valor_total)}
+                    </p>
+                  )}
+                {canEstimate &&
+                  !estimatedRtmQuery.isLoading &&
+                  !estimatedRtmQuery.isError &&
+                  !estimatedRtmQuery.data?.disponible && (
+                    <p className="text-xs text-amber-800 mt-1">{estimatedRtmQuery.data?.mensaje}</p>
+                  )}
+                <p className="text-[11px] text-amber-700 mt-1 flex items-center justify-center gap-1">
+                  <Info className="w-3 h-3 shrink-0" />
+                  <span>Solo referencia comercial. El valor final se define en recepción.</span>
+                </p>
+              </div>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Tipo documento</label>
-              <select className="input-corporate" value={form.cliente_tipo_documento || 'CC'} onChange={(e) => setForm((p) => ({ ...p, cliente_tipo_documento: e.target.value as 'CC' | 'CE' | 'PA' | 'NIT' }))}>
-                <option value="CC">CC</option>
-                <option value="CE">CE</option>
-                <option value="PA">PA</option>
-                <option value="NIT">NIT</option>
-              </select>
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Documento (opcional)</label>
-              <input className="input-corporate" placeholder="Ej: 1052071342" value={form.cliente_documento || ''} onChange={(e) => setForm((p) => ({ ...p, cliente_documento: e.target.value.toUpperCase() }))} />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Celular (opcional)</label>
-              <input className="input-corporate" placeholder="Ej: 3001234567" value={form.cliente_celular || ''} onChange={(e) => setForm((p) => ({ ...p, cliente_celular: e.target.value }))} />
-            </div>
-            <div className="md:col-span-2">
-              <label className="block text-xs font-medium text-slate-500 mb-1">Correo (opcional)</label>
-              <input className="input-corporate lowercase" type="email" placeholder="cliente@correo.com" value={form.cliente_email || ''} onChange={(e) => setForm((p) => ({ ...p, cliente_email: e.target.value.toLowerCase() }))} />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Placa *</label>
-              <input className="input-corporate" placeholder="Ej: XHI56H" value={form.placa} onChange={(e) => setForm((p) => ({ ...p, placa: e.target.value.toUpperCase() }))} />
-              {submitIntent && formErrors.placa && <p className="text-[11px] text-red-600 mt-1">Placa es obligatoria.</p>}
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Servicio</label>
-              <select className="input-corporate" value={form.tipo_vehiculo} onChange={(e) => setForm((p) => ({ ...p, tipo_vehiculo: e.target.value }))}>
-                <option value="liviano_particular">Liviano particular</option>
-                <option value="moto">Moto</option>
-                <option value="liviano_publico">Liviano público</option>
-                <option value="pesado_particular">Pesado particular</option>
-                <option value="pesado_publico">Pesado público</option>
-                <option value="preventiva">Preventiva</option>
-              </select>
-            </div>
-            <div className="md:col-span-4 rounded-xl border border-slate-200 bg-slate-50/40 p-3 mt-1">
-              <p className="text-xs font-medium text-slate-600 flex items-center gap-2">
-                <CarFront className="w-3.5 h-3.5 text-slate-500" />
+
+            <div className="md:col-span-4 rounded-2xl border border-slate-200 bg-slate-50/40 p-4 space-y-3 transition-shadow transition-colors md:hover:shadow-sm md:hover:border-slate-300">
+              <p className="text-sm md:text-base font-bold text-slate-900 flex items-center justify-center gap-2 text-center">
+                <CalendarClock className="w-4.5 h-4.5 text-slate-500" />
                 Programación de cita
               </p>
+              <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">
+                    Fecha <span className="text-red-500">*</span>
+                  </label>
+                  <input className="input-corporate" type="date" value={form.fecha} onChange={(e) => setForm((p) => ({ ...p, fecha: e.target.value }))} />
+                  {submitIntent && formErrors.fecha && <p className="text-[11px] text-red-600 mt-1">Fecha es obligatoria.</p>}
+                </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">
+                    Hora <span className="text-red-500">*</span>
+                  </label>
+                  <input className="input-corporate" type="time" value={form.hora} onChange={(e) => setForm((p) => ({ ...p, hora: e.target.value }))} />
+                  {submitIntent && formErrors.hora && <p className="text-[11px] text-red-600 mt-1">Hora es obligatoria.</p>}
+                </div>
+                <div className="md:col-span-2 rounded-xl border border-blue-100 bg-blue-50/60 p-3">
+                  <p className="text-xs font-semibold text-blue-800 flex items-center gap-2">
+                    <CalendarClock className="w-3.5 h-3.5" />
+                    Recomendación
+                  </p>
+                  <p className="text-[11px] text-blue-700 mt-1">
+                    Agenda con 10 minutos de margen para mejorar el flujo en recepción.
+                  </p>
+                </div>
+                <div className="md:col-span-4">
+                  <label className="block text-xs font-medium text-slate-500 mb-1">Observaciones (opcional)</label>
+                  <input className="input-corporate" placeholder="Ej: llega con 10 min de anticipación" value={form.notes || ''} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} />
+                </div>
+              </div>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Fecha *</label>
-              <input className="input-corporate" type="date" value={form.fecha} onChange={(e) => setForm((p) => ({ ...p, fecha: e.target.value }))} />
-              {submitIntent && formErrors.fecha && <p className="text-[11px] text-red-600 mt-1">Fecha es obligatoria.</p>}
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">Hora *</label>
-              <input className="input-corporate" type="time" value={form.hora} onChange={(e) => setForm((p) => ({ ...p, hora: e.target.value }))} />
-              {submitIntent && formErrors.hora && <p className="text-[11px] text-red-600 mt-1">Hora es obligatoria.</p>}
-            </div>
-            <div className="md:col-span-3">
-              <label className="block text-xs font-medium text-slate-500 mb-1">Observaciones (opcional)</label>
-              <input className="input-corporate" placeholder="Ej: llega con 10 min de anticipación" value={form.notes || ''} onChange={(e) => setForm((p) => ({ ...p, notes: e.target.value }))} />
-            </div>
-            <div className="md:self-end">
-              <button type="submit" disabled={createMutation.isLoading} className="btn-corporate-primary w-full inline-flex items-center justify-center gap-2 disabled:opacity-60">
+
+            <div className="md:col-span-4">
+              <button type="submit" disabled={createMutation.isLoading} className="btn-corporate-primary w-full py-3 inline-flex items-center justify-center gap-2 disabled:opacity-60">
                 <Plus className="w-4 h-4" />
                 {createMutation.isLoading ? 'Guardando...' : 'Crear cita'}
               </button>

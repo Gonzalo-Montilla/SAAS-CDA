@@ -585,6 +585,7 @@ def generar_email_confirmacion_cita(
     hora_legible: str,
     placa: str,
     tipo_servicio: str,
+    valor_aproximado: str | None = None,
     google_calendar_url: str | None = None,
     ics_download_url: str | None = None,
 ) -> str:
@@ -596,7 +597,8 @@ def generar_email_confirmacion_cita(
         <p style="margin:0 0 6px 0;">📌 <strong>Día:</strong> {fecha_legible}</p>
         <p style="margin:0 0 6px 0;">⏰ <strong>Hora:</strong> {hora_legible}</p>
         <p style="margin:0 0 6px 0;">📍 <strong>Placa:</strong> {placa}</p>
-        <p style="margin:0;">🔧 <strong>Servicio:</strong> {tipo_servicio}</p>
+        <p style="margin:0 0 6px 0;">🔧 <strong>Servicio:</strong> {tipo_servicio}</p>
+        {f'<p style="margin:0;">💰 <strong>Valor aprox.:</strong> {valor_aproximado}</p>' if valor_aproximado else ''}
     </div>
     <p>
         Te invitamos a llegar unos minutos antes para registrarte y pasar tranquilamente a nuestra sala de espera,

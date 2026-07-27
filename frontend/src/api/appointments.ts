@@ -5,16 +5,37 @@ export interface AppointmentCreatePayload {
   cliente_nombre: string;
   cliente_tipo_documento?: 'CC' | 'CE' | 'PA' | 'NIT';
   cliente_documento?: string;
-  cliente_email?: string;
+  cliente_email: string;
   cliente_celular?: string;
   placa: string;
   tipo_vehiculo: string;
+  ano_modelo?: string;
   fecha: string;
   hora: string;
   notes?: string;
 }
 
+export interface AppointmentEstimatedRtm {
+  disponible: boolean;
+  tipo_vehiculo: string;
+  ano_modelo: number;
+  valor_rtm?: number | null;
+  valor_terceros?: number | null;
+  valor_total?: number | null;
+  descripcion_antiguedad?: string | null;
+  mensaje: string;
+}
+
 const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000/api/v1';
+
+function normalizeApiErrorDetail(detail: unknown): string {
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (Array.isArray(detail) && detail.length > 0) {
+    const first = detail[0] as any;
+    if (typeof first?.msg === 'string' && first.msg.trim()) return first.msg;
+  }
+  return 'No fue posible completar la solicitud';
+}
 
 export const appointmentsApi = {
   listByDate: async (fecha: string, statusFilter?: string): Promise<AppointmentItem[]> => {
@@ -26,8 +47,13 @@ export const appointmentsApi = {
   },
 
   createInternal: async (payload: AppointmentCreatePayload): Promise<AppointmentItem> => {
-    const response = await apiClient.post<AppointmentItem>('/appointments/internal', payload);
-    return response.data;
+    try {
+      const response = await apiClient.post<AppointmentItem>('/appointments/internal', payload);
+      return response.data;
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail;
+      throw new Error(normalizeApiErrorDetail(detail) || 'No fue posible crear la cita');
+    }
   },
 
   updateStatus: async (
@@ -91,9 +117,36 @@ export const appointmentsApi = {
     });
     const data = await response.json();
     if (!response.ok) {
-      throw new Error(data?.detail || 'No fue posible crear la cita');
+      throw new Error(normalizeApiErrorDetail(data?.detail) || 'No fue posible crear la cita');
     }
     return data as AppointmentItem;
+  },
+
+  getPublicEstimatedRtm: async (
+    tenantSlug: string,
+    anoModelo: number,
+    tipoVehiculo: string
+  ): Promise<AppointmentEstimatedRtm> => {
+    const response = await fetch(
+      `${API_URL}/appointments/public/${encodeURIComponent(tenantSlug)}/estimated-rtm?ano_modelo=${encodeURIComponent(
+        String(anoModelo)
+      )}&tipo_vehiculo=${encodeURIComponent(tipoVehiculo)}`
+    );
+    const data = await response.json();
+    if (!response.ok) {
+      throw new Error(normalizeApiErrorDetail(data?.detail) || 'No fue posible estimar la tarifa');
+    }
+    return data as AppointmentEstimatedRtm;
+  },
+
+  getInternalEstimatedRtm: async (
+    anoModelo: number,
+    tipoVehiculo: string
+  ): Promise<AppointmentEstimatedRtm> => {
+    const response = await apiClient.get<AppointmentEstimatedRtm>('/appointments/estimated-rtm', {
+      params: { ano_modelo: anoModelo, tipo_vehiculo: tipoVehiculo },
+    });
+    return response.data;
   },
 };
 

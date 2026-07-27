@@ -7,14 +7,15 @@ from typing import Literal, Optional
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from pydantic import BaseModel, Field, EmailStr, field_validator
-from sqlalchemy import and_, func
+from pydantic import BaseModel, Field, EmailStr, TypeAdapter, field_validator
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.timezone_utils import zoneinfo_from_name
 from app.core.deps import get_current_user, get_db, get_agendamiento_or_admin
 from app.models.appointment import Appointment
+from app.models.tarifa import Tarifa
 from app.models.tenant import Tenant
 from app.models.usuario import Usuario
 from app.utils.email import (
@@ -59,10 +60,11 @@ class PublicAppointmentCreateRequest(BaseModel):
     cliente_nombre: str = Field(min_length=3, max_length=200)
     cliente_tipo_documento: Optional[str] = Field(default=None, max_length=10)
     cliente_documento: Optional[str] = Field(default=None, max_length=50)
-    cliente_email: Optional[EmailStr] = None
+    cliente_email: str = Field(min_length=5, max_length=255)
     cliente_celular: Optional[str] = Field(default=None, max_length=30)
     placa: str = Field(min_length=5, max_length=10)
     tipo_vehiculo: str = Field(min_length=2, max_length=40)
+    ano_modelo: Optional[str] = Field(default=None, max_length=10)
     fecha: str
     hora: str
     notes: Optional[str] = Field(default=None, max_length=1000)
@@ -78,9 +80,15 @@ class PublicAppointmentCreateRequest(BaseModel):
     @classmethod
     def normalize_email(cls, value):
         if value is None:
-            return None
+            raise ValueError("Correo electrónico es obligatorio.")
         normalized = str(value).strip().lower()
-        return normalized or None
+        if not normalized:
+            raise ValueError("Correo electrónico es obligatorio.")
+        try:
+            TypeAdapter(EmailStr).validate_python(normalized)
+        except Exception:
+            raise ValueError("Ingresa un correo válido.")
+        return normalized
 
     @field_validator("tipo_vehiculo", mode="before")
     @classmethod
@@ -136,6 +144,17 @@ class AppointmentStatusUpdateRequest(BaseModel):
     """Transiciones permitidas desde la agenda interna."""
 
     status: Literal["confirmed", "cancelled", "no_show"]
+
+
+class AppointmentEstimatedRtmResponse(BaseModel):
+    disponible: bool
+    tipo_vehiculo: str
+    ano_modelo: int
+    valor_rtm: Optional[float] = None
+    valor_terceros: Optional[float] = None
+    valor_total: Optional[float] = None
+    descripcion_antiguedad: Optional[str] = None
+    mensaje: str
 
 
 def _appointment_to_response(row: Appointment) -> AppointmentResponse:
@@ -244,6 +263,88 @@ def _humanize_service(tipo_vehiculo: str) -> str:
     return mapping.get(normalized, normalized.replace("_", " ").title() or "Revisión técnico-mecánica")
 
 
+def _format_cop_amount(value: float) -> str:
+    try:
+        amount = round(float(value))
+    except Exception:
+        amount = 0
+    return f"${amount:,.0f}".replace(",", ".")
+
+
+def _normalize_tarifa_tipo_vehiculo(tipo_vehiculo: str) -> str:
+    raw = (tipo_vehiculo or "").strip().lower()
+    aliases = {
+        "pesado": "pesado_particular",
+    }
+    return aliases.get(raw, raw)
+
+
+def _estimate_tarifa_for_tenant(
+    db: Session,
+    *,
+    tenant_id,
+    ano_modelo: int,
+    tipo_vehiculo: str,
+) -> AppointmentEstimatedRtmResponse:
+    tipo_normalizado = _normalize_tarifa_tipo_vehiculo(tipo_vehiculo)
+    if tipo_normalizado in {"preventiva", "pruebas_auditoria"}:
+        return AppointmentEstimatedRtmResponse(
+            disponible=False,
+            tipo_vehiculo=tipo_normalizado,
+            ano_modelo=ano_modelo,
+            mensaje="Este tipo de servicio no usa estimación tarifaria automática.",
+        )
+
+    ano_actual = date.today().year
+    if ano_modelo < 1950 or ano_modelo > (ano_actual + 1):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Año de modelo inválido. Debe estar entre 1950 y {ano_actual + 1}.",
+        )
+
+    antiguedad = max(ano_actual - ano_modelo, 0)
+    hoy = date.today()
+    tarifa = (
+        db.query(Tarifa)
+        .filter(
+            Tarifa.tenant_id == tenant_id,
+            Tarifa.activa == True,
+            Tarifa.tipo_vehiculo == tipo_normalizado,
+            Tarifa.vigencia_inicio <= hoy,
+            Tarifa.vigencia_fin >= hoy,
+            Tarifa.antiguedad_min <= antiguedad,
+            or_(Tarifa.antiguedad_max.is_(None), Tarifa.antiguedad_max >= antiguedad),
+        )
+        .order_by(Tarifa.vigencia_inicio.desc(), Tarifa.antiguedad_min.desc())
+        .first()
+    )
+    if not tarifa:
+        return AppointmentEstimatedRtmResponse(
+            disponible=False,
+            tipo_vehiculo=tipo_normalizado,
+            ano_modelo=ano_modelo,
+            mensaje="No hay una tarifa vigente para este tipo de vehículo y año/modelo.",
+        )
+
+    if tarifa.antiguedad_max is None:
+        descripcion = f"{tarifa.antiguedad_min}+ años"
+    elif tarifa.antiguedad_min == tarifa.antiguedad_max:
+        descripcion = f"{tarifa.antiguedad_min} año"
+    else:
+        descripcion = f"{tarifa.antiguedad_min}-{tarifa.antiguedad_max} años"
+
+    return AppointmentEstimatedRtmResponse(
+        disponible=True,
+        tipo_vehiculo=tipo_normalizado,
+        ano_modelo=ano_modelo,
+        valor_rtm=float(tarifa.valor_rtm),
+        valor_terceros=float(tarifa.valor_terceros),
+        valor_total=float(tarifa.valor_total),
+        descripcion_antiguedad=descripcion,
+        mensaje="Valor estimado informativo según tarifas vigentes del CDA.",
+    )
+
+
 def _get_colombia_timezone():
     return zoneinfo_from_name(settings.TIMEZONE)
 
@@ -338,6 +439,7 @@ def _compute_reminder_scheduled_at(scheduled_at: datetime) -> datetime:
 
 
 def _send_appointment_email_notification(
+    db: Session,
     tenant: Tenant,
     *,
     appointment: Appointment,
@@ -346,35 +448,56 @@ def _send_appointment_email_notification(
     scheduled_at: datetime,
     placa: str,
     tipo_vehiculo: str,
+    ano_modelo: str | None = None,
 ) -> None:
-    if not cliente_email:
-        return
-    fecha_legible = _format_fecha_es(scheduled_at.date())
-    hora_legible = scheduled_at.strftime("%H:%M")
-    nombre_cda = tenant.nombre_comercial if tenant and tenant.nombre_comercial else tenant.nombre
-    tipo_servicio = _humanize_service(tipo_vehiculo)
-    google_calendar_url = _build_google_calendar_url(
-        nombre_cda=nombre_cda,
-        placa=placa,
-        tipo_servicio=tipo_servicio,
-        scheduled_at=scheduled_at,
-    )
-    ics_download_url = _build_ics_download_url(appointment.public_token)
-    html = generar_email_confirmacion_cita(
-        nombre_cda=nombre_cda,
-        nombre_cliente=cliente_nombre,
-        fecha_legible=fecha_legible,
-        hora_legible=hora_legible,
-        placa=placa,
-        tipo_servicio=tipo_servicio,
-        google_calendar_url=google_calendar_url,
-        ics_download_url=ics_download_url,
-    )
-    asunto = f"{nombre_cda} - Confirmación de cita"
     try:
-        enviar_email(cliente_email, asunto, html)
+        if not cliente_email:
+            return
+        fecha_legible = _format_fecha_es(scheduled_at.date())
+        hora_legible = scheduled_at.strftime("%H:%M")
+        nombre_cda = tenant.nombre_comercial if tenant and tenant.nombre_comercial else tenant.nombre
+        tipo_servicio = _humanize_service(tipo_vehiculo)
+        google_calendar_url = _build_google_calendar_url(
+            nombre_cda=nombre_cda,
+            placa=placa,
+            tipo_servicio=tipo_servicio,
+            scheduled_at=scheduled_at,
+        )
+        ics_download_url = _build_ics_download_url(appointment.public_token)
+        valor_aproximado = None
+        raw_ano = (ano_modelo or "").strip()
+        if raw_ano:
+            try:
+                estimated = _estimate_tarifa_for_tenant(
+                    db,
+                    tenant_id=tenant.id,
+                    ano_modelo=int(raw_ano),
+                    tipo_vehiculo=tipo_vehiculo,
+                )
+                if estimated.disponible and estimated.valor_total is not None:
+                    valor_aproximado = _format_cop_amount(estimated.valor_total)
+            except Exception:
+                # El email no debe bloquearse por errores de cálculo informativo.
+                valor_aproximado = None
+        html = generar_email_confirmacion_cita(
+            nombre_cda=nombre_cda,
+            nombre_cliente=cliente_nombre,
+            fecha_legible=fecha_legible,
+            hora_legible=hora_legible,
+            placa=placa,
+            tipo_servicio=tipo_servicio,
+            valor_aproximado=valor_aproximado,
+            google_calendar_url=google_calendar_url,
+            ics_download_url=ics_download_url,
+        )
+        asunto = f"{nombre_cda} - Confirmación de cita"
+        try:
+            enviar_email(cliente_email, asunto, html)
+        except Exception:
+            # No bloquear agendamiento por fallas SMTP.
+            pass
     except Exception:
-        # No bloquear agendamiento por fallas SMTP.
+        # Regla crítica: nunca bloquear creación de cita por generación de correo.
         pass
 
 
@@ -518,7 +641,7 @@ def book_public_appointment(
         cliente_nombre=payload.cliente_nombre.strip().upper(),
         cliente_tipo_documento=(payload.cliente_tipo_documento or "").strip().upper() or None,
         cliente_documento=(payload.cliente_documento or "").strip().upper() or None,
-        cliente_email=(payload.cliente_email or "").strip().lower() or None,
+        cliente_email=payload.cliente_email.strip().lower(),
         cliente_celular=(payload.cliente_celular or "").strip() or None,
         placa=payload.placa.strip().upper(),
         tipo_vehiculo=payload.tipo_vehiculo.strip().lower(),
@@ -536,6 +659,7 @@ def book_public_appointment(
     db.commit()
     db.refresh(appointment)
     _send_appointment_email_notification(
+        db,
         tenant,
         appointment=appointment,
         cliente_email=appointment.cliente_email,
@@ -543,8 +667,25 @@ def book_public_appointment(
         scheduled_at=appointment.scheduled_at,
         placa=appointment.placa,
         tipo_vehiculo=appointment.tipo_vehiculo,
+        ano_modelo=payload.ano_modelo,
     )
     return _appointment_to_response(appointment)
+
+
+@router.get("/public/{tenant_slug}/estimated-rtm", response_model=AppointmentEstimatedRtmResponse)
+def get_public_estimated_rtm(
+    tenant_slug: str,
+    ano_modelo: int,
+    tipo_vehiculo: str,
+    db: Session = Depends(get_db),
+):
+    tenant = _get_tenant_or_404(db, tenant_slug)
+    return _estimate_tarifa_for_tenant(
+        db,
+        tenant_id=tenant.id,
+        ano_modelo=ano_modelo,
+        tipo_vehiculo=tipo_vehiculo,
+    )
 
 
 @router.get("/", response_model=list[AppointmentResponse])
@@ -566,6 +707,21 @@ def list_appointments(
 
     rows = query.order_by(Appointment.scheduled_at.asc()).limit(300).all()
     return [_appointment_to_response(row) for row in rows]
+
+
+@router.get("/estimated-rtm", response_model=AppointmentEstimatedRtmResponse)
+def get_internal_estimated_rtm(
+    ano_modelo: int,
+    tipo_vehiculo: str,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_agendamiento_or_admin),
+):
+    return _estimate_tarifa_for_tenant(
+        db,
+        tenant_id=current_user.tenant_id,
+        ano_modelo=ano_modelo,
+        tipo_vehiculo=tipo_vehiculo,
+    )
 
 
 @router.post("/internal", response_model=AppointmentResponse, status_code=status.HTTP_201_CREATED)
@@ -593,7 +749,7 @@ def create_internal_appointment(
         cliente_nombre=payload.cliente_nombre.strip().upper(),
         cliente_tipo_documento=(payload.cliente_tipo_documento or "").strip().upper() or None,
         cliente_documento=(payload.cliente_documento or "").strip().upper() or None,
-        cliente_email=(payload.cliente_email or "").strip().lower() or None,
+        cliente_email=payload.cliente_email.strip().lower(),
         cliente_celular=(payload.cliente_celular or "").strip() or None,
         placa=payload.placa.strip().upper(),
         tipo_vehiculo=payload.tipo_vehiculo.strip().lower(),
@@ -611,6 +767,7 @@ def create_internal_appointment(
     db.commit()
     db.refresh(appointment)
     _send_appointment_email_notification(
+        db,
         tenant,
         appointment=appointment,
         cliente_email=appointment.cliente_email,
@@ -618,6 +775,7 @@ def create_internal_appointment(
         scheduled_at=appointment.scheduled_at,
         placa=appointment.placa,
         tipo_vehiculo=appointment.tipo_vehiculo,
+        ano_modelo=payload.ano_modelo,
     )
     return _appointment_to_response(appointment)
 
