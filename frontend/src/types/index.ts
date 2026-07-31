@@ -899,6 +899,8 @@ export interface Vehiculo {
   reinspeccion_vence_at?: string | null;
   reinspeccion_exenta?: boolean | null;
   observaciones?: string;
+  /** Solo listado liviano de pendientes (sin JSON de firmas). */
+  kilometraje?: string | null;
   recepcion_formato_extra_json?: Record<string, unknown> | null;
   tiene_recepcion_formato_extra?: boolean | null;
   fecha_registro: string;

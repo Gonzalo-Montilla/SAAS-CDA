@@ -310,6 +310,15 @@ def ensure_tenant_domain_schema(db):
     )
     db.execute(text("UPDATE vehiculos_proceso SET reinspeccion_intento = COALESCE(reinspeccion_intento, 1)"))
     db.execute(text("UPDATE vehiculos_proceso SET reinspeccion_exenta = COALESCE(reinspeccion_exenta, FALSE)"))
+    # Cola de Caja: pendientes por sede (estado REGISTRADO) sin escanear todo el historial.
+    db.execute(
+        text(
+            """
+            CREATE INDEX IF NOT EXISTS ix_vehiculos_proceso_tenant_sucursal_estado_fecha
+            ON vehiculos_proceso (tenant_id, sucursal_id, estado, fecha_registro)
+            """
+        )
+    )
     db.execute(text("ALTER TABLE tarifas ADD COLUMN IF NOT EXISTS tenant_id UUID"))
     db.execute(
         text(

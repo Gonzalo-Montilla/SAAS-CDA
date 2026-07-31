@@ -300,9 +300,50 @@ class VehiculoCobradoHoyResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class VehiculoPendienteCajaResponse(BaseModel):
+    """
+    Respuesta liviana para cola de Caja.
+    Omite recepcion_formato_extra_json completo (firmas base64) para no
+    saturar red/CPU; solo incluye kilometraje si existe.
+    """
+
+    id: UUID
+    placa: str
+    tipo_vehiculo: str
+    marca: Optional[str] = None
+    modelo: Optional[str] = None
+    ano_modelo: int
+    cliente_nombre: str
+    cliente_tipo_documento: str = "CC"
+    cliente_documento: str
+    cliente_telefono: Optional[str] = None
+    cliente_email: Optional[str] = None
+    cliente_direccion: Optional[str] = None
+    cliente_factus_municipality_id: Optional[int] = None
+    valor_rtm: Decimal
+    tiene_soat: bool = False
+    comision_soat: Decimal = Decimal("0")
+    total_cobrado: Decimal
+    metodo_pago: Optional[str] = None
+    numero_factura_dian: Optional[str] = None
+    registrado_runt: bool = False
+    registrado_sicov: bool = False
+    registrado_indra: bool = False
+    fecha_pago: Optional[datetime] = None
+    estado: str
+    reinspeccion_intento: Optional[int] = None
+    reinspeccion_exenta: Optional[bool] = None
+    observaciones: Optional[str] = None
+    kilometraje: Optional[str] = None
+    fecha_registro: datetime
+    antiguedad: Optional[int] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class VehiculosPendientes(BaseModel):
     """Lista de vehículos pendientes de pago"""
-    vehiculos: list[VehiculoResponse]
+    vehiculos: list[VehiculoPendienteCajaResponse]
     total: int
 
 

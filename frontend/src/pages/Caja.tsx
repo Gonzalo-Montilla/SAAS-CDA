@@ -333,7 +333,8 @@ export default function CajaPage() {
     queryKey: ['vehiculos-pendientes'],
     queryFn: vehiculosApi.obtenerPendientes,
     enabled: !!cajaActiva, // Solo si hay caja activa
-    refetchInterval: 10000, // Refrescar cada 10 segundos
+    refetchInterval: 20000, // Antes 10s; payload ya es liviano, 20s basta para cola
+    staleTime: 8000,
     retry: 1,
   });
 
@@ -931,6 +932,9 @@ function VehiculosPendientes({
   };
 
   const extractKilometraje = (vehiculo: Vehiculo): string => {
+    if (vehiculo.kilometraje != null && String(vehiculo.kilometraje).trim()) {
+      return valueOrDash(vehiculo.kilometraje);
+    }
     const extra = vehiculo.recepcion_formato_extra_json as Record<string, unknown> | null | undefined;
     const datosTecnicos = extra && typeof extra === 'object'
       ? (extra.datos_tecnicos as Record<string, unknown> | undefined)

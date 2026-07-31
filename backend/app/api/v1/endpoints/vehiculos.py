@@ -112,6 +112,7 @@ from app.schemas.vehiculo import (
     VehiculoCobro,
     VehiculoResponse,
     VehiculoCobradoHoyResponse,
+    VehiculoPendienteCajaResponse,
     VehiculosPendientes,
     VehiculoConTarifa,
     TarifaCalculada,
@@ -344,6 +345,47 @@ def _build_vehiculo_response_with_correccion(
         update_data["recepcion_formato_extra_json"] = None
     out = VehiculoResponse.model_validate(vehiculo)
     return out.model_copy(update=update_data) if update_data else out
+
+
+def _build_vehiculo_pendiente_caja_response(
+    vehiculo: VehiculoProceso,
+    *,
+    kilometraje: str | None = None,
+) -> VehiculoPendienteCajaResponse:
+    estado = vehiculo.estado.value if hasattr(vehiculo.estado, "value") else str(vehiculo.estado)
+    km = (kilometraje or "").strip() or None
+    return VehiculoPendienteCajaResponse(
+        id=vehiculo.id,
+        placa=vehiculo.placa,
+        tipo_vehiculo=vehiculo.tipo_vehiculo,
+        marca=vehiculo.marca,
+        modelo=vehiculo.modelo,
+        ano_modelo=vehiculo.ano_modelo,
+        cliente_nombre=vehiculo.cliente_nombre,
+        cliente_tipo_documento=vehiculo.cliente_tipo_documento or "CC",
+        cliente_documento=vehiculo.cliente_documento,
+        cliente_telefono=vehiculo.cliente_telefono,
+        cliente_email=vehiculo.cliente_email,
+        cliente_direccion=vehiculo.cliente_direccion,
+        cliente_factus_municipality_id=vehiculo.cliente_factus_municipality_id,
+        valor_rtm=vehiculo.valor_rtm,
+        tiene_soat=bool(vehiculo.tiene_soat),
+        comision_soat=vehiculo.comision_soat or 0,
+        total_cobrado=vehiculo.total_cobrado,
+        metodo_pago=str(vehiculo.metodo_pago or "") or None,
+        numero_factura_dian=vehiculo.numero_factura_dian,
+        registrado_runt=bool(vehiculo.registrado_runt),
+        registrado_sicov=bool(vehiculo.registrado_sicov),
+        registrado_indra=bool(vehiculo.registrado_indra),
+        fecha_pago=vehiculo.fecha_pago,
+        estado=estado,
+        reinspeccion_intento=vehiculo.reinspeccion_intento,
+        reinspeccion_exenta=bool(vehiculo.reinspeccion_exenta) if vehiculo.reinspeccion_exenta is not None else None,
+        observaciones=vehiculo.observaciones,
+        kilometraje=km,
+        fecha_registro=vehiculo.fecha_registro,
+        antiguedad=vehiculo.antiguedad,
+    )
 
 
 def _build_vehiculo_cobrado_hoy_response(
@@ -2554,18 +2596,64 @@ def listar_pendientes(
     active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
-    Listar vehículos pendientes de pago (para Caja)
-    """
-    vehiculos = _filtro_vehiculo_sede(
-        db.query(VehiculoProceso),
-        current_user.tenant_id,
-        active_sucursal_id,
-    ).filter(VehiculoProceso.estado == EstadoVehiculo.REGISTRADO).order_by(VehiculoProceso.fecha_registro).all()
+    Listar vehículos pendientes de pago (para Caja).
 
-    return VehiculosPendientes(
-        vehiculos=vehiculos,
-        total=len(vehiculos)
+    Respuesta liviana: no serializa recepcion_formato_extra_json (firmas/PDF extras),
+    que puede pesar varios MB por vehículo y ralentizar Caja en tenants activos.
+    """
+    km_expr = (
+        VehiculoProceso.recepcion_formato_extra_json["datos_tecnicos"]["kilometraje"].as_string()
+    ).label("kilometraje")
+
+    rows = (
+        _filtro_vehiculo_sede(
+            db.query(VehiculoProceso),
+            current_user.tenant_id,
+            active_sucursal_id,
+        )
+        .options(
+            load_only(
+                VehiculoProceso.id,
+                VehiculoProceso.placa,
+                VehiculoProceso.tipo_vehiculo,
+                VehiculoProceso.marca,
+                VehiculoProceso.modelo,
+                VehiculoProceso.ano_modelo,
+                VehiculoProceso.cliente_nombre,
+                VehiculoProceso.cliente_tipo_documento,
+                VehiculoProceso.cliente_documento,
+                VehiculoProceso.cliente_telefono,
+                VehiculoProceso.cliente_email,
+                VehiculoProceso.cliente_direccion,
+                VehiculoProceso.cliente_factus_municipality_id,
+                VehiculoProceso.valor_rtm,
+                VehiculoProceso.tiene_soat,
+                VehiculoProceso.comision_soat,
+                VehiculoProceso.total_cobrado,
+                VehiculoProceso.metodo_pago,
+                VehiculoProceso.numero_factura_dian,
+                VehiculoProceso.registrado_runt,
+                VehiculoProceso.registrado_sicov,
+                VehiculoProceso.registrado_indra,
+                VehiculoProceso.fecha_pago,
+                VehiculoProceso.estado,
+                VehiculoProceso.reinspeccion_intento,
+                VehiculoProceso.reinspeccion_exenta,
+                VehiculoProceso.observaciones,
+                VehiculoProceso.fecha_registro,
+            )
+        )
+        .add_columns(km_expr)
+        .filter(VehiculoProceso.estado == EstadoVehiculo.REGISTRADO)
+        .order_by(VehiculoProceso.fecha_registro.asc())
+        .all()
     )
+
+    vehiculos = [
+        _build_vehiculo_pendiente_caja_response(vehiculo, kilometraje=km)
+        for vehiculo, km in rows
+    ]
+    return VehiculosPendientes(vehiculos=vehiculos, total=len(vehiculos))
 
 
 @router.post("/{vehiculo_id}/notificar-paso-caja")
