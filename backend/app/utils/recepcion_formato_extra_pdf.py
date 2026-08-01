@@ -299,15 +299,23 @@ def _resolve_visual_vehicle_type(
     if _has_any(tipo, liviano_tokens):
         return "liviano"
 
-    # 2) Para tipos especiales o ambiguos, derivar del formato/clase.
-    if _has_any(tipo_formato, moto_tokens) or _has_any(clase, moto_tokens):
+    # 2) Tipo visual del formato (corrección humana / encabezado) antes que clase RUNT.
+    if _has_any(tipo_formato, moto_tokens):
         return "moto"
-    if _has_any(tipo_formato, pesado_tokens) or _has_any(clase, pesado_tokens):
+    if _has_any(tipo_formato, pesado_tokens):
         return "pesado"
-    if _has_any(tipo_formato, liviano_tokens) or _has_any(clase, liviano_tokens):
+    if _has_any(tipo_formato, liviano_tokens):
         return "liviano"
 
-    # 3) Fallback conservador histórico.
+    # 3) Clase técnica (RUNT u otros) como respaldo.
+    if _has_any(clase, moto_tokens):
+        return "moto"
+    if _has_any(clase, pesado_tokens):
+        return "pesado"
+    if _has_any(clase, liviano_tokens):
+        return "liviano"
+
+    # 4) Fallback conservador histórico.
     return "liviano"
 
 

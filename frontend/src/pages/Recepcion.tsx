@@ -279,6 +279,19 @@ const formatServerDateTimeToBogota = (value?: string | null): string => {
   });
 };
 
+const TIPO_VEHICULO_FISICO_VALUES = [
+  'liviano_particular',
+  'liviano_publico',
+  'pesado_particular',
+  'pesado_publico',
+  'moto',
+] as const;
+
+type TipoVehiculoFisico = (typeof TIPO_VEHICULO_FISICO_VALUES)[number];
+
+const isTipoVehiculoFisico = (tipo: string): tipo is TipoVehiculoFisico =>
+  (TIPO_VEHICULO_FISICO_VALUES as readonly string[]).includes((tipo || '').trim().toLowerCase());
+
 const mapTipoVehiculoFormato = (tipo: string, claseVehiculo?: string): string => {
   const t = (tipo || '').trim().toLowerCase();
   const clase = (claseVehiculo || '').trim().toLowerCase();
@@ -297,10 +310,88 @@ const mapTipoVehiculoFormato = (tipo: string, claseVehiculo?: string): string =>
     'microbus',
     'microbús',
   ];
+  const livianoTokens = ['liviano', 'carro', 'automovil', 'automóvil', 'camioneta', 'suv', 'pickup', 'pick-up'];
 
-  if (hasAny(t, motoTokens) || hasAny(clase, motoTokens)) return 'MOTOCICLETA 4T';
-  if (hasAny(t, pesadoTokens) || hasAny(clase, pesadoTokens)) return 'PESADO';
+  // Prioridad: tipo del formulario (corrección humana / select) sobre clase RUNT.
+  if (hasAny(t, motoTokens)) return 'MOTOCICLETA 4T';
+  if (hasAny(t, pesadoTokens)) return 'PESADO';
+  if (hasAny(t, livianoTokens)) return 'LIVIANO';
+  if (hasAny(clase, motoTokens)) return 'MOTOCICLETA 4T';
+  if (hasAny(clase, pesadoTokens)) return 'PESADO';
+  if (hasAny(clase, livianoTokens)) return 'LIVIANO';
   return 'LIVIANO';
+};
+
+const inferTipoVehiculoFisico = (
+  tipoFormato?: string,
+  claseVehiculo?: string,
+  fallback: TipoVehiculoFisico = 'liviano_particular'
+): TipoVehiculoFisico => {
+  const raw = `${tipoFormato || ''} ${claseVehiculo || ''}`.trim().toLowerCase();
+  if (!raw) return fallback;
+  if (raw.includes('moto')) return 'moto';
+  if (
+    ['pesado', 'camion', 'camión', 'tracto', 'volqueta', 'bus', 'buseta', 'microbus', 'microbús'].some((t) =>
+      raw.includes(t)
+    )
+  ) {
+    return 'pesado_particular';
+  }
+  if (['liviano', 'carro', 'automovil', 'automóvil', 'camioneta', 'suv', 'pickup'].some((t) => raw.includes(t))) {
+    return 'liviano_particular';
+  }
+  return fallback;
+};
+
+/** En el formato de pre-revisión, "Modelo" = año. RUNT a veces manda la línea comercial en `modelo`. */
+const looksLikeAnoModelo = (raw: unknown): boolean => {
+  const s = String(raw ?? '').trim();
+  if (!/^\d{4}$/.test(s)) return false;
+  const y = Number(s);
+  return y >= 1950 && y <= 2100;
+};
+
+const lineaComercialDesdeRunt = (runt: {
+  linea?: string | null;
+  modelo?: string | null;
+}): string => {
+  const linea = String(runt.linea || '').trim();
+  if (linea) return linea;
+  const modelo = String(runt.modelo || '').trim();
+  if (modelo && !looksLikeAnoModelo(modelo)) return modelo;
+  return '';
+};
+
+const anoModeloTextoDesdeRunt = (runt: {
+  modelo?: string | null;
+  ano_modelo?: number | null;
+}): string => {
+  const ano = Number(runt.ano_modelo || 0);
+  if (ano >= 1950 && ano <= 2100) return String(ano);
+  if (looksLikeAnoModelo(runt.modelo)) return String(runt.modelo).trim();
+  return '';
+};
+
+/** Alinea el formato visual al tipo físico elegido en el formulario. */
+const syncFormatoConTipoFisico = (
+  prev: RecepcionFormatoExtra,
+  tipoFisico: string
+): RecepcionFormatoExtra => {
+  const mapped = mapTipoVehiculoFormato(tipoFisico, '');
+  const visualTipo = resolveTipoLlantasKey(tipoFisico, '');
+  const visualClase = resolveTipoLlantasKey('', prev.datos_tecnicos.clase_vehiculo);
+  const claseConflicto = Boolean((prev.datos_tecnicos.clase_vehiculo || '').trim()) && visualClase !== visualTipo;
+  return {
+    ...prev,
+    // Si estaba en Auto (vacío), permanece Auto; el layout usa el tipo del formulario.
+    // Si estaba Manual, actualiza al nuevo tipo físico corregido.
+    tipo_vehiculo_formato: (prev.tipo_vehiculo_formato || '').trim() ? mapped : '',
+    datos_tecnicos: {
+      ...prev.datos_tecnicos,
+      // Evita que la clase RUNT (ej. camión) siga pintando diagrama pesado.
+      clase_vehiculo: claseConflicto ? mapped : prev.datos_tecnicos.clase_vehiculo,
+    },
+  };
 };
 
 const buildNoInspeccionProvisional = (placa: string): string => {
@@ -330,9 +421,15 @@ const resolveTipoLlantasKey = (
     'microbus',
     'microbús',
   ];
+  const livianoTokens = ['liviano', 'carro', 'automovil', 'automóvil', 'camioneta', 'suv', 'pickup', 'pick-up'];
 
-  if (hasAny(t, motoTokens) || hasAny(clase, motoTokens)) return 'moto';
-  if (hasAny(t, pesadoTokens) || hasAny(clase, pesadoTokens)) return 'pesado';
+  // Prioridad: tipo del formulario sobre clase RUNT (evita diagrama pesado si ya corrigieron a liviano).
+  if (hasAny(t, motoTokens)) return 'moto';
+  if (hasAny(t, pesadoTokens)) return 'pesado';
+  if (hasAny(t, livianoTokens)) return 'liviano';
+  if (hasAny(clase, motoTokens)) return 'moto';
+  if (hasAny(clase, pesadoTokens)) return 'pesado';
+  if (hasAny(clase, livianoTokens)) return 'liviano';
   return 'liviano';
 };
 
@@ -464,6 +561,8 @@ export default function Recepcion() {
   });
   const [mostrarFormatoExtra, setMostrarFormatoExtra] = useState(false);
   const [formatoExtra, setFormatoExtra] = useState<RecepcionFormatoExtra>(createDefaultFormatoExtra());
+  /** Servicio preventiva (valor en Caja). No compite como tipo físico en el select. */
+  const [esPreventiva, setEsPreventiva] = useState(false);
   const [modoNoInspeccion, setModoNoInspeccion] = useState<'auto' | 'manual'>('auto');
   const firmaCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const firmaOperarioCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -880,14 +979,17 @@ export default function Recepcion() {
         };
       });
       if (mostrarFormatoExtra) {
+        const lineaRunt = lineaComercialDesdeRunt(data);
+        const anoRunt = anoModeloTextoDesdeRunt(data);
         setFormatoExtra((prev) => ({
           ...prev,
           datos_tecnicos: {
             ...prev.datos_tecnicos,
             clase_vehiculo: data.clase_vehiculo || prev.datos_tecnicos.clase_vehiculo,
             marca: data.marca || prev.datos_tecnicos.marca || '',
-            linea: data.linea || prev.datos_tecnicos.linea,
-            modelo: data.modelo || prev.datos_tecnicos.modelo || '',
+            linea: lineaRunt || prev.datos_tecnicos.linea,
+            // En formato, modelo = año (no la descripción comercial).
+            modelo: anoRunt || prev.datos_tecnicos.modelo || '',
             servicio: data.tipo_servicio || prev.datos_tecnicos.servicio,
             color: data.color || prev.datos_tecnicos.color,
             cilindraje: data.cilindraje || prev.datos_tecnicos.cilindraje,
@@ -948,9 +1050,15 @@ export default function Recepcion() {
     };
 
     const tipoRaw = (prefill.tipo_vehiculo || '').trim().toLowerCase();
-    const tipoPrefill = allowedTipoVehiculo.has(tipoRaw)
+    const tipoPrefillRaw = allowedTipoVehiculo.has(tipoRaw)
       ? tipoRaw
       : (tipoMap[tipoRaw] || 'liviano_particular');
+    const prefillEsPreventiva = tipoPrefillRaw === 'preventiva';
+    const tipoPrefill = prefillEsPreventiva
+      ? 'liviano_particular'
+      : (isTipoVehiculoFisico(tipoPrefillRaw) || tipoPrefillRaw === 'pruebas_auditoria'
+          ? tipoPrefillRaw
+          : 'liviano_particular');
     const docTipoPrefill =
       prefill.cliente_tipo_documento && ['CC', 'CE', 'PA', 'NIT'].includes(prefill.cliente_tipo_documento)
         ? (prefill.cliente_tipo_documento as VehiculoRegistro['cliente_tipo_documento'])
@@ -963,6 +1071,7 @@ export default function Recepcion() {
         ? validarConsistenciaDocumentoCliente(docTipoPrefill, docNumeroPrefill)
         : null;
 
+    setEsPreventiva(prefillEsPreventiva);
     setFormData((prev) => ({
       ...prev,
       placa: (prefill.placa || prev.placa || '').toUpperCase(),
@@ -996,7 +1105,7 @@ export default function Recepcion() {
     let cancelled = false;
 
     // Preventiva y pruebas de auditoría: no requieren cálculo de tarifa en recepción.
-    if (formData.tipo_vehiculo === 'preventiva' || formData.tipo_vehiculo === 'pruebas_auditoria') {
+    if (esPreventiva || formData.tipo_vehiculo === 'pruebas_auditoria') {
       setTarifaCalculada(null);
       setTarifaError('');
       return;
@@ -1035,7 +1144,7 @@ export default function Recepcion() {
     return () => {
       cancelled = true;
     };
-  }, [formData.ano_modelo, formData.tipo_vehiculo, anoActual]);
+  }, [formData.ano_modelo, formData.tipo_vehiculo, anoActual, esPreventiva]);
 
   const resetForm = () => {
     // Limpiar fotos
@@ -1057,6 +1166,7 @@ export default function Recepcion() {
       tiene_soat: false,
       observaciones: '',
     });
+    setEsPreventiva(false);
     setClienteFactusMunicipalityId(defaultClienteFactusMunicipalityId || '');
     setClienteFactusMunicipalityLabel('');
     setRuntSugerencia(null);
@@ -1098,9 +1208,22 @@ export default function Recepcion() {
       document_type: (vehiculo.cliente_tipo_documento || 'CC') as 'CC' | 'CE' | 'PA' | 'NIT',
       document_number: vehiculo.cliente_documento || '',
     });
+    const formatoGuardado = hidratarFormatoExtra(vehiculo.recepcion_formato_extra_json);
+    const tipoApi = String(vehiculo.tipo_vehiculo || '').trim().toLowerCase();
+    const editEsPreventiva = tipoApi === 'preventiva';
+    const tipoFisicoEdit: string = editEsPreventiva
+      ? inferTipoVehiculoFisico(
+          formatoGuardado.tipo_vehiculo_formato,
+          formatoGuardado.datos_tecnicos.clase_vehiculo,
+          'liviano_particular'
+        )
+      : isTipoVehiculoFisico(tipoApi) || tipoApi === 'pruebas_auditoria'
+        ? tipoApi
+        : 'liviano_particular';
+    setEsPreventiva(editEsPreventiva);
     setFormData({
       placa: vehiculo.placa,
-      tipo_vehiculo: vehiculo.tipo_vehiculo,
+      tipo_vehiculo: tipoFisicoEdit,
       marca: vehiculo.marca,
       modelo: vehiculo.modelo,
       ano_modelo: vehiculo.ano_modelo,
@@ -1122,7 +1245,6 @@ export default function Recepcion() {
         : defaultClienteFactusMunicipalityId || ''
     );
     setClienteFactusMunicipalityLabel('');
-    const formatoGuardado = hidratarFormatoExtra(vehiculo.recepcion_formato_extra_json);
     setFormatoExtra(formatoGuardado);
     setModoNoInspeccion(
       formatoGuardado.no_inspeccion_modo ||
@@ -1263,31 +1385,45 @@ export default function Recepcion() {
       `Se aplicarán sugerencias RUNT para la placa ${runtSugerencia.placa_consultada}. ¿Deseas continuar?`
     );
     if (!ok) return;
+    const lineaRunt = lineaComercialDesdeRunt(runtSugerencia);
+    const anoRuntTexto = anoModeloTextoDesdeRunt(runtSugerencia);
+    const anoRuntNum = Number(anoRuntTexto || 0);
     setFormData((prev) => ({
       ...prev,
       marca: runtSugerencia.marca || prev.marca || '',
-      modelo: runtSugerencia.linea || runtSugerencia.modelo || prev.modelo || '',
-      ano_modelo: runtSugerencia.ano_modelo || prev.ano_modelo,
+      // En el formulario principal, modelo = línea/comercial (no el año).
+      modelo: lineaRunt || prev.modelo || '',
+      ano_modelo: anoRuntNum >= 1950 ? anoRuntNum : prev.ano_modelo,
       tipo_vehiculo: runtSugerencia.tipo_vehiculo_sugerido || prev.tipo_vehiculo,
     }));
-    setFormatoExtra((prev) => ({
-      ...prev,
-      datos_tecnicos: {
-        ...prev.datos_tecnicos,
-        clase_vehiculo: runtSugerencia.clase_vehiculo || prev.datos_tecnicos.clase_vehiculo,
-        marca: runtSugerencia.marca || prev.datos_tecnicos.marca || '',
-        linea: runtSugerencia.linea || prev.datos_tecnicos.linea,
-        modelo: runtSugerencia.modelo || prev.datos_tecnicos.modelo || '',
-        servicio: runtSugerencia.tipo_servicio || prev.datos_tecnicos.servicio,
-        color: runtSugerencia.color || prev.datos_tecnicos.color,
-        cilindraje: runtSugerencia.cilindraje || prev.datos_tecnicos.cilindraje,
-      },
-    }));
+    const tipoSugerido = (runtSugerencia.tipo_vehiculo_sugerido || '').trim();
+    setFormatoExtra((prev) => {
+      const withTecnicos: RecepcionFormatoExtra = {
+        ...prev,
+        datos_tecnicos: {
+          ...prev.datos_tecnicos,
+          clase_vehiculo: runtSugerencia.clase_vehiculo || prev.datos_tecnicos.clase_vehiculo,
+          marca: runtSugerencia.marca || prev.datos_tecnicos.marca || '',
+          linea: lineaRunt || prev.datos_tecnicos.linea,
+          // En formato de pre-revisión, modelo = año del modelo.
+          modelo: anoRuntTexto || prev.datos_tecnicos.modelo || '',
+          servicio: runtSugerencia.tipo_servicio || prev.datos_tecnicos.servicio,
+          color: runtSugerencia.color || prev.datos_tecnicos.color,
+          cilindraje: runtSugerencia.cilindraje || prev.datos_tecnicos.cilindraje,
+        },
+      };
+      if (tipoSugerido && isTipoVehiculoFisico(tipoSugerido)) {
+        return syncFormatoConTipoFisico(withTecnicos, tipoSugerido);
+      }
+      return withTecnicos;
+    });
     showToast('success', 'Sugerencias aplicadas', 'Se aplicaron datos sugeridos desde RUNT.');
   };
 
   useEffect(() => {
     if (!mostrarFormatoExtra || !runtSugerencia?.encontrado) return;
+    const lineaRunt = lineaComercialDesdeRunt(runtSugerencia);
+    const anoRunt = anoModeloTextoDesdeRunt(runtSugerencia);
     setFormatoExtra((prev) => ({
       ...prev,
       datos_tecnicos: {
@@ -1295,8 +1431,8 @@ export default function Recepcion() {
         // Solo completamos vacíos para no pisar edición manual del usuario.
         clase_vehiculo: prev.datos_tecnicos.clase_vehiculo || runtSugerencia.clase_vehiculo || '',
         marca: prev.datos_tecnicos.marca || runtSugerencia.marca || '',
-        linea: prev.datos_tecnicos.linea || runtSugerencia.linea || '',
-        modelo: prev.datos_tecnicos.modelo || runtSugerencia.modelo || '',
+        linea: prev.datos_tecnicos.linea || lineaRunt || '',
+        modelo: prev.datos_tecnicos.modelo || anoRunt || '',
         servicio: prev.datos_tecnicos.servicio || runtSugerencia.tipo_servicio || '',
         color: prev.datos_tecnicos.color || runtSugerencia.color || '',
         cilindraje: prev.datos_tecnicos.cilindraje || runtSugerencia.cilindraje || '',
@@ -1353,7 +1489,7 @@ export default function Recepcion() {
           : buildNoInspeccionProvisional(formData.placa).trim(),
       tipo_vehiculo_formato: (
         formatoExtra.tipo_vehiculo_formato ||
-        mapTipoVehiculoFormato(formData.tipo_vehiculo, formatoExtra.datos_tecnicos.clase_vehiculo)
+        mapTipoVehiculoFormato(formData.tipo_vehiculo, '')
       ).trim(),
       datos_tecnicos: {
         clase_vehiculo: (formatoExtra.datos_tecnicos.clase_vehiculo || '').trim(),
@@ -1617,8 +1753,13 @@ export default function Recepcion() {
       return;
     }
     // Preparar datos incluyendo fotos en observaciones
+    const tipoParaApi =
+      esPreventiva && formData.tipo_vehiculo !== 'pruebas_auditoria'
+        ? 'preventiva'
+        : formData.tipo_vehiculo;
     const dataConFotos = {
       ...formData,
+      tipo_vehiculo: tipoParaApi,
       placa: (formData.placa || '').trim().toUpperCase(),
       cliente_documento: normalizarDocumentoCliente(formData.cliente_documento, formData.cliente_tipo_documento),
       cliente_telefono: telDigits,
@@ -1645,7 +1786,27 @@ export default function Recepcion() {
   };
 
   const handleInputChange = (field: keyof VehiculoRegistro, value: string | number | boolean) => {
-    setFormData(prev => ({ ...prev, [field]: value }));
+    if (field === 'tipo_vehiculo' && typeof value === 'string') {
+      const tipo = value.trim().toLowerCase();
+      if (tipo === 'pruebas_auditoria') {
+        setEsPreventiva(false);
+      }
+      setFormData((prev) => ({ ...prev, tipo_vehiculo: value as string }));
+      if (isTipoVehiculoFisico(tipo)) {
+        setFormatoExtra((prev) => syncFormatoConTipoFisico(prev, tipo));
+      }
+      return;
+    }
+    setFormData((prev) => ({ ...prev, [field]: value }));
+  };
+
+  const handleEsPreventivaChange = (checked: boolean) => {
+    if (formData.tipo_vehiculo === 'pruebas_auditoria') return;
+    setEsPreventiva(checked);
+    // Asegura que el formato tenga tipo visual físico (no "preventiva").
+    if (isTipoVehiculoFisico(formData.tipo_vehiculo)) {
+      setFormatoExtra((prev) => syncFormatoConTipoFisico(prev, formData.tipo_vehiculo));
+    }
   };
 
   const handleFormatoTecnicoChange = (
@@ -1985,8 +2146,10 @@ export default function Recepcion() {
     return valorTotal + valorComision;
   };
 
-  // Obtener comisión SOAT usando el mapeo
-  const tipoComisionActual = mapearTipoVehiculoAComision(formData.tipo_vehiculo);
+  // Obtener comisión SOAT usando el mapeo (preventiva sigue mapeando a carro en Caja)
+  const tipoComisionActual = mapearTipoVehiculoAComision(
+    esPreventiva ? 'preventiva' : formData.tipo_vehiculo
+  );
   const comisionSOAT = comisionesSOAT?.find(c => c.tipo_vehiculo === tipoComisionActual);
 
   useEffect(() => {
@@ -2312,26 +2475,57 @@ export default function Recepcion() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
 
-              {/* Tipo de Vehículo */}
-              <div>
-                <label className="block text-sm font-medium text-slate-700 mb-2">
-                  Tipo de Vehículo <span className="text-red-600">*</span>
-                </label>
-                <select
-                  value={formData.tipo_vehiculo}
-                  onChange={(e) => handleInputChange('tipo_vehiculo', e.target.value)}
-                  required
-                  className="input-pos"
-                >
-                  <option value="">Seleccione tipo...</option>
-                  <option value="liviano_particular">Liviano Particular</option>
-                  <option value="liviano_publico">Liviano Público</option>
-                  <option value="pesado_particular">Pesado Particular</option>
-                  <option value="pesado_publico">Pesado Público</option>
-                  <option value="moto">Motocicleta</option>
-                  <option value="preventiva">Preventiva (valor en Caja)</option>
-                  <option value="pruebas_auditoria">Pruebas de Auditoría (sin cobro)</option>
-                </select>
+              {/* Tipo físico + preventiva en la misma fila */}
+              <div className="md:col-span-2 grid grid-cols-1 md:grid-cols-2 gap-4 items-start">
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Tipo de Vehículo <span className="text-red-600">*</span>
+                  </label>
+                  <select
+                    value={formData.tipo_vehiculo}
+                    onChange={(e) => handleInputChange('tipo_vehiculo', e.target.value)}
+                    required
+                    className="input-pos"
+                  >
+                    <option value="">Seleccione tipo...</option>
+                    <option value="liviano_particular">Liviano Particular</option>
+                    <option value="liviano_publico">Liviano Público</option>
+                    <option value="pesado_particular">Pesado Particular</option>
+                    <option value="pesado_publico">Pesado Público</option>
+                    <option value="moto">Motocicleta</option>
+                    <option value="pruebas_auditoria">Pruebas de Auditoría (sin cobro)</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-2">
+                    Servicio
+                  </label>
+                  <label
+                    className={`flex w-full min-h-[3.25rem] items-center gap-3 rounded-xl border px-4 py-3 transition-colors ${
+                      formData.tipo_vehiculo === 'pruebas_auditoria'
+                        ? 'border-slate-200 bg-slate-50 opacity-60'
+                        : esPreventiva
+                          ? 'border-amber-400 bg-amber-100 shadow-sm ring-1 ring-amber-300/50'
+                          : 'border-amber-200/80 bg-amber-50/70 hover:border-amber-300 hover:bg-amber-50'
+                    }`}
+                  >
+                    <input
+                      type="checkbox"
+                      className={`h-4 w-4 shrink-0 rounded border-slate-300 focus:ring-amber-500 ${
+                        esPreventiva ? 'text-amber-600' : 'text-primary-600'
+                      }`}
+                      checked={esPreventiva}
+                      disabled={formData.tipo_vehiculo === 'pruebas_auditoria'}
+                      onChange={(e) => handleEsPreventivaChange(e.target.checked)}
+                    />
+                    <span className="min-w-0 text-sm font-semibold text-slate-800 leading-tight">
+                      Es preventiva
+                    </span>
+                  </label>
+                  <p className="mt-1 text-xs text-slate-500">
+                    Valor manual en Caja. No cambia el tipo físico.
+                  </p>
+                </div>
               </div>
 
               {/* Marca */}
@@ -2539,7 +2733,7 @@ export default function Recepcion() {
                             className="input-pos uppercase"
                             value={
                               formatoExtra.tipo_vehiculo_formato ||
-                              mapTipoVehiculoFormato(formData.tipo_vehiculo, formatoExtra.datos_tecnicos.clase_vehiculo)
+                              mapTipoVehiculoFormato(formData.tipo_vehiculo, '')
                             }
                             onChange={(e) => handleFormatoEncabezadoChange('tipo_vehiculo_formato', e.target.value.toUpperCase())}
                           />
@@ -3197,7 +3391,7 @@ export default function Recepcion() {
               Tarifa a Cobrar
             </h3>
 
-            {formData.tipo_vehiculo === 'preventiva' ? (
+            {esPreventiva ? (
               <div>
                 <div className="bg-yellow-50 border-2 border-yellow-300 rounded-lg p-6 text-center">
                   <DollarSign className="w-16 h-16 text-yellow-600 mx-auto mb-3" />
@@ -3206,6 +3400,9 @@ export default function Recepcion() {
                   </p>
                   <p className="text-sm text-yellow-700">
                     El valor se definirá manualmente en Caja
+                  </p>
+                  <p className="text-xs text-yellow-800 mt-2 capitalize">
+                    Tipo físico: {(formData.tipo_vehiculo || '').replaceAll('_', ' ')}
                   </p>
                 </div>
 

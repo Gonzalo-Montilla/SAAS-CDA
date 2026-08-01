@@ -46,6 +46,16 @@ POSTGRES_PASSWORD=(contraseña fuerte)
 
 El build **debe** conocer la URL pública del API (ver `frontend/.env.example`).
 
+### Estándar CDASOFT producción (obligatorio)
+
+Para evitar errores intermitentes de CORS/SSL por dominios cruzados, el frontend de producción debe compilarse siempre contra el dominio canónico:
+
+```powershell
+$env:VITE_API_URL="https://cdasoft.com.co/api/v1"
+```
+
+> No usar `https://www.cdasoft.com/api/v1` como destino de build mientras ese host no sea el canónico operativo.
+
 Abre PowerShell en la carpeta del proyecto:
 
 ```powershell
@@ -472,14 +482,52 @@ Build frontend con URL final:
 
 ```bash
 cd frontend
+# CDASOFT PROD: usar siempre el dominio canónico
+# PowerShell: $env:VITE_API_URL="https://cdasoft.com.co/api/v1"
 npm run build
 ```
 
-Subir solo `dist`:
+> Si por operación excepcional compilas en el VPS (y no en local), primero exporta el canónico en esa sesión:
+>
+> ```bash
+> cd /var/www/cdasoft/repo/frontend
+> export VITE_API_URL="https://cdasoft.com.co/api/v1"
+> npm run build
+> ```
+>
+> Nunca ejecutar `npm run build` sin fijar `VITE_API_URL` en producción; puede incrustar `localhost` y provocar `Network Error` en login.
+
+Verifica antes de subir que el build quedó con la URL correcta:
+
+```bash
+cd ..
+grep -R -n "https://www\.cdasoft\.com/api/v1" frontend/dist/assets && echo "ERROR: build con URL no canónica" || echo "OK: build canónico"
+grep -R -n "https://cdasoft\.com\.co/api/v1" frontend/dist/assets | head -n 5
+grep -R -n "localhost:8000\|127\.0\.0\.1:8000\|http://127\.0\.0\.1" frontend/dist/assets && echo "ERROR: build apunta a localhost" || echo "OK: build sin localhost"
+```
+
+Si aparece algún `ERROR` en estos checks, **no** continúes el deploy.
+
+Subir solo `dist` (o preferiblemente `dist_new` para swap atómico):
 
 ```bash
 # ejemplo con rsync desde Git Bash / WSCP / scp
 rsync -avz --delete ./frontend/dist/ USUARIO@IP:/var/www/cdasoft/repo/frontend/dist/
+```
+
+Alternativa recomendada para minimizar riesgo en horario operativo:
+
+```bash
+# Subir a carpeta temporal
+rsync -avz --delete ./frontend/dist/ USUARIO@IP:/var/www/cdasoft/repo/frontend/dist_new/
+
+# En VPS: swap atómico + rollback rápido
+cd /var/www/cdasoft/repo/frontend
+TS=$(date +%F-%H%M)
+sudo mv dist "dist.prev-$TS"
+sudo mv dist_new dist
+sudo chown -R www-data:www-data dist
+sudo nginx -t && sudo systemctl reload nginx
 ```
 
 En VPS:
