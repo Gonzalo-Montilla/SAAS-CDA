@@ -110,6 +110,7 @@ from app.schemas.vehiculo import (
     VehiculoRegistro,
     VehiculoEdicion,
     VehiculoCobro,
+    CambiarMetodoPagoRequest,
     VehiculoResponse,
     VehiculoCobradoHoyResponse,
     VehiculoPendienteCajaResponse,
@@ -3993,38 +3994,175 @@ def listar_cobrados_recientes(
     )
 
 
+def _movimientos_cobro_vehiculo_caja(
+    db: Session,
+    *,
+    caja_id,
+    tenant_id,
+    vehiculo_id,
+) -> list:
+    """Movimientos RTM/SOAT activos del cobro (excluye gastos y anulados)."""
+    return (
+        db.query(MovimientoCaja)
+        .filter(
+            and_(
+                MovimientoCaja.caja_id == caja_id,
+                MovimientoCaja.tenant_id == tenant_id,
+                MovimientoCaja.vehiculo_id == vehiculo_id,
+                MovimientoCaja.tipo.in_([TipoMovimiento.RTM, TipoMovimiento.COMISION_SOAT]),
+                or_(MovimientoCaja.anulado == False, MovimientoCaja.anulado.is_(None)),
+            )
+        )
+        .all()
+    )
+
+
+def _set_vehiculo_metodo_pago(db: Session, vehiculo: VehiculoProceso, metodo: str) -> None:
+    """Persiste metodo_pago; mixto usa SQL literal por compatibilidad de enum histórico."""
+    from sqlalchemy import text
+
+    if metodo == "mixto":
+        db.execute(
+            text("UPDATE vehiculos_proceso SET metodo_pago = :metodo WHERE id = :vehiculo_id"),
+            {"metodo": "mixto", "vehiculo_id": str(vehiculo.id)},
+        )
+        vehiculo.metodo_pago = "mixto"
+    else:
+        vehiculo.metodo_pago = metodo
+
+
+def _recrear_movimientos_metodo_simple(
+    *,
+    db: Session,
+    current_user: Usuario,
+    caja_id,
+    vehiculo: VehiculoProceso,
+    nuevo_metodo: str,
+    concepto_nota: str,
+) -> int:
+    ingresa_efectivo = nuevo_metodo == "efectivo"
+    db.add(
+        MovimientoCaja(
+            tenant_id=current_user.tenant_id,
+            caja_id=caja_id,
+            vehiculo_id=vehiculo.id,
+            tipo=TipoMovimiento.RTM,
+            monto=vehiculo.valor_rtm,
+            metodo_pago=nuevo_metodo,
+            concepto=(
+                f"RTM {vehiculo.placa} ({concepto_nota}) - {vehiculo.cliente_nombre}"
+            ),
+            ingresa_efectivo=ingresa_efectivo,
+            created_by=current_user.id,
+        )
+    )
+    creados = 1
+    if vehiculo.comision_soat and Decimal(str(vehiculo.comision_soat)) > 0:
+        db.add(
+            MovimientoCaja(
+                tenant_id=current_user.tenant_id,
+                caja_id=caja_id,
+                vehiculo_id=vehiculo.id,
+                tipo=TipoMovimiento.COMISION_SOAT,
+                monto=vehiculo.comision_soat,
+                metodo_pago=nuevo_metodo,
+                concepto=f"Comisión SOAT {vehiculo.placa} ({concepto_nota})",
+                ingresa_efectivo=ingresa_efectivo,
+                created_by=current_user.id,
+            )
+        )
+        creados += 1
+    return creados
+
+
+def _recrear_movimientos_metodo_mixto(
+    *,
+    db: Session,
+    current_user: Usuario,
+    caja_id,
+    vehiculo: VehiculoProceso,
+    desglose: Dict[str, Decimal],
+) -> int:
+    """Misma lógica proporcional que el cobro inicial mixto (solo arqueo/caja; no toca Factus)."""
+    total = Decimal(str(vehiculo.total_cobrado or 0))
+    if total <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No se puede aplicar pago mixto a un cobro con total 0",
+        )
+    creados = 0
+    for metodo, monto_total_decimal in desglose.items():
+        ingresa_efectivo = metodo == "efectivo"
+        porcentaje = monto_total_decimal / total
+        monto_rtm = vehiculo.valor_rtm * porcentaje
+        monto_soat = (
+            vehiculo.comision_soat * porcentaje
+            if vehiculo.comision_soat and Decimal(str(vehiculo.comision_soat)) > 0
+            else Decimal(0)
+        )
+        db.add(
+            MovimientoCaja(
+                tenant_id=current_user.tenant_id,
+                caja_id=caja_id,
+                vehiculo_id=vehiculo.id,
+                tipo=TipoMovimiento.RTM,
+                monto=monto_rtm,
+                metodo_pago=metodo,
+                concepto=(
+                    f"RTM {vehiculo.placa} ({metodo.replace('_', ' ').title()}) - {vehiculo.cliente_nombre}"
+                ),
+                ingresa_efectivo=ingresa_efectivo,
+                created_by=current_user.id,
+            )
+        )
+        creados += 1
+        if monto_soat > 0:
+            db.add(
+                MovimientoCaja(
+                    tenant_id=current_user.tenant_id,
+                    caja_id=caja_id,
+                    vehiculo_id=vehiculo.id,
+                    tipo=TipoMovimiento.COMISION_SOAT,
+                    monto=monto_soat,
+                    metodo_pago=metodo,
+                    concepto=(
+                        f"Comisión SOAT {vehiculo.placa} ({metodo.replace('_', ' ').title()})"
+                    ),
+                    ingresa_efectivo=ingresa_efectivo,
+                    created_by=current_user.id,
+                )
+            )
+            creados += 1
+    return creados
+
+
 @router.put("/{vehiculo_id}/cambiar-metodo-pago")
 def cambiar_metodo_pago(
     vehiculo_id: str,
-    nuevo_metodo: str,
-    motivo: str,
+    payload: CambiarMetodoPagoRequest,
     request: Request,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_cajero_or_admin),
     active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
-    Cambiar método de pago de un vehículo ya cobrado
-    - Solo si el vehículo está PAGADO
+    Cambiar método de pago de un vehículo ya cobrado.
+    - Solo si el vehículo está cobrado
     - Solo si la caja está ABIERTA
     - Solo el mismo día del cobro
     - Requiere motivo obligatorio
+    - Permite cambiar a mixto con desglose (ajusta movimientos/arqueo; no altera Factus)
     """
-    # Validar motivo
-    if not motivo or len(motivo.strip()) < 10:
+    motivo = (payload.motivo or "").strip()
+    if len(motivo) < 10:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="El motivo debe tener al menos 10 caracteres"
+            detail="El motivo debe tener al menos 10 caracteres",
         )
-    
-    # Validar nuevo método de pago
-    nuevo_metodo_normalizado = _normalize_payment_method(nuevo_metodo)
-    if nuevo_metodo_normalizado == "mixto":
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="No se puede cambiar a método 'mixto'. El pago mixto solo es válido al momento del cobro inicial."
-        )
-    
+
+    nuevo_metodo_normalizado = _normalize_payment_method(payload.nuevo_metodo)
+    desglose_mixto_validado: Dict[str, Decimal] | None = None
+
     vehiculo = _filtro_vehiculo_sede(
         db.query(VehiculoProceso),
         current_user.tenant_id,
@@ -4034,24 +4172,24 @@ def cambiar_metodo_pago(
     if not vehiculo:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Vehículo no encontrado"
+            detail="Vehículo no encontrado",
         )
-    
-    # Validar que esté en una etapa posterior al cobro
+
     if vehiculo.estado not in ESTADOS_COBRO_EFECTIVO:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Solo se puede cambiar el método de pago de vehículos cobrados. Estado actual: {vehiculo.estado}"
+            detail=(
+                "Solo se puede cambiar el método de pago de vehículos cobrados. "
+                f"Estado actual: {vehiculo.estado}"
+            ),
         )
-    
-    # Validar que tenga caja asociada
+
     if not vehiculo.caja_id:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="El vehículo no tiene caja asociada"
+            detail="El vehículo no tiene caja asociada",
         )
-    
-    # Obtener caja
+
     caja = db.query(Caja).filter(
         Caja.id == vehiculo.caja_id,
         Caja.tenant_id == current_user.tenant_id,
@@ -4060,122 +4198,101 @@ def cambiar_metodo_pago(
     if not caja:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="Caja no encontrada"
+            detail="Caja no encontrada",
         )
-    
-    # Validar que la caja esté abierta
+
     if caja.estado != EstadoCaja.ABIERTA:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="La caja ya está cerrada. No se puede modificar el método de pago"
+            detail="La caja ya está cerrada. No se puede modificar el método de pago",
         )
 
-    # Ownership: cajero solo puede modificar cobros de su caja.
-    # Admin del tenant sí puede intervenir.
     current_role = current_user.rol.value if hasattr(current_user.rol, "value") else str(current_user.rol)
     if current_role != "administrador" and caja.usuario_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Solo el cajero propietario de la caja puede cambiar el método de pago de este cobro",
         )
-    
-    # Validar que sea el mismo día
+
     hoy = _co_today_date()
     fecha_pago = _utc_naive_to_co_date(vehiculo.fecha_pago)
     if fecha_pago != hoy:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Solo se puede cambiar el método de pago el mismo día del cobro"
+            detail="Solo se puede cambiar el método de pago el mismo día del cobro",
         )
-    
-    # Buscar movimientos de caja de este vehículo
-    movimientos = db.query(MovimientoCaja).filter(
-        and_(
-            MovimientoCaja.caja_id == caja.id,
-            MovimientoCaja.tenant_id == current_user.tenant_id,
-            MovimientoCaja.vehiculo_id == vehiculo.id
-        )
-    ).all()
-    
+
+    movimientos = _movimientos_cobro_vehiculo_caja(
+        db,
+        caja_id=caja.id,
+        tenant_id=current_user.tenant_id,
+        vehiculo_id=vehiculo.id,
+    )
     if not movimientos:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail="No se encontraron movimientos asociados a este vehículo"
+            detail="No se encontraron movimientos asociados a este vehículo",
         )
-    
-    # Guardar método anterior para auditoría
-    metodo_anterior = vehiculo.metodo_pago
-    if (metodo_anterior or "").lower() == nuevo_metodo_normalizado:
+
+    metodo_anterior = str(getattr(vehiculo.metodo_pago, "value", vehiculo.metodo_pago) or "").strip().lower()
+    mismo_metodo = metodo_anterior == nuevo_metodo_normalizado
+    if mismo_metodo and nuevo_metodo_normalizado != "mixto":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="El nuevo método de pago es igual al método actual",
         )
-    
+
+    if nuevo_metodo_normalizado == "mixto":
+        desglose_mixto_validado = _validate_mixed_breakdown(
+            payload.desglose_mixto,
+            Decimal(str(vehiculo.total_cobrado or 0)),
+        )
+
     try:
-        # Actualizar método de pago en vehículo
-        vehiculo.metodo_pago = nuevo_metodo_normalizado
-        
-        # CASO ESPECIAL: Si el método anterior era MIXTO
-        # Consolidar todos los movimientos en uno solo con el nuevo método
-        if metodo_anterior == "mixto":
-            # 1. ELIMINAR todos los movimientos mixtos
+        movimientos_antes = len(movimientos)
+
+        if nuevo_metodo_normalizado == "mixto":
             for movimiento in movimientos:
                 db.delete(movimiento)
-            
-            # 2. CREAR movimientos consolidados con el nuevo método
-            ingresa_efectivo = (nuevo_metodo_normalizado == "efectivo")
-            
-            # Movimiento RTM consolidado
-            mov_rtm = MovimientoCaja(
-                tenant_id=current_user.tenant_id,
+            movimientos_nuevos = _recrear_movimientos_metodo_mixto(
+                db=db,
+                current_user=current_user,
                 caja_id=caja.id,
-                vehiculo_id=vehiculo.id,
-                tipo=TipoMovimiento.RTM,
-                monto=vehiculo.valor_rtm,
-                metodo_pago=nuevo_metodo_normalizado,
-                concepto=f"RTM {vehiculo.placa} (Cambio de mixto a {nuevo_metodo_normalizado}) - {vehiculo.cliente_nombre}",
-                ingresa_efectivo=ingresa_efectivo,
-                created_by=current_user.id
+                vehiculo=vehiculo,
+                desglose=desglose_mixto_validado or {},
             )
-            db.add(mov_rtm)
-            
-            # Movimiento SOAT consolidado (si aplica)
-            if vehiculo.comision_soat > 0:
-                mov_soat = MovimientoCaja(
-                    tenant_id=current_user.tenant_id,
-                    caja_id=caja.id,
-                    vehiculo_id=vehiculo.id,
-                    tipo=TipoMovimiento.COMISION_SOAT,
-                    monto=vehiculo.comision_soat,
-                    metodo_pago=nuevo_metodo_normalizado,
-                    concepto=f"Comisión SOAT {vehiculo.placa} (Cambio de mixto a {nuevo_metodo_normalizado})",
-                    ingresa_efectivo=ingresa_efectivo,
-                    created_by=current_user.id
-                )
-                db.add(mov_soat)
-        
-        # CASO NORMAL: Cambio entre métodos simples
+            _set_vehiculo_metodo_pago(db, vehiculo, "mixto")
+        elif metodo_anterior == "mixto":
+            for movimiento in movimientos:
+                db.delete(movimiento)
+            movimientos_nuevos = _recrear_movimientos_metodo_simple(
+                db=db,
+                current_user=current_user,
+                caja_id=caja.id,
+                vehiculo=vehiculo,
+                nuevo_metodo=nuevo_metodo_normalizado,
+                concepto_nota=f"Cambio de mixto a {nuevo_metodo_normalizado}",
+            )
+            _set_vehiculo_metodo_pago(db, vehiculo, nuevo_metodo_normalizado)
         else:
-            # Actualizar cada movimiento existente
             for movimiento in movimientos:
                 movimiento.metodo_pago = nuevo_metodo_normalizado
-                
-                # Ajustar ingresa_efectivo según nuevo método
-                # SOLO el efectivo ingresa físicamente a caja
-                if nuevo_metodo_normalizado == "efectivo":
-                    movimiento.ingresa_efectivo = True
-                else:
-                    movimiento.ingresa_efectivo = False
+                movimiento.ingresa_efectivo = nuevo_metodo_normalizado == "efectivo"
+            movimientos_nuevos = len(movimientos)
+            _set_vehiculo_metodo_pago(db, vehiculo, nuevo_metodo_normalizado)
 
         db.commit()
 
-        # Registrar en auditoría (fuera de transacción principal)
         from app.utils.audit import audit_caja_operation
         from app.models.audit_log import AuditAction
+
         audit_caja_operation(
             db=db,
             action=AuditAction.UPDATE_VEHICLE,
-            description=f"Cambio de método de pago: {metodo_anterior} → {nuevo_metodo_normalizado}. Motivo: {motivo}",
+            description=(
+                f"Cambio de método de pago: {metodo_anterior} → {nuevo_metodo_normalizado}. "
+                f"Motivo: {motivo}"
+            ),
             usuario=current_user,
             request=request,
             metadata={
@@ -4184,28 +4301,36 @@ def cambiar_metodo_pago(
                 "caja_id": str(caja.id),
                 "metodo_anterior": metodo_anterior,
                 "metodo_nuevo": nuevo_metodo_normalizado,
-                "motivo": motivo.strip(),
-                "movimientos_afectados": len(movimientos),
+                "motivo": motivo,
+                "movimientos_antes": movimientos_antes,
+                "movimientos_despues": movimientos_nuevos,
                 "era_mixto": metodo_anterior == "mixto",
+                "es_mixto": nuevo_metodo_normalizado == "mixto",
+                "desglose_mixto": (
+                    {k: float(v) for k, v in desglose_mixto_validado.items()}
+                    if desglose_mixto_validado
+                    else None
+                ),
+                "factus_sin_cambio": True,
             },
         )
-        
+
         return {
             "success": True,
             "message": "Método de pago actualizado exitosamente",
             "metodo_anterior": metodo_anterior,
             "metodo_nuevo": nuevo_metodo_normalizado,
             "vehiculo_id": str(vehiculo.id),
-            "placa": vehiculo.placa
+            "placa": vehiculo.placa,
         }
-    
+
     except HTTPException:
         raise
     except Exception as e:
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error al cambiar método de pago: {str(e)}"
+            detail=f"Error al cambiar método de pago: {str(e)}",
         )
 
 

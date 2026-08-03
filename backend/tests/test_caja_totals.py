@@ -40,6 +40,54 @@ def test_saldo_esperado_solo_monto_inicial():
     assert caja.saldo_esperado == Decimal("250000")
 
 
+def test_cambio_efectivo_a_transferencia_baja_saldo_esperado():
+    """Tras cambiar método simple (efectivo → transferencia), el arqueo no debe contar el cobro."""
+    caja = Caja(monto_inicial=Decimal("50000"))
+    caja.movimientos = [
+        _ingreso("217586", ingresa_efectivo=False, metodo="transferencia"),
+        _ingreso("30000", ingresa_efectivo=False, metodo="transferencia", tipo=TipoMovimiento.COMISION_SOAT),
+    ]
+    assert caja.total_ingresos_efectivo == Decimal("0")
+    assert caja.saldo_esperado == Decimal("50000")
+
+
+def test_cambio_efectivo_a_mixto_solo_cuenta_parte_efectivo():
+    """
+    Cobro $217.586 que era 100% efectivo y pasa a mixto
+    ($100.000 efectivo + $117.586 transferencia): el saldo esperado solo suma $100.000.
+    """
+    caja = Caja(monto_inicial=Decimal("50000"))
+    # Movimientos recreados como en cobro/cambio a mixto (proporcional RTM/SOAT).
+    # Total 217586 = RTM 187586 + SOAT 30000; efectivo 100000 ≈ 45.957% del total.
+    pct_efectivo = Decimal("100000") / Decimal("217586")
+    rtm = Decimal("187586")
+    soat = Decimal("30000")
+    caja.movimientos = [
+        _ingreso(rtm * pct_efectivo, metodo="efectivo", tipo=TipoMovimiento.RTM),
+        _ingreso(soat * pct_efectivo, metodo="efectivo", tipo=TipoMovimiento.COMISION_SOAT),
+        _ingreso(rtm * (1 - pct_efectivo), ingresa_efectivo=False, metodo="transferencia", tipo=TipoMovimiento.RTM),
+        _ingreso(
+            soat * (1 - pct_efectivo),
+            ingresa_efectivo=False,
+            metodo="transferencia",
+            tipo=TipoMovimiento.COMISION_SOAT,
+        ),
+    ]
+    # La parte efectivo (RTM+SOAT) debe coincidir con el desglose de efectivo.
+    assert caja.total_ingresos_efectivo == Decimal("100000")
+    assert caja.saldo_esperado == Decimal("150000")
+
+
+def test_mixto_sin_efectivo_no_aumenta_arqueo():
+    caja = Caja(monto_inicial=Decimal("50000"))
+    caja.movimientos = [
+        _ingreso("100000", ingresa_efectivo=False, metodo="transferencia"),
+        _ingreso("117586", ingresa_efectivo=False, metodo="tarjeta_debito"),
+    ]
+    assert caja.total_ingresos_efectivo == Decimal("0")
+    assert caja.saldo_esperado == Decimal("50000")
+
+
 def test_saldo_esperado_ingresos_efectivo_y_egreso():
     caja = Caja(monto_inicial=Decimal("100000"))
     caja.movimientos = [

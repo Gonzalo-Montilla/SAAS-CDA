@@ -3676,7 +3676,8 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
               👉 Cuenta los billetes y monedas. Saldo esperado: <span className="text-xl">${formatCurrency(resumen.saldo_esperado)}</span>
             </p>
             <p className="text-xs text-yellow-700 mt-1">
-              (Monto inicial: ${formatCurrency(resumen.monto_inicial)} + Efectivo cobrado: ${formatCurrency(resumen.efectivo)}
+              (Monto inicial: ${formatCurrency(resumen.monto_inicial)} + Efectivo cobrado:{' '}
+              ${formatCurrency(resumen.total_ingresos_efectivo ?? resumen.efectivo)}
               {resumen.total_egresos > 0 && ` - Egresos: $${formatCurrency(resumen.total_egresos)}`})
             </p>
           </div>
@@ -5067,17 +5068,62 @@ function ModalCorregirFacturaEmitida({ vehiculo, onClose }: { vehiculo: Vehiculo
   );
 }
 
-// Modal para cambiar método de pago
+// Modal para cambiar método de pago (incluye corrección a/desde mixto; no altera Factus)
 function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onClose: () => void }) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const formRef = useRef<HTMLFormElement>(null);
   const motivoInputRef = useRef<HTMLTextAreaElement>(null);
-  const [nuevoMetodo, setNuevoMetodo] = useState(vehiculo.metodo_pago || 'efectivo');
+  const totalCobrado = Number(vehiculo.total_cobrado || 0);
+  const metodoActual = (vehiculo.metodo_pago || 'efectivo').toLowerCase();
+
+  const emptyDesglose = () => ({
+    efectivo: 0,
+    tarjeta_debito: 0,
+    tarjeta_credito: 0,
+    transferencia: 0,
+    credismart: 0,
+    sistecredito: 0,
+  });
+
+  const buildDesgloseInicial = (metodo: string) => {
+    const base = emptyDesglose();
+    if (metodo && metodo !== 'mixto' && metodo in base) {
+      return { ...base, [metodo]: totalCobrado };
+    }
+    return base;
+  };
+
+  const [nuevoMetodo, setNuevoMetodo] = useState(metodoActual);
   const [motivo, setMotivo] = useState('');
+  const [desgloseMixto, setDesgloseMixto] = useState<Record<string, number>>(() =>
+    buildDesgloseInicial(metodoActual === 'mixto' ? '' : metodoActual)
+  );
+
+  const sumaMixto = Object.values(desgloseMixto).reduce((a, b) => a + (Number(b) || 0), 0);
+  const desgloseMixtoValido =
+    nuevoMetodo === 'mixto'
+      ? Math.abs(sumaMixto - totalCobrado) < 1 &&
+        Object.values(desgloseMixto).filter((v) => Number(v) > 0).length >= 2
+      : true;
+
+  const seleccionarMetodo = (metodoId: string) => {
+    setNuevoMetodo(metodoId);
+    if (metodoId === 'mixto') {
+      setDesgloseMixto(buildDesgloseInicial(metodoActual === 'mixto' ? '' : metodoActual));
+    }
+  };
 
   const cambiarMetodoMutation = useMutation({
-    mutationFn: () => vehiculosApi.cambiarMetodoPago(vehiculo.id, nuevoMetodo, motivo),
+    mutationFn: () => {
+      const desgloseParaEnviar =
+        nuevoMetodo === 'mixto'
+          ? Object.fromEntries(
+              Object.entries(desgloseMixto).filter(([, valor]) => Number(valor) > 0)
+            )
+          : undefined;
+      return vehiculosApi.cambiarMetodoPago(vehiculo.id, nuevoMetodo, motivo, desgloseParaEnviar);
+    },
     onSuccess: (data) => {
       showToast(
         'success',
@@ -5085,13 +5131,15 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
         `Anterior: ${data.metodo_anterior} → Nuevo: ${data.metodo_nuevo}`,
       );
 
-      // Defer query invalidations
       setTimeout(() => {
         queryClient.invalidateQueries({ queryKey: ['vehiculos-cobrados-hoy'] });
         queryClient.invalidateQueries({ queryKey: ['vehiculos-cobrados-recientes', 30] });
         queryClient.invalidateQueries({ queryKey: ['caja-resumen-tiempo-real'] });
+        queryClient.invalidateQueries({ queryKey: ['caja-resumen'] });
+        queryClient.invalidateQueries({ queryKey: ['movimientos-caja'] });
+        queryClient.invalidateQueries({ queryKey: ['vehiculos-por-metodo'] });
       }, 300);
-      
+
       onClose();
     },
     onError: (error: any) => {
@@ -5105,8 +5153,16 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (nuevoMetodo === vehiculo.metodo_pago) {
+    if (nuevoMetodo === metodoActual && nuevoMetodo !== 'mixto') {
       showToast('warning', 'Sin cambios', 'El método seleccionado es el mismo que el actual.');
+      return;
+    }
+    if (nuevoMetodo === 'mixto' && !desgloseMixtoValido) {
+      showToast(
+        'warning',
+        'Desglose incompleto',
+        'En pago mixto usa al menos 2 métodos y la suma debe coincidir con el total cobrado.',
+      );
       return;
     }
     cambiarMetodoMutation.mutate();
@@ -5140,11 +5196,18 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
     { id: 'transferencia', nombre: 'Transferencia', Icono: Smartphone, canal: 'Electrónico', nota: 'No entra a caja' },
     { id: 'credismart', nombre: 'CrediSmart', Icono: Building2, canal: 'Crédito CDA', nota: 'Cartera del CDA' },
     { id: 'sistecredito', nombre: 'SisteCredito', Icono: Landmark, canal: 'Crédito CDA', nota: 'Cartera del CDA' },
+    { id: 'mixto', nombre: 'Pago Mixto', Icono: CreditCard, canal: 'Combinado', nota: 'Múltiples métodos' },
   ];
+
+  const canalSeleccionado = metodosPago.find((m) => m.id === nuevoMetodo)?.canal;
+  const puedeConfirmar =
+    motivo.length >= 10 &&
+    desgloseMixtoValido &&
+    (nuevoMetodo !== metodoActual || nuevoMetodo === 'mixto');
 
   return (
     <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="modal-panel max-w-4xl w-full">
+      <div className="modal-panel max-w-4xl w-full max-h-[92vh] overflow-y-auto">
         <div className="p-6">
           <div className="modal-header-sticky -mx-6 px-6 pt-1 pb-4 flex justify-between items-start mb-6 border-b border-slate-200">
             <div>
@@ -5163,28 +5226,33 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
             </button>
           </div>
 
-          <div className="bg-yellow-50 border-2 border-yellow-200 rounded-lg p-4 mb-6">
+          <div className="bg-yellow-50 border-2 border-yellow-200 rounded-lg p-4 mb-4">
             <p className="text-sm text-yellow-800 font-semibold">
-              📝 Método actual: <span className="uppercase">{vehiculo.metodo_pago?.replace('_', ' ')}</span>
+              Método actual: <span className="uppercase">{metodoActual.replace('_', ' ')}</span>
+              {' · '}Total cobrado: ${formatCurrency(totalCobrado)}
+            </p>
+            <p className="text-xs text-yellow-700 mt-1">
+              Ajusta solo caja/arqueo/reportes. La factura electrónica Factus ya emitida no se modifica.
             </p>
           </div>
 
           <form ref={formRef} onSubmit={handleSubmit}>
             <div className="space-y-6">
-              {/* Nuevo Método de Pago */}
               <div>
                 <label className="block text-lg font-bold text-slate-900 mb-3">
                   Nuevo Método de Pago <span className="text-red-600">*</span>
                 </label>
-                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3">
+                <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                   {metodosPago.map((metodo) => (
                     <button
                       key={metodo.id}
                       type="button"
-                      onClick={() => setNuevoMetodo(metodo.id)}
+                      onClick={() => seleccionarMetodo(metodo.id)}
                       className={`p-4 rounded-lg border-2 font-semibold transition-all ${
                         nuevoMetodo === metodo.id
-                          ? 'border-blue-600 bg-blue-50 text-blue-900 scale-105'
+                          ? metodo.id === 'mixto'
+                            ? 'border-teal-600 bg-teal-50 text-teal-900 scale-105'
+                            : 'border-blue-600 bg-blue-50 text-blue-900 scale-105'
                           : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400'
                       }`}
                     >
@@ -5198,7 +5266,9 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
                             ? 'bg-emerald-100 text-emerald-800'
                             : metodo.canal === 'Electrónico'
                               ? 'bg-blue-100 text-blue-800'
-                              : 'bg-amber-100 text-amber-800'
+                              : metodo.canal === 'Combinado'
+                                ? 'bg-teal-100 text-teal-800'
+                                : 'bg-amber-100 text-amber-800'
                         }`}
                       >
                         {metodo.canal}
@@ -5208,15 +5278,95 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
                   ))}
                 </div>
                 <div className="mt-3 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-                  {metodosPago.find((m) => m.id === nuevoMetodo)?.canal === 'Caja'
+                  {canalSeleccionado === 'Caja'
                     ? 'El ajuste impacta arqueo de caja.'
-                    : metodosPago.find((m) => m.id === nuevoMetodo)?.canal === 'Electrónico'
+                    : canalSeleccionado === 'Electrónico'
                       ? 'El ajuste impacta conciliación bancaria.'
-                      : 'El ajuste impacta cartera del CDA.'}
+                      : canalSeleccionado === 'Combinado'
+                        ? 'Solo la parte en efectivo impacta el arqueo; el resto va por su canal.'
+                        : 'El ajuste impacta cartera del CDA.'}
                 </div>
               </div>
 
-              {/* Motivo */}
+              {nuevoMetodo === 'mixto' && (
+                <div className="p-4 bg-teal-50 border-2 border-teal-200 rounded-lg">
+                  <h4 className="font-bold text-teal-900 mb-3 flex items-center gap-2">
+                    <CreditCard className="w-5 h-5" />
+                    Desglose de Pago Mixto
+                  </h4>
+                  <p className="text-sm text-teal-700 mb-4">
+                    Ingresa el monto para cada método. La suma debe ser{' '}
+                    <strong>${formatCurrency(totalCobrado)}</strong> (mínimo 2 métodos).
+                  </p>
+
+                  <div className="grid grid-cols-2 gap-3 mb-3">
+                    {(
+                      [
+                        ['efectivo', 'Efectivo', Banknote],
+                        ['tarjeta_debito', 'T. Débito', CreditCard],
+                        ['tarjeta_credito', 'T. Crédito', CreditCard],
+                        ['transferencia', 'Transferencia', Smartphone],
+                        ['credismart', 'CrediSmart', Building2],
+                        ['sistecredito', 'SisteCredito', Landmark],
+                      ] as const
+                    ).map(([key, label, Icono]) => (
+                      <div key={key}>
+                        <label className="block text-sm font-semibold text-slate-700 mb-1">
+                          <Icono className="w-4 h-4 inline mr-1" />
+                          {label}
+                        </label>
+                        <div className="relative">
+                          <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500">$</span>
+                          <input
+                            type="number"
+                            value={desgloseMixto[key] || ''}
+                            onChange={(e) =>
+                              setDesgloseMixto({
+                                ...desgloseMixto,
+                                [key]: parseFloat(e.target.value) || 0,
+                              })
+                            }
+                            className="w-full pl-8 pr-3 py-2 border border-slate-300 rounded-lg focus:ring-2 focus:ring-teal-500 focus:border-teal-500"
+                            placeholder="0"
+                            min="0"
+                          />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+
+                  <div
+                    className={`p-3 rounded-lg border-2 ${
+                      desgloseMixtoValido
+                        ? 'bg-green-50 border-green-300'
+                        : 'bg-yellow-50 border-yellow-300'
+                    }`}
+                  >
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="font-semibold">Total ingresado:</span>
+                      <span className="text-lg font-bold">${formatCurrency(sumaMixto)}</span>
+                    </div>
+                    {!desgloseMixtoValido && (
+                      <div className="mt-2 text-sm">
+                        <span className="font-semibold">Falta: </span>
+                        <span className="text-red-600 font-bold">
+                          ${formatCurrency(Math.max(0, totalCobrado - sumaMixto))}
+                        </span>
+                      </div>
+                    )}
+                    {desgloseMixtoValido && (
+                      <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
+                        <CheckCircle2 className="w-4 h-4" />
+                        Monto correcto
+                      </p>
+                    )}
+                  </div>
+                  <div className="mt-3 p-2 bg-white border border-teal-200 rounded text-xs text-teal-800">
+                    Solo el <strong>efectivo</strong> se contará en el arqueo de caja.
+                  </div>
+                </div>
+              )}
+
               <div>
                 <label className="block text-lg font-bold text-slate-900 mb-3">
                   Motivo del Cambio <span className="text-red-600">*</span>
@@ -5227,17 +5377,14 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
                   ref={motivoInputRef}
                   className="input-pos"
                   rows={3}
-                  placeholder="Ej: Cliente cambió de opinión, error al registrar, etc."
+                  placeholder="Ej: Cliente pagó parte en transferencia, error al registrar, etc."
                   minLength={10}
                   required
                 />
-                <p className="text-xs text-slate-500 mt-1">
-                  Mínimo 10 caracteres
-                </p>
+                <p className="text-xs text-slate-500 mt-1">Mínimo 10 caracteres</p>
               </div>
             </div>
 
-            {/* Botones */}
             <div className="modal-footer-sticky -mx-6 px-6 flex gap-4">
               <button
                 type="button"
@@ -5249,7 +5396,7 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
               </button>
               <button
                 type="submit"
-                disabled={cambiarMetodoMutation.isLoading || motivo.length < 10}
+                disabled={cambiarMetodoMutation.isLoading || !puedeConfirmar}
                 className="flex-1 btn-pos btn-primary disabled:opacity-50 inline-flex items-center justify-center gap-2"
               >
                 {cambiarMetodoMutation.isLoading ? (

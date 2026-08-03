@@ -270,14 +270,21 @@ export const vehiculosApi = {
   },
 
   // Cambiar método de pago de un vehículo ya cobrado
-  cambiarMetodoPago: async (vehiculoId: string, nuevoMetodo: string, motivo: string): Promise<{
+  cambiarMetodoPago: async (
+    vehiculoId: string,
+    nuevoMetodo: string,
+    motivo: string,
+    desgloseMixto?: Record<string, number>
+  ): Promise<{
     success: boolean;
     message: string;
     metodo_anterior: string;
     metodo_nuevo: string;
   }> => {
-    const response = await apiClient.put(`/vehiculos/${vehiculoId}/cambiar-metodo-pago`, null, {
-      params: { nuevo_metodo: nuevoMetodo, motivo }
+    const response = await apiClient.put(`/vehiculos/${vehiculoId}/cambiar-metodo-pago`, {
+      nuevo_metodo: nuevoMetodo,
+      motivo,
+      desglose_mixto: nuevoMetodo === 'mixto' ? desgloseMixto : undefined,
     });
     return response.data;
   },

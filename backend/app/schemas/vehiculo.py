@@ -217,6 +217,16 @@ class VehiculoCobro(BaseModel):
     desglose_mixto: Optional[dict] = Field(None, description="Desglose de montos por método cuando metodo_pago='mixto'")
 
 
+class CambiarMetodoPagoRequest(BaseModel):
+    """Cambio de método de pago en cobro ya registrado (mismo día, caja abierta)."""
+    nuevo_metodo: str
+    motivo: str = Field(..., min_length=10)
+    desglose_mixto: Optional[dict] = Field(
+        None,
+        description="Obligatorio si nuevo_metodo='mixto'. No altera factura Factus ya emitida.",
+    )
+
+
 class VehiculoResponse(BaseModel):
     """Respuesta de vehículo"""
     id: UUID
