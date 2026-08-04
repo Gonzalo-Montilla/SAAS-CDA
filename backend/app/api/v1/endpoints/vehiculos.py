@@ -2822,8 +2822,11 @@ async def enviar_recibo_pago_email(
         .order_by(FacturaElectronica.created_at.desc())
         .first()
     )
+    # CDA sin Factus: fe queda None; igual se envía el recibo PDF manual de caja.
     factura_url = (fe.public_url or "").strip() if fe else None
-    factura_numero = (fe.numero_documento or vehiculo.numero_factura_dian or "").strip() or None
+    numero_fe = (fe.numero_documento or "").strip() if fe else ""
+    numero_vehiculo = (vehiculo.numero_factura_dian or "").strip()
+    factura_numero = (numero_fe or numero_vehiculo) or None
     factura_pdf: bytes | None = None
     if factura_url:
         factura_pdf = _try_download_factura_pdf_desde_url_publica(factura_url)
