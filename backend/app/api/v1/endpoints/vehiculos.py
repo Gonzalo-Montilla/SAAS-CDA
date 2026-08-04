@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFi
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, load_only
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func, or_, text
 from sqlalchemy.exc import OperationalError
 from datetime import datetime, date, time as dt_time, timezone, timedelta
 from zoneinfo import ZoneInfo
@@ -416,6 +416,47 @@ def _build_vehiculo_pendiente_caja_response(
         kilometraje=km,
         fecha_registro=vehiculo.fecha_registro,
         antiguedad=vehiculo.antiguedad,
+    )
+
+
+def _build_vehiculo_pendiente_caja_from_row(row: Any) -> VehiculoPendienteCajaResponse:
+    """Arma la respuesta liviana desde una fila SQL (sin ORM / sin JSON de firmas)."""
+    km_raw = getattr(row, "kilometraje", None)
+    km = str(km_raw).strip() if km_raw is not None else ""
+    km = km or None
+    ano = int(row.ano_modelo) if row.ano_modelo is not None else 0
+    estado = row.estado.value if hasattr(row.estado, "value") else str(row.estado or "")
+    return VehiculoPendienteCajaResponse(
+        id=row.id,
+        placa=row.placa,
+        tipo_vehiculo=row.tipo_vehiculo,
+        marca=row.marca,
+        modelo=row.modelo,
+        ano_modelo=ano,
+        cliente_nombre=row.cliente_nombre,
+        cliente_tipo_documento=(row.cliente_tipo_documento or "CC"),
+        cliente_documento=row.cliente_documento,
+        cliente_telefono=row.cliente_telefono,
+        cliente_email=row.cliente_email,
+        cliente_direccion=row.cliente_direccion,
+        cliente_factus_municipality_id=row.cliente_factus_municipality_id,
+        valor_rtm=row.valor_rtm,
+        tiene_soat=bool(row.tiene_soat),
+        comision_soat=row.comision_soat or 0,
+        total_cobrado=row.total_cobrado,
+        metodo_pago=str(row.metodo_pago or "") or None,
+        numero_factura_dian=row.numero_factura_dian,
+        registrado_runt=bool(row.registrado_runt),
+        registrado_sicov=bool(row.registrado_sicov),
+        registrado_indra=bool(row.registrado_indra),
+        fecha_pago=row.fecha_pago,
+        estado=estado,
+        reinspeccion_intento=row.reinspeccion_intento,
+        reinspeccion_exenta=bool(row.reinspeccion_exenta) if row.reinspeccion_exenta is not None else None,
+        observaciones=row.observaciones,
+        kilometraje=km,
+        fecha_registro=row.fecha_registro,
+        antiguedad=(datetime.now().year - ano) if ano else None,
     )
 
 
@@ -2631,57 +2672,53 @@ def listar_pendientes(
     """
     Listar vehículos pendientes de pago (para Caja).
 
-    Respuesta liviana: no lee ni serializa recepcion_formato_extra_json
-    (firmas/PDF extras). El kilometraje sale de la columna propia `kilometraje`.
+    SQL explícito: NUNCA selecciona recepcion_formato_extra_json (firmas TOAST).
+    El kilometraje sale solo de la columna liviana `kilometraje`.
     """
-    rows = (
-        _filtro_vehiculo_sede(
-            db.query(VehiculoProceso),
-            current_user.tenant_id,
-            active_sucursal_id,
-        )
-        .options(
-            load_only(
-                VehiculoProceso.id,
-                VehiculoProceso.placa,
-                VehiculoProceso.tipo_vehiculo,
-                VehiculoProceso.marca,
-                VehiculoProceso.modelo,
-                VehiculoProceso.ano_modelo,
-                VehiculoProceso.cliente_nombre,
-                VehiculoProceso.cliente_tipo_documento,
-                VehiculoProceso.cliente_documento,
-                VehiculoProceso.cliente_telefono,
-                VehiculoProceso.cliente_email,
-                VehiculoProceso.cliente_direccion,
-                VehiculoProceso.cliente_factus_municipality_id,
-                VehiculoProceso.valor_rtm,
-                VehiculoProceso.tiene_soat,
-                VehiculoProceso.comision_soat,
-                VehiculoProceso.total_cobrado,
-                VehiculoProceso.metodo_pago,
-                VehiculoProceso.numero_factura_dian,
-                VehiculoProceso.registrado_runt,
-                VehiculoProceso.registrado_sicov,
-                VehiculoProceso.registrado_indra,
-                VehiculoProceso.fecha_pago,
-                VehiculoProceso.estado,
-                VehiculoProceso.reinspeccion_intento,
-                VehiculoProceso.reinspeccion_exenta,
-                VehiculoProceso.observaciones,
-                VehiculoProceso.kilometraje,
-                VehiculoProceso.fecha_registro,
-            )
-        )
-        .filter(VehiculoProceso.estado == EstadoVehiculo.REGISTRADO)
-        .order_by(VehiculoProceso.fecha_registro.asc())
-        .all()
-    )
+    rows = db.execute(
+        text(
+            """
+            SELECT
+              id,
+              placa,
+              tipo_vehiculo,
+              marca,
+              modelo,
+              ano_modelo,
+              cliente_nombre,
+              cliente_tipo_documento,
+              cliente_documento,
+              cliente_telefono,
+              cliente_email,
+              cliente_direccion,
+              cliente_factus_municipality_id,
+              valor_rtm,
+              tiene_soat,
+              comision_soat,
+              total_cobrado,
+              metodo_pago,
+              numero_factura_dian,
+              registrado_runt,
+              registrado_sicov,
+              registrado_indra,
+              fecha_pago,
+              estado::text AS estado,
+              reinspeccion_intento,
+              reinspeccion_exenta,
+              observaciones,
+              kilometraje,
+              fecha_registro
+            FROM vehiculos_proceso
+            WHERE tenant_id = :tenant_id
+              AND sucursal_id = :sucursal_id
+              AND estado::text IN ('registrado', 'REGISTRADO')
+            ORDER BY fecha_registro ASC
+            """
+        ),
+        {"tenant_id": str(current_user.tenant_id), "sucursal_id": str(active_sucursal_id)},
+    ).mappings().all()
 
-    vehiculos = [
-        _build_vehiculo_pendiente_caja_response(vehiculo, kilometraje=vehiculo.kilometraje)
-        for vehiculo in rows
-    ]
+    vehiculos = [_build_vehiculo_pendiente_caja_from_row(row) for row in rows]
     return VehiculosPendientes(vehiculos=vehiculos, total=len(vehiculos))
 
 

@@ -311,25 +311,9 @@ def ensure_tenant_domain_schema(db):
     )
     db.execute(text("UPDATE vehiculos_proceso SET reinspeccion_intento = COALESCE(reinspeccion_intento, 1)"))
     db.execute(text("UPDATE vehiculos_proceso SET reinspeccion_exenta = COALESCE(reinspeccion_exenta, FALSE)"))
-    # Backfill km solo en cola de Caja. Si no hay km en el JSON, deja '' (no NULL)
-    # para no re-descomprimir el JSONB TOASTeado en cada arranque del backend.
-    db.execute(
-        text(
-            """
-            UPDATE vehiculos_proceso
-            SET kilometraje = LEFT(
-              COALESCE(
-                NULLIF(BTRIM(recepcion_formato_extra_json #>> '{datos_tecnicos,kilometraje}'), ''),
-                ''
-              ),
-              40
-            )
-            WHERE kilometraje IS NULL
-              AND estado::text IN ('registrado', 'REGISTRADO')
-              AND recepcion_formato_extra_json IS NOT NULL
-            """
-        )
-    )
+    # NO hacer backfill de kilometraje desde recepcion_formato_extra_json aquí:
+    # ese JSONB TOASTeado (firmas) puede colgar el arranque del backend en producción.
+    # El km se llena al registrar/editar en recepción; pendientes lo lee de la columna.
     # Cola de Caja: pendientes por sede (estado REGISTRADO) sin escanear todo el historial.
     db.execute(
         text(
