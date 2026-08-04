@@ -185,7 +185,6 @@ export default function Calidad() {
   const [satSearchDebounced, setSatSearchDebounced] = useState('');
   const [satPagina, setSatPagina] = useState(1);
   const [satDetalle, setSatDetalle] = useState<QualitySatisfactionItem | null>(null);
-  const [selectedInviteId, setSelectedInviteId] = useState<string | null>(null);
   const [manualInviteId, setManualInviteId] = useState<string | null>(null);
   const [confirmEntregaInvite, setConfirmEntregaInvite] = useState<QualityInviteItem | null>(null);
   const [markingInviteId, setMarkingInviteId] = useState<string | null>(null);
@@ -375,12 +374,6 @@ export default function Calidad() {
       }
       showToast('error', 'Error', message);
     },
-  });
-
-  const detailQuery = useQuery({
-    queryKey: ['quality-invite-detail', selectedInviteId],
-    queryFn: () => qualityApi.getInviteDetail(selectedInviteId || ''),
-    enabled: !!selectedInviteId,
   });
 
   const manualDetailQuery = useQuery({
@@ -849,7 +842,6 @@ export default function Calidad() {
                   <th>Fecha</th>
                   <th>Cliente</th>
                   <th>Sede</th>
-                  <th>Celular</th>
                   <th>Placa</th>
                   <th>Tipo</th>
                   <th>Estado</th>
@@ -859,12 +851,12 @@ export default function Calidad() {
               <tbody>
                 {invitesQuery.isLoading && (
                   <tr>
-                    <td colSpan={8} className="text-sm text-slate-500">Cargando encuestas...</td>
+                    <td colSpan={7} className="text-sm text-slate-500">Cargando encuestas...</td>
                   </tr>
                 )}
                 {!invitesQuery.isLoading && rows.length === 0 && (
                   <tr>
-                    <td colSpan={8} className="text-sm text-slate-500">No hay resultados para los filtros actuales.</td>
+                    <td colSpan={7} className="text-sm text-slate-500">No hay resultados para los filtros actuales.</td>
                   </tr>
                 )}
                 {rows.map((row) => (
@@ -874,7 +866,6 @@ export default function Calidad() {
                     <td className="text-slate-700 max-w-[160px] truncate" title={row.sucursal_nombre || ''}>
                       {row.sucursal_nombre || '—'}
                     </td>
-                    <td>{row.cliente_celular || '-'}</td>
                     <td className="font-semibold text-slate-900">{row.placa}</td>
                     <td className="capitalize">{row.tipo_vehiculo.replaceAll('_', ' ')}</td>
                     <td>
@@ -897,14 +888,6 @@ export default function Calidad() {
                             En mostrador
                           </button>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => setSelectedInviteId(row.id)}
-                          className="btn-chip px-3 py-1 text-xs inline-flex items-center gap-1"
-                        >
-                          <Eye className="w-3.5 h-3.5" />
-                          Ver detalle
-                        </button>
                         {!(row.revision_cierre_resultado || row.certificado_entregado_at) ? (
                           <button
                             type="button"
@@ -1186,6 +1169,7 @@ export default function Calidad() {
                         <tr>
                           <th>Fecha</th>
                           <th>Cliente</th>
+                          <th>Celular</th>
                           <th>Sede</th>
                           <th>Placa</th>
                           <th>Canal</th>
@@ -1199,7 +1183,7 @@ export default function Calidad() {
                       <tbody>
                         {satItems.length === 0 && (
                           <tr>
-                            <td colSpan={10} className="text-sm text-slate-500">
+                            <td colSpan={11} className="text-sm text-slate-500">
                               No hay respuestas para los filtros actuales.
                             </td>
                           </tr>
@@ -1223,6 +1207,7 @@ export default function Calidad() {
                                 </span>
                               )}
                             </td>
+                            <td>{row.cliente_celular || '—'}</td>
                             <td className="max-w-[140px] truncate" title={row.sucursal_nombre || ''}>
                               {row.sucursal_nombre || '—'}
                             </td>
@@ -1298,13 +1283,13 @@ export default function Calidad() {
             {satDetalle && (
               <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
                 <div
-                  className={`w-full max-w-2xl modal-panel rounded-2xl border border-slate-200 border-l-8 ${scoreBorderClass(satDetalle.experiencia_global)} bg-white shadow-2xl`}
+                  className={`w-full max-w-3xl modal-panel rounded-2xl border border-slate-200 border-l-8 ${scoreBorderClass(satDetalle.experiencia_global)} bg-gradient-to-b from-white to-slate-50 shadow-2xl`}
                 >
-                  <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+                  <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 sticky top-0 bg-white/95 backdrop-blur-sm">
                     <div>
                       <p className="text-base font-semibold text-slate-900">Detalle de satisfacción</p>
-                      <p className="text-xs text-slate-500">
-                        {satDetalle.placa} · {satDetalle.cliente_nombre}
+                      <p className="text-xs text-slate-500 mt-0.5">
+                        Vista completa para seguimiento y contacto
                       </p>
                     </div>
                     <button
@@ -1322,41 +1307,71 @@ export default function Calidad() {
                         Cliente en riesgo: experiencia o recomendación ≤ 2.
                       </div>
                     )}
-                    <div className="space-y-2">
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                        <p className="text-[11px] uppercase tracking-wide text-slate-500">Cliente</p>
+                        <p className="font-semibold text-slate-900">{satDetalle.cliente_nombre}</p>
+                        <p className="text-xs text-slate-600 mt-1">
+                          Celular:{' '}
+                          <span className="font-medium">{satDetalle.cliente_celular || '—'}</span>
+                        </p>
+                        <p className="text-xs text-slate-600 mt-0.5">
+                          Email: <span className="font-medium">{satDetalle.cliente_email || '—'}</span>
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                        <p className="text-[11px] uppercase tracking-wide text-slate-500">Sede del servicio</p>
+                        <p className="font-semibold text-slate-900">{satDetalle.sucursal_nombre || '—'}</p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                        <p className="text-[11px] uppercase tracking-wide text-slate-500">Servicio</p>
+                        <p className="font-semibold text-slate-900">
+                          {satDetalle.placa} - {satDetalle.tipo_vehiculo.replaceAll('_', ' ')}
+                        </p>
+                        <p className="text-xs text-slate-600 mt-1">
+                          Canal:{' '}
+                          <span className="font-medium">
+                            {satDetalle.canal_respuesta === 'mostrador' ? 'Mostrador' : 'Correo'}
+                          </span>
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm space-y-2 max-h-[40vh] overflow-y-auto">
+                      <p className="text-sm font-semibold text-slate-800 mb-2">Calificaciones</p>
                       {QUALITY_SURVEY_QUESTIONS.map((q) => {
                         const value = satDetalle[q.key as keyof QualitySatisfactionItem];
                         const n = typeof value === 'number' ? value : null;
                         return (
-                          <p key={q.key} className="text-sm text-slate-700 flex justify-between gap-3">
-                            <span className="text-slate-600">{q.label}</span>
+                          <p key={q.key} className="text-sm text-slate-700">
+                            <span className="text-slate-600">{q.label}</span>{' '}
                             <span className={`font-semibold ${scoreClass(n)}`}>{stars(n)}</span>
                           </p>
                         );
                       })}
                     </div>
-                    <div className="rounded-xl border border-slate-200 p-3">
-                      <p className="text-xs uppercase tracking-wide text-slate-500 mb-1">Comentario</p>
-                      <p className="text-sm text-slate-800 whitespace-pre-wrap">
+
+                    <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                      <p className="text-sm font-semibold text-slate-800 mb-2">Comentario del cliente</p>
+                      <p className="text-sm text-slate-700 whitespace-pre-wrap">
                         {satDetalle.comentario || 'Sin comentario.'}
                       </p>
                     </div>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
-                      <p>
-                        <span className="text-slate-500">Canal: </span>
-                        {satDetalle.canal_respuesta === 'mostrador' ? 'Mostrador' : 'Correo'}
-                      </p>
-                      <p>
-                        <span className="text-slate-500">Sede: </span>
-                        {satDetalle.sucursal_nombre || '—'}
-                      </p>
-                      <p>
-                        <span className="text-slate-500">Recepcionista: </span>
-                        {satDetalle.recepcionista_nombre || '—'}
-                      </p>
-                      <p>
-                        <span className="text-slate-500">Cajero: </span>
-                        {satDetalle.cajero_nombre || '—'}
-                      </p>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                        <p className="text-[11px] uppercase tracking-wide text-slate-500">Recepcionista</p>
+                        <p className="text-sm font-medium text-slate-800">
+                          {satDetalle.recepcionista_nombre || '—'}
+                        </p>
+                      </div>
+                      <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
+                        <p className="text-[11px] uppercase tracking-wide text-slate-500">Cajero</p>
+                        <p className="text-sm font-medium text-slate-800">
+                          {satDetalle.cajero_nombre || '—'}
+                        </p>
+                      </div>
                     </div>
                   </div>
                 </div>
@@ -2023,92 +2038,6 @@ export default function Calidad() {
                 <RotateCcw className="w-4 h-4" />
                 {correctInspectionResultMutation.isLoading ? 'Aplicando...' : 'Confirmar corrección'}
               </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {selectedInviteId && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
-          <div className={`w-full max-w-3xl modal-panel rounded-2xl border border-slate-200 border-l-8 ${scoreBorderClass(detailQuery.data?.experiencia_global)} bg-gradient-to-b from-white to-slate-50 shadow-2xl`}>
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200 sticky top-0 bg-white/95 backdrop-blur-sm">
-              <div>
-                <p className="text-base font-semibold text-slate-900">Detalle de encuesta</p>
-                <p className="text-xs text-slate-500 mt-0.5">Vista completa de experiencia del cliente</p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setSelectedInviteId(null)}
-                className="modal-close-btn inline-flex items-center justify-center"
-              >
-                <X className="w-5 h-5 text-slate-600" />
-              </button>
-            </div>
-
-            <div className="p-6 space-y-4">
-              {detailQuery.isLoading && <p className="text-sm text-slate-500">Cargando detalle...</p>}
-              {detailQuery.isError && (
-                <p className="text-sm text-red-600">No fue posible cargar el detalle de esta encuesta.</p>
-              )}
-
-              {detailQuery.data && (
-                <>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-                      <p className="text-[11px] uppercase tracking-wide text-slate-500">Cliente</p>
-                      <p className="font-semibold text-slate-900">{detailQuery.data.cliente_nombre}</p>
-                      <p className="text-xs text-slate-600 mt-1">
-                        Celular: <span className="font-medium">{detailQuery.data.cliente_celular || '-'}</span>
-                      </p>
-                    </div>
-                    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-                      <p className="text-[11px] uppercase tracking-wide text-slate-500">Sede del servicio</p>
-                      <p className="font-semibold text-slate-900">{detailQuery.data.sucursal_nombre || '—'}</p>
-                    </div>
-                    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-                      <p className="text-[11px] uppercase tracking-wide text-slate-500">Servicio</p>
-                      <p className="font-semibold text-slate-900">{detailQuery.data.placa} - {detailQuery.data.tipo_vehiculo}</p>
-                      <p className="text-xs text-slate-600 mt-1">
-                        Estado:{' '}
-                        <span className={`px-2 py-0.5 rounded-full text-[11px] font-semibold ${statusClass(detailQuery.data.status)}`}>
-                          {statusLabel(detailQuery.data.status)}
-                        </span>
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm space-y-2 max-h-[50vh] overflow-y-auto">
-                    <p className="text-sm font-semibold text-slate-800 mb-2">Calificaciones</p>
-                    {QUALITY_SURVEY_QUESTIONS.map((q) => {
-                      const value = detailQuery.data[q.key];
-                      return (
-                        <p key={q.key} className="text-sm text-slate-700">
-                          <span className="text-slate-600">{q.label}</span>{' '}
-                          <span className={`font-semibold ${scoreClass(value)}`}>{stars(value)}</span>
-                        </p>
-                      );
-                    })}
-                  </div>
-
-                  <div className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                    <p className="text-sm font-semibold text-slate-800 mb-2">Comentario del cliente</p>
-                    <p className="text-sm text-slate-700 whitespace-pre-wrap">
-                      {detailQuery.data.comentario || 'Sin comentario.'}
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-                      <p className="text-[11px] uppercase tracking-wide text-slate-500">Recepcionista</p>
-                      <p className="text-sm font-medium text-slate-800">{detailQuery.data.recepcionista_nombre || '-'}</p>
-                    </div>
-                    <div className="rounded-xl border border-slate-200 bg-white p-3 shadow-sm">
-                      <p className="text-[11px] uppercase tracking-wide text-slate-500">Cajero</p>
-                      <p className="text-sm font-medium text-slate-800">{detailQuery.data.cajero_nombre || '-'}</p>
-                    </div>
-                  </div>
-                </>
-              )}
             </div>
           </div>
         </div>
