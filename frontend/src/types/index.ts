@@ -664,6 +664,60 @@ export interface QualitySummary {
   tasa_respuesta: number;
 }
 
+export interface QualitySatisfactionDimensions {
+  atencion: number;
+  operacion: number;
+  instalaciones: number;
+  lealtad: number;
+}
+
+export interface QualitySatisfactionSummary {
+  total_respondidas: number;
+  en_riesgo: number;
+  en_riesgo_7d: number;
+  pct_insatisfaccion: number;
+  promedio_experiencia_global: number;
+  promedio_compuesto: number;
+  nps_recomendar: number;
+  respondidas_mostrador?: number;
+  respondidas_correo?: number;
+  dimensiones: QualitySatisfactionDimensions;
+  ventana_dias?: number | null;
+}
+
+export interface QualitySatisfactionItem {
+  invite_id: string;
+  response_id: string;
+  cliente_nombre: string;
+  cliente_email?: string | null;
+  cliente_celular?: string | null;
+  sucursal_nombre?: string | null;
+  placa: string;
+  tipo_vehiculo: string;
+  responded_at?: string | null;
+  experiencia_global: number;
+  recomendar_cda: number;
+  promedio_9: number;
+  en_riesgo: boolean;
+  canal_respuesta?: string | null;
+  comentario?: string | null;
+  facilidad_agendar_cita: number;
+  tiempo_espera_revision: number;
+  amabilidad_recepcion_caja: number;
+  limpieza_instalaciones: number;
+  amenidades_cda: number;
+  claridad_resultados_revision: number;
+  confianza_diagnostico_tecnico: number;
+  cajero_nombre?: string | null;
+  recepcionista_nombre?: string | null;
+}
+
+export interface QualitySatisfactionListResponse {
+  summary: QualitySatisfactionSummary;
+  items: QualitySatisfactionItem[];
+  total: number;
+}
+
 export interface QualityTenantLogoSettings {
   logo_calidad_url?: string | null;
   logo_general_url?: string | null;

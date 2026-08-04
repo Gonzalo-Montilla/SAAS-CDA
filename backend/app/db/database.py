@@ -303,6 +303,7 @@ def ensure_tenant_domain_schema(db):
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS reinspeccion_vence_at TIMESTAMP WITHOUT TIME ZONE"))
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS reinspeccion_exenta BOOLEAN"))
     db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS recepcion_formato_extra_json JSONB"))
+    db.execute(text("ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS kilometraje VARCHAR(40)"))
     db.execute(
         text(
             "ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS cliente_tipo_documento VARCHAR(10) NOT NULL DEFAULT 'CC'"
@@ -310,6 +311,25 @@ def ensure_tenant_domain_schema(db):
     )
     db.execute(text("UPDATE vehiculos_proceso SET reinspeccion_intento = COALESCE(reinspeccion_intento, 1)"))
     db.execute(text("UPDATE vehiculos_proceso SET reinspeccion_exenta = COALESCE(reinspeccion_exenta, FALSE)"))
+    # Backfill km solo en cola de Caja. Si no hay km en el JSON, deja '' (no NULL)
+    # para no re-descomprimir el JSONB TOASTeado en cada arranque del backend.
+    db.execute(
+        text(
+            """
+            UPDATE vehiculos_proceso
+            SET kilometraje = LEFT(
+              COALESCE(
+                NULLIF(BTRIM(recepcion_formato_extra_json #>> '{datos_tecnicos,kilometraje}'), ''),
+                ''
+              ),
+              40
+            )
+            WHERE kilometraje IS NULL
+              AND estado::text IN ('registrado', 'REGISTRADO')
+              AND recepcion_formato_extra_json IS NOT NULL
+            """
+        )
+    )
     # Cola de Caja: pendientes por sede (estado REGISTRADO) sin escanear todo el historial.
     db.execute(
         text(
@@ -1534,6 +1554,30 @@ def ensure_quality_survey_responses_schema(db):
         "atencion_general",
     ):
         db.execute(text(f"ALTER TABLE {tbl} DROP COLUMN IF EXISTS {col}"))
+
+    db.execute(
+        text(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS canal_respuesta VARCHAR(20)")
+    )
+    db.execute(
+        text(
+            f"CREATE INDEX IF NOT EXISTS ix_quality_survey_responses_canal_respuesta ON {tbl}(canal_respuesta)"
+        )
+    )
+    # Backfill: si el correo ya se había enviado al responder → correo; si no → mostrador
+    db.execute(
+        text(
+            f"""
+            UPDATE {tbl} AS r
+            SET canal_respuesta = CASE
+              WHEN i.sent_at IS NOT NULL THEN 'correo'
+              ELSE 'mostrador'
+            END
+            FROM quality_survey_invites AS i
+            WHERE r.invite_id = i.id
+              AND (r.canal_respuesta IS NULL OR BTRIM(r.canal_respuesta) = '')
+            """
+        )
+    )
 
 
 def ensure_quality_survey_invites_sucursal_schema(db):

@@ -93,7 +93,9 @@ class VehiculoProceso(Base):
     # Observaciones
     observaciones = Column(Text)
     recepcion_formato_extra_json = Column(JSONB, nullable=True)
-    
+    # Copia liviana del km (fuera del JSONB de firmas) para listados de Caja.
+    kilometraje = Column(String(40), nullable=True)
+
     # Auditoría
     caja_id = Column(UUID(as_uuid=True), ForeignKey("cajas.id"), nullable=True)
     registrado_por = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=False)

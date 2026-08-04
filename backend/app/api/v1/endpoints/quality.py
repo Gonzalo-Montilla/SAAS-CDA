@@ -94,6 +94,60 @@ class QualitySummaryResponse(BaseModel):
     tasa_respuesta: float
 
 
+class QualitySatisfactionDimensionAverages(BaseModel):
+    atencion: float
+    operacion: float
+    instalaciones: float
+    lealtad: float
+
+
+class QualitySatisfactionSummaryResponse(BaseModel):
+    total_respondidas: int
+    en_riesgo: int
+    en_riesgo_7d: int
+    pct_insatisfaccion: float
+    promedio_experiencia_global: float
+    promedio_compuesto: float
+    nps_recomendar: float
+    respondidas_mostrador: int = 0
+    respondidas_correo: int = 0
+    dimensiones: QualitySatisfactionDimensionAverages
+    ventana_dias: int | None = None
+
+
+class QualitySatisfactionItem(BaseModel):
+    invite_id: str
+    response_id: str
+    cliente_nombre: str
+    cliente_email: str | None = None
+    cliente_celular: str | None = None
+    sucursal_nombre: str | None = None
+    placa: str
+    tipo_vehiculo: str
+    responded_at: datetime | None = None
+    experiencia_global: int
+    recomendar_cda: int
+    promedio_9: float
+    en_riesgo: bool
+    canal_respuesta: str | None = None  # mostrador | correo
+    comentario: str | None = None
+    facilidad_agendar_cita: int
+    tiempo_espera_revision: int
+    amabilidad_recepcion_caja: int
+    limpieza_instalaciones: int
+    amenidades_cda: int
+    claridad_resultados_revision: int
+    confianza_diagnostico_tecnico: int
+    cajero_nombre: str | None = None
+    recepcionista_nombre: str | None = None
+
+
+class QualitySatisfactionListResponse(BaseModel):
+    summary: QualitySatisfactionSummaryResponse
+    items: list[QualitySatisfactionItem]
+    total: int
+
+
 class QualityTenantLogoResponse(BaseModel):
     logo_calidad_url: str | None = None
     logo_general_url: str | None = None
@@ -426,7 +480,12 @@ def _persist_quality_survey_response(
     invite: QualitySurveyInvite,
     payload: QualityPublicSurveySubmitRequest,
     now: datetime,
+    *,
+    canal_respuesta: str,
 ) -> None:
+    canal = (canal_respuesta or "").strip().lower()
+    if canal not in {"mostrador", "correo"}:
+        canal = "correo"
     response = QualitySurveyResponse(
         invite_id=invite.id,
         tenant_id=invite.tenant_id,
@@ -439,6 +498,7 @@ def _persist_quality_survey_response(
         confianza_diagnostico_tecnico=payload.confianza_diagnostico_tecnico,
         recomendar_cda=payload.recomendar_cda,
         experiencia_global=payload.experiencia_global,
+        canal_respuesta=canal,
         comentario=(payload.comentario or "").strip() or None,
         created_at=now,
     )
@@ -689,6 +749,218 @@ def get_quality_summary(
     )
 
 
+def _avg_or_zero(values: list[float | int]) -> float:
+    return round(float(mean(values)), 2) if values else 0.0
+
+
+def _response_is_riesgo(resp: QualitySurveyResponse) -> bool:
+    return int(resp.experiencia_global) <= 2 or int(resp.recomendar_cda) <= 2
+
+
+def _response_promedio_9(resp: QualitySurveyResponse) -> float:
+    vals = [
+        resp.facilidad_agendar_cita,
+        resp.tiempo_espera_revision,
+        resp.amabilidad_recepcion_caja,
+        resp.limpieza_instalaciones,
+        resp.amenidades_cda,
+        resp.claridad_resultados_revision,
+        resp.confianza_diagnostico_tecnico,
+        resp.recomendar_cda,
+        resp.experiencia_global,
+    ]
+    return round(float(mean(vals)), 2)
+
+
+def _response_canal(
+    resp: QualitySurveyResponse, invite: QualitySurveyInvite | None
+) -> str:
+    """Canal de captura: mostrador (en CDA) o correo (enlace del email)."""
+    stored = (getattr(resp, "canal_respuesta", None) or "").strip().lower()
+    if stored in {"mostrador", "correo"}:
+        return stored
+    # Histórico sin columna: si el correo ya se había enviado, asumimos canal correo.
+    if invite is not None and invite.sent_at is not None:
+        return "correo"
+    return "mostrador"
+
+
+@router.get("/satisfaction", response_model=QualitySatisfactionListResponse)
+def get_quality_satisfaction(
+    sucursal_id: str | None = Query(default=None, description="Filtrar por sede (administrador/contador)"),
+    days_window: int | None = Query(
+        default=30,
+        ge=1,
+        le=365,
+        description="Ventana en días sobre responded_at (None=histórico completo si se omite con all=1)",
+    ),
+    all_time: bool = Query(default=False, description="Si true, ignora days_window"),
+    solo_riesgo: bool = Query(default=False, description="Solo respuestas en riesgo"),
+    search: str | None = Query(default=None, max_length=120),
+    skip: int = Query(default=0, ge=0, le=500_000),
+    limit: int = Query(default=25, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """
+    Vista gerencial de satisfacción: KPIs, dimensiones y lista priorizable de riesgos.
+    No altera el formulario ni la escala 1-5 de la encuesta.
+    """
+    sid = _parse_calidad_sucursal_id_param(sucursal_id) if _calidad_puede_elegir_sede(current_user) else None
+
+    q_inv = db.query(QualitySurveyInvite).filter(
+        QualitySurveyInvite.tenant_id == current_user.tenant_id,
+        QualitySurveyInvite.status == "responded",
+    )
+    q_inv = _apply_calidad_sede_filter(q_inv, db, current_user, sid)
+    invites = q_inv.all()
+    invite_by_id = {inv.id: inv for inv in invites}
+    invite_ids = list(invite_by_id.keys())
+
+    responses: list[QualitySurveyResponse] = []
+    if invite_ids:
+        responses = (
+            db.query(QualitySurveyResponse)
+            .filter(QualitySurveyResponse.invite_id.in_(invite_ids))
+            .all()
+        )
+
+    now = _now_naive()
+    ventana = None if all_time else int(days_window or 30)
+    cutoff = None
+    if ventana is not None:
+        cutoff = now - timedelta(days=ventana)
+    cutoff_7d = now - timedelta(days=7)
+
+    def _responded_at(inv: QualitySurveyInvite | None, resp: QualitySurveyResponse) -> datetime | None:
+        return (inv.responded_at if inv else None) or resp.created_at
+
+    scoped: list[tuple[QualitySurveyInvite, QualitySurveyResponse]] = []
+    for resp in responses:
+        inv = invite_by_id.get(resp.invite_id)
+        if not inv:
+            continue
+        responded = _responded_at(inv, resp)
+        if cutoff is not None and responded is not None and responded < cutoff:
+            continue
+        scoped.append((inv, resp))
+
+    en_riesgo = sum(1 for _, r in scoped if _response_is_riesgo(r))
+    en_riesgo_7d = 0
+    for inv, resp in scoped:
+        if not _response_is_riesgo(resp):
+            continue
+        responded = _responded_at(inv, resp)
+        if responded is not None and responded >= cutoff_7d:
+            en_riesgo_7d += 1
+
+    total_resp = len(scoped)
+    pct_insat = round((en_riesgo / total_resp) * 100, 2) if total_resp else 0.0
+    promedio_exp = _avg_or_zero([r.experiencia_global for _, r in scoped])
+    promedio_comp = _avg_or_zero([_response_promedio_9(r) for _, r in scoped])
+    respondidas_mostrador = sum(1 for inv, r in scoped if _response_canal(r, inv) == "mostrador")
+    respondidas_correo = sum(1 for inv, r in scoped if _response_canal(r, inv) == "correo")
+
+    promoters = sum(1 for _, r in scoped if int(r.recomendar_cda) >= 4)
+    detractors = sum(1 for _, r in scoped if int(r.recomendar_cda) <= 2)
+    nps = round(((promoters - detractors) / total_resp) * 100, 2) if total_resp else 0.0
+
+    dimensiones = QualitySatisfactionDimensionAverages(
+        atencion=_avg_or_zero(
+            [r.facilidad_agendar_cita for _, r in scoped] + [r.amabilidad_recepcion_caja for _, r in scoped]
+        ),
+        operacion=_avg_or_zero(
+            [r.tiempo_espera_revision for _, r in scoped]
+            + [r.claridad_resultados_revision for _, r in scoped]
+            + [r.confianza_diagnostico_tecnico for _, r in scoped]
+        ),
+        instalaciones=_avg_or_zero(
+            [r.limpieza_instalaciones for _, r in scoped] + [r.amenidades_cda for _, r in scoped]
+        ),
+        lealtad=_avg_or_zero(
+            [r.recomendar_cda for _, r in scoped] + [r.experiencia_global for _, r in scoped]
+        ),
+    )
+
+    # Lista: prioriza riesgos, luego peor experiencia, luego más reciente
+    q_term = (search or "").strip().lower()
+    listed = scoped
+    if solo_riesgo:
+        listed = [(i, r) for i, r in listed if _response_is_riesgo(r)]
+    if q_term:
+        listed = [
+            (i, r)
+            for i, r in listed
+            if q_term in (i.cliente_nombre or "").lower()
+            or q_term in (i.placa or "").lower()
+            or q_term in (i.cliente_email or "").lower()
+            or q_term in (i.cliente_celular or "").lower()
+            or q_term in (i.sucursal_nombre or "").lower()
+            or q_term in (r.comentario or "").lower()
+        ]
+
+    def _sort_key(pair: tuple[QualitySurveyInvite, QualitySurveyResponse]):
+        inv, resp = pair
+        responded = _responded_at(inv, resp)
+        ts = responded.timestamp() if responded is not None else 0.0
+        return (
+            0 if _response_is_riesgo(resp) else 1,
+            int(resp.experiencia_global),
+            int(resp.recomendar_cda),
+            -ts,
+        )
+
+    listed.sort(key=_sort_key)
+    total = len(listed)
+    page = listed[skip : skip + limit]
+
+    items: list[QualitySatisfactionItem] = []
+    for inv, resp in page:
+        items.append(
+            QualitySatisfactionItem(
+                invite_id=str(inv.id),
+                response_id=str(resp.id),
+                cliente_nombre=inv.cliente_nombre,
+                cliente_email=inv.cliente_email,
+                cliente_celular=inv.cliente_celular,
+                sucursal_nombre=inv.sucursal_nombre,
+                placa=inv.placa,
+                tipo_vehiculo=inv.tipo_vehiculo,
+                responded_at=_responded_at(inv, resp),
+                experiencia_global=int(resp.experiencia_global),
+                recomendar_cda=int(resp.recomendar_cda),
+                promedio_9=_response_promedio_9(resp),
+                en_riesgo=_response_is_riesgo(resp),
+                canal_respuesta=_response_canal(resp, inv),
+                comentario=resp.comentario,
+                facilidad_agendar_cita=int(resp.facilidad_agendar_cita),
+                tiempo_espera_revision=int(resp.tiempo_espera_revision),
+                amabilidad_recepcion_caja=int(resp.amabilidad_recepcion_caja),
+                limpieza_instalaciones=int(resp.limpieza_instalaciones),
+                amenidades_cda=int(resp.amenidades_cda),
+                claridad_resultados_revision=int(resp.claridad_resultados_revision),
+                confianza_diagnostico_tecnico=int(resp.confianza_diagnostico_tecnico),
+                cajero_nombre=inv.cajero_nombre,
+                recepcionista_nombre=inv.recepcionista_nombre,
+            )
+        )
+
+    summary = QualitySatisfactionSummaryResponse(
+        total_respondidas=total_resp,
+        en_riesgo=en_riesgo,
+        en_riesgo_7d=en_riesgo_7d,
+        pct_insatisfaccion=pct_insat,
+        promedio_experiencia_global=promedio_exp,
+        promedio_compuesto=promedio_comp,
+        nps_recomendar=nps,
+        respondidas_mostrador=respondidas_mostrador,
+        respondidas_correo=respondidas_correo,
+        dimensiones=dimensiones,
+        ventana_dias=ventana,
+    )
+    return QualitySatisfactionListResponse(summary=summary, items=items, total=total)
+
+
 @router.get("/invites", response_model=QualityInviteListResponse)
 def list_quality_invites(
     status_filter: str | None = None,
@@ -879,7 +1151,7 @@ def submit_public_quality_survey(
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Esta encuesta ya fue respondida")
 
-    _persist_quality_survey_response(db, invite, payload, now)
+    _persist_quality_survey_response(db, invite, payload, now, canal_respuesta="correo")
     db.commit()
     return {"success": True, "message": "Gracias por compartir tu experiencia."}
 
@@ -928,7 +1200,7 @@ def submit_in_person_quality_survey(
     if existing:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Esta encuesta ya fue respondida")
 
-    _persist_quality_survey_response(db, invite, payload, now)
+    _persist_quality_survey_response(db, invite, payload, now, canal_respuesta="mostrador")
     db.commit()
     return {"success": True, "message": "Encuesta registrada. No se enviará correo si aún estaba pendiente."}
 
@@ -1268,6 +1540,7 @@ def get_rtm_reminders_summary(
     rows = (
         db.query(RTMRenewalReminder)
         .filter(RTMRenewalReminder.tenant_id == current_user.tenant_id)
+        .filter(RTMRenewalReminder.status != "cancelled")
         .filter(RTMRenewalReminder.next_due_at >= now)
         .filter(RTMRenewalReminder.next_due_at <= horizon)
         .all()
@@ -1306,6 +1579,7 @@ def list_rtm_reminders(
     query = (
         db.query(RTMRenewalReminder)
         .filter(RTMRenewalReminder.tenant_id == current_user.tenant_id)
+        .filter(RTMRenewalReminder.status != "cancelled")
         .filter(RTMRenewalReminder.next_due_at >= now)
         .filter(RTMRenewalReminder.next_due_at <= upper)
     )
@@ -1427,14 +1701,17 @@ def send_rtm_reminder_now(
         subject = f"{nombre_cda} - Recordatorio de próxima RTM"
     sent = enviar_email(reminder.cliente_email, subject, html)
     now = _now_naive()
-    reminder.last_manual_sent_at = now
-    reminder.last_management_at = now
-    reminder.last_management_channel = "email_manual"
-    reminder.management_count = int(reminder.management_count or 0) + 1
-    if (reminder.commercial_status or "pendiente") == "pendiente":
-        reminder.commercial_status = "contactado"
     reminder.updated_at = now
-    reminder.send_error = None if sent else "No fue posible enviar email manual"
+    if sent:
+        reminder.last_manual_sent_at = now
+        reminder.last_management_at = now
+        reminder.last_management_channel = "email_manual"
+        reminder.management_count = int(reminder.management_count or 0) + 1
+        if (reminder.commercial_status or "pendiente") == "pendiente":
+            reminder.commercial_status = "contactado"
+        reminder.send_error = None
+    else:
+        reminder.send_error = "No fue posible enviar email manual"
     db.commit()
     return RTMReminderManualSendResponse(
         sent=bool(sent),

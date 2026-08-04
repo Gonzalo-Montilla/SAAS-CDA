@@ -348,13 +348,43 @@ def _build_vehiculo_response_with_correccion(
     return out.model_copy(update=update_data) if update_data else out
 
 
+def _extract_kilometraje_from_formato(extra) -> str | None:
+    """Lee km desde el JSON de pre-revisión. None si no hay valor útil."""
+    if not isinstance(extra, dict):
+        return None
+    datos = extra.get("datos_tecnicos")
+    if not isinstance(datos, dict):
+        return None
+    raw = datos.get("kilometraje")
+    if raw is None:
+        return None
+    km = str(raw).strip()
+    return km[:40] if km else None
+
+
+def _kilometraje_column_from_formato(extra) -> str | None:
+    """
+    Valor para la columna liviana.
+    - Sin formato: None
+    - Con formato pero sin km: '' (evita re-backfill/detoast en arranques)
+    - Con km: texto truncado
+    """
+    if not isinstance(extra, dict):
+        return None
+    extracted = _extract_kilometraje_from_formato(extra)
+    return extracted if extracted is not None else ""
+
+
 def _build_vehiculo_pendiente_caja_response(
     vehiculo: VehiculoProceso,
     *,
     kilometraje: str | None = None,
 ) -> VehiculoPendienteCajaResponse:
     estado = vehiculo.estado.value if hasattr(vehiculo.estado, "value") else str(vehiculo.estado)
-    km = (kilometraje or "").strip() or None
+    # Preferir el valor explícito del listado; ''/None → null en respuesta (tarjeta muestra —).
+    source = getattr(vehiculo, "kilometraje", None) if kilometraje is None else kilometraje
+    km = str(source).strip() if source is not None else ""
+    km = km or None
     return VehiculoPendienteCajaResponse(
         id=vehiculo.id,
         placa=vehiculo.placa,
@@ -2377,6 +2407,7 @@ def registrar_vehiculo(
         estado=estado_inicial,
         observaciones=vehiculo_data.observaciones,
         recepcion_formato_extra_json=vehiculo_data.recepcion_formato_extra,
+        kilometraje=_kilometraje_column_from_formato(vehiculo_data.recepcion_formato_extra),
         reinspeccion_origen_id=(reinspeccion_ctx["origen"].id if es_reingreso and reinspeccion_ctx is not None else None),
         reinspeccion_intento=(intento_actual if es_reingreso and reinspeccion_ctx is not None else 1),
         reinspeccion_vence_at=(reinspeccion_ctx["vence_at"] if es_reingreso and reinspeccion_ctx is not None else None),
@@ -2578,7 +2609,8 @@ def editar_vehiculo(
     vehiculo.tiene_soat = False if _es_prueba_auditoria(vehiculo_data.tipo_vehiculo) else vehiculo_data.tiene_soat
     vehiculo.observaciones = vehiculo_data.observaciones
     vehiculo.recepcion_formato_extra_json = vehiculo_data.recepcion_formato_extra
-    
+    vehiculo.kilometraje = _kilometraje_column_from_formato(vehiculo_data.recepcion_formato_extra)
+
     # Actualizar tarifas (RECALCULADAS)
     vehiculo.valor_rtm = valor_rtm
     vehiculo.comision_soat = comision_soat
@@ -2599,13 +2631,9 @@ def listar_pendientes(
     """
     Listar vehículos pendientes de pago (para Caja).
 
-    Respuesta liviana: no serializa recepcion_formato_extra_json (firmas/PDF extras),
-    que puede pesar varios MB por vehículo y ralentizar Caja en tenants activos.
+    Respuesta liviana: no lee ni serializa recepcion_formato_extra_json
+    (firmas/PDF extras). El kilometraje sale de la columna propia `kilometraje`.
     """
-    km_expr = (
-        VehiculoProceso.recepcion_formato_extra_json["datos_tecnicos"]["kilometraje"].as_string()
-    ).label("kilometraje")
-
     rows = (
         _filtro_vehiculo_sede(
             db.query(VehiculoProceso),
@@ -2641,18 +2669,18 @@ def listar_pendientes(
                 VehiculoProceso.reinspeccion_intento,
                 VehiculoProceso.reinspeccion_exenta,
                 VehiculoProceso.observaciones,
+                VehiculoProceso.kilometraje,
                 VehiculoProceso.fecha_registro,
             )
         )
-        .add_columns(km_expr)
         .filter(VehiculoProceso.estado == EstadoVehiculo.REGISTRADO)
         .order_by(VehiculoProceso.fecha_registro.asc())
         .all()
     )
 
     vehiculos = [
-        _build_vehiculo_pendiente_caja_response(vehiculo, kilometraje=km)
-        for vehiculo, km in rows
+        _build_vehiculo_pendiente_caja_response(vehiculo, kilometraje=vehiculo.kilometraje)
+        for vehiculo in rows
     ]
     return VehiculosPendientes(vehiculos=vehiculos, total=len(vehiculos))
 

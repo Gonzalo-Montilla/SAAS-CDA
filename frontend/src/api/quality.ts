@@ -4,6 +4,7 @@ import type {
   QualityInviteListResponse,
   QualityPublicSurveyInfo,
   QualityTenantLogoSettings,
+  QualitySatisfactionListResponse,
   RTMReminderItem,
   RTMReminderSummary,
   QualitySummary,
@@ -70,6 +71,32 @@ export const qualityApi = {
   getSummary: async (params?: { sucursal_id?: string }): Promise<QualitySummary> => {
     const response = await apiClient.get<QualitySummary>('/quality/summary', {
       params: params?.sucursal_id ? { sucursal_id: params.sucursal_id } : undefined,
+    });
+    return response.data;
+  },
+
+  getSatisfaction: async (opts?: {
+    sucursal_id?: string;
+    days_window?: number;
+    all_time?: boolean;
+    solo_riesgo?: boolean;
+    search?: string;
+    skip?: number;
+    limit?: number;
+  }): Promise<QualitySatisfactionListResponse> => {
+    const params: Record<string, string | number | boolean> = {};
+    if (opts?.sucursal_id) params.sucursal_id = opts.sucursal_id;
+    if (opts?.all_time) {
+      params.all_time = true;
+    } else if (opts?.days_window != null) {
+      params.days_window = opts.days_window;
+    }
+    if (opts?.solo_riesgo) params.solo_riesgo = true;
+    if (opts?.search) params.search = opts.search;
+    if (opts?.skip != null) params.skip = opts.skip;
+    if (opts?.limit != null) params.limit = opts.limit;
+    const response = await apiClient.get<QualitySatisfactionListResponse>('/quality/satisfaction', {
+      params: Object.keys(params).length ? params : undefined,
     });
     return response.data;
   },

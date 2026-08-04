@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import axios from 'axios';
 import {
@@ -19,6 +19,7 @@ import {
 import { useLocation, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { appointmentsApi, type AppointmentCreatePayload } from '../api/appointments';
+import { qualityApi } from '../api/quality';
 import apiClient from '../api/client';
 import type { AppointmentItem } from '../types';
 import { useAuth } from '../contexts/AuthContext';
@@ -72,6 +73,7 @@ export default function Agendamiento() {
     return true;
   });
   const [anoModelo, setAnoModelo] = useState('');
+  const rtmReminderIdRef = useRef<string | null>(null);
   const [form, setForm] = useState<AppointmentCreatePayload>({
     cliente_nombre: '',
     cliente_tipo_documento: 'CC',
@@ -118,8 +120,30 @@ export default function Agendamiento() {
         ...form,
         ano_modelo: anoModelo || undefined,
       }),
-    onSuccess: () => {
-      setFeedback({ type: 'success', message: 'Cita creada correctamente.' });
+    onSuccess: async () => {
+      const reminderId = rtmReminderIdRef.current;
+      if (reminderId) {
+        try {
+          await qualityApi.touchRTMManagement(reminderId, {
+            channel: 'agendamiento',
+            auto_status: 'agendado',
+          });
+          queryClient.invalidateQueries({ queryKey: ['quality-rtm-summary'] });
+          queryClient.invalidateQueries({ queryKey: ['quality-rtm-reminders'] });
+          setFeedback({
+            type: 'success',
+            message: 'Cita creada correctamente. Vencimiento RTM marcado como agendado.',
+          });
+        } catch {
+          setFeedback({
+            type: 'success',
+            message: 'Cita creada correctamente. No se pudo actualizar el estado del vencimiento RTM.',
+          });
+        }
+        rtmReminderIdRef.current = null;
+      } else {
+        setFeedback({ type: 'success', message: 'Cita creada correctamente.' });
+      }
       setSubmitIntent(false);
       setForm((prev) => ({
         ...prev,
@@ -179,11 +203,15 @@ export default function Agendamiento() {
   useEffect(() => {
     const state = location.state as
       | {
-          agendamiento_comercial_prefill?: Partial<AppointmentCreatePayload>;
+          agendamiento_comercial_prefill?: Partial<AppointmentCreatePayload> & {
+            rtm_reminder_id?: string;
+          };
         }
       | undefined;
     const prefill = state?.agendamiento_comercial_prefill;
     if (!prefill) return;
+
+    rtmReminderIdRef.current = (prefill.rtm_reminder_id || '').trim() || null;
 
     setForm((prev) => ({
       ...prev,

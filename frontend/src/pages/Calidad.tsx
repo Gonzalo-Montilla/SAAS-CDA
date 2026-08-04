@@ -18,13 +18,15 @@ import {
   RotateCcw,
   Trash2,
   Star,
+  AlertTriangle,
+  Store,
   X,
 } from 'lucide-react';
 import axios from 'axios';
 import { useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import { qualityApi } from '../api/quality';
-import type { QualityInviteItem, RTMReminderItem, Usuario } from '../types';
+import type { QualityInviteItem, QualitySatisfactionItem, RTMReminderItem, Usuario } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import type {
   QualitySurveySubmitPayload,
@@ -43,6 +45,22 @@ import {
 
 const canRegisterInPerson = (row: QualityInviteItem) =>
   ['pending', 'no_email', 'sent', 'failed'].includes(row.status);
+
+/** Normaliza celular colombiano para wa.me (código país 57, sin duplicarlo). */
+const normalizeWhatsAppCo = (phoneRaw: string | null | undefined): string | null => {
+  let digits = (phoneRaw || '').replace(/\D/g, '');
+  if (!digits) return null;
+  if (digits.startsWith('57') && digits.length >= 12) {
+    return digits;
+  }
+  if (digits.length === 10 && digits.startsWith('3')) {
+    return `57${digits}`;
+  }
+  return null;
+};
+
+const hasValidRtmEmail = (email: string | null | undefined): boolean =>
+  Boolean((email || '').trim() && (email || '').includes('@'));
 
 const getInviteResultadoCierre = (row: QualityInviteItem): 'aprobado' | 'rechazado' | null => {
   if (row.revision_cierre_resultado === 'aprobado' || row.revision_cierre_resultado === 'rechazado') {
@@ -153,7 +171,7 @@ export default function Calidad() {
     !!tenantUser && (tenantUser.rol === 'administrador' || tenantUser.rol === 'contador');
   const puedeGestionarLogoCalidad = !!tenantUser && tenantUser.rol === 'administrador';
   const puedeCorregirCierreInspeccion = !!tenantUser && tenantUser.rol === 'administrador';
-  const [activeTab, setActiveTab] = useState<'encuestas' | 'vencimientos' | 'logo_calidad'>('encuestas');
+  const [activeTab, setActiveTab] = useState<'encuestas' | 'satisfaccion' | 'vencimientos' | 'logo_calidad'>('encuestas');
   const [statusFilter, setStatusFilter] = useState<string>('todos');
   const [calidadSedeScope, setCalidadSedeScope] = useState<'todas' | 'sucursal'>('todas');
   const [calidadSedeId, setCalidadSedeId] = useState('');
@@ -161,6 +179,12 @@ export default function Calidad() {
   const [searchDebounced, setSearchDebounced] = useState('');
   const [encuestasPagina, setEncuestasPagina] = useState(1);
   const [encuestasPorPagina, setEncuestasPorPagina] = useState(25);
+  const [satWindow, setSatWindow] = useState<'7' | '30' | '90' | 'all'>('30');
+  const [satSoloRiesgo, setSatSoloRiesgo] = useState(true);
+  const [satSearchInput, setSatSearchInput] = useState('');
+  const [satSearchDebounced, setSatSearchDebounced] = useState('');
+  const [satPagina, setSatPagina] = useState(1);
+  const [satDetalle, setSatDetalle] = useState<QualitySatisfactionItem | null>(null);
   const [selectedInviteId, setSelectedInviteId] = useState<string | null>(null);
   const [manualInviteId, setManualInviteId] = useState<string | null>(null);
   const [confirmEntregaInvite, setConfirmEntregaInvite] = useState<QualityInviteItem | null>(null);
@@ -197,6 +221,11 @@ export default function Calidad() {
     return () => window.clearTimeout(t);
   }, [searchInput]);
 
+  useEffect(() => {
+    const t = window.setTimeout(() => setSatSearchDebounced(satSearchInput.trim()), 400);
+    return () => window.clearTimeout(t);
+  }, [satSearchInput]);
+
   const [rtmWindow, setRtmWindow] = useState<8 | 15 | 30>(30);
   const [rtmStatusFilter, setRtmStatusFilter] = useState<string>('todos');
   const [rtmSearch, setRtmSearch] = useState('');
@@ -217,11 +246,39 @@ export default function Calidad() {
     setEncuestasPagina(1);
   }, [searchDebounced, statusFilter, calidadSedeApiParam]);
 
+  useEffect(() => {
+    setSatPagina(1);
+  }, [satWindow, satSoloRiesgo, satSearchDebounced, calidadSedeApiParam]);
+
   const summaryQuery = useQuery({
     queryKey: ['quality-summary', calidadSedeApiParam],
     queryFn: () =>
       qualityApi.getSummary(calidadSedeApiParam ? { sucursal_id: calidadSedeApiParam } : undefined),
     refetchInterval: 30000,
+  });
+
+  const satPorPagina = 25;
+  const satisfactionQuery = useQuery({
+    queryKey: [
+      'quality-satisfaction',
+      calidadSedeApiParam,
+      satWindow,
+      satSoloRiesgo,
+      satSearchDebounced,
+      satPagina,
+    ],
+    queryFn: () =>
+      qualityApi.getSatisfaction({
+        sucursal_id: calidadSedeApiParam,
+        all_time: satWindow === 'all',
+        days_window: satWindow === 'all' ? undefined : Number(satWindow),
+        solo_riesgo: satSoloRiesgo,
+        search: satSearchDebounced || undefined,
+        skip: (satPagina - 1) * satPorPagina,
+        limit: satPorPagina,
+      }),
+    enabled: activeTab === 'satisfaccion',
+    refetchInterval: activeTab === 'satisfaccion' ? 30000 : false,
   });
 
   const qualityLogoQuery = useQuery({
@@ -255,6 +312,7 @@ export default function Calidad() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['quality-summary'] });
       queryClient.invalidateQueries({ queryKey: ['quality-invites'] });
+      queryClient.invalidateQueries({ queryKey: ['quality-satisfaction'] });
     },
   });
 
@@ -341,6 +399,7 @@ export default function Calidad() {
       setInPersonComentario('');
       queryClient.invalidateQueries({ queryKey: ['quality-summary'] });
       queryClient.invalidateQueries({ queryKey: ['quality-invites'] });
+      queryClient.invalidateQueries({ queryKey: ['quality-satisfaction'] });
     },
     onError: (error: unknown) => {
       let message = 'No fue posible guardar la encuesta.';
@@ -449,6 +508,7 @@ export default function Calidad() {
         result.sent ? 'Correo enviado' : 'No se pudo enviar el correo',
         result.message
       );
+      queryClient.invalidateQueries({ queryKey: ['quality-rtm-summary'] });
       queryClient.invalidateQueries({ queryKey: ['quality-rtm-reminders'] });
     },
     onError: (error: unknown) => {
@@ -456,6 +516,10 @@ export default function Calidad() {
       showToast('error', 'Error enviando recordatorio', message);
     },
   });
+  const sendingRtmEmailId =
+    sendRTMNowMutation.isLoading && typeof sendRTMNowMutation.variables === 'string'
+      ? sendRTMNowMutation.variables
+      : null;
 
   const updateRTMMutation = useMutation({
     mutationFn: ({ reminderId, payload }: { reminderId: string; payload: { commercial_status: string; commercial_notes?: string } }) =>
@@ -496,6 +560,16 @@ export default function Calidad() {
     }
   }, [encuestasPagina, totalPaginasEncuestas]);
 
+  const satSummary = satisfactionQuery.data?.summary;
+  const satItems = satisfactionQuery.data?.items ?? [];
+  const totalSat = satisfactionQuery.data?.total ?? 0;
+  const totalPaginasSat = Math.max(1, Math.ceil(totalSat / satPorPagina) || 1);
+  useEffect(() => {
+    if (satPagina > totalPaginasSat) {
+      setSatPagina(totalPaginasSat);
+    }
+  }, [satPagina, totalPaginasSat]);
+
   const rtmRows = useMemo(() => rtmRemindersQuery.data || [], [rtmRemindersQuery.data]);
 
   const inPersonAllRated = useMemo(
@@ -519,21 +593,23 @@ export default function Calidad() {
 
   const statusCommercialLabel = (value: string) => value || 'pendiente';
 
-  const openWhatsApp = (row: RTMReminderItem) => {
-    const phone = (row.cliente_celular || '').replace(/\D/g, '');
+  const openWhatsApp = (row: RTMReminderItem): boolean => {
+    const phone = normalizeWhatsAppCo(row.cliente_celular);
     const nombreCda = (row.nombre_cda || 'CDASOFT').trim();
     if (!phone) {
       showToast('warning', 'Sin celular', 'Este cliente no tiene celular válido para WhatsApp.');
-      return;
+      return false;
     }
     const message = encodeURIComponent(
       `Hola ${row.cliente_nombre}, te escribimos de ${nombreCda} para recordarte la próxima RTM de tu vehículo ${row.placa}. ¿Te gustaría agendar tu cita? ${row.agendamiento_url || ''}`
     );
-    window.open(`https://wa.me/57${phone}?text=${message}`, '_blank', 'noopener,noreferrer');
+    window.open(`https://wa.me/${phone}?text=${message}`, '_blank', 'noopener,noreferrer');
     touchRTMManagementMutation.mutate({
       reminderId: row.id,
       payload: { channel: 'whatsapp', auto_status: row.commercial_status === 'pendiente' ? 'contactado' : undefined },
     });
+    showToast('success', 'WhatsApp abierto', 'Se registró la gestión comercial por WhatsApp.');
+    return true;
   };
 
   useEffect(() => {
@@ -610,18 +686,25 @@ export default function Calidad() {
             Gestión de calidad
           </p>
           <p className="module-hero-subtitle">
-            Monitorea la satisfacción de clientes con encuestas de experiencia post-servicio.
+            Opera encuestas y cierres de inspección, y monitorea la satisfacción para detectar clientes en riesgo.
           </p>
         </section>
 
         <section className="section-card p-2">
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             <button
               type="button"
               onClick={() => setActiveTab('encuestas')}
               className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${activeTab === 'encuestas' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-700 hover:bg-slate-100'}`}
             >
               Encuestas
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('satisfaccion')}
+              className={`px-4 py-2 rounded-lg text-sm font-semibold transition ${activeTab === 'satisfaccion' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-700 hover:bg-slate-100'}`}
+            >
+              Satisfacción
             </button>
             <button
               type="button"
@@ -655,18 +738,27 @@ export default function Calidad() {
             <p className="text-2xl font-bold text-emerald-700">{summaryQuery.data?.total_respondidas || 0}</p>
           </div>
           <div className="section-card p-4">
-            <p className="text-xs text-slate-500">Pendientes</p>
+            <p className="text-xs text-slate-500">Pendientes de envío</p>
             <p className="text-2xl font-bold text-cyan-700">{summaryQuery.data?.total_pendientes || 0}</p>
           </div>
           <div className="section-card p-4">
-            <p className="text-xs text-slate-500">Promedio general</p>
-            <p className="text-2xl font-bold text-violet-700">{summaryQuery.data?.promedio_general?.toFixed(2) || '0.00'}</p>
+            <p className="text-xs text-slate-500">Tasa de respuesta</p>
+            <p className="text-2xl font-bold text-slate-800">
+              {summaryQuery.data?.tasa_respuesta != null
+                ? `${summaryQuery.data.tasa_respuesta}%`
+                : '0%'}
+            </p>
           </div>
         </section>
 
         <section className="section-card p-6">
           <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-            <p className="text-sm font-semibold text-slate-800">Bandeja de encuestas</p>
+            <div>
+              <p className="text-sm font-semibold text-slate-800">Bandeja operativa de encuestas</p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Mostrador, envíos y cierre de inspección. El análisis de satisfacción está en la pestaña Satisfacción.
+              </p>
+            </div>
             <button
               type="button"
               onClick={() => processMutation.mutate()}
@@ -751,7 +843,7 @@ export default function Calidad() {
           </div>
           <div className="table-shell">
             <div ref={bottomEncuestasScrollRef} onScroll={handleBottomEncuestasScroll} className="overflow-x-auto">
-            <table className="table-enterprise min-w-[1180px]">
+            <table className="table-enterprise min-w-[1000px]">
               <thead>
                 <tr>
                   <th>Fecha</th>
@@ -760,8 +852,6 @@ export default function Calidad() {
                   <th>Celular</th>
                   <th>Placa</th>
                   <th>Tipo</th>
-                  <th>Exp. global</th>
-                  <th>Comentario</th>
                   <th>Estado</th>
                   <th className="sticky right-0 z-20 bg-slate-50 shadow-[-8px_0_8px_-10px_rgba(15,23,42,0.35)]">Acciones</th>
                 </tr>
@@ -769,12 +859,12 @@ export default function Calidad() {
               <tbody>
                 {invitesQuery.isLoading && (
                   <tr>
-                    <td colSpan={10} className="text-sm text-slate-500">Cargando encuestas...</td>
+                    <td colSpan={8} className="text-sm text-slate-500">Cargando encuestas...</td>
                   </tr>
                 )}
                 {!invitesQuery.isLoading && rows.length === 0 && (
                   <tr>
-                    <td colSpan={10} className="text-sm text-slate-500">No hay resultados para los filtros actuales.</td>
+                    <td colSpan={8} className="text-sm text-slate-500">No hay resultados para los filtros actuales.</td>
                   </tr>
                 )}
                 {rows.map((row) => (
@@ -787,17 +877,6 @@ export default function Calidad() {
                     <td>{row.cliente_celular || '-'}</td>
                     <td className="font-semibold text-slate-900">{row.placa}</td>
                     <td className="capitalize">{row.tipo_vehiculo.replaceAll('_', ' ')}</td>
-                    <td>
-                      {row.experiencia_global ? (
-                        <span className="inline-flex items-center gap-1 text-amber-600 font-semibold">
-                          <Star className="w-4 h-4 fill-current" />
-                          {row.experiencia_global} ({stars(row.experiencia_global)})
-                        </span>
-                      ) : (
-                        '-'
-                      )}
-                    </td>
-                    <td className="max-w-[220px] truncate" title={row.comentario || ''}>{row.comentario || '-'}</td>
                     <td>
                       <span className={statusClass(row.status)}>{statusLabel(row.status)}</span>
                       {row.status === 'pending' && row.cliente_email && (
@@ -955,6 +1034,334 @@ export default function Calidad() {
             </div>
           </div>
         </section>
+          </>
+        )}
+
+        {activeTab === 'satisfaccion' && (
+          <>
+            <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-5 gap-4">
+              <div className="section-card p-4 border-l-4 border-l-red-500">
+                <p className="text-xs text-slate-500 flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5 text-red-600" />
+                  En riesgo (ventana)
+                </p>
+                <p className="text-2xl font-bold text-red-700">{satSummary?.en_riesgo ?? 0}</p>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Experiencia o recomendar ≤ 2
+                </p>
+              </div>
+              <div className="section-card p-4">
+                <p className="text-xs text-slate-500">En riesgo (últimos 7 días)</p>
+                <p className="text-2xl font-bold text-amber-700">{satSummary?.en_riesgo_7d ?? 0}</p>
+              </div>
+              <div className="section-card p-4">
+                <p className="text-xs text-slate-500">% insatisfacción</p>
+                <p className="text-2xl font-bold text-slate-900">
+                  {satSummary?.pct_insatisfaccion != null ? `${satSummary.pct_insatisfaccion}%` : '0%'}
+                </p>
+              </div>
+              <div className="section-card p-4">
+                <p className="text-xs text-slate-500">Promedio experiencia global</p>
+                <p className="text-2xl font-bold text-violet-700">
+                  {satSummary?.promedio_experiencia_global?.toFixed(2) ?? '0.00'}
+                </p>
+              </div>
+              <div className="section-card p-4">
+                <p className="text-xs text-slate-500">NPS (recomendar)</p>
+                <p className="text-2xl font-bold text-indigo-700">
+                  {satSummary?.nps_recomendar != null ? satSummary.nps_recomendar : 0}
+                </p>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Compósito 9 ítems: {satSummary?.promedio_compuesto?.toFixed(2) ?? '0.00'}
+                </p>
+              </div>
+            </section>
+
+            <section className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="section-card p-4 border-l-4 border-l-emerald-500">
+                <p className="text-xs text-slate-500 flex items-center gap-1">
+                  <Store className="w-3.5 h-3.5 text-emerald-600" />
+                  Encuestas en mostrador
+                </p>
+                <p className="text-2xl font-bold text-emerald-700">
+                  {satSummary?.respondidas_mostrador ?? 0}
+                </p>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Registradas manualmente en el CDA
+                  {satSummary?.total_respondidas
+                    ? ` · ${Math.round(((satSummary.respondidas_mostrador ?? 0) / satSummary.total_respondidas) * 100)}%`
+                    : ''}
+                </p>
+              </div>
+              <div className="section-card p-4 border-l-4 border-l-sky-500">
+                <p className="text-xs text-slate-500 flex items-center gap-1">
+                  <Mail className="w-3.5 h-3.5 text-sky-600" />
+                  Encuestas por correo
+                </p>
+                <p className="text-2xl font-bold text-sky-700">
+                  {satSummary?.respondidas_correo ?? 0}
+                </p>
+                <p className="text-[11px] text-slate-500 mt-1">
+                  Respondidas con el enlace del email
+                  {satSummary?.total_respondidas
+                    ? ` · ${Math.round(((satSummary.respondidas_correo ?? 0) / satSummary.total_respondidas) * 100)}%`
+                    : ''}
+                </p>
+              </div>
+            </section>
+
+            <section className="grid grid-cols-1 md:grid-cols-4 gap-4">
+              {(
+                [
+                  ['Atención', satSummary?.dimensiones.atencion],
+                  ['Operación', satSummary?.dimensiones.operacion],
+                  ['Instalaciones', satSummary?.dimensiones.instalaciones],
+                  ['Lealtad', satSummary?.dimensiones.lealtad],
+                ] as const
+              ).map(([label, value]) => (
+                <div key={label} className="section-card p-4">
+                  <p className="text-xs text-slate-500">{label}</p>
+                  <p className={`text-xl font-bold ${scoreClass(value ? Math.round(value) : null)}`}>
+                    {value != null ? value.toFixed(2) : '0.00'}
+                  </p>
+                </div>
+              ))}
+            </section>
+
+            <section className="section-card p-6">
+              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+                <div>
+                  <p className="text-sm font-semibold text-slate-800">Lectura gerencial de satisfacción</p>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Prioriza clientes insatisfechos. Las 9 preguntas y la escala 1–5 no cambian.
+                  </p>
+                </div>
+                <p className="text-xs text-slate-500">
+                  Respondidas en ventana: <span className="font-semibold text-slate-800">{satSummary?.total_respondidas ?? 0}</span>
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mb-4">
+                <select
+                  className="input-corporate"
+                  value={satWindow}
+                  onChange={(e) => setSatWindow(e.target.value as typeof satWindow)}
+                  aria-label="Ventana de análisis"
+                >
+                  <option value="7">Últimos 7 días</option>
+                  <option value="30">Últimos 30 días</option>
+                  <option value="90">Últimos 90 días</option>
+                  <option value="all">Todo el histórico</option>
+                </select>
+                <select
+                  className="input-corporate"
+                  value={satSoloRiesgo ? 'riesgo' : 'todas'}
+                  onChange={(e) => setSatSoloRiesgo(e.target.value === 'riesgo')}
+                  aria-label="Filtro de riesgo"
+                >
+                  <option value="riesgo">Solo en riesgo</option>
+                  <option value="todas">Todas las respondidas</option>
+                </select>
+                <input
+                  type="text"
+                  className="input-corporate md:col-span-2"
+                  value={satSearchInput}
+                  onChange={(e) => setSatSearchInput(e.target.value)}
+                  placeholder="Buscar cliente, placa, sede o comentario"
+                />
+              </div>
+
+              {satisfactionQuery.isLoading && (
+                <p className="text-sm text-slate-500 py-6 text-center">Cargando satisfacción...</p>
+              )}
+              {satisfactionQuery.isError && (
+                <p className="text-sm text-red-600 py-4">No fue posible cargar el análisis de satisfacción.</p>
+              )}
+
+              {!satisfactionQuery.isLoading && (
+                <div className="table-shell">
+                  <div className="overflow-x-auto">
+                    <table className="table-enterprise min-w-[980px]">
+                      <thead>
+                        <tr>
+                          <th>Fecha</th>
+                          <th>Cliente</th>
+                          <th>Sede</th>
+                          <th>Placa</th>
+                          <th>Canal</th>
+                          <th>Exp. global</th>
+                          <th>Recomendar</th>
+                          <th>Prom. 9</th>
+                          <th>Comentario</th>
+                          <th>Detalle</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {satItems.length === 0 && (
+                          <tr>
+                            <td colSpan={10} className="text-sm text-slate-500">
+                              No hay respuestas para los filtros actuales.
+                            </td>
+                          </tr>
+                        )}
+                        {satItems.map((row) => (
+                          <tr
+                            key={row.response_id}
+                            className={row.en_riesgo ? 'bg-red-50/70' : undefined}
+                          >
+                            <td>
+                              {row.responded_at
+                                ? new Date(row.responded_at).toLocaleString()
+                                : '-'}
+                            </td>
+                            <td>
+                              <p className="font-medium text-slate-900">{row.cliente_nombre}</p>
+                              {row.en_riesgo && (
+                                <span className="badge badge-warning text-[10px] mt-1 inline-flex items-center gap-1">
+                                  <AlertTriangle className="w-3 h-3" />
+                                  En riesgo
+                                </span>
+                              )}
+                            </td>
+                            <td className="max-w-[140px] truncate" title={row.sucursal_nombre || ''}>
+                              {row.sucursal_nombre || '—'}
+                            </td>
+                            <td className="font-semibold text-slate-900">{row.placa}</td>
+                            <td>
+                              {row.canal_respuesta === 'mostrador' ? (
+                                <span className="inline-flex items-center gap-1 text-xs text-emerald-700">
+                                  <Store className="w-3.5 h-3.5" />
+                                  Mostrador
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 text-xs text-sky-700">
+                                  <Mail className="w-3.5 h-3.5" />
+                                  Correo
+                                </span>
+                              )}
+                            </td>
+                            <td className={scoreClass(row.experiencia_global)}>
+                              {row.experiencia_global} ({stars(row.experiencia_global)})
+                            </td>
+                            <td className={scoreClass(row.recomendar_cda)}>
+                              {row.recomendar_cda} ({stars(row.recomendar_cda)})
+                            </td>
+                            <td>{row.promedio_9.toFixed(2)}</td>
+                            <td className="max-w-[220px] truncate" title={row.comentario || ''}>
+                              {row.comentario || '—'}
+                            </td>
+                            <td>
+                              <button
+                                type="button"
+                                className="btn-chip px-3 py-1 text-xs inline-flex items-center gap-1"
+                                onClick={() => setSatDetalle(row)}
+                              >
+                                <Eye className="w-3.5 h-3.5" />
+                                Ver
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mt-4 pt-4 border-t border-slate-100">
+                <p className="text-xs text-slate-600">
+                  {totalSat === 0
+                    ? 'Sin resultados en esta vista.'
+                    : `Mostrando página ${satPagina} de ${totalPaginasSat} · ${totalSat} registro(s)`}
+                </p>
+                <div className="flex gap-1 justify-center sm:justify-end">
+                  <button
+                    type="button"
+                    className="btn-corporate-muted p-2 rounded-lg disabled:opacity-40"
+                    disabled={satPagina <= 1 || satisfactionQuery.isLoading}
+                    onClick={() => setSatPagina((p) => Math.max(1, p - 1))}
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className="btn-corporate-muted p-2 rounded-lg disabled:opacity-40"
+                    disabled={satPagina >= totalPaginasSat || satisfactionQuery.isLoading}
+                    onClick={() => setSatPagina((p) => Math.min(totalPaginasSat, p + 1))}
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
+              </div>
+            </section>
+
+            {satDetalle && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4">
+                <div
+                  className={`w-full max-w-2xl modal-panel rounded-2xl border border-slate-200 border-l-8 ${scoreBorderClass(satDetalle.experiencia_global)} bg-white shadow-2xl`}
+                >
+                  <div className="flex items-center justify-between px-6 py-4 border-b border-slate-200">
+                    <div>
+                      <p className="text-base font-semibold text-slate-900">Detalle de satisfacción</p>
+                      <p className="text-xs text-slate-500">
+                        {satDetalle.placa} · {satDetalle.cliente_nombre}
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setSatDetalle(null)}
+                      className="modal-close-btn inline-flex items-center justify-center"
+                    >
+                      <X className="w-5 h-5 text-slate-600" />
+                    </button>
+                  </div>
+                  <div className="p-6 space-y-4 max-h-[70vh] overflow-y-auto">
+                    {satDetalle.en_riesgo && (
+                      <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800 flex items-center gap-2">
+                        <AlertTriangle className="w-4 h-4" />
+                        Cliente en riesgo: experiencia o recomendación ≤ 2.
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      {QUALITY_SURVEY_QUESTIONS.map((q) => {
+                        const value = satDetalle[q.key as keyof QualitySatisfactionItem];
+                        const n = typeof value === 'number' ? value : null;
+                        return (
+                          <p key={q.key} className="text-sm text-slate-700 flex justify-between gap-3">
+                            <span className="text-slate-600">{q.label}</span>
+                            <span className={`font-semibold ${scoreClass(n)}`}>{stars(n)}</span>
+                          </p>
+                        );
+                      })}
+                    </div>
+                    <div className="rounded-xl border border-slate-200 p-3">
+                      <p className="text-xs uppercase tracking-wide text-slate-500 mb-1">Comentario</p>
+                      <p className="text-sm text-slate-800 whitespace-pre-wrap">
+                        {satDetalle.comentario || 'Sin comentario.'}
+                      </p>
+                    </div>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                      <p>
+                        <span className="text-slate-500">Canal: </span>
+                        {satDetalle.canal_respuesta === 'mostrador' ? 'Mostrador' : 'Correo'}
+                      </p>
+                      <p>
+                        <span className="text-slate-500">Sede: </span>
+                        {satDetalle.sucursal_nombre || '—'}
+                      </p>
+                      <p>
+                        <span className="text-slate-500">Recepcionista: </span>
+                        {satDetalle.recepcionista_nombre || '—'}
+                      </p>
+                      <p>
+                        <span className="text-slate-500">Cajero: </span>
+                        {satDetalle.cajero_nombre || '—'}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </>
         )}
 
@@ -1125,12 +1532,16 @@ export default function Calidad() {
                                       placa: row.placa,
                                       tipo_vehiculo: row.tipo_vehiculo,
                                       notes: `Seguimiento comercial por vencimiento RTM (${row.days_until_due} días restantes).`,
+                                      rtm_reminder_id: row.id,
                                     },
                                   },
                                 });
                                 touchRTMManagementMutation.mutate({
                                   reminderId: row.id,
-                                  payload: { channel: 'agendamiento', auto_status: row.commercial_status === 'pendiente' ? 'interesado' : undefined },
+                                  payload: {
+                                    channel: 'agendamiento',
+                                    auto_status: row.commercial_status === 'pendiente' ? 'interesado' : undefined,
+                                  },
                                 });
                                 showToast('success', 'Cliente precargado', 'Abriendo Agendamiento con datos del cliente.');
                               }}
@@ -1140,11 +1551,14 @@ export default function Calidad() {
                             </button>
                             <button
                               type="button"
-                              onClick={() => {
-                                openWhatsApp(row);
-                                showToast('success', 'WhatsApp abierto', 'Se registró la gestión comercial por WhatsApp.');
-                              }}
-                              className="btn-chip px-2 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1"
+                              onClick={() => openWhatsApp(row)}
+                              disabled={!normalizeWhatsAppCo(row.cliente_celular)}
+                              title={
+                                normalizeWhatsAppCo(row.cliente_celular)
+                                  ? 'Abrir WhatsApp'
+                                  : 'Sin celular válido'
+                              }
+                              className="btn-chip px-2 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-60"
                             >
                               <MessageCircle className="w-3.5 h-3.5" />
                               WhatsApp
@@ -1152,11 +1566,16 @@ export default function Calidad() {
                             <button
                               type="button"
                               onClick={() => sendRTMNowMutation.mutate(row.id)}
-                              disabled={sendRTMNowMutation.isLoading}
+                              disabled={!hasValidRtmEmail(row.cliente_email) || sendingRtmEmailId === row.id}
+                              title={
+                                hasValidRtmEmail(row.cliente_email)
+                                  ? 'Enviar recordatorio por correo'
+                                  : 'Sin correo registrado'
+                              }
                               className="btn-chip px-2 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-60"
                             >
                               <Mail className="w-3.5 h-3.5" />
-                              {sendRTMNowMutation.isLoading ? 'Enviando...' : 'Email'}
+                              {sendingRtmEmailId === row.id ? 'Enviando...' : 'Email'}
                             </button>
                           </div>
                         </td>

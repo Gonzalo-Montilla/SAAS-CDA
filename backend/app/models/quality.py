@@ -56,6 +56,8 @@ class QualitySurveyResponse(Base):
     confianza_diagnostico_tecnico = Column(Integer, nullable=False)
     recomendar_cda = Column(Integer, nullable=False)
     experiencia_global = Column(Integer, nullable=False)
+    # "mostrador" (submit en CDA) | "correo" (enlace público del email)
+    canal_respuesta = Column(String(20), nullable=True, index=True)
     comentario = Column(Text, nullable=True)
     created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
 
