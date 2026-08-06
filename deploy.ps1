@@ -1,134 +1,169 @@
 # Script de Deployment a Producción - CDASOFT
-# Ejecutar con: .\deploy.ps1
+# Ejecutar desde la raíz del repo: .\deploy.ps1
+#
+# Flujo:
+#   1) Build frontend con VITE_API_URL canónico
+#   2) Checks anti-localhost / URL canónica
+#   3) Instrucciones SSH: git pull + restart backend (o scripts/deploy_on_vps.sh)
+#   4) Subir CONTENIDO de dist a dist_new vacío (nunca scp -r dist → evita dist/dist)
+#   5) En VPS: verificar dist_new/index.html → swap atómico
+
+$ErrorActionPreference = "Stop"
 
 Write-Host "================================================" -ForegroundColor Cyan
-Write-Host "  DEPLOYMENT A PRODUCCIÓN - CDASOFT" -ForegroundColor Cyan
+Write-Host "  DEPLOYMENT A PRODUCCION - CDASOFT" -ForegroundColor Cyan
 Write-Host "================================================" -ForegroundColor Cyan
 Write-Host ""
 
-# Configuración
-$SERVER = "root@31.97.144.9"
-$REMOTE_PATH = "/var/www/cdasoft"
-$BACKUP_DATE = Get-Date -Format "yyyyMMdd_HHmmss"
+$SERVER = if ($env:CDASOFT_SSH) { $env:CDASOFT_SSH } else { "root@31.97.144.9" }
+$REMOTE_REPO = "/var/www/cdasoft/repo"
+$VITE_API = "https://cdasoft.com.co/api/v1"
+$RepoRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+Set-Location $RepoRoot
 
-# Verificar que estamos en el directorio correcto
-if (-not (Test-Path ".\frontend\dist")) {
-    Write-Host "❌ Error: No se encuentra el directorio frontend/dist" -ForegroundColor Red
-    Write-Host "   Asegúrate de estar en el directorio raíz del proyecto" -ForegroundColor Yellow
+function Fail([string]$msg) {
+    Write-Host "ERROR: $msg" -ForegroundColor Red
     exit 1
 }
 
-# Paso 1: Confirmación
-Write-Host "📋 Este script realizará:" -ForegroundColor Yellow
-Write-Host "   1. Backup del código actual en el servidor" -ForegroundColor White
-Write-Host "   2. Subida del frontend (dist/) al servidor" -ForegroundColor White
-Write-Host "   3. Subida del backend al servidor" -ForegroundColor White
-Write-Host "   4. Reinicio de servicios (cda-backend, nginx)" -ForegroundColor White
+# --- Confirmacion ---
+Write-Host "Este script:" -ForegroundColor Yellow
+Write-Host "  1. Compila frontend con $VITE_API"
+Write-Host "  2. Valida el build (sin localhost / URL canonica)"
+Write-Host "  3. Te da comandos SSH seguros (pull + deploy_on_vps.sh)"
+Write-Host "  4. Sube dist a dist_new (contenido, no carpeta anidada)"
 Write-Host ""
-
-$confirm = Read-Host "¿Deseas continuar? (s/n)"
+$confirm = Read-Host "Continuar? (s/n)"
 if ($confirm -ne "s") {
-    Write-Host "❌ Deployment cancelado" -ForegroundColor Red
+    Write-Host "Cancelado." -ForegroundColor Yellow
     exit 0
 }
 
-# Paso 2: Verificar que el build existe
-Write-Host ""
-Write-Host "🔍 Verificando build del frontend..." -ForegroundColor Cyan
-if (-not (Test-Path ".\frontend\dist\index.html")) {
-    Write-Host "❌ Error: Build no encontrado. Ejecuta 'npm run build' primero" -ForegroundColor Red
-    exit 1
+# --- Git limpio (recomendado) ---
+$porcelain = (git status --porcelain 2>$null)
+if ($porcelain) {
+    Write-Host "ADVERTENCIA: working tree local no esta limpio:" -ForegroundColor Yellow
+    git status --short
+    $go = Read-Host "Continuar igual? (s/n)"
+    if ($go -ne "s") { exit 0 }
 }
-Write-Host "✅ Build encontrado" -ForegroundColor Green
 
-# Paso 3: Crear backup en servidor (solo estructura)
+# --- Build frontend ---
 Write-Host ""
-Write-Host "💾 Creando backup en servidor..." -ForegroundColor Cyan
-Write-Host "⚠️  IMPORTANTE: Ejecuta manualmente en el servidor:" -ForegroundColor Yellow
-Write-Host "   ssh $SERVER" -ForegroundColor White
-Write-Host "   cd $REMOTE_PATH" -ForegroundColor White
-Write-Host "   cp -r frontend frontend.backup_$BACKUP_DATE" -ForegroundColor White
-Write-Host "   cp -r backend backend.backup_$BACKUP_DATE" -ForegroundColor White
+Write-Host "Build frontend..." -ForegroundColor Cyan
+Push-Location frontend
+$env:VITE_API_URL = $VITE_API
+npm run build
+if ($LASTEXITCODE -ne 0) {
+    Pop-Location
+    Fail "npm run build fallo"
+}
+Pop-Location
+
+$indexPath = Join-Path $RepoRoot "frontend\dist\index.html"
+if (-not (Test-Path $indexPath)) {
+    Fail "No existe frontend/dist/index.html tras el build"
+}
+Write-Host "OK: frontend/dist/index.html" -ForegroundColor Green
+
+# --- Checks de assets ---
+Write-Host ""
+Write-Host "Verificando assets del build..." -ForegroundColor Cyan
+$assetsDir = Join-Path $RepoRoot "frontend\dist\assets"
+if (-not (Test-Path $assetsDir)) {
+    Fail "No existe frontend/dist/assets"
+}
+
+$assetFiles = Get-ChildItem -Path $assetsDir -File -Recurse -ErrorAction SilentlyContinue
+$joined = ""
+foreach ($f in $assetFiles) {
+    if ($f.Length -lt 8MB) {
+        $joined += [System.IO.File]::ReadAllText($f.FullName)
+    }
+}
+
+if ($joined -match "localhost:8000|127\.0\.0\.1:8000|http://127\.0\.0\.1") {
+    Fail "Build apunta a localhost — no despliegues"
+}
+if ($joined -match "https://www\.cdasoft\.com/api/v1") {
+    Fail "Build con URL no canonica (www.cdasoft.com)"
+}
+if ($joined -notmatch [regex]::Escape($VITE_API)) {
+    Fail "Build no contiene $VITE_API"
+}
+Write-Host "OK: URL canonica y sin localhost" -ForegroundColor Green
+
+# --- Backend en VPS ---
+Write-Host ""
+Write-Host "=== PASO A: Backend en VPS (SSH) ===" -ForegroundColor Yellow
+Write-Host @"
+ssh $SERVER
+cd $REMOTE_REPO
+git status --porcelain
+# Si hay cambios locales: NO hagas pull a ciegas (ver DEPLOY_VPS.md §15.3)
+git pull --ff-only origin main
+chmod +x scripts/deploy_on_vps.sh
+./scripts/deploy_on_vps.sh
+# O solo backend sin swap de front:
+# ./scripts/deploy_on_vps.sh --backend-only
+"@ -ForegroundColor White
+
+Read-Host "Presiona Enter cuando el backend en VPS este actualizado y healthy..."
+
+# --- Frontend: preparar dist_new ---
+Write-Host ""
+Write-Host "=== PASO B: Subir frontend a dist_new ===" -ForegroundColor Yellow
+Write-Host @"
+En el VPS, deja dist_new VACIA (importante: evita dist/dist):
+
+ssh $SERVER
+cd $REMOTE_REPO/frontend
+rm -rf dist_new
+mkdir -p dist_new
+"@ -ForegroundColor White
+
+Read-Host "Presiona Enter cuando dist_new este vacia en el VPS..."
+
+Write-Host ""
+Write-Host "Subiendo CONTENIDO de dist (asterisco / trailing slash)..." -ForegroundColor Cyan
+Write-Host "Comando SCP (PowerShell / OpenSSH):" -ForegroundColor White
+Write-Host "  scp -r .\frontend\dist\* ${SERVER}:${REMOTE_REPO}/frontend/dist_new/" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "Comando rsync (Git Bash / WSL) — preferido:" -ForegroundColor White
+Write-Host "  rsync -avz --delete ./frontend/dist/ ${SERVER}:${REMOTE_REPO}/frontend/dist_new/" -ForegroundColor Cyan
+Write-Host ""
+Write-Host "NUNCA uses: scp -r frontend/dist  (sin /*) — crea dist_new/dist/ y el sitio da 404" -ForegroundColor Red
 Write-Host ""
 
-$backupDone = Read-Host "¿Ya creaste el backup? (s/n)"
-if ($backupDone -ne "s") {
-    Write-Host "⚠️  Por favor crea el backup antes de continuar" -ForegroundColor Yellow
+$upload = Read-Host "Ya subiste el contenido a dist_new? (s/n)"
+if ($upload -ne "s") {
+    Write-Host "Quedo a medias: backend puede estar OK; front no swapado." -ForegroundColor Yellow
     exit 0
 }
 
-# Paso 4: Verificar script SQL de comisiones
+# --- Swap ---
 Write-Host ""
-Write-Host "🗄️  Verificando script SQL de comisiones SOAT..." -ForegroundColor Cyan
-if (Test-Path ".\backend\scripts\verificar_comisiones_soat.sql") {
-    Write-Host "✅ Script SQL encontrado" -ForegroundColor Green
-    Write-Host "⚠️  RECUERDA: Ejecutar este script en la BD de producción" -ForegroundColor Yellow
-    Write-Host "   psql -U cda_user -d cdasoft_prod -f backend/scripts/verificar_comisiones_soat.sql" -ForegroundColor White
-} else {
-    Write-Host "⚠️  Script SQL no encontrado (opcional)" -ForegroundColor Yellow
-}
+Write-Host "=== PASO C: Verificar index.html y swap atomico ===" -ForegroundColor Yellow
+Write-Host @"
+ssh $SERVER
+cd $REMOTE_REPO/frontend
 
-# Paso 5: Subir frontend
-Write-Host ""
-Write-Host "📤 Subiendo frontend al servidor..." -ForegroundColor Cyan
-Write-Host "⚠️  Ejecuta manualmente (rsync no está disponible en PowerShell):" -ForegroundColor Yellow
-Write-Host ""
-Write-Host "# Opción 1: Usando WSL o Git Bash" -ForegroundColor White
-Write-Host "rsync -avz --delete frontend/dist/ $SERVER`:$REMOTE_PATH/frontend/" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "# Opción 2: Usando SCP" -ForegroundColor White
-Write-Host "scp -r frontend/dist/* $SERVER`:$REMOTE_PATH/frontend/" -ForegroundColor Cyan
-Write-Host ""
+# FAIL-FAST: index.html debe estar en la RAIZ de dist_new
+test -f dist_new/index.html || { echo 'FALLO: falta dist_new/index.html (¿subiste dist anidado?)'; ls -la dist_new; exit 1; }
+test ! -f dist_new/dist/index.html || { echo 'FALLO: existe dist_new/dist/ (anidado)'; exit 1; }
 
-# Paso 6: Subir backend
-Write-Host ""
-Write-Host "📤 Subiendo backend al servidor..." -ForegroundColor Cyan
-Write-Host "⚠️  Ejecuta manualmente:" -ForegroundColor Yellow
-Write-Host ""
-Write-Host "# Opción 1: Usando WSL o Git Bash" -ForegroundColor White
-Write-Host "rsync -avz --exclude='__pycache__' --exclude='*.pyc' --exclude='venv' backend/ $SERVER`:$REMOTE_PATH/backend/" -ForegroundColor Cyan
-Write-Host ""
-Write-Host "# Opción 2: Usando SCP" -ForegroundColor White
-Write-Host "scp -r backend/* $SERVER`:$REMOTE_PATH/backend/" -ForegroundColor Cyan
-Write-Host ""
+# Swap
+./../scripts/deploy_on_vps.sh --frontend-swap-only
+# O manual:
+# TS=`$(date +%F-%H%M)
+# sudo mv dist "dist.prev-`$TS"
+# sudo mv dist_new dist
+# sudo chown -R www-data:www-data dist
+# sudo nginx -t && sudo systemctl reload nginx
+"@ -ForegroundColor White
 
-Read-Host "Presiona Enter después de subir los archivos..."
-
-# Paso 7: Reiniciar servicios
-Write-Host ""
-Write-Host "🔄 Reiniciando servicios en el servidor..." -ForegroundColor Cyan
-Write-Host "⚠️  Ejecuta manualmente en el servidor:" -ForegroundColor Yellow
-Write-Host ""
-Write-Host "ssh $SERVER" -ForegroundColor White
-Write-Host "systemctl restart cda-backend" -ForegroundColor Cyan
-Write-Host "systemctl restart nginx" -ForegroundColor Cyan
-Write-Host "systemctl status cda-backend" -ForegroundColor Cyan
-Write-Host "systemctl status nginx" -ForegroundColor Cyan
-Write-Host ""
-
-# Paso 8: Verificación post-deployment
-Write-Host ""
-Write-Host "✅ PASOS COMPLETADOS" -ForegroundColor Green
-Write-Host ""
-Write-Host "🧪 TESTS POST-DEPLOYMENT (ver PRE_DEPLOYMENT_CHECKLIST.md):" -ForegroundColor Yellow
-Write-Host ""
-Write-Host "1. Test campos numéricos:" -ForegroundColor White
-Write-Host "   - Abrir caja con monto inicial" -ForegroundColor Gray
-Write-Host "   - Registrar gasto" -ForegroundColor Gray
-Write-Host "   - Cerrar caja con arqueo" -ForegroundColor Gray
-Write-Host ""
-Write-Host "2. Test comisiones SOAT editables:" -ForegroundColor White
-Write-Host "   - Cobrar vehículo con SOAT" -ForegroundColor Gray
-Write-Host "   - Verificar checkbox de comisión" -ForegroundColor Gray
-Write-Host ""
-Write-Host "3. Test venta SOAT independiente:" -ForegroundColor White
-Write-Host "   - Usar botón 'Venta SOAT'" -ForegroundColor Gray
-Write-Host "   - Verificar PDF generado" -ForegroundColor Gray
-Write-Host ""
-Write-Host "4. Test PDF recibo RTM:" -ForegroundColor White
-Write-Host "   - Cobrar vehículo normal" -ForegroundColor Gray
-Write-Host "   - Verificar PDF automático" -ForegroundColor Gray
 Write-Host ""
 Write-Host "================================================" -ForegroundColor Cyan
-Write-Host "  URL: http://31.97.144.9" -ForegroundColor Cyan
+Write-Host "  Post-check: https://cdasoft.com.co  y /health" -ForegroundColor Cyan
+Write-Host "  Ver DEPLOY_VPS.md §15" -ForegroundColor Cyan
 Write-Host "================================================" -ForegroundColor Cyan

@@ -1,0 +1,22 @@
+[Unit]
+Description=CDASOFT API (FastAPI / Uvicorn)
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/cdasoft/repo/backend
+EnvironmentFile=/var/www/cdasoft/repo/backend/.env
+# 2 workers: un request lento (PDF/SMTP/JSONB) no bloquea toda la API.
+# Cada worker tiene su pool SQLAlchemy (ver pool_size en database.py).
+# init_db() corre en cada worker al arrancar (idempotente / IF NOT EXISTS); el restart puede tardar unos segundos más.
+ExecStart=/var/www/cdasoft/repo/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8010 --proxy-headers --workers 2
+Restart=always
+RestartSec=5
+
+# Subidas persistidas: logos de tenant y módulo documental (ajusta si cambias rutas en .env)
+ReadWritePaths=/var/www/cdasoft/repo/backend/uploads /var/www/cdasoft/repo/backend/private_uploads
+
+[Install]
+WantedBy=multi-user.target

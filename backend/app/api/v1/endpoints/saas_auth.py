@@ -134,6 +134,8 @@ class SaaSTenantSummary(BaseModel):
     exogena_enabled: bool = False
     sarlaft_enabled: bool = False
     sarlaft_mode: str = "manual"
+    # NULL = default global; 0 = ilimitado; >0 = MB de este CDA
+    documentos_quota_mb: int | None = None
     login_url: str
 
 
@@ -199,6 +201,8 @@ class SaaSTenantCoreDataPatch(BaseModel):
     exogena_enabled: bool | None = None
     sarlaft_enabled: bool | None = None
     sarlaft_mode: str | None = Field(default=None, pattern="^(manual|api)$")
+    # Enviar null explícito para volver al default global; 0 = ilimitado; >0 = MB custom
+    documentos_quota_mb: int | None = Field(default=None, ge=0, le=102400)
 
 
 class SaaSAuditLogItem(BaseModel):
@@ -919,6 +923,7 @@ def list_saas_tenants(
             exogena_enabled=bool(getattr(tenant, "exogena_enabled", False)),
             sarlaft_enabled=bool(getattr(tenant, "sarlaft_enabled", False)),
             sarlaft_mode=(getattr(tenant, "sarlaft_mode", None) or "manual"),
+            documentos_quota_mb=getattr(tenant, "documentos_quota_mb", None),
             login_url=f"{base_url}/{tenant.slug}",
         )
         for tenant in tenants
@@ -989,6 +994,7 @@ def get_saas_tenant_profile(
         exogena_enabled=bool(getattr(tenant, "exogena_enabled", False)),
         sarlaft_enabled=bool(getattr(tenant, "sarlaft_enabled", False)),
         sarlaft_mode=(getattr(tenant, "sarlaft_mode", None) or "manual"),
+        documentos_quota_mb=getattr(tenant, "documentos_quota_mb", None),
         login_url=f"{base_url}/{tenant.slug}",
         facturacion_matriz=SaaSTenantFacturacionMatriz(
             direccion_facturacion=tenant.direccion_facturacion,
@@ -1140,6 +1146,12 @@ def patch_saas_tenant_core_data(
         tenant.sarlaft_enabled = bool(data["sarlaft_enabled"])
     if "sarlaft_mode" in data and data["sarlaft_mode"] is not None:
         tenant.sarlaft_mode = (str(data["sarlaft_mode"]).strip().lower() or "manual")
+    if "documentos_quota_mb" in data:
+        raw_q = data["documentos_quota_mb"]
+        if raw_q is None:
+            tenant.documentos_quota_mb = None
+        else:
+            tenant.documentos_quota_mb = int(raw_q)
 
     db.commit()
     return get_saas_tenant_profile(tenant_id=tenant_id, db=db)

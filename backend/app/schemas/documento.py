@@ -29,6 +29,27 @@ class DocumentoResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class DocumentoStorageUsageResponse(BaseModel):
+    """Uso de disco del módulo documental del tenant autenticado."""
+
+    used_bytes: int
+    quota_bytes: int | None = Field(
+        default=None,
+        description="None si la cuota efectiva es ilimitada.",
+    )
+    max_file_bytes: int
+    used_pct: float | None = None
+    documentos_count: int = 0
+    # Override del tenant: null = usa default global; 0 = ilimitado; >0 = MB propios
+    documentos_quota_mb: int | None = None
+    default_quota_mb: int = Field(
+        description="DOCUMENTOS_TENANT_QUOTA_MB del servidor (cuando el tenant no tiene override).",
+    )
+    quota_source: str = Field(
+        description="tenant | default | unlimited",
+    )
+
+
 class DocumentoMetadataUpdate(BaseModel):
     titulo: Optional[str] = Field(default=None, max_length=300)
     categoria: Optional[str] = Field(default=None, max_length=120)

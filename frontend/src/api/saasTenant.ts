@@ -49,6 +49,8 @@ export async function patchSaasTenantCoreData(
     exogena_enabled?: boolean | null;
     sarlaft_enabled?: boolean | null;
     sarlaft_mode?: 'manual' | 'api' | null;
+    /** null = volver al default global; 0 = ilimitado; >0 = MB custom */
+    documentos_quota_mb?: number | null;
   },
 ): Promise<SaaSTenantProfile> {
   const r = await apiClient.patch<SaaSTenantProfile>(

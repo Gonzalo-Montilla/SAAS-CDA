@@ -69,6 +69,9 @@ class Settings(BaseSettings):
     # Archivos del módulo documental (no se exponen por /uploads estático)
     DOCUMENTOS_STORAGE_DIR: str = Field(default="private_uploads/documentos", env="DOCUMENTOS_STORAGE_DIR")
     DOCUMENTOS_MAX_SIZE_MB: int = Field(default=25, ge=1, le=200, env="DOCUMENTOS_MAX_SIZE_MB")
+    # Cuota de almacenamiento por tenant (suma de tamano_bytes de todas las versiones).
+    # 0 = sin límite. Default 2 GiB — razonable para VPS compartido con varios CDA.
+    DOCUMENTOS_TENANT_QUOTA_MB: int = Field(default=2048, ge=0, le=102400, env="DOCUMENTOS_TENANT_QUOTA_MB")
     # Ruta al ejecutable soffice (LibreOffice). Vacío = buscar en PATH y rutas típicas de Windows.
     DOCUMENTOS_LIBREOFFICE_PATH: str = Field(default="", env="DOCUMENTOS_LIBREOFFICE_PATH")
     # Directorio de perfil headless (UserInstallation). Vacío en Linux = junto al almacén documental

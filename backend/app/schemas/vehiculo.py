@@ -313,8 +313,8 @@ class VehiculoCobradoHoyResponse(BaseModel):
 class VehiculoPendienteCajaResponse(BaseModel):
     """
     Respuesta liviana para cola de Caja.
-    Omite recepcion_formato_extra_json completo (firmas base64).
-    kilometraje viene de columna propia (no del JSONB TOASTeado).
+    Omite recepcion_formato_extra_json (firmas) y observaciones (pueden traer fotos base64).
+    kilometraje viene de columna propia.
     """
 
     id: UUID

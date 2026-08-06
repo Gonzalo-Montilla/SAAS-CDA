@@ -33,6 +33,7 @@ from app.schemas.documento import (
     DocumentoAuditoriaResponse,
     DocumentoMetadataUpdate,
     DocumentoResponse,
+    DocumentoStorageUsageResponse,
 )
 from app.services.documento_preview import PREVIEW_OFFICE_EXTENSIONS, schedule_preview_build, try_generate_preview_pdf
 from app.utils.certificacion_cuenta_pdf import (
@@ -61,9 +62,93 @@ ALLOWED_DOC_EXTENSIONS = frozenset({
     ".csv",
 })
 
+_UPLOAD_CHUNK_BYTES = 1024 * 1024  # 1 MiB
+
 
 def _storage_dir() -> Path:
     return Path(settings.DOCUMENTOS_STORAGE_DIR)
+
+
+def _max_file_bytes() -> int:
+    return int(settings.DOCUMENTOS_MAX_SIZE_MB) * 1024 * 1024
+
+
+def _tenant_quota_bytes(db: Session, tenant_id: UUID) -> int | None:
+    """
+    Cuota efectiva en bytes. None = sin límite.
+    Prioridad: tenants.documentos_quota_mb si no es NULL; si no, DOCUMENTOS_TENANT_QUOTA_MB.
+    0 (tenant o global) = ilimitado.
+    """
+    override = (
+        db.query(Tenant.documentos_quota_mb)
+        .filter(Tenant.id == tenant_id)
+        .scalar()
+    )
+    if override is not None:
+        mb = int(override)
+        if mb <= 0:
+            return None
+        return mb * 1024 * 1024
+    mb_global = int(settings.DOCUMENTOS_TENANT_QUOTA_MB or 0)
+    if mb_global <= 0:
+        return None
+    return mb_global * 1024 * 1024
+
+
+def _tenant_storage_used_bytes(db: Session, tenant_id: UUID) -> int:
+    total = (
+        db.query(func.coalesce(func.sum(TenantDocumento.tamano_bytes), 0))
+        .filter(TenantDocumento.tenant_id == tenant_id)
+        .scalar()
+    )
+    return int(total or 0)
+
+
+def _tenant_documentos_count(db: Session, tenant_id: UUID) -> int:
+    return int(
+        db.query(func.count(TenantDocumento.id))
+        .filter(TenantDocumento.tenant_id == tenant_id)
+        .scalar()
+        or 0
+    )
+
+
+def _safe_unlink(path: Path | None) -> None:
+    if path is None:
+        return
+    try:
+        if path.is_file():
+            path.unlink()
+    except OSError:
+        pass
+
+
+def _stream_upload_to_disk(upload: UploadFile, dest: Path, max_bytes: int) -> int:
+    """
+    Escribe el UploadFile a disco por chunks. Si supera max_bytes, borra el parcial y 400.
+    Devuelve bytes escritos.
+    """
+    written = 0
+    try:
+        with open(dest, "wb") as out:
+            while True:
+                chunk = upload.file.read(_UPLOAD_CHUNK_BYTES)
+                if not chunk:
+                    break
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail=f"El archivo supera el límite de {settings.DOCUMENTOS_MAX_SIZE_MB} MB.",
+                    )
+                out.write(chunk)
+    except HTTPException:
+        _safe_unlink(dest)
+        raise
+    except Exception:
+        _safe_unlink(dest)
+        raise
+    return written
 
 
 def _abs_path(relpath: str) -> Path:
@@ -723,6 +808,39 @@ def listar_categorias_documentos(
     return vals
 
 
+@router.get("/almacenamiento", response_model=DocumentoStorageUsageResponse)
+def uso_almacenamiento_documentos(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    used = _tenant_storage_used_bytes(db, current_user.tenant_id)
+    tenant_row = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    override = getattr(tenant_row, "documentos_quota_mb", None) if tenant_row else None
+    default_mb = int(settings.DOCUMENTOS_TENANT_QUOTA_MB or 0)
+    quota = _tenant_quota_bytes(db, current_user.tenant_id)
+    if override is not None and int(override) <= 0:
+        source = "unlimited"
+    elif override is not None:
+        source = "tenant"
+    elif quota is None:
+        source = "unlimited"
+    else:
+        source = "default"
+    pct: float | None = None
+    if quota is not None and quota > 0:
+        pct = round(min(100.0, (used / quota) * 100.0), 2)
+    return DocumentoStorageUsageResponse(
+        used_bytes=used,
+        quota_bytes=quota,
+        max_file_bytes=_max_file_bytes(),
+        used_pct=pct,
+        documentos_count=_tenant_documentos_count(db, current_user.tenant_id),
+        documentos_quota_mb=int(override) if override is not None else None,
+        default_quota_mb=default_mb,
+        quota_source=source,
+    )
+
+
 @router.get("/", response_model=list[DocumentoResponse])
 def listar_documentos(
     skip: int = 0,
@@ -790,12 +908,16 @@ def subir_documento(
             detail="Tipo de archivo no permitido para este módulo.",
         )
 
-    content = file.file.read()
-    max_bytes = settings.DOCUMENTOS_MAX_SIZE_MB * 1024 * 1024
-    if len(content) > max_bytes:
+    max_bytes = _max_file_bytes()
+    quota_bytes = _tenant_quota_bytes(db, current_user.tenant_id)
+    used_before = _tenant_storage_used_bytes(db, current_user.tenant_id)
+    if quota_bytes is not None and used_before >= quota_bytes:
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"El archivo supera el límite de {settings.DOCUMENTOS_MAX_SIZE_MB} MB.",
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                "Se alcanzó la cuota de almacenamiento documental de su organización. "
+                "Elimine versiones antiguas o contacte a soporte CDASOFT."
+            ),
         )
 
     mime = (file.content_type or "application/octet-stream").strip()[:200]
@@ -809,8 +931,19 @@ def subir_documento(
     relpath = f"{current_user.tenant_id}/{stored_name}"
     dest = tenant_folder / stored_name
 
-    with open(dest, "wb") as out:
-        out.write(content)
+    # Streaming a disco (no carga el archivo completo en RAM del worker).
+    size_written = _stream_upload_to_disk(file, dest, max_bytes)
+
+    if quota_bytes is not None and (used_before + size_written) > quota_bytes:
+        _safe_unlink(dest)
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=(
+                f"Este archivo ({size_written} bytes) supera el espacio libre de la cuota documental "
+                f"({max(0, quota_bytes - used_before)} bytes libres). "
+                "Elimine documentos o pida ampliar la cuota."
+            ),
+        )
 
     sust_uuid = _parse_sustituye_id(sustituye_a_id)
     prev: TenantDocumento | None = None
@@ -824,11 +957,7 @@ def subir_documento(
             .first()
         )
         if not prev:
-            try:
-                if dest.is_file():
-                    dest.unlink()
-            except OSError:
-                pass
+            _safe_unlink(dest)
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="El documento a sustituir no existe.",
@@ -886,7 +1015,7 @@ def subir_documento(
         categoria=cat,
         nombre_archivo_original=safe_base[:500],
         mime_type=mime,
-        tamano_bytes=len(content),
+        tamano_bytes=size_written,
         storage_relpath=relpath,
         created_by=current_user.id,
     )

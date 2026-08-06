@@ -80,7 +80,7 @@ type BackofficeModule =
   | 'auditoria'
   | 'seguridad';
 const TABLE_DENSITY_STORAGE_KEY = 'saas_backoffice_table_density';
-type TenantProfileSection = 'brandAccess' | 'sedes' | 'factus' | 'billing' | 'payments' | 'users';
+type TenantProfileSection = 'brandAccess' | 'documentos' | 'sedes' | 'factus' | 'billing' | 'payments' | 'users';
 type CheckoutSessionsViewTab = 'all' | 'pending' | 'paid' | 'fe_issue';
 const OPENSANCTIONS_CUSTOM_WINDOW = -1;
 const RUNT_CUSTOM_WINDOW = -1;
@@ -89,6 +89,7 @@ const BOGOTA_UTC_OFFSET_HOURS = -5;
 
 const DEFAULT_TENANT_PROFILE_SECTIONS_OPEN: Record<TenantProfileSection, boolean> = {
   brandAccess: true,
+  documentos: false,
   sedes: false,
   factus: false,
   billing: false,
@@ -221,6 +222,9 @@ export default function SaaSBackoffice() {
   const [tenantCoreExogenaEnabled, setTenantCoreExogenaEnabled] = useState(false);
   const [tenantCoreSarlaftEnabled, setTenantCoreSarlaftEnabled] = useState(false);
   const [tenantCoreSarlaftMode, setTenantCoreSarlaftMode] = useState<'manual' | 'api'>('manual');
+  /** Vacío = default global; "0" = ilimitado; número = MB custom */
+  const [tenantCoreDocumentosQuotaMb, setTenantCoreDocumentosQuotaMb] = useState('');
+  const [tenantDocumentosQuotaError, setTenantDocumentosQuotaError] = useState('');
   const [tenantCoreError, setTenantCoreError] = useState('');
   const [tenantCoreEditMode, setTenantCoreEditMode] = useState(false);
   const [auditSortBy, setAuditSortBy] = useState<'created_at' | 'action' | 'success' | 'tenant' | 'actor'>('created_at');
@@ -417,6 +421,7 @@ export default function SaaSBackoffice() {
   const openAllTenantProfileSections = () => {
     setTenantProfileSectionsOpen({
       brandAccess: true,
+      documentos: true,
       sedes: true,
       factus: true,
       billing: true,
@@ -428,6 +433,7 @@ export default function SaaSBackoffice() {
   const collapseAllTenantProfileSections = () => {
     setTenantProfileSectionsOpen({
       brandAccess: true,
+      documentos: false,
       sedes: false,
       factus: false,
       billing: false,
@@ -585,6 +591,7 @@ export default function SaaSBackoffice() {
       setTenantLogoFile(null);
       setTenantLogoError('');
       setTenantCoreError('');
+      setTenantDocumentosQuotaError('');
       setTenantProfileSectionsOpen(DEFAULT_TENANT_PROFILE_SECTIONS_OPEN);
     }
   }, [selectedTenantId]);
@@ -604,6 +611,11 @@ export default function SaaSBackoffice() {
     setTenantCoreExogenaEnabled(Boolean(profile.exogena_enabled));
     setTenantCoreSarlaftEnabled(Boolean(profile.sarlaft_enabled));
     setTenantCoreSarlaftMode((profile.sarlaft_mode === 'api' ? 'api' : 'manual') as 'manual' | 'api');
+    setTenantCoreDocumentosQuotaMb(
+      profile.documentos_quota_mb === null || profile.documentos_quota_mb === undefined
+        ? ''
+        : String(profile.documentos_quota_mb),
+    );
     setTenantCoreError('');
     setTenantCoreEditMode(false);
   }, [tenantProfileQuery.data]);
@@ -728,6 +740,40 @@ export default function SaaSBackoffice() {
         return;
       }
       setTenantCoreError(typeof detail === 'string' ? detail : 'No se pudo actualizar los datos del tenant.');
+    },
+  });
+
+  const tenantDocumentosQuotaMutation = useMutation({
+    mutationFn: async () => {
+      if (!selectedTenantId) {
+        throw new Error('Sin tenant seleccionado');
+      }
+      const raw = tenantCoreDocumentosQuotaMb.trim();
+      let documentos_quota_mb: number | null = null;
+      if (raw) {
+        const n = Number(raw);
+        if (!Number.isFinite(n) || n < 0 || !Number.isInteger(n)) {
+          throw new Error('Use un entero ≥ 0, o vacío para el default del servidor.');
+        }
+        documentos_quota_mb = n;
+      }
+      return patchSaasTenantCoreData(selectedTenantId, { documentos_quota_mb });
+    },
+    onSuccess: () => {
+      setTenantDocumentosQuotaError('');
+      queryClient.invalidateQueries({ queryKey: ['saas-tenant-profile', selectedTenantId] });
+      queryClient.invalidateQueries({ queryKey: ['saas-tenants-list'] });
+    },
+    onError: (err: unknown) => {
+      const detail =
+        typeof err === 'object' && err !== null && 'response' in err
+          ? (err as { response?: { data?: { detail?: string } } }).response?.data?.detail
+          : undefined;
+      if (err instanceof Error && err.message && !detail) {
+        setTenantDocumentosQuotaError(err.message);
+        return;
+      }
+      setTenantDocumentosQuotaError(typeof detail === 'string' ? detail : 'No se pudo guardar la cuota.');
     },
   });
 
@@ -3902,6 +3948,72 @@ export default function SaaSBackoffice() {
                           </div>
                         </div>
                       </div>
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+                  <button
+                    type="button"
+                    onClick={() => toggleTenantProfileSection('documentos')}
+                    className="flex w-full items-center justify-between px-4 py-3 text-left"
+                  >
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Almacenamiento Documentos</p>
+                      <p className="text-xs text-slate-500">
+                        Cuota de espacio por CDA
+                        {tenantProfileQuery.data
+                          ? ` · ${
+                              tenantProfileQuery.data.documentos_quota_mb === null ||
+                              tenantProfileQuery.data.documentos_quota_mb === undefined
+                                ? 'default del servidor'
+                                : tenantProfileQuery.data.documentos_quota_mb === 0
+                                  ? 'ilimitado'
+                                  : `${tenantProfileQuery.data.documentos_quota_mb} MB`
+                            }`
+                          : ''}
+                      </p>
+                    </div>
+                    <span className="text-xs font-semibold text-slate-600">
+                      {tenantProfileSectionsOpen.documentos ? 'Ocultar' : 'Mostrar'}
+                    </span>
+                  </button>
+                  {tenantProfileSectionsOpen.documentos && (
+                    <div className="border-t border-slate-100 px-4 py-4 space-y-3">
+                      <p className="text-xs text-slate-500 leading-relaxed">
+                        Vacío = default del servidor · 0 = sin límite · número = tope solo de este CDA (ej. 5120 = 5&nbsp;GB).
+                        No afecta a los demás CDA.
+                      </p>
+                      <div className="flex flex-col sm:flex-row sm:items-end gap-3">
+                        <label className="flex-1 min-w-0 space-y-1">
+                          <span className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
+                            Cuota (MB)
+                          </span>
+                          <input
+                            type="number"
+                            min={0}
+                            step={1}
+                            value={tenantCoreDocumentosQuotaMb}
+                            onChange={(e) => {
+                              setTenantDocumentosQuotaError('');
+                              setTenantCoreDocumentosQuotaMb(e.target.value);
+                            }}
+                            placeholder="Default global"
+                            className="input-corporate"
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          className="btn-corporate-primary px-4 shrink-0 disabled:opacity-60"
+                          disabled={tenantDocumentosQuotaMutation.isLoading}
+                          onClick={() => tenantDocumentosQuotaMutation.mutate()}
+                        >
+                          {tenantDocumentosQuotaMutation.isLoading ? 'Guardando...' : 'Guardar cuota'}
+                        </button>
+                      </div>
+                      {tenantDocumentosQuotaError && (
+                        <p className="text-xs text-red-600">{tenantDocumentosQuotaError}</p>
+                      )}
                     </div>
                   )}
                 </div>

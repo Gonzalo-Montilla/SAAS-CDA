@@ -120,13 +120,14 @@ function categoriaFolderKey(categoria: string | null | undefined): string {
   return c.toLocaleLowerCase('es-CO');
 }
 
-function validarArchivoDocumento(file: File): string | null {
+function validarArchivoDocumento(file: File, maxBytes: number = MAX_DOCUMENTO_BYTES): string | null {
   const ext = extensionDeNombre(file.name);
   if (!ext || !EXTENSIONES_DOCUMENTO_PERMITIDAS.has(ext)) {
     return 'Tipo de archivo no permitido. Use PDF, Office, imágenes o texto.';
   }
-  if (file.size > MAX_DOCUMENTO_BYTES) {
-    return 'El archivo supera el límite de 25 MB.';
+  if (file.size > maxBytes) {
+    const mb = Math.max(1, Math.round(maxBytes / (1024 * 1024)));
+    return `El archivo supera el límite de ${mb} MB.`;
   }
   return null;
 }
@@ -279,6 +280,14 @@ export default function Documentos() {
     queryFn: () => documentosApi.listarCategorias(),
   });
 
+  const storageQuery = useQuery({
+    queryKey: ['tenant-documentos-almacenamiento'],
+    queryFn: () => documentosApi.usoAlmacenamiento(),
+    staleTime: 60_000,
+  });
+
+  const maxDocumentoBytes = storageQuery.data?.max_file_bytes ?? MAX_DOCUMENTO_BYTES;
+
   const listQuery = useQuery({
     queryKey: ['tenant-documentos', listFilters],
     queryFn: () => documentosApi.listar(listFilters),
@@ -367,6 +376,7 @@ export default function Documentos() {
     void queryClient.invalidateQueries({ queryKey: ['tenant-documentos-categorias'] });
     void queryClient.invalidateQueries({ queryKey: ['tenant-documentos-versiones'] });
     void queryClient.invalidateQueries({ queryKey: ['tenant-documentos-auditoria'] });
+    void queryClient.invalidateQueries({ queryKey: ['tenant-documentos-almacenamiento'] });
   };
 
   const uploadMutation = useMutation({
@@ -658,7 +668,7 @@ export default function Documentos() {
 
   const asignarArchivoSeleccionado = (file: File | undefined, origen: 'principal' | 'nv') => {
     if (!file) return;
-    const err = validarArchivoDocumento(file);
+    const err = validarArchivoDocumento(file, maxDocumentoBytes);
     if (err) {
       setFeedback({ type: 'error', message: err });
       return;
@@ -853,6 +863,59 @@ export default function Documentos() {
           </label>
         </section>
 
+        {storageQuery.data && (
+          <section
+            className="rounded-xl border border-slate-200/80 bg-white px-4 py-3 shadow-sm"
+            aria-label="Uso de almacenamiento documental"
+          >
+            <div className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
+              <p className="font-medium text-slate-800">
+                Almacenamiento:{' '}
+                <span className="tabular-nums">{formatBytes(storageQuery.data.used_bytes)}</span>
+                {storageQuery.data.quota_bytes != null ? (
+                  <>
+                    {' '}
+                    de <span className="tabular-nums">{formatBytes(storageQuery.data.quota_bytes)}</span>
+                  </>
+                ) : (
+                  <span className="text-slate-500 font-normal"> (sin cuota fija)</span>
+                )}
+              </p>
+              <p className="text-xs text-slate-500">
+                {storageQuery.data.documentos_count} archivo
+                {storageQuery.data.documentos_count === 1 ? '' : 's'} · máx.{' '}
+                {formatBytes(storageQuery.data.max_file_bytes)} por archivo
+                {storageQuery.data.quota_source === 'tenant'
+                  ? ' · cuota personalizada'
+                  : storageQuery.data.quota_source === 'default'
+                    ? ' · cuota estándar'
+                    : storageQuery.data.quota_source === 'unlimited'
+                      ? ' · sin tope'
+                      : ''}
+              </p>
+            </div>
+            {storageQuery.data.quota_bytes != null && storageQuery.data.used_pct != null && (
+              <div className="mt-2 h-2 rounded-full bg-slate-100 overflow-hidden">
+                <div
+                  className={`h-full rounded-full transition-all ${
+                    storageQuery.data.used_pct >= 95
+                      ? 'bg-red-500'
+                      : storageQuery.data.used_pct >= 80
+                        ? 'bg-amber-500'
+                        : 'bg-emerald-600'
+                  }`}
+                  style={{ width: `${Math.min(100, storageQuery.data.used_pct)}%` }}
+                />
+              </div>
+            )}
+            {storageQuery.data.quota_bytes != null && (storageQuery.data.used_pct ?? 0) >= 95 && (
+              <p className="mt-2 text-xs text-red-700">
+                Cuota casi llena: elimine versiones antiguas o solicite ampliar el espacio.
+              </p>
+            )}
+          </section>
+        )}
+
         <section
           id="documentos-seccion-subida"
           className="rounded-2xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/50 shadow-md shadow-slate-200/40 scroll-mt-4 overflow-hidden ring-1 ring-slate-100"
@@ -953,7 +1016,7 @@ export default function Documentos() {
                   Arrastre aquí o haga clic para elegir
                 </p>
                 <p className="text-xs text-slate-500 mt-2 max-w-md mx-auto leading-relaxed">
-                  PDF, Office, imágenes o texto · máx. 25 MB · no se envía hasta pulsar «Subir documento»
+                  PDF, Office, imágenes o texto · máx. {formatBytes(maxDocumentoBytes)} · no se envía hasta pulsar «Subir documento»
                 </p>
                 <p className="text-[11px] text-slate-400 mt-3 max-w-lg mx-auto">
                   Para reemplazar un documento ya cargado use «Más acciones → Subir nueva versión» en la tabla.

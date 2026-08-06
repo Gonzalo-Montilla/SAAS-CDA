@@ -8,11 +8,13 @@ from uuid import UUID
 from app.core.config import settings
 
 # Motor de base de datos
+# Pool por proceso. Con uvicorn --workers 2: ~30 conexiones pico (5+10)*2.
+# No subir pool_size sin revisar max_connections de PostgreSQL.
 engine = create_engine(
     settings.DATABASE_URL,
     pool_pre_ping=True,
-    pool_size=10,
-    max_overflow=20
+    pool_size=5,
+    max_overflow=10,
 )
 
 # Sesión
@@ -92,6 +94,7 @@ def ensure_tenant_baseline_schema(db):
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS nomina_enabled BOOLEAN"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS sarlaft_enabled BOOLEAN"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS sarlaft_mode VARCHAR(20)"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS documentos_quota_mb INTEGER"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS nit_cda VARCHAR(30)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS correo_electronico VARCHAR(255)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS nombre_representante VARCHAR(200)"))

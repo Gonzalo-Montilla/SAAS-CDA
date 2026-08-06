@@ -43,6 +43,8 @@ class Tenant(Base):
     sarlaft_enabled = Column(Boolean, nullable=False, default=False)
     exogena_enabled = Column(Boolean, nullable=False, default=False)
     sarlaft_mode = Column(String(20), nullable=False, default="manual")
+    # Cuota módulo Documentos (MB). NULL = default global; 0 = ilimitado; >0 = tope de este CDA.
+    documentos_quota_mb = Column(Integer, nullable=True)
 
     # Facturación electrónica (Factus / DIAN): matriz / por defecto del CDA
     factus_municipality_id = Column(Integer, nullable=True)

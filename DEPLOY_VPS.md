@@ -243,13 +243,15 @@ Debe responder JSON con `"status":"ok"`. Luego `Ctrl+C` en la primera terminal p
 
 ## 11. Servicio systemd (arranque automático)
 
-Crea el unit (cambia rutas y puerto si aplica):
+Usa el unit de referencia del repo ([deploy/cdasoft-backend.service](deploy/cdasoft-backend.service)): **2 workers** de uvicorn para que un request lento (PDF, SMTP, JSONB) no bloquee toda la API.
 
 ```bash
+sudo cp /var/www/cdasoft/repo/deploy/cdasoft-backend.service /etc/systemd/system/cdasoft-backend.service
+# O, si aún no tienes el archivo en el repo, crea el unit a mano:
 sudo nano /etc/systemd/system/cdasoft-backend.service
 ```
 
-Contenido:
+Contenido (debe coincidir con `deploy/cdasoft-backend.service`):
 
 ```ini
 [Unit]
@@ -262,7 +264,9 @@ User=www-data
 Group=www-data
 WorkingDirectory=/var/www/cdasoft/repo/backend
 EnvironmentFile=/var/www/cdasoft/repo/backend/.env
-ExecStart=/var/www/cdasoft/repo/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8010 --proxy-headers
+# 2 workers + pool_size=5 / max_overflow=10 por proceso (~30 conexiones pico).
+# init_db() corre en cada worker (idempotente); el restart puede tardar unos segundos más.
+ExecStart=/var/www/cdasoft/repo/backend/venv/bin/uvicorn app.main:app --host 127.0.0.1 --port 8010 --proxy-headers --workers 2
 Restart=always
 RestartSec=5
 
@@ -286,13 +290,16 @@ sudo chown -R www-data:www-data /var/www/cdasoft/repo/backend/private_uploads
 
 Si en `.env` usas otras rutas absolutas para `TENANT_LOGO_UPLOAD_DIR` o `DOCUMENTOS_STORAGE_DIR`, crea esos directorios y añade las mismas rutas en `ReadWritePaths=` del unit (systemd restringe escritura fuera de lo listado en algunas configuraciones).
 
-Activa el servicio:
+Activa / actualiza el servicio:
 
 ```bash
 sudo systemctl daemon-reload
 sudo systemctl enable cdasoft-backend
-sudo systemctl start cdasoft-backend
+sudo systemctl restart cdasoft-backend
 sudo systemctl status cdasoft-backend
+# Debe haber ~2 procesos uvicorn (master + workers):
+ps aux | grep '[u]vicorn app.main'
+curl -s http://127.0.0.1:8010/health
 ```
 
 Si falla: `sudo journalctl -u cdasoft-backend -n 80 --no-pager`
@@ -431,25 +438,55 @@ Con el bloque `location = /health` anterior, ese path llega al backend. (La API 
 
 ---
 
-## 14. Cron: automatizaciones (recordatorios, encuestas, etc.)
+## 14. Cron: automatizaciones, alerta health y backups
 
 Desde la raíz del repo en el servidor (donde está `run_saas_automation.sh`):
 
 ```bash
 crontab -e
+mkdir -p /var/www/cdasoft/repo/logs
+chmod +x /var/www/cdasoft/repo/scripts/*.sh /var/www/cdasoft/repo/backup_postgres_cdasoft.sh
 ```
 
-Línea ejemplo (ajusta la ruta):
+Líneas ejemplo (ajusta rutas):
 
 ```cron
+# Automatizaciones SaaS (recordatorios, encuestas, etc.)
 */10 * * * * cd /var/www/cdasoft/repo && /bin/bash ./run_saas_automation.sh >> /var/www/cdasoft/repo/logs/saas_automation.log 2>&1
+
+# Alerta health cada 5 min (exit≠0 → logs/vps_alerts.log; opcional ALERT_WEBHOOK_URL)
+*/5 * * * * /var/www/cdasoft/repo/scripts/vps_alert_cron.sh >> /var/www/cdasoft/repo/logs/vps_alert_cron.log 2>&1
+
+# Backup PostgreSQL diario 03:15 UTC (retención 14 días en el script)
+15 3 * * * /var/www/cdasoft/repo/backup_postgres_cdasoft.sh >> /var/www/cdasoft/repo/logs/pg_backup_cron.log 2>&1
+
+# Opcional: tar de uploads (documentos + logos) semanal
+0 4 * * 0 tar -czf /var/backups/cdasoft/uploads_$(date -u +\%Y\%m\%d).tar.gz -C /var/www/cdasoft/repo/backend private_uploads uploads >> /var/www/cdasoft/repo/logs/uploads_backup.log 2>&1
 ```
 
-Crea la carpeta de logs si no existe:
+Webhook opcional (mismo crontab, arriba de las líneas):
+
+```cron
+ALERT_WEBHOOK_URL=https://hooks.example.com/...
+```
+
+Prueba manual:
 
 ```bash
-mkdir -p /var/www/cdasoft/repo/logs
+./scripts/vps_health_check.sh; echo exit=$?
+./scripts/vps_alert_cron.sh
 ```
+
+Restore / smoke test de un dump: ver [scripts/restore_postgres_cdasoft.md](scripts/restore_postgres_cdasoft.md).
+
+---
+
+## 14b. Backups PostgreSQL (imprescindible)
+
+- Script: [`backup_postgres_cdasoft.sh`](backup_postgres_cdasoft.sh) → `/var/backups/cdasoft/cdasoft_*.sql.gz`
+- Retención: `RETENTION_DAYS=14` por defecto (override con env)
+- Procedimiento restore a DB temporal: [scripts/restore_postgres_cdasoft.md](scripts/restore_postgres_cdasoft.md)
+- Copia los `.sql.gz` (y tars de uploads) **fuera del VPS** cuando puedas (otro disco / Object Storage)
 
 ---
 
@@ -464,10 +501,41 @@ No hagas deploy si falla alguno de estos puntos:
 - Pull en VPS con `--ff-only` (evita merges inesperados durante deploy).
 - Prechecks backend (`py_compile` + `import-ok`) pasan antes de reiniciar servicio.
 - Existe tag estable de referencia para rollback rápido (ejemplo: `prod-stable-YYYY-MM-DD`).
+- Frontend: **`dist_new/index.html` en la raíz** antes del swap (nunca `dist_new/dist/` → 404).
 
-### 15.2 Flujo recomendado de despliegue
+### 15.2 Flujo recomendado (camino feliz)
 
-En local (Windows/PC):
+**Opción A — scripts (preferida)**
+
+En local (Windows), desde la raíz del repo:
+
+```powershell
+.\deploy.ps1
+```
+
+Ese script: build con `VITE_API_URL=https://cdasoft.com.co/api/v1`, valida assets, y te guía para:
+
+1. En VPS: `git pull --ff-only` + `./scripts/deploy_on_vps.sh` (restart backend + health).
+2. Subir **contenido** de `frontend/dist/*` a `frontend/dist_new/` (carpeta vacía).
+3. Fail-fast si falta `dist_new/index.html`; luego swap atómico (`--frontend-swap-only` o el mismo script si detecta `dist_new`).
+
+En VPS, solo backend tras un `git pull` ya hecho:
+
+```bash
+cd /var/www/cdasoft/repo
+chmod +x scripts/deploy_on_vps.sh
+./scripts/deploy_on_vps.sh --backend-only
+```
+
+Pull + backend + swap si hay `dist_new` válido:
+
+```bash
+./scripts/deploy_on_vps.sh --pull
+```
+
+**Opción B — pasos manuales**
+
+En local:
 
 ```bash
 cd C:\Proyectos\SAAS-CDA
@@ -482,53 +550,36 @@ Build frontend con URL final:
 
 ```bash
 cd frontend
-# CDASOFT PROD: usar siempre el dominio canónico
 # PowerShell: $env:VITE_API_URL="https://cdasoft.com.co/api/v1"
 npm run build
 ```
 
-> Si por operación excepcional compilas en el VPS (y no en local), primero exporta el canónico en esa sesión:
->
-> ```bash
-> cd /var/www/cdasoft/repo/frontend
-> export VITE_API_URL="https://cdasoft.com.co/api/v1"
-> npm run build
-> ```
->
-> Nunca ejecutar `npm run build` sin fijar `VITE_API_URL` en producción; puede incrustar `localhost` y provocar `Network Error` en login.
+> Si por operación excepcional compilas en el VPS, exporta antes `VITE_API_URL=https://cdasoft.com.co/api/v1`. Nunca `npm run build` sin fijar esa variable en producción.
 
-Verifica antes de subir que el build quedó con la URL correcta:
+Verifica el build:
 
 ```bash
 cd ..
 grep -R -n "https://www\.cdasoft\.com/api/v1" frontend/dist/assets && echo "ERROR: build con URL no canónica" || echo "OK: build canónico"
 grep -R -n "https://cdasoft\.com\.co/api/v1" frontend/dist/assets | head -n 5
 grep -R -n "localhost:8000\|127\.0\.0\.1:8000\|http://127\.0\.0\.1" frontend/dist/assets && echo "ERROR: build apunta a localhost" || echo "OK: build sin localhost"
+test -f frontend/dist/index.html || echo "ERROR: falta index.html"
 ```
 
-Si aparece algún `ERROR` en estos checks, **no** continúes el deploy.
+Si aparece algún `ERROR`, **no** continúes.
 
-Subir solo `dist` (o preferiblemente `dist_new` para swap atómico):
-
-```bash
-# ejemplo con rsync desde Git Bash / WSCP / scp
-rsync -avz --delete ./frontend/dist/ USUARIO@IP:/var/www/cdasoft/repo/frontend/dist/
-```
-
-Alternativa recomendada para minimizar riesgo en horario operativo:
+Subir a `dist_new` (contenido, no la carpeta `dist`):
 
 ```bash
-# Subir a carpeta temporal
+# VPS: carpeta vacía
+ssh USUARIO@IP 'rm -rf /var/www/cdasoft/repo/frontend/dist_new && mkdir -p /var/www/cdasoft/repo/frontend/dist_new'
+
+# Local — rsync (preferido) o scp con /*
 rsync -avz --delete ./frontend/dist/ USUARIO@IP:/var/www/cdasoft/repo/frontend/dist_new/
-
-# En VPS: swap atómico + rollback rápido
-cd /var/www/cdasoft/repo/frontend
-TS=$(date +%F-%H%M)
-sudo mv dist "dist.prev-$TS"
-sudo mv dist_new dist
-sudo chown -R www-data:www-data dist
-sudo nginx -t && sudo systemctl reload nginx
+# scp -r ./frontend/dist/* USUARIO@IP:/var/www/cdasoft/repo/frontend/dist_new/
 ```
+
+**Nunca** `scp -r frontend/dist` sin `/*`: crea `dist_new/dist/` y el sitio queda en 404.
 
 En VPS:
 
@@ -536,12 +587,30 @@ En VPS:
 cd /var/www/cdasoft/repo
 git status --porcelain
 git pull --ff-only origin main
-cd backend
-sudo -u www-data ./venv/bin/python -m py_compile app/api/v1/endpoints/vehiculos.py app/api/v1/endpoints/exogena.py app/db/database.py app/models/factus.py app/models/exogena.py
+./scripts/deploy_on_vps.sh
+# Fail-fast + swap si dist_new/index.html está en la raíz
+```
+
+Equivalente manual backend:
+
+```bash
+cd /var/www/cdasoft/repo/backend
+sudo -u www-data ./venv/bin/python -m py_compile app/main.py app/db/database.py
 sudo -u www-data ./venv/bin/python -c "import app.main; print('import-ok')"
 sudo systemctl restart cdasoft-backend
 curl -s http://127.0.0.1:8010/health
-sudo chown -R www-data:www-data /var/www/cdasoft/repo/frontend/dist
+```
+
+Swap manual frontend:
+
+```bash
+cd /var/www/cdasoft/repo/frontend
+test -f dist_new/index.html || { echo "FALLO: falta dist_new/index.html"; exit 1; }
+test ! -f dist_new/dist/index.html || { echo "FALLO: dist anidado"; exit 1; }
+TS=$(date +%F-%H%M)
+sudo mv dist "dist.prev-$TS"
+sudo mv dist_new dist
+sudo chown -R www-data:www-data dist
 sudo nginx -t && sudo systemctl reload nginx
 ```
 
@@ -567,7 +636,13 @@ sudo systemctl restart cdasoft-backend
 curl -s http://127.0.0.1:8010/health
 ```
 
+Frontend: si quedó `dist.prev-YYYY-MM-DD-HHMM`, restaura con `sudo mv dist dist.bad && sudo mv dist.prev-... dist` y `nginx reload`.
+
 Cuando estabilices, crea la rama/commit correcto para volver a `main` con trazabilidad.
+
+### 15.5 Ops: no JSONB pesado en listados
+
+En endpoints de **lista**, no selecciones columnas JSONB grandes (p. ej. `recepcion_formato_extra_json` con firmas). Usa SQL explícito / `load_only` / `defer`, como en `GET /vehiculos/pendientes`. Detalle por id sí puede cargar el JSON completo.
 
 ---
 
@@ -589,7 +664,9 @@ Cuando estabilices, crea la rama/commit correcto para volver a `main` con trazab
 - [ ] Contraseñas fuertes (DB, owner SaaS, JWT `SECRET_KEY`).
 - [ ] Certbot / HTTPS.
 - [ ] Cron de automatización.
-- [ ] Backups de PostgreSQL (fuera del alcance de esta guía, imprescindible en producción).
+- [ ] Unit systemd con **`--workers 2`** (`deploy/cdasoft-backend.service`).
+- [ ] Cron de alerta health (`scripts/vps_alert_cron.sh`).
+- [ ] Backups de PostgreSQL (`backup_postgres_cdasoft.sh` + retención) y **probar restore** a DB temporal ([scripts/restore_postgres_cdasoft.md](scripts/restore_postgres_cdasoft.md)).
 - [ ] Backup del disco de **`private_uploads/documentos`** (y logos) si usan el módulo documental.
 
 Si me indicas **si usarás un solo dominio con `/api/` o dos subdominios**, y el **sistema del VPS** (Ubuntu 22.04, etc.), puedes pegar aquí tu `server_name` y rutas y te devuelvo los bloques Nginx y el valor exacto de `VITE_API_URL` sin ambigüedad.

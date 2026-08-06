@@ -11,7 +11,7 @@ from io import BytesIO
 from fastapi import APIRouter, Depends, HTTPException, status, Request, UploadFile, File, Query
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy.orm import Session, load_only
+from sqlalchemy.orm import Session, load_only, defer
 from sqlalchemy import and_, func, or_, text
 from sqlalchemy.exc import OperationalError
 from datetime import datetime, date, time as dt_time, timezone, timedelta
@@ -412,7 +412,8 @@ def _build_vehiculo_pendiente_caja_response(
         estado=estado,
         reinspeccion_intento=vehiculo.reinspeccion_intento,
         reinspeccion_exenta=bool(vehiculo.reinspeccion_exenta) if vehiculo.reinspeccion_exenta is not None else None,
-        observaciones=vehiculo.observaciones,
+        # Cola de caja: nunca serializar observaciones (pueden traer fotos base64).
+        observaciones=None,
         kilometraje=km,
         fecha_registro=vehiculo.fecha_registro,
         antiguedad=vehiculo.antiguedad,
@@ -453,7 +454,8 @@ def _build_vehiculo_pendiente_caja_from_row(row: Any) -> VehiculoPendienteCajaRe
         estado=estado,
         reinspeccion_intento=row.reinspeccion_intento,
         reinspeccion_exenta=bool(row.reinspeccion_exenta) if row.reinspeccion_exenta is not None else None,
-        observaciones=row.observaciones,
+        # No leer observaciones aquí: en recepción suelen ir fotos base64 y hinchan la respuesta.
+        observaciones=None,
         kilometraje=km,
         fecha_registro=row.fecha_registro,
         antiguedad=(datetime.now().year - ano) if ano else None,
@@ -2672,8 +2674,8 @@ def listar_pendientes(
     """
     Listar vehículos pendientes de pago (para Caja).
 
-    SQL explícito: NUNCA selecciona recepcion_formato_extra_json (firmas TOAST).
-    El kilometraje sale solo de la columna liviana `kilometraje`.
+    SQL explícito: NUNCA selecciona recepcion_formato_extra_json (firmas TOAST)
+    ni observaciones (pueden incluir fotos base64). kilometraje = columna liviana.
     """
     rows = db.execute(
         text(
@@ -2705,7 +2707,6 @@ def listar_pendientes(
               estado::text AS estado,
               reinspeccion_intento,
               reinspeccion_exenta,
-              observaciones,
               kilometraje,
               fecha_registro
             FROM vehiculos_proceso
@@ -4679,7 +4680,10 @@ def listar_vehiculos(
     estado: str = None,
     fecha_desde: str = None,
     fecha_hasta: str = None,
-    include_formato_extra: bool = Query(True, description="Si false, omite JSON pesado de recepción en el listado"),
+    include_formato_extra: bool = Query(
+        False,
+        description="Si true, incluye JSON pesado de recepción (firmas). Default false: no detoast.",
+    ),
     include_observaciones: bool = Query(True, description="Si false, omite observaciones en el listado"),
     skip: int = 0,
     limit: int = 20,
@@ -4705,6 +4709,10 @@ def listar_vehiculos(
         current_user.tenant_id,
         active_sucursal_id,
     )
+
+    # Por defecto no cargar firmas TOAST en listados (DEPLOY_VPS.md §15.5)
+    if not include_formato_extra:
+        query = query.options(defer(VehiculoProceso.recepcion_formato_extra_json))
 
     # Filtro de búsqueda (placa o cédula)
     if buscar:
@@ -4744,18 +4752,41 @@ def listar_vehiculos(
     # Paginación
     vehiculos = query.offset(skip).limit(limit).all()
 
+    tiene_map: dict = {}
+    if not include_formato_extra and vehiculos:
+        from sqlalchemy import bindparam
+        from sqlalchemy.orm.attributes import set_committed_value
+
+        # IS NOT NULL no detoast el JSONB completo; solo marca presencia
+        ids = [v.id for v in vehiculos]
+        stmt = text(
+            """
+            SELECT id, (recepcion_formato_extra_json IS NOT NULL) AS tiene
+            FROM vehiculos_proceso
+            WHERE id IN :ids
+            """
+        ).bindparams(bindparam("ids", expanding=True))
+        rows = db.execute(stmt, {"ids": ids}).fetchall()
+        tiene_map = {r[0]: bool(r[1]) for r in rows}
+        # Evitar que model_validate dispare lazy-load del deferred JSONB
+        for v in vehiculos:
+            set_committed_value(v, "recepcion_formato_extra_json", None)
+
     out: list[VehiculoResponse] = []
     for vehiculo in vehiculos:
-        tiene_formato = bool(
-            isinstance(vehiculo.recepcion_formato_extra_json, dict)
-            and len(vehiculo.recepcion_formato_extra_json) > 0
-        )
+        if include_formato_extra:
+            tiene_formato = bool(
+                isinstance(vehiculo.recepcion_formato_extra_json, dict)
+                and len(vehiculo.recepcion_formato_extra_json) > 0
+            )
+            extra_json = vehiculo.recepcion_formato_extra_json
+        else:
+            tiene_formato = bool(tiene_map.get(vehiculo.id, False))
+            extra_json = None
         row = VehiculoResponse.model_validate(vehiculo).model_copy(
             update={
                 "tiene_recepcion_formato_extra": tiene_formato,
-                "recepcion_formato_extra_json": (
-                    vehiculo.recepcion_formato_extra_json if include_formato_extra else None
-                ),
+                "recepcion_formato_extra_json": extra_json,
                 "observaciones": vehiculo.observaciones if include_observaciones else None,
             }
         )

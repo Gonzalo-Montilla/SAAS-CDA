@@ -79,13 +79,30 @@ def on_startup():
 
 @app.get("/health", tags=["health"])
 def health_check():
-    """Health check endpoint"""
-    return {
+    """
+    Health check: proceso + ping ligero a PostgreSQL.
+    Si la DB no responde → status degraded y HTTP 503 (útil para cron/alertas).
+    """
+    from fastapi.responses import JSONResponse
+    from sqlalchemy import text
+    from app.db.database import engine
+
+    payload = {
         "status": "ok",
         "app": settings.APP_NAME,
         "version": settings.APP_VERSION,
-        "environment": settings.ENVIRONMENT
+        "environment": settings.ENVIRONMENT,
+        "database": "ok",
     }
+    try:
+        with engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception as exc:
+        payload["status"] = "degraded"
+        payload["database"] = "error"
+        payload["database_error"] = str(exc.__class__.__name__)
+        return JSONResponse(status_code=503, content=payload)
+    return payload
 
 
 def _repo_root() -> Path:

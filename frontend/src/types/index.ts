@@ -118,6 +118,8 @@ export interface SaaSTenantSummary {
   exogena_enabled: boolean;
   sarlaft_enabled: boolean;
   sarlaft_mode: 'manual' | 'api' | string;
+  /** null = default global; 0 = ilimitado; >0 = MB de este CDA */
+  documentos_quota_mb?: number | null;
   login_url: string;
 }
 

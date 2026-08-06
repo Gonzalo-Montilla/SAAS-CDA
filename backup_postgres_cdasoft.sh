@@ -49,15 +49,16 @@ fi
 
 stamp="$(date -u +"%Y%m%d_%H%M%SZ")"
 out="$BACKUP_DIR/cdasoft_${stamp}.sql.gz"
+RETENTION_DAYS="${RETENTION_DAYS:-14}"
 
 {
   echo "======================================================"
   echo "[BACKUP] $(date -u +"%Y-%m-%dT%H:%M:%SZ")"
   pg_dump "$DBURL" | gzip -9 > "$out"
   echo "[OK] $out ($(du -h "$out" | cut -f1))"
+  # Retención: borrar respaldos más antiguos que RETENTION_DAYS (default 14)
+  deleted="$(find "$BACKUP_DIR" -name 'cdasoft_*.sql.gz' -mtime +"$RETENTION_DAYS" -print -delete 2>/dev/null | wc -l | tr -d ' ')"
+  echo "[RETENTION] eliminados=${deleted:-0} (mtime +${RETENTION_DAYS}d en $BACKUP_DIR)"
 } >> "$LOG_DIR/pg_backup.log" 2>&1
 
 echo "[OK] Respaldo guardado: $out (detalle en $LOG_DIR/pg_backup.log)"
-
-# Opcional: borrar respaldos con más de 14 días (descomenta si lo quieres)
-# find "$BACKUP_DIR" -name 'cdasoft_*.sql.gz' -mtime +14 -delete

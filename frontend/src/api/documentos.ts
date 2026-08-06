@@ -101,9 +101,25 @@ function buildListParams(p: ListarDocumentosParams): Record<string, string | num
   return params;
 }
 
+export interface DocumentoStorageUsage {
+  used_bytes: number;
+  quota_bytes: number | null;
+  max_file_bytes: number;
+  used_pct: number | null;
+  documentos_count: number;
+  documentos_quota_mb?: number | null;
+  default_quota_mb?: number;
+  quota_source?: 'tenant' | 'default' | 'unlimited' | string;
+}
+
 export const documentosApi = {
   listarCategorias: async (): Promise<string[]> => {
     const response = await apiClient.get<string[]>('/documentos/categorias');
+    return response.data;
+  },
+
+  usoAlmacenamiento: async (): Promise<DocumentoStorageUsage> => {
+    const response = await apiClient.get<DocumentoStorageUsage>('/documentos/almacenamiento');
     return response.data;
   },
 
