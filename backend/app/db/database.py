@@ -2248,6 +2248,126 @@ def ensure_sarlaft_schema(db):
         )
 
 
+def ensure_egreso_factura_soporte_schema(db):
+    """Factura/soporte de compra adjunto a egresos de caja y tesorería."""
+    for table in ("movimientos_tesoreria", "movimientos_caja"):
+        db.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS factura_soporte_relpath VARCHAR(800)"))
+        db.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS factura_soporte_nombre VARCHAR(300)"))
+        db.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS factura_soporte_mime VARCHAR(120)"))
+        db.execute(text(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS factura_soporte_at TIMESTAMP"))
+
+
+def ensure_obligaciones_proveedor_schema(db):
+    """Tabla de obligaciones/facturas de compra por pagar (CxP formal gerencial)."""
+    bind = db.get_bind()
+    dialect = bind.dialect.name
+    if dialect == "sqlite":
+        db.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS obligaciones_proveedor (
+                    id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL,
+                    sucursal_id TEXT,
+                    proveedor_catalogo_id TEXT,
+                    proveedor_nombre VARCHAR(300) NOT NULL,
+                    proveedor_documento VARCHAR(80) NOT NULL,
+                    proveedor_tipo_documento VARCHAR(80),
+                    numero_documento VARCHAR(80) NOT NULL,
+                    fecha_emision DATE NOT NULL,
+                    fecha_vencimiento DATE,
+                    concepto TEXT NOT NULL,
+                    notas TEXT,
+                    valor_total NUMERIC(14,2) NOT NULL,
+                    saldo_pendiente NUMERIC(14,2) NOT NULL,
+                    estado VARCHAR(20) NOT NULL DEFAULT 'abierta',
+                    created_at DATETIME NOT NULL,
+                    updated_at DATETIME,
+                    created_by TEXT NOT NULL
+                )
+                """
+            )
+        )
+        db.execute(
+            text(
+                """
+                CREATE TABLE IF NOT EXISTS obligaciones_proveedor_pagos (
+                    id TEXT PRIMARY KEY,
+                    tenant_id TEXT NOT NULL,
+                    obligacion_id TEXT NOT NULL,
+                    monto NUMERIC(14,2) NOT NULL,
+                    fecha_pago DATE NOT NULL,
+                    notas TEXT,
+                    movimiento_tesoreria_id TEXT,
+                    created_at DATETIME NOT NULL,
+                    created_by TEXT NOT NULL
+                )
+                """
+            )
+        )
+        return
+    if dialect != "postgresql":
+        return
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS obligaciones_proveedor (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                sucursal_id UUID REFERENCES sucursales(id) ON DELETE SET NULL,
+                proveedor_catalogo_id UUID REFERENCES proveedores_catalogo(id) ON DELETE SET NULL,
+                proveedor_nombre VARCHAR(300) NOT NULL,
+                proveedor_documento VARCHAR(80) NOT NULL,
+                proveedor_tipo_documento VARCHAR(80),
+                numero_documento VARCHAR(80) NOT NULL,
+                fecha_emision DATE NOT NULL,
+                fecha_vencimiento DATE,
+                concepto TEXT NOT NULL,
+                notas TEXT,
+                valor_total NUMERIC(14,2) NOT NULL,
+                saldo_pendiente NUMERIC(14,2) NOT NULL,
+                estado VARCHAR(20) NOT NULL DEFAULT 'abierta',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMPTZ,
+                created_by UUID NOT NULL REFERENCES usuarios(id)
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_obligaciones_proveedor_tenant ON obligaciones_proveedor (tenant_id)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_obligaciones_proveedor_estado ON obligaciones_proveedor (estado)"
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS obligaciones_proveedor_pagos (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                obligacion_id UUID NOT NULL REFERENCES obligaciones_proveedor(id) ON DELETE CASCADE,
+                monto NUMERIC(14,2) NOT NULL,
+                fecha_pago DATE NOT NULL,
+                notas TEXT,
+                movimiento_tesoreria_id UUID REFERENCES movimientos_tesoreria(id) ON DELETE SET NULL,
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+                created_by UUID NOT NULL REFERENCES usuarios(id)
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_obligaciones_pagos_obligacion ON obligaciones_proveedor_pagos (obligacion_id)"
+        )
+    )
+
+
 def ensure_exogena_schema(db):
     """
     Esquema base de Exógena (Sprint 1).
@@ -2835,6 +2955,7 @@ def init_db():
     from app.models.documento_tenant import TenantDocumento  # noqa: F401 — register model
     from app.models.documento_auditoria import TenantDocumentoAuditoria  # noqa: F401 — register model
     from app.models.proveedor_catalogo import ProveedorCatalogo  # noqa: F401 — register model
+    from app.models.obligacion_proveedor import ObligacionProveedor, ObligacionProveedorPago  # noqa: F401
     from app.models.dse_retencion_motor import DseRetencionTasaConcepto, DseUvtPorAnio  # noqa: F401
     from app.models.runt_metrica import RuntConsultaMetrica  # noqa: F401
     from app.models.runt_cache import RuntConsultaCache  # noqa: F401
@@ -2908,6 +3029,8 @@ def init_db():
         ensure_iva_provision_schema(db)
         ensure_sarlaft_schema(db)
         ensure_exogena_schema(db)
+        ensure_obligaciones_proveedor_schema(db)
+        ensure_egreso_factura_soporte_schema(db)
         if nomina_available:
             ensure_nomina_schema(db)
         db.commit()

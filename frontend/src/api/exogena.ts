@@ -37,9 +37,28 @@ export interface ExogenaSaveConfigPayload {
   }>;
 }
 
+export interface ExogenaClonarConfigPayload {
+  anio_origen: string;
+  anio_destino: string;
+  reemplazar_destino?: boolean;
+}
+
+export interface ExogenaValidacionResumenItem {
+  id?: string;
+  codigo: string;
+  severidad: string;
+  mensaje: string;
+  formato?: string;
+  referencia_origen?: string | null;
+}
+
 export interface ExogenaValidarResponse {
+  anio?: string;
+  formatos?: string[];
+  total?: number;
   total_errors: number;
   total_warnings: number;
+  items?: ExogenaValidacionResumenItem[];
 }
 
 export interface ExogenaExportarPayload {
@@ -80,6 +99,7 @@ export interface ExogenaValidacionItem {
   codigo: string;
   severidad: string;
   mensaje: string;
+  referencia_origen?: string | null;
 }
 
 interface BlobDownload {
@@ -112,7 +132,12 @@ export const exogenaApi = {
   },
 
   saveConfig: async (payload: ExogenaSaveConfigPayload): Promise<ExogenaConfigResponse> => {
-    const response = await apiClient.post<ExogenaConfigResponse>('/exogena/config', payload);
+    const response = await apiClient.put<ExogenaConfigResponse>('/exogena/config', payload);
+    return response.data;
+  },
+
+  clonarConfig: async (payload: ExogenaClonarConfigPayload): Promise<ExogenaConfigResponse> => {
+    const response = await apiClient.post<ExogenaConfigResponse>('/exogena/config/clonar', payload);
     return response.data;
   },
 

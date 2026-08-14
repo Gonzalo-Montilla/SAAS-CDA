@@ -116,6 +116,8 @@ class MovimientoTesoreriaResponse(BaseModel):
     beneficiario_telefono: Optional[str] = None
     beneficiario_factus_municipality_id: Optional[int] = None
     proveedor_catalogo_id: Optional[UUID] = None
+    tiene_factura_soporte: bool = False
+    factura_soporte_nombre: Optional[str] = None
 
     anulado: bool = False
     motivo_anulacion: Optional[str] = None

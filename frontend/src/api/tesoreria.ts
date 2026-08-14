@@ -27,6 +27,8 @@ export interface MovimientoTesoreria {
   anulado?: boolean;
   motivo_anulacion?: string | null;
   fecha_anulacion?: string | null;
+  tiene_factura_soporte?: boolean;
+  factura_soporte_nombre?: string | null;
 }
 
 export interface ResumenTesoreria {
@@ -238,5 +240,22 @@ export const tesoreriaApi = {
     link.click();
     link.remove();
     window.URL.revokeObjectURL(url);
+  },
+
+  /** Adjunta factura de compra (PDF/imagen) al egreso ya registrado. */
+  adjuntarFacturaSoporte: async (
+    movimientoId: string,
+    file: File,
+    numeroFactura?: string,
+  ): Promise<MovimientoTesoreria> => {
+    const form = new FormData();
+    form.append('file', file);
+    if (numeroFactura?.trim()) form.append('numero_factura', numeroFactura.trim());
+    const response = await apiClient.post<MovimientoTesoreria>(
+      `/tesoreria/movimientos/${movimientoId}/factura-soporte`,
+      form,
+      { headers: { 'Content-Type': 'multipart/form-data' } },
+    );
+    return response.data;
   },
 };

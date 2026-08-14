@@ -86,8 +86,15 @@ export interface CxcClienteItem {
   tramites_pendientes: number;
   monto_pendiente_total: number;
   antiguedad_max_dias: number;
+  aging_tramo?: string;
   fecha_registro_mas_antigua?: string | null;
   placas: string[];
+}
+
+export interface CxcAgingBucket {
+  monto: number;
+  tramites: number;
+  clientes: number;
 }
 
 export interface CxcGeneralClienteResponse {
@@ -96,8 +103,60 @@ export interface CxcGeneralClienteResponse {
     total_clientes: number;
     total_tramites_pendientes: number;
     saldo_total_pendiente: number;
+    aging?: {
+      '0_30': CxcAgingBucket;
+      '31_60': CxcAgingBucket;
+      '61_90': CxcAgingBucket;
+      mas_90: CxcAgingBucket;
+    };
   };
   clientes: CxcClienteItem[];
+}
+
+export interface CxcTramiteDetalleItem {
+  vehiculo_id: string;
+  placa?: string | null;
+  fecha_registro?: string | null;
+  antiguedad_dias: number;
+  aging_tramo: string;
+  total_cobrado: number;
+  sucursal_nombre?: string | null;
+  tipo_vehiculo?: string | null;
+}
+
+export interface CxcClienteDetalleResponse {
+  fecha_corte: string;
+  cliente_nombre: string;
+  cliente_documento: string;
+  resumen: { tramites: number; saldo_pendiente: number };
+  tramites: CxcTramiteDetalleItem[];
+}
+
+export interface CierrePeriodoResumenResponse {
+  periodo: string;
+  fecha_corte: string;
+  checklist: Array<{
+    id: string;
+    label: string;
+    ok: boolean;
+    valor: number;
+    tab: string;
+    detalle: string;
+  }>;
+  conciliacion: {
+    ventas_cobradas: number;
+    gastos_caja: number;
+    gastos_tesoreria: number;
+    gastos_totales: number;
+    resultado_neto_estimado: number;
+  };
+  resumen: {
+    cxc_abierta: number;
+    obligaciones_saldo: number;
+    obligaciones_vencidas: number;
+    exogena_enabled: boolean;
+    mapeos_exogena: number;
+  };
 }
 
 export interface CxpProveedorItem {
@@ -328,6 +387,41 @@ export interface EstadoCambiosPatrimonioGerencialResponse {
   };
 }
 
+export interface GastoPeriodoItem {
+  id: string;
+  origen: 'caja' | 'tesoreria' | string;
+  fecha?: string | null;
+  tipo: string;
+  clasificacion: 'gasto' | 'devolucion' | string;
+  categoria?: string | null;
+  concepto: string;
+  beneficiario?: string | null;
+  documento?: string | null;
+  metodo_pago?: string | null;
+  monto: number;
+  sucursal_id?: string | null;
+  sucursal_nombre?: string | null;
+  numero_comprobante?: string | null;
+  tiene_factura_soporte?: boolean;
+  factura_soporte_nombre?: string | null;
+}
+
+export interface GastosPeriodoResponse {
+  periodo: string;
+  alcance: string;
+  notas: string[];
+  resumen: {
+    total_movimientos: number;
+    total_caja: number;
+    total_tesoreria: number;
+    total_gastos: number;
+    total_devoluciones: number;
+    total_egresado: number;
+    por_categoria: Record<string, number>;
+  };
+  items: GastoPeriodoItem[];
+}
+
 export interface FacturacionContingenciaItem {
   vehiculo_id: string;
   fecha_pago?: string | null;
@@ -357,6 +451,37 @@ export interface FacturacionContingenciaEmitResponse {
   cufe?: string | null;
   public_url?: string | null;
   emitted_at: string;
+}
+
+async function fetchFacturaSoporteGastoBlob(
+  origen: 'caja' | 'tesoreria' | string,
+  movimientoId: string,
+): Promise<{ blob: Blob; filename: string; mime: string }> {
+  const response = await apiClient.get(
+    `/reportes/gastos/${origen}/${movimientoId}/factura-soporte`,
+    { responseType: 'blob' },
+  );
+  const cd = String(response.headers['content-disposition'] || '');
+  const match = cd.match(/filename="?([^";]+)"?/i);
+  const filename = match?.[1] || `factura_soporte_${movimientoId}`;
+  const blob = response.data as Blob;
+  const headerMime = String(response.headers['content-type'] || '');
+  const mime = (blob.type || headerMime || 'application/octet-stream').split(';')[0].trim();
+
+  // Si el backend devolvió JSON de error con status 200 raro, o axios entregó error como blob
+  if (mime.includes('json') || mime.includes('text/html')) {
+    let detail = 'No se pudo obtener la factura adjunta.';
+    try {
+      const text = await blob.text();
+      const parsed = JSON.parse(text);
+      if (typeof parsed?.detail === 'string') detail = parsed.detail;
+    } catch {
+      /* ignore */
+    }
+    throw new Error(detail);
+  }
+
+  return { blob, filename, mime: mime || 'application/pdf' };
 }
 
 export const reportesApi = {
@@ -405,6 +530,45 @@ export const reportesApi = {
     const suffix = qp.toString();
     const response = await apiClient.get<CxcGeneralClienteResponse>(
       `/reportes/cxc-general-cliente${suffix ? `?${suffix}` : ''}`,
+    );
+    return response.data;
+  },
+
+  getCxcClienteDetalle: async (params: {
+    clienteDocumento: string;
+    clienteNombre?: string;
+    fechaCorte?: string;
+    consolidarTodas?: boolean;
+    sucursalId?: string;
+    limit?: number;
+  }): Promise<CxcClienteDetalleResponse> => {
+    const qp = new URLSearchParams();
+    qp.set('cliente_documento', params.clienteDocumento);
+    if (params.clienteNombre) qp.set('cliente_nombre', params.clienteNombre);
+    if (params.fechaCorte) qp.set('fecha_corte', params.fechaCorte);
+    if (params.consolidarTodas) qp.set('consolidar_todas', 'true');
+    if (params.sucursalId) qp.set('sucursal_id', params.sucursalId);
+    if (params.limit) qp.set('limit', String(params.limit));
+    const response = await apiClient.get<CxcClienteDetalleResponse>(
+      `/reportes/cxc-cliente-detalle?${qp.toString()}`,
+    );
+    return response.data;
+  },
+
+  getCierrePeriodoResumen: async (params?: {
+    fechaInicio?: string;
+    fechaFin?: string;
+    consolidarTodas?: boolean;
+    sucursalId?: string;
+  }): Promise<CierrePeriodoResumenResponse> => {
+    const qp = new URLSearchParams();
+    if (params?.fechaInicio) qp.set('fecha_inicio', params.fechaInicio);
+    if (params?.fechaFin) qp.set('fecha_fin', params.fechaFin);
+    if (params?.consolidarTodas) qp.set('consolidar_todas', 'true');
+    if (params?.sucursalId) qp.set('sucursal_id', params.sucursalId);
+    const suffix = qp.toString();
+    const response = await apiClient.get<CierrePeriodoResumenResponse>(
+      `/reportes/cierre-periodo-resumen${suffix ? `?${suffix}` : ''}`,
     );
     return response.data;
   },
@@ -561,6 +725,49 @@ export const reportesApi = {
       `/reportes/estado-flujo-efectivo-gerencial${suffix ? `?${suffix}` : ''}`,
     );
     return response.data;
+  },
+
+  getGastosPeriodo: async (params?: {
+    fecha?: string;
+    fechaInicio?: string;
+    fechaFin?: string;
+    origen?: 'caja' | 'tesoreria';
+    incluirDevoluciones?: boolean;
+    consolidarTodas?: boolean;
+    sucursalId?: string;
+    limit?: number;
+  }): Promise<GastosPeriodoResponse> => {
+    const qp = new URLSearchParams();
+    if (params?.fecha) qp.set('fecha', params.fecha);
+    if (params?.fechaInicio) qp.set('fecha_inicio', params.fechaInicio);
+    if (params?.fechaFin) qp.set('fecha_fin', params.fechaFin);
+    if (params?.origen) qp.set('origen', params.origen);
+    if (params?.incluirDevoluciones === false) qp.set('incluir_devoluciones', 'false');
+    if (params?.consolidarTodas) qp.set('consolidar_todas', 'true');
+    if (params?.sucursalId) qp.set('sucursal_id', params.sucursalId);
+    if (params?.limit) qp.set('limit', String(params.limit));
+    const suffix = qp.toString();
+    const response = await apiClient.get<GastosPeriodoResponse>(
+      `/reportes/gastos-periodo${suffix ? `?${suffix}` : ''}`,
+    );
+    return response.data;
+  },
+
+  obtenerFacturaSoporteGastoBlob: fetchFacturaSoporteGastoBlob,
+
+  descargarFacturaSoporteGasto: async (
+    origen: 'caja' | 'tesoreria' | string,
+    movimientoId: string,
+  ): Promise<void> => {
+    const { blob, filename } = await fetchFacturaSoporteGastoBlob(origen, movimientoId);
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', filename);
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
   },
 
   getEstadoCambiosPatrimonioGerencial: async (params?: {

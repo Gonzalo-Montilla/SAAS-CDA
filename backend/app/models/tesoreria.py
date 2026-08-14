@@ -86,6 +86,11 @@ class MovimientoTesoreria(Base):
     origen_caja_id = Column(UUID(as_uuid=True), ForeignKey("cajas.id"), nullable=True)  # Si viene de una caja diaria
     comprobante_url = Column(String(500), nullable=True)  # URL a factura/comprobante escaneado
     numero_comprobante = Column(String(50), nullable=True)  # Número de factura, cheque, etc.
+    # Factura de compra / soporte del egreso (PDF o imagen) — distinta del comprobante interno
+    factura_soporte_relpath = Column(String(800), nullable=True)
+    factura_soporte_nombre = Column(String(300), nullable=True)
+    factura_soporte_mime = Column(String(120), nullable=True)
+    factura_soporte_at = Column(DateTime, nullable=True)
     
     # Auditoría
     fecha_movimiento = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
@@ -106,6 +111,10 @@ class MovimientoTesoreria(Base):
     def __repr__(self):
         signo = "+" if self.monto >= 0 else "-"
         return f"<MovimientoTesoreria {self.tipo} {signo}${abs(self.monto)}>"
+
+    @property
+    def tiene_factura_soporte(self) -> bool:
+        return bool((self.factura_soporte_relpath or "").strip())
 
 
 class DesgloseEfectivoTesoreria(Base):

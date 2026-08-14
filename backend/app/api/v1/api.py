@@ -28,6 +28,7 @@ from app.api.v1.endpoints import (
     runt_metricas,
     sarlaft,
     exogena,
+    obligaciones,
 )
 
 api_router = APIRouter()
@@ -62,3 +63,4 @@ api_router.include_router(sarlaft.router, prefix="/sarlaft", tags=["sarlaft"])
 api_router.include_router(sarlaft.public_router, prefix="/sarlaft", tags=["sarlaft-public"])
 api_router.include_router(runt_metricas.router, prefix="/runt-metricas", tags=["runt-metricas"])
 api_router.include_router(exogena.router, prefix="/exogena", tags=["exogena"])
+api_router.include_router(obligaciones.router, prefix="/obligaciones", tags=["obligaciones"])

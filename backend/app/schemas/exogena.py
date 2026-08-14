@@ -37,6 +37,12 @@ class ExogenaConfigUpsertRequest(BaseModel):
     mapeos: list[ExogenaMapeoInput] = Field(default_factory=list)
 
 
+class ExogenaClonarConfigRequest(BaseModel):
+    anio_origen: str = Field(min_length=4, max_length=4)
+    anio_destino: str = Field(min_length=4, max_length=4)
+    reemplazar_destino: bool = False
+
+
 class ExogenaConfigResponse(BaseModel):
     anio: str
     uvt_anual: int

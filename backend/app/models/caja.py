@@ -122,6 +122,12 @@ class MovimientoCaja(Base):
         UUID(as_uuid=True), ForeignKey("proveedores_catalogo.id", ondelete="SET NULL"), nullable=True, index=True
     )
 
+    # Factura de compra / soporte del egreso (PDF o imagen)
+    factura_soporte_relpath = Column(String(800), nullable=True)
+    factura_soporte_nombre = Column(String(300), nullable=True)
+    factura_soporte_mime = Column(String(120), nullable=True)
+    factura_soporte_at = Column(DateTime, nullable=True)
+
     # Control especial para CrediSmart
     ingresa_efectivo = Column(Boolean, default=True, nullable=False)
     

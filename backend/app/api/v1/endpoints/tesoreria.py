@@ -1,8 +1,8 @@
 """
 Endpoints de Tesorería (Caja Fuerte)
 """
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Body, File, Form, UploadFile
+from fastapi.responses import StreamingResponse, FileResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, func, desc, or_
 from datetime import datetime, timedelta, date, timezone
@@ -36,6 +36,7 @@ from app.schemas.tesoreria import (
 from app.utils.comprobantes import generar_comprobante_egreso
 from app.utils.egreso_proveedor_dian import normalizar_y_validar_contacto_proveedor_documento_soporte
 from app.services.proveedor_catalogo import cargar_beneficiario_desde_proveedor_catalogo
+from app.services import egreso_factura_soporte as factura_soporte_svc
 from app.models.proveedor_catalogo import ProveedorCatalogo
 from app.services.dse_retencion_motor_calculo import (
     calcular_retencion_desde_parametros,
@@ -1109,4 +1110,86 @@ def obtener_categorias(
             {"value": "consignacion", "label": "Consignación"}
         ]
     }
+
+
+def _movimiento_tesoreria_tenant(
+    db: Session,
+    movimiento_id: UUID,
+    tenant_id: UUID,
+) -> MovimientoTesoreria:
+    mov = (
+        db.query(MovimientoTesoreria)
+        .filter(
+            MovimientoTesoreria.id == movimiento_id,
+            MovimientoTesoreria.tenant_id == tenant_id,
+        )
+        .first()
+    )
+    if not mov:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Movimiento no encontrado")
+    return mov
+
+
+@router.post(
+    "/movimientos/{movimiento_id}/factura-soporte",
+    response_model=MovimientoTesoreriaResponse,
+)
+async def adjuntar_factura_soporte_egreso(
+    movimiento_id: UUID,
+    file: UploadFile = File(...),
+    numero_factura: Optional[str] = Form(default=None),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_admin),
+):
+    """Adjunta la factura de compra (PDF/imagen) al egreso ya registrado."""
+    mov = _movimiento_tesoreria_tenant(db, movimiento_id, current_user.tenant_id)
+    if mov.anulado:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="El movimiento está anulado.")
+    if mov.tipo != TipoMovimientoTesoreria.EGRESO:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Solo se puede adjuntar factura de compra a egresos.",
+        )
+    try:
+        relpath, nombre, mime = await factura_soporte_svc.guardar_upload(
+            tenant_id=current_user.tenant_id,
+            origen="tesoreria",
+            movimiento_id=mov.id,
+            upload=file,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    factura_soporte_svc.eliminar_si_existe(mov.factura_soporte_relpath)
+    mov.factura_soporte_relpath = relpath
+    mov.factura_soporte_nombre = nombre
+    mov.factura_soporte_mime = mime
+    mov.factura_soporte_at = datetime.now(timezone.utc)
+    if numero_factura and numero_factura.strip():
+        mov.numero_comprobante = numero_factura.strip()[:50]
+    db.commit()
+    db.refresh(mov)
+    return mov
+
+
+@router.get("/movimientos/{movimiento_id}/factura-soporte")
+def descargar_factura_soporte_egreso(
+    movimiento_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """Contador/admin: descarga la factura de compra ligada al egreso (sin permiso de Tesorería operativa)."""
+    mov = _movimiento_tesoreria_tenant(db, movimiento_id, current_user.tenant_id)
+    path = factura_soporte_svc.abs_path(mov.factura_soporte_relpath)
+    if not path or not path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Este egreso no tiene factura de compra adjunta.",
+        )
+    filename = (mov.factura_soporte_nombre or path.name).replace('"', "")
+    return FileResponse(
+        path,
+        media_type=mov.factura_soporte_mime or "application/octet-stream",
+        filename=filename,
+    )
 

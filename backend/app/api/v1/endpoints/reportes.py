@@ -3,6 +3,7 @@ Endpoints de Reportes - Dashboard General y Consolidados
 """
 from collections import defaultdict
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session, joinedload, load_only
 from sqlalchemy import func, and_, or_, cast, Date, String
@@ -23,6 +24,7 @@ from app.models.vehiculo import VehiculoProceso, EstadoVehiculo
 from app.models.tarifa import Tarifa
 from app.models.sucursal import Sucursal
 from app.models.proveedor_catalogo import ProveedorCatalogo
+from app.models.obligacion_proveedor import ObligacionProveedor
 from app.models.factus import DocumentoSoporteElectronico, FacturaElectronica, FacturaCorreccion, TenantFactusSettings
 from app.models.iva_provision import IvaProvisionRegistro
 from app.models.appointment import Appointment
@@ -33,6 +35,7 @@ from app.integrations.factus_emit import (
     validar_datos_cliente_para_factus,
 )
 from app.services.factus_tenant_settings import creds_complete_for_active_env
+from app.services import egreso_factura_soporte as factura_soporte_svc
 
 router = APIRouter()
 REPORT_TZ = get_app_timezone()
@@ -2152,6 +2155,7 @@ class CxcClienteItem(BaseModel):
     tramites_pendientes: int
     monto_pendiente_total: Decimal
     antiguedad_max_dias: int
+    aging_tramo: str = "0_30"
     fecha_registro_mas_antigua: Optional[datetime] = None
     placas: list[str] = Field(default_factory=list)
 
@@ -2160,6 +2164,16 @@ class CxcGeneralClienteResponse(BaseModel):
     fecha_corte: str
     resumen: dict
     clientes: list[CxcClienteItem]
+
+
+def _aging_tramo(dias: int) -> str:
+    if dias <= 30:
+        return "0_30"
+    if dias <= 60:
+        return "31_60"
+    if dias <= 90:
+        return "61_90"
+    return "mas_90"
 
 
 @router.get("/cxc-general-cliente", response_model=CxcGeneralClienteResponse)
@@ -2210,12 +2224,23 @@ def cxc_general_por_cliente(
     )
 
     if not pendientes:
+        empty_aging = {
+            "monto": Decimal("0"),
+            "tramites": 0,
+            "clientes": 0,
+        }
         return CxcGeneralClienteResponse(
             fecha_corte=corte_local.isoformat(),
             resumen={
                 "total_clientes": 0,
                 "total_tramites_pendientes": 0,
                 "saldo_total_pendiente": Decimal("0"),
+                "aging": {
+                    "0_30": dict(empty_aging),
+                    "31_60": dict(empty_aging),
+                    "61_90": dict(empty_aging),
+                    "mas_90": dict(empty_aging),
+                },
             },
             clientes=[],
         )
@@ -2227,6 +2252,13 @@ def cxc_general_por_cliente(
             sucursal_names[sid] = sname
 
     grouped: dict[tuple[str, str], dict] = {}
+    aging_monto: dict[str, Decimal] = {
+        "0_30": Decimal("0"),
+        "31_60": Decimal("0"),
+        "61_90": Decimal("0"),
+        "mas_90": Decimal("0"),
+    }
+    aging_tramites: dict[str, int] = {k: 0 for k in aging_monto}
     for v in pendientes:
         doc = (v.cliente_documento or "").strip()
         nombre = (v.cliente_nombre or "").strip() or "Cliente sin nombre"
@@ -2237,6 +2269,9 @@ def cxc_general_por_cliente(
         antiguedad_dias = 0
         if fecha_local is not None:
             antiguedad_dias = max((corte_local - fecha_local.date()).days, 0)
+        tramo = _aging_tramo(antiguedad_dias)
+        aging_monto[tramo] += saldo
+        aging_tramites[tramo] += 1
 
         if key not in grouped:
             grouped[key] = {
@@ -2273,6 +2308,7 @@ def cxc_general_por_cliente(
             tramites_pendientes=int(item["tramites_pendientes"]),
             monto_pendiente_total=Decimal(str(item["monto_pendiente_total"])),
             antiguedad_max_dias=int(item["antiguedad_max_dias"]),
+            aging_tramo=_aging_tramo(int(item["antiguedad_max_dias"])),
             fecha_registro_mas_antigua=_as_utc_aware(item["fecha_registro_mas_antigua"]),
             placas=item["placas"],
         )
@@ -2291,6 +2327,9 @@ def cxc_general_por_cliente(
 
     saldo_total = sum((Decimal(str(c.monto_pendiente_total)) for c in clientes), Decimal("0"))
     total_tramites = sum((int(c.tramites_pendientes) for c in clientes), 0)
+    aging_clientes: dict[str, int] = {k: 0 for k in aging_monto}
+    for c in clientes:
+        aging_clientes[c.aging_tramo] = aging_clientes.get(c.aging_tramo, 0) + 1
 
     return CxcGeneralClienteResponse(
         fecha_corte=corte_local.isoformat(),
@@ -2298,8 +2337,120 @@ def cxc_general_por_cliente(
             "total_clientes": len(clientes),
             "total_tramites_pendientes": total_tramites,
             "saldo_total_pendiente": saldo_total,
+            "aging": {
+                k: {
+                    "monto": aging_monto[k].quantize(Decimal("0.01")),
+                    "tramites": aging_tramites[k],
+                    "clientes": aging_clientes.get(k, 0),
+                }
+                for k in ("0_30", "31_60", "61_90", "mas_90")
+            },
         },
         clientes=clientes,
+    )
+
+
+class CxcTramiteDetalleItem(BaseModel):
+    vehiculo_id: UUID
+    placa: Optional[str] = None
+    fecha_registro: Optional[datetime] = None
+    antiguedad_dias: int = 0
+    aging_tramo: str = "0_30"
+    total_cobrado: Decimal
+    sucursal_nombre: Optional[str] = None
+    tipo_vehiculo: Optional[str] = None
+
+
+class CxcClienteDetalleResponse(BaseModel):
+    fecha_corte: str
+    cliente_nombre: str
+    cliente_documento: str
+    resumen: dict
+    tramites: list[CxcTramiteDetalleItem]
+
+
+@router.get("/cxc-cliente-detalle", response_model=CxcClienteDetalleResponse)
+def cxc_cliente_detalle(
+    request: Request,
+    cliente_documento: str = Query(...),
+    cliente_nombre: Optional[str] = Query(None),
+    fecha_corte: Optional[date] = Query(None),
+    sucursal_id: Optional[UUID] = Query(None),
+    consolidar_todas: bool = Query(False),
+    limit: int = Query(200, ge=1, le=1000),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=sucursal_id,
+        consolidar_todas=consolidar_todas,
+    )
+    tid = current_user.tenant_id
+    corte_local = fecha_corte or datetime.now(REPORT_TZ).date()
+    corte_dt_utc = (
+        datetime.combine(corte_local, time.max, tzinfo=REPORT_TZ)
+        .astimezone(timezone.utc)
+        .replace(tzinfo=None)
+    )
+    doc = (cliente_documento or "").strip()
+    nombre = (cliente_nombre or "").strip()
+
+    q = db.query(VehiculoProceso).filter(
+        _vp_scope(
+            tid,
+            scope_sid,
+            VehiculoProceso.fecha_registro <= corte_dt_utc,
+            VehiculoProceso.fecha_pago.is_(None),
+            VehiculoProceso.total_cobrado > 0,
+            _no_pruebas_auditoria_clause(),
+        )
+    )
+    if doc and doc != "SIN_DOCUMENTO":
+        q = q.filter(VehiculoProceso.cliente_documento == doc)
+    if nombre:
+        q = q.filter(func.upper(VehiculoProceso.cliente_nombre) == nombre.upper())
+    rows = q.order_by(VehiculoProceso.fecha_registro.asc()).limit(limit).all()
+
+    sucursal_ids = {v.sucursal_id for v in rows if v.sucursal_id}
+    suc_map: dict[UUID, str] = {}
+    if sucursal_ids:
+        for sid, sname in db.query(Sucursal.id, Sucursal.nombre).filter(Sucursal.id.in_(list(sucursal_ids))).all():
+            suc_map[sid] = sname
+
+    tramites: list[CxcTramiteDetalleItem] = []
+    for v in rows:
+        fecha_reg = _as_utc_aware(v.fecha_registro)
+        fecha_local = _as_report_tz(fecha_reg)
+        dias = 0
+        if fecha_local is not None:
+            dias = max((corte_local - fecha_local.date()).days, 0)
+        tramites.append(
+            CxcTramiteDetalleItem(
+                vehiculo_id=v.id,
+                placa=v.placa,
+                fecha_registro=fecha_reg,
+                antiguedad_dias=dias,
+                aging_tramo=_aging_tramo(dias),
+                total_cobrado=Decimal(str(v.total_cobrado or 0)).quantize(Decimal("0.01")),
+                sucursal_nombre=suc_map.get(v.sucursal_id) if v.sucursal_id else None,
+                tipo_vehiculo=v.tipo_vehiculo,
+            )
+        )
+    saldo = sum((t.total_cobrado for t in tramites), Decimal("0"))
+    display_nombre = nombre or (rows[0].cliente_nombre if rows else "")
+    return CxcClienteDetalleResponse(
+        fecha_corte=corte_local.isoformat(),
+        cliente_nombre=display_nombre or "Cliente",
+        cliente_documento=doc or "SIN_DOCUMENTO",
+        resumen={
+            "tramites": len(tramites),
+            "saldo_pendiente": saldo.quantize(Decimal("0.01")),
+        },
+        tramites=tramites,
     )
 
 
@@ -2987,7 +3138,27 @@ def estado_situacion_gerencial(
     cxc_operativa = Decimal(str(cxc_operativa or 0))
 
     activo_total = efectivo_equivalente + cxc_operativa
-    cxp_proveedores = Decimal("0")
+    obl_filters = [
+        ObligacionProveedor.tenant_id == tid,
+        ObligacionProveedor.estado.in_(["abierta", "parcial"]),
+        ObligacionProveedor.saldo_pendiente > 0,
+        ObligacionProveedor.fecha_emision <= corte_local,
+    ]
+    if scope_sid is not None:
+        obl_filters.append(
+            or_(
+                ObligacionProveedor.sucursal_id == scope_sid,
+                ObligacionProveedor.sucursal_id.is_(None),
+            )
+        )
+    cxp_proveedores = Decimal(
+        str(
+            db.query(func.coalesce(func.sum(ObligacionProveedor.saldo_pendiente), 0))
+            .filter(*obl_filters)
+            .scalar()
+            or 0
+        )
+    )
     pasivo_total = cxp_proveedores
     patrimonio_estimado = activo_total - pasivo_total
 
@@ -2996,8 +3167,8 @@ def estado_situacion_gerencial(
         alcance="gerencial_preliminar",
         notas=[
             "Este reporte es de uso gerencial interno y no reemplaza estados financieros oficiales NIIF.",
-            "CxP proveedores se muestra en cero hasta implementar el módulo formal de obligaciones por pagar.",
-            "Los saldos se calculan con base en movimientos de caja/tesorería y cartera operativa (vehículos sin pago).",
+            "CxP proveedores = saldo pendiente de obligaciones/facturas de compra registradas en Contador.",
+            "Los activos usan efectivo (caja/tesorería) + cartera operativa (trámites sin pago).",
         ],
         activos={
             "efectivo_equivalente": efectivo_equivalente.quantize(Decimal("0.01")),
@@ -3708,6 +3879,537 @@ def estado_resultado_gerencial(
             "impuesto_estimado": impuesto_estimado.quantize(Decimal("0.01")),
             "resultado_neto_estimado": resultado_neto_estimado.quantize(Decimal("0.01")),
             "margen_neto_pct": margen_neto_pct.quantize(Decimal("0.01")),
+        },
+    )
+
+
+class GastoPeriodoItem(BaseModel):
+    id: UUID
+    origen: str
+    fecha: Optional[str] = None
+    tipo: str
+    clasificacion: str
+    categoria: Optional[str] = None
+    concepto: str
+    beneficiario: Optional[str] = None
+    documento: Optional[str] = None
+    metodo_pago: Optional[str] = None
+    monto: Decimal
+    sucursal_id: Optional[UUID] = None
+    sucursal_nombre: Optional[str] = None
+    numero_comprobante: Optional[str] = None
+    tiene_factura_soporte: bool = False
+    factura_soporte_nombre: Optional[str] = None
+
+
+class GastosPeriodoResponse(BaseModel):
+    periodo: str
+    alcance: str
+    notas: list[str] = Field(default_factory=list)
+    resumen: dict
+    items: list[GastoPeriodoItem]
+
+
+@router.get("/gastos-periodo", response_model=GastosPeriodoResponse)
+def gastos_periodo(
+    request: Request,
+    fecha: Optional[date] = Query(None, description="Fecha específica (default: hoy)."),
+    fecha_inicio: Optional[date] = Query(None, description="Fecha inicio para rango"),
+    fecha_fin: Optional[date] = Query(None, description="Fecha fin para rango"),
+    origen: Optional[str] = Query(
+        None,
+        description="Filtrar por origen: caja | tesoreria. Sin valor = ambos.",
+    ),
+    incluir_devoluciones: bool = Query(
+        True,
+        description="Si false, omite egresos de caja tipo devolución.",
+    ),
+    sucursal_id: Optional[UUID] = Query(None),
+    consolidar_todas: bool = Query(False),
+    limit: int = Query(2000, ge=1, le=5000),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """
+    Detalle de gastos/egresos del periodo (caja + tesorería) para el módulo Contador.
+    Solo consulta; no registra movimientos.
+    """
+    try:
+        fecha_inicio_dt, fecha_fin_dt, etiqueta_fecha = resolve_report_date_window(
+            fecha=fecha,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    origen_norm = (origen or "").strip().lower() or None
+    if origen_norm and origen_norm not in ("caja", "tesoreria"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="origen debe ser 'caja', 'tesoreria' o vacío.",
+        )
+
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=sucursal_id,
+        consolidar_todas=consolidar_todas,
+    )
+    tid = current_user.tenant_id
+    items: list[GastoPeriodoItem] = []
+
+    if origen_norm in (None, "caja"):
+        caja_rows = (
+            db.query(MovimientoCaja, Caja.sucursal_id)
+            .join(Caja, Caja.id == MovimientoCaja.caja_id)
+            .filter(
+                _mc_scope(
+                    db,
+                    tid,
+                    scope_sid,
+                    MovimientoCaja.created_at >= fecha_inicio_dt,
+                    MovimientoCaja.created_at <= fecha_fin_dt,
+                    MovimientoCaja.monto < 0,
+                )
+            )
+            .order_by(MovimientoCaja.created_at.desc())
+            .all()
+        )
+        for m, caja_sid in caja_rows:
+            tipo_raw = str(
+                getattr(getattr(m, "tipo", None), "value", getattr(m, "tipo", "")) or ""
+            ).strip().lower()
+            es_devolucion = tipo_raw == "devolucion"
+            if es_devolucion and not incluir_devoluciones:
+                continue
+            items.append(
+                GastoPeriodoItem(
+                    id=m.id,
+                    origen="caja",
+                    fecha=_iso_utc(m.created_at),
+                    tipo=tipo_raw or "egreso",
+                    clasificacion="devolucion" if es_devolucion else "gasto",
+                    categoria=tipo_raw or "gasto",
+                    concepto=str(m.concepto or "").strip() or "Sin concepto",
+                    beneficiario=(str(m.beneficiario).strip() if m.beneficiario else None),
+                    documento=(
+                        str(m.beneficiario_numero_identificacion).strip()
+                        if m.beneficiario_numero_identificacion
+                        else None
+                    ),
+                    metodo_pago=(str(m.metodo_pago).strip() if m.metodo_pago else None),
+                    monto=abs(Decimal(str(m.monto or 0))).quantize(Decimal("0.01")),
+                    sucursal_id=caja_sid,
+                    sucursal_nombre=None,
+                    numero_comprobante=None,
+                    tiene_factura_soporte=bool((getattr(m, "factura_soporte_relpath", None) or "").strip()),
+                    factura_soporte_nombre=(
+                        str(m.factura_soporte_nombre).strip()
+                        if getattr(m, "factura_soporte_nombre", None)
+                        else None
+                    ),
+                )
+            )
+
+    if origen_norm in (None, "tesoreria"):
+        tes_rows = (
+            db.query(MovimientoTesoreria)
+            .filter(
+                _mt_scope(
+                    tid,
+                    scope_sid,
+                    MovimientoTesoreria.fecha_movimiento >= fecha_inicio_dt,
+                    MovimientoTesoreria.fecha_movimiento <= fecha_fin_dt,
+                    MovimientoTesoreria.tipo == TipoMovimientoTesoreria.EGRESO,
+                )
+            )
+            .order_by(MovimientoTesoreria.fecha_movimiento.desc())
+            .all()
+        )
+        for m in tes_rows:
+            cat = str(
+                getattr(
+                    getattr(m, "categoria_egreso", None),
+                    "value",
+                    getattr(m, "categoria_egreso", ""),
+                )
+                or ""
+            ).strip().lower() or "sin_categoria"
+            metodo = str(
+                getattr(getattr(m, "metodo_pago", None), "value", getattr(m, "metodo_pago", ""))
+                or ""
+            ).strip() or None
+            items.append(
+                GastoPeriodoItem(
+                    id=m.id,
+                    origen="tesoreria",
+                    fecha=_iso_utc(m.fecha_movimiento),
+                    tipo="egreso",
+                    clasificacion="gasto",
+                    categoria=cat,
+                    concepto=str(m.concepto or "").strip() or "Sin concepto",
+                    beneficiario=(str(m.beneficiario).strip() if m.beneficiario else None),
+                    documento=(
+                        str(m.beneficiario_numero_identificacion).strip()
+                        if m.beneficiario_numero_identificacion
+                        else None
+                    ),
+                    metodo_pago=metodo,
+                    monto=abs(Decimal(str(m.monto or 0))).quantize(Decimal("0.01")),
+                    sucursal_id=m.sucursal_id,
+                    sucursal_nombre=None,
+                    numero_comprobante=(
+                        str(m.numero_comprobante).strip() if m.numero_comprobante else None
+                    ),
+                    tiene_factura_soporte=bool((getattr(m, "factura_soporte_relpath", None) or "").strip()),
+                    factura_soporte_nombre=(
+                        str(m.factura_soporte_nombre).strip()
+                        if getattr(m, "factura_soporte_nombre", None)
+                        else None
+                    ),
+                )
+            )
+
+    sucursal_ids = {i.sucursal_id for i in items if i.sucursal_id}
+    suc_map: dict[UUID, str] = {}
+    if sucursal_ids:
+        for sid, sname in (
+            db.query(Sucursal.id, Sucursal.nombre).filter(Sucursal.id.in_(list(sucursal_ids))).all()
+        ):
+            suc_map[sid] = sname
+    for i in items:
+        if i.sucursal_id and i.sucursal_id in suc_map:
+            i.sucursal_nombre = suc_map[i.sucursal_id]
+
+    items.sort(key=lambda x: x.fecha or "", reverse=True)
+    if len(items) > limit:
+        items = items[:limit]
+
+    total_caja = sum((i.monto for i in items if i.origen == "caja"), Decimal("0"))
+    total_tesoreria = sum((i.monto for i in items if i.origen == "tesoreria"), Decimal("0"))
+    total_devoluciones = sum(
+        (i.monto for i in items if i.clasificacion == "devolucion"), Decimal("0")
+    )
+    total_gastos = sum((i.monto for i in items if i.clasificacion == "gasto"), Decimal("0"))
+    por_categoria: dict[str, Decimal] = defaultdict(Decimal)
+    for i in items:
+        key = i.categoria or "sin_categoria"
+        por_categoria[key] += i.monto
+
+    return GastosPeriodoResponse(
+        periodo=etiqueta_fecha,
+        alcance="gerencial_preliminar",
+        notas=[
+            "Consulta de egresos ejecutados en caja y/o tesorería. No registra ni modifica movimientos.",
+            "Si el egreso tiene factura de compra adjunta, el contador puede descargarla aquí sin entrar a Tesorería.",
+            "Las devoluciones de caja se marcan aparte; en Estado de resultado van como contra-ingresos.",
+            "El registro de gastos y el adjunto de factura siguen en Caja / Tesorería.",
+        ],
+        resumen={
+            "total_movimientos": len(items),
+            "total_caja": total_caja.quantize(Decimal("0.01")),
+            "total_tesoreria": total_tesoreria.quantize(Decimal("0.01")),
+            "total_gastos": total_gastos.quantize(Decimal("0.01")),
+            "total_devoluciones": total_devoluciones.quantize(Decimal("0.01")),
+            "total_egresado": (total_caja + total_tesoreria).quantize(Decimal("0.01")),
+            "por_categoria": {
+                k: Decimal(str(v)).quantize(Decimal("0.01"))
+                for k, v in sorted(por_categoria.items(), key=lambda x: x[0])
+            },
+        },
+        items=items,
+    )
+
+
+@router.get("/gastos/{origen}/{movimiento_id}/factura-soporte")
+def descargar_factura_soporte_gasto(
+    origen: str,
+    movimiento_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """
+    Contador: ve/descarga la factura de compra adjunta al egreso
+    sin necesitar permiso operativo de Tesorería/Caja.
+    """
+    origen_norm = (origen or "").strip().lower()
+    tid = current_user.tenant_id
+    relpath = None
+    nombre = None
+    mime = None
+    if origen_norm == "tesoreria":
+        mov = (
+            db.query(MovimientoTesoreria)
+            .filter(
+                MovimientoTesoreria.id == movimiento_id,
+                MovimientoTesoreria.tenant_id == tid,
+            )
+            .first()
+        )
+        if not mov:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Egreso no encontrado")
+        relpath = mov.factura_soporte_relpath
+        nombre = mov.factura_soporte_nombre
+        mime = mov.factura_soporte_mime
+    elif origen_norm == "caja":
+        mov = (
+            db.query(MovimientoCaja)
+            .filter(
+                MovimientoCaja.id == movimiento_id,
+                MovimientoCaja.tenant_id == tid,
+            )
+            .first()
+        )
+        if not mov:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Egreso no encontrado")
+        relpath = getattr(mov, "factura_soporte_relpath", None)
+        nombre = getattr(mov, "factura_soporte_nombre", None)
+        mime = getattr(mov, "factura_soporte_mime", None)
+    else:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="origen debe ser caja o tesoreria",
+        )
+
+    path = factura_soporte_svc.abs_path(relpath)
+    if not path or not path.is_file():
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Este egreso no tiene factura de compra adjunta.",
+        )
+    filename = (nombre or path.name).replace('"', "")
+    return FileResponse(
+        path,
+        media_type=mime or "application/octet-stream",
+        filename=filename,
+    )
+
+
+class CierrePeriodoResumenResponse(BaseModel):
+    periodo: str
+    fecha_corte: str
+    checklist: list[dict]
+    conciliacion: dict
+    resumen: dict
+
+
+@router.get("/cierre-periodo-resumen", response_model=CierrePeriodoResumenResponse)
+def cierre_periodo_resumen(
+    request: Request,
+    fecha_inicio: Optional[date] = Query(None),
+    fecha_fin: Optional[date] = Query(None),
+    sucursal_id: Optional[UUID] = Query(None),
+    consolidar_todas: bool = Query(False),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """Checklist calculado + conciliación rápida para el panel Contador."""
+    try:
+        fecha_inicio_dt, fecha_fin_dt, etiqueta_fecha = resolve_report_date_window(
+            fecha=None,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=sucursal_id,
+        consolidar_todas=consolidar_todas,
+    )
+    tid = current_user.tenant_id
+    # fecha_fin_dt is naive UTC end-of-day; derive corte local from query or label
+    if fecha_fin:
+        corte_local = fecha_fin
+    elif fecha_inicio:
+        corte_local = fecha_inicio
+    else:
+        corte_local = datetime.now(REPORT_TZ).date()
+
+    ventas = (
+        db.query(func.coalesce(func.sum(VehiculoProceso.total_cobrado), 0))
+        .filter(
+            _vp_scope(
+                tid,
+                scope_sid,
+                VehiculoProceso.fecha_pago.isnot(None),
+                VehiculoProceso.total_cobrado > 0,
+                VehiculoProceso.fecha_pago >= fecha_inicio_dt,
+                VehiculoProceso.fecha_pago <= fecha_fin_dt,
+                _no_pruebas_auditoria_clause(),
+            )
+        )
+        .scalar()
+    )
+    ventas_cobradas = Decimal(str(ventas or 0))
+
+    caja_egresos = (
+        db.query(MovimientoCaja)
+        .filter(
+            _mc_scope(
+                db,
+                tid,
+                scope_sid,
+                MovimientoCaja.created_at >= fecha_inicio_dt,
+                MovimientoCaja.created_at <= fecha_fin_dt,
+                MovimientoCaja.monto < 0,
+            )
+        )
+        .all()
+    )
+    gastos_caja = Decimal("0")
+    for m in caja_egresos:
+        t = str(getattr(getattr(m, "tipo", None), "value", getattr(m, "tipo", "")) or "").strip().lower()
+        if t != "devolucion":
+            gastos_caja += abs(Decimal(str(m.monto or 0)))
+
+    tes_egresos = (
+        db.query(func.coalesce(func.sum(func.abs(MovimientoTesoreria.monto)), 0))
+        .filter(
+            _mt_scope(
+                tid,
+                scope_sid,
+                MovimientoTesoreria.fecha_movimiento >= fecha_inicio_dt,
+                MovimientoTesoreria.fecha_movimiento <= fecha_fin_dt,
+                MovimientoTesoreria.tipo == TipoMovimientoTesoreria.EGRESO,
+            )
+        )
+        .scalar()
+    )
+    gastos_tesoreria = Decimal(str(tes_egresos or 0))
+    gastos_totales = gastos_caja + gastos_tesoreria
+
+    cxc = (
+        db.query(func.coalesce(func.sum(VehiculoProceso.total_cobrado), 0))
+        .filter(
+            _vp_scope(
+                tid,
+                scope_sid,
+                VehiculoProceso.fecha_registro <= fecha_fin_dt,
+                VehiculoProceso.fecha_pago.is_(None),
+                VehiculoProceso.total_cobrado > 0,
+                _no_pruebas_auditoria_clause(),
+            )
+        )
+        .scalar()
+    )
+    cxc_abierta = Decimal(str(cxc or 0))
+
+    obl_q = db.query(ObligacionProveedor).filter(
+        ObligacionProveedor.tenant_id == tid,
+        ObligacionProveedor.estado.in_(["abierta", "parcial"]),
+        ObligacionProveedor.saldo_pendiente > 0,
+    )
+    if scope_sid is not None:
+        obl_q = obl_q.filter(
+            or_(
+                ObligacionProveedor.sucursal_id == scope_sid,
+                ObligacionProveedor.sucursal_id.is_(None),
+            )
+        )
+    obl_rows = obl_q.all()
+    obl_saldo = sum((Decimal(str(o.saldo_pendiente or 0)) for o in obl_rows), Decimal("0"))
+    obl_vencidas = sum(
+        1
+        for o in obl_rows
+        if o.fecha_vencimiento and o.fecha_vencimiento < corte_local
+    )
+
+    from app.models.exogena import ExogenaMapeo
+    from app.models.tenant import Tenant
+
+    anio = str(corte_local.year)
+    tenant = db.query(Tenant).filter(Tenant.id == tid).first()
+    exogena_enabled = bool(getattr(tenant, "exogena_enabled", False)) if tenant else False
+    mapeos_activos = 0
+    if exogena_enabled:
+        mapeos_activos = (
+            db.query(func.count(ExogenaMapeo.id))
+            .filter(
+                ExogenaMapeo.tenant_id == tid,
+                ExogenaMapeo.anio == anio,
+                func.lower(ExogenaMapeo.activo) == "si",
+            )
+            .scalar()
+            or 0
+        )
+
+    resultado_neto = ventas_cobradas - gastos_totales
+    checklist = [
+        {
+            "id": "ventas",
+            "label": "Ventas cobradas del periodo",
+            "ok": ventas_cobradas > 0,
+            "valor": float(ventas_cobradas),
+            "tab": "ventas_sucursal",
+            "detalle": "Hay cobros registrados" if ventas_cobradas > 0 else "Sin ventas cobradas en el periodo",
+        },
+        {
+            "id": "gastos",
+            "label": "Gastos caja + tesorería revisados",
+            "ok": True,
+            "valor": float(gastos_totales),
+            "tab": "gastos",
+            "detalle": f"Egresos del periodo: ${float(gastos_totales):,.0f}",
+        },
+        {
+            "id": "cxc",
+            "label": "CxC abierta al corte",
+            "ok": True,
+            "valor": float(cxc_abierta),
+            "tab": "cxc",
+            "detalle": f"Cartera pendiente: ${float(cxc_abierta):,.0f}",
+        },
+        {
+            "id": "obligaciones",
+            "label": "Obligaciones / CxP formal",
+            "ok": obl_vencidas == 0,
+            "valor": float(obl_saldo),
+            "tab": "obligaciones",
+            "detalle": (
+                f"{obl_vencidas} vencida(s); saldo ${float(obl_saldo):,.0f}"
+                if obl_vencidas
+                else f"Saldo pendiente ${float(obl_saldo):,.0f}"
+            ),
+        },
+        {
+            "id": "exogena",
+            "label": f"Exógena {anio} (mapeos)",
+            "ok": (not exogena_enabled) or mapeos_activos > 0,
+            "valor": mapeos_activos,
+            "tab": "exogena",
+            "detalle": (
+                "Módulo no habilitado para el tenant"
+                if not exogena_enabled
+                else (f"{mapeos_activos} mapeo(s) activo(s)" if mapeos_activos else "Sin mapeos activos")
+            ),
+        },
+    ]
+
+    return CierrePeriodoResumenResponse(
+        periodo=etiqueta_fecha,
+        fecha_corte=corte_local.isoformat(),
+        checklist=checklist,
+        conciliacion={
+            "ventas_cobradas": ventas_cobradas.quantize(Decimal("0.01")),
+            "gastos_caja": gastos_caja.quantize(Decimal("0.01")),
+            "gastos_tesoreria": gastos_tesoreria.quantize(Decimal("0.01")),
+            "gastos_totales": gastos_totales.quantize(Decimal("0.01")),
+            "resultado_neto_estimado": resultado_neto.quantize(Decimal("0.01")),
+        },
+        resumen={
+            "cxc_abierta": cxc_abierta.quantize(Decimal("0.01")),
+            "obligaciones_saldo": obl_saldo.quantize(Decimal("0.01")),
+            "obligaciones_vencidas": obl_vencidas,
+            "exogena_enabled": exogena_enabled,
+            "mapeos_exogena": mapeos_activos,
         },
     )
 

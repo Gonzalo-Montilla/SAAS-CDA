@@ -83,6 +83,12 @@ class Settings(BaseSettings):
         env="PROVEEDORES_RUT_STORAGE_DIR",
     )
     PROVEEDORES_RUT_MAX_MB: int = Field(default=5, ge=1, le=25, env="PROVEEDORES_RUT_MAX_MB")
+    # Factura/soporte de compra adjunto a egresos (caja/tesorería) — visible para Contador
+    EGRESOS_FACTURA_SOPORTE_STORAGE_DIR: str = Field(
+        default="private_uploads/egresos_factura_soporte",
+        env="EGRESOS_FACTURA_SOPORTE_STORAGE_DIR",
+    )
+    EGRESOS_FACTURA_SOPORTE_MAX_MB: int = Field(default=8, ge=1, le=25, env="EGRESOS_FACTURA_SOPORTE_MAX_MB")
     # Copias PDF archivadas en disco (documento soporte / factura) para trazabilidad y conservación.
     ARCHIVOS_FISCALES_DIR: str = Field(default="private_uploads/archivos_fiscales", env="ARCHIVOS_FISCALES_DIR")
     ONBOARDING_EMAIL_VERIFICATION_REQUIRED: bool = True

@@ -7,6 +7,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 import ContadorEfectivo, { type DesgloseEfectivo } from '../components/ContadorEfectivo';
 import NotificacionesCierreCaja from '../components/NotificacionesCierreCaja';
 import { tesoreriaApi } from '../api/tesoreria';
+import { reportesApi } from '../api/reportes';
 import { factusApi } from '../api/factus';
 import { proveedoresCatalogoApi } from '../api/proveedoresCatalogo';
 import ProveedorCatalogoPicker from '../components/ProveedorCatalogoPicker';
@@ -30,7 +31,10 @@ import {
   Clock,
   Search,
   Download,
-  Trash2
+  Trash2,
+  FileUp,
+  X,
+  Eye,
 } from 'lucide-react';
 
 /** Valores alineados con el backend (`BENEFICIARIO_TIPOS_IDENTIFICACION_TESORERIA`). */
@@ -1410,6 +1414,68 @@ function Historial() {
   const [busqueda, setBusqueda] = useState('');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [movEliminar, setMovEliminar] = useState<MovimientoTesoreria | null>(null);
+  const [docPreview, setDocPreview] = useState<{
+    blobUrl: string;
+    title: string;
+    fileName: string;
+    mime: string;
+  } | null>(null);
+
+  const cerrarDocPreview = () => {
+    setDocPreview((prev) => {
+      if (prev?.blobUrl) URL.revokeObjectURL(prev.blobUrl);
+      return null;
+    });
+  };
+
+  const abrirDocPreview = (next: {
+    blobUrl: string;
+    title: string;
+    fileName: string;
+    mime: string;
+  }) => {
+    setDocPreview((prev) => {
+      if (prev?.blobUrl) URL.revokeObjectURL(prev.blobUrl);
+      return next;
+    });
+  };
+
+  const abrirComprobantePreview = async (mov: MovimientoTesoreria) => {
+    try {
+      const { blob, filename } = await tesoreriaApi.obtenerComprobanteEgresoPdf(mov.id);
+      abrirDocPreview({
+        blobUrl: URL.createObjectURL(blob),
+        title: `Comprobante de egreso · ${mov.beneficiario || mov.concepto}`,
+        fileName: filename,
+        mime: blob.type || 'application/pdf',
+      });
+    } catch {
+      setFeedback({
+        type: 'error',
+        message: 'No se pudo abrir el comprobante de egreso.',
+      });
+    }
+  };
+
+  const abrirFacturaPreview = async (mov: MovimientoTesoreria) => {
+    try {
+      const { blob, filename, mime } = await reportesApi.obtenerFacturaSoporteGastoBlob(
+        'tesoreria',
+        mov.id,
+      );
+      abrirDocPreview({
+        blobUrl: URL.createObjectURL(blob),
+        title: mov.factura_soporte_nombre || filename || 'Factura de compra',
+        fileName: filename,
+        mime,
+      });
+    } catch {
+      setFeedback({
+        type: 'error',
+        message: 'No se pudo abrir la factura adjunta.',
+      });
+    }
+  };
 
   const { data: movimientosRaw, isLoading } = useQuery({
     queryKey: ['tesoreria-movimientos', filtros, consolidarTodas],
@@ -1707,22 +1773,65 @@ function Historial() {
                         {mov.tipo === 'egreso' && !mov.anulado && (
                           <button
                             type="button"
-                            onClick={async () => {
-                              try {
-                                await tesoreriaApi.descargarComprobanteEgreso(mov.id);
-                              } catch (error) {
-                                console.error('Error:', error);
-                                setFeedback({
-                                  type: 'error',
-                                  message: 'No fue posible descargar el comprobante. Intenta nuevamente.',
-                                });
-                              }
-                            }}
+                            onClick={() => abrirComprobantePreview(mov)}
                             className="btn-chip border-red-300 bg-red-50 text-red-700 hover:bg-red-100 px-3 py-1 inline-flex items-center gap-1"
-                            title="Descargar comprobante de egreso"
+                            title="Ver comprobante de egreso"
                           >
-                            <Download className="w-3 h-3" />
+                            <Eye className="w-3 h-3" />
                             Comprobante
+                          </button>
+                        )}
+                        {mov.tipo === 'egreso' && !mov.anulado && (
+                          <label
+                            className="btn-chip border-slate-300 bg-white text-slate-800 hover:bg-slate-50 px-3 py-1 inline-flex items-center gap-1 cursor-pointer"
+                            title="Adjuntar factura de compra del proveedor (PDF o imagen)"
+                          >
+                            <FileUp className="w-3 h-3" />
+                            {mov.tiene_factura_soporte ? 'Cambiar factura' : 'Factura compra'}
+                            <input
+                              type="file"
+                              className="hidden"
+                              accept=".pdf,image/jpeg,image/png,image/webp"
+                              onChange={async (e) => {
+                                const file = e.target.files?.[0];
+                                e.target.value = '';
+                                if (!file) return;
+                                try {
+                                  await tesoreriaApi.adjuntarFacturaSoporte(
+                                    mov.id,
+                                    file,
+                                    mov.numero_comprobante || undefined,
+                                  );
+                                  setFeedback({
+                                    type: 'success',
+                                    message:
+                                      'Factura de compra adjunta. El contador puede verla en Contador → Gastos.',
+                                  });
+                                  queryClient.invalidateQueries({ queryKey: ['tesoreria-movimientos'] });
+                                  queryClient.invalidateQueries({ queryKey: ['tesoreria-movimientos-recientes'] });
+                                  queryClient.invalidateQueries({ queryKey: ['reportes-gastos-periodo'] });
+                                } catch (err: any) {
+                                  setFeedback({
+                                    type: 'error',
+                                    message:
+                                      err?.response?.data?.detail ||
+                                      err?.message ||
+                                      'No se pudo adjuntar la factura.',
+                                  });
+                                }
+                              }}
+                            />
+                          </label>
+                        )}
+                        {mov.tipo === 'egreso' && mov.tiene_factura_soporte && (
+                          <button
+                            type="button"
+                            className="btn-chip border-emerald-300 bg-emerald-50 text-emerald-800 hover:bg-emerald-100 px-3 py-1 inline-flex items-center gap-1"
+                            title={mov.factura_soporte_nombre || 'Ver factura adjunta'}
+                            onClick={() => abrirFacturaPreview(mov)}
+                          >
+                            <Eye className="w-3 h-3" />
+                            Ver factura
                           </button>
                         )}
                         {!mov.anulado && (
@@ -1802,6 +1911,65 @@ function Historial() {
                   {anularMutation.isLoading ? 'Procesando…' : 'Sí, anular movimiento'}
                 </button>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {docPreview && (
+        <div
+          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="doc-preview-titulo"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) cerrarDocPreview();
+          }}
+        >
+          <div className="bg-white rounded-xl shadow-2xl max-w-5xl w-full max-h-[92vh] flex flex-col overflow-hidden">
+            <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3 border-b border-slate-200 bg-slate-50">
+              <h4
+                id="doc-preview-titulo"
+                className="font-bold text-slate-900 flex items-center gap-2 text-sm sm:text-base min-w-0 pr-2"
+              >
+                <FileText className="w-5 h-5 text-primary-600 shrink-0" />
+                <span className="truncate">{docPreview.title}</span>
+              </h4>
+              <div className="flex items-center gap-2 shrink-0">
+                <a
+                  href={docPreview.blobUrl}
+                  download={docPreview.fileName}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-semibold text-slate-800 hover:bg-slate-100"
+                >
+                  <Download className="w-4 h-4" />
+                  Descargar
+                </a>
+                <button
+                  type="button"
+                  onClick={cerrarDocPreview}
+                  className="p-2 rounded-lg hover:bg-slate-200 text-slate-600"
+                  aria-label="Cerrar"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+            </div>
+            <div className="flex-1 min-h-0 bg-slate-100 flex flex-col">
+              {docPreview.mime.startsWith('image/') ? (
+                <div className="overflow-auto p-4 flex justify-center">
+                  <img
+                    src={docPreview.blobUrl}
+                    alt={docPreview.title}
+                    className="max-w-full max-h-[75vh] object-contain rounded shadow"
+                  />
+                </div>
+              ) : (
+                <iframe
+                  title={docPreview.title}
+                  src={docPreview.blobUrl}
+                  className="w-full flex-1 min-h-[70vh] border-0"
+                />
+              )}
             </div>
           </div>
         </div>

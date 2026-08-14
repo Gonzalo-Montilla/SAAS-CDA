@@ -35,7 +35,9 @@ from app.models.tenant import Tenant
 from app.models.caja import MovimientoCaja
 from app.models.tesoreria import MovimientoTesoreria
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo
+from app.models.proveedor_catalogo import ProveedorCatalogo
 from app.schemas.exogena import (
+    ExogenaClonarConfigRequest,
     ExogenaConfigResponse,
     ExogenaConfigUpsertRequest,
     ExogenaExecutionItem,
@@ -351,6 +353,7 @@ def _run_validaciones(
                         )
                     )
                 else:
+                    cat_by_id, cat_by_doc = _load_proveedor_contacto_index(db, tenant_id)
                     quality_rows_caja = (
                         db.query(
                             MovimientoCaja.id,
@@ -359,6 +362,7 @@ def _run_validaciones(
                             MovimientoCaja.beneficiario,
                             MovimientoCaja.beneficiario_direccion,
                             MovimientoCaja.beneficiario_factus_municipality_id,
+                            MovimientoCaja.proveedor_catalogo_id,
                         )
                         .filter(
                             MovimientoCaja.tenant_id == tenant_id,
@@ -376,6 +380,7 @@ def _run_validaciones(
                             MovimientoTesoreria.beneficiario,
                             MovimientoTesoreria.beneficiario_direccion,
                             MovimientoTesoreria.beneficiario_factus_municipality_id,
+                            MovimientoTesoreria.proveedor_catalogo_id,
                         )
                         .filter(
                             MovimientoTesoreria.tenant_id == tenant_id,
@@ -389,16 +394,26 @@ def _run_validaciones(
                     invalid_doc_number = 0
                     city_missing = 0
                     address_missing = 0
-                    for _, td, nd, nm, direccion, city_id in list(quality_rows_caja) + list(quality_rows_tes):
+                    for _, td, nd, nm, direccion, city_id, cat_id in list(quality_rows_caja) + list(
+                        quality_rows_tes
+                    ):
                         if _is_missing_party_data(td, nd, nm):
                             continue
                         if not _is_valid_doc_type(td):
                             invalid_doc_type += 1
                         if not _is_valid_doc_number(td, nd):
                             invalid_doc_number += 1
-                        if city_id is None:
+                        resolved_dir, resolved_city = _resolve_egreso_contacto(
+                            direccion=direccion,
+                            city_id=city_id,
+                            proveedor_catalogo_id=cat_id,
+                            numero_documento=nd,
+                            by_id=cat_by_id,
+                            by_doc=cat_by_doc,
+                        )
+                        if resolved_city is None:
                             city_missing += 1
-                        if not (direccion or "").strip():
+                        if not resolved_dir:
                             address_missing += 1
                     if invalid_doc_type > 0:
                         results.append(
@@ -806,6 +821,88 @@ def _is_missing_party_data(tipo_documento: str | None, numero_documento: str | N
     return td in invalid_values or nd in invalid_values or nm in invalid_values
 
 
+def _doc_digits(numero_documento: str | None) -> str:
+    """Solo dígitos del NIT/CC para cruzar catálogo ↔ egresos."""
+    return re.sub(r"\D+", "", (numero_documento or "").strip())
+
+
+def _doc_lookup_keys(numero_documento: str | None) -> list[str]:
+    """Claves de cruce: dígitos completos y, si aplica, base sin DV (NIT)."""
+    digits = _doc_digits(numero_documento)
+    if not digits:
+        return []
+    keys = [digits]
+    if len(digits) >= 9:
+        keys.append(digits[:-1])
+    # únicos preservando orden
+    seen: set[str] = set()
+    out: list[str] = []
+    for k in keys:
+        if k not in seen:
+            seen.add(k)
+            out.append(k)
+    return out
+
+
+def _load_proveedor_contacto_index(
+    db: Session, tenant_id: UUID
+) -> tuple[dict, dict[str, dict]]:
+    """
+    Índice de dirección/municipio Factus del catálogo (fuente de verdad actual).
+    Los egresos guardan un snapshot; si el contador corrige el catálogo, validación/export
+    deben poder completar ciudad/dirección desde aquí.
+    """
+    rows = (
+        db.query(ProveedorCatalogo)
+        .filter(
+            ProveedorCatalogo.tenant_id == tenant_id,
+            ProveedorCatalogo.activo.is_(True),
+        )
+        .all()
+    )
+    by_id: dict = {}
+    by_doc: dict[str, dict] = {}
+    for p in rows:
+        info = {
+            "direccion": (p.direccion or "").strip(),
+            "factus_municipality_id": p.factus_municipality_id,
+        }
+        by_id[p.id] = info
+        for key in _doc_lookup_keys(p.numero_identificacion):
+            by_doc[key] = info
+    return by_id, by_doc
+
+
+def _resolve_egreso_contacto(
+    *,
+    direccion: str | None,
+    city_id: int | None,
+    proveedor_catalogo_id,
+    numero_documento: str | None,
+    by_id: dict,
+    by_doc: dict[str, dict],
+) -> tuple[str, int | None]:
+    """Prioriza snapshot del movimiento; completa faltantes desde catálogo."""
+    addr = (direccion or "").strip()
+    mid = city_id
+    if mid is not None and addr:
+        return addr, mid
+    cat = None
+    if proveedor_catalogo_id is not None:
+        cat = by_id.get(proveedor_catalogo_id)
+    if cat is None:
+        for key in _doc_lookup_keys(numero_documento):
+            cat = by_doc.get(key)
+            if cat:
+                break
+    if cat:
+        if not addr:
+            addr = (cat.get("direccion") or "").strip()
+        if mid is None:
+            mid = cat.get("factus_municipality_id")
+    return addr, mid
+
+
 def _doc_type_key(tipo_documento: str | None) -> str:
     return re.sub(r"[^A-Z0-9]", "", (tipo_documento or "").strip().upper())
 
@@ -987,6 +1084,7 @@ def _build_export_rows(
             )
             .all()
         )
+        cat_by_id, cat_by_doc = _load_proveedor_contacto_index(db, tenant_id)
         for mov in caja_rows:
             tipo_doc = (mov.beneficiario_tipo_identificacion or "").strip()
             num_doc = (mov.beneficiario_numero_identificacion or "").strip()
@@ -1051,6 +1149,14 @@ def _build_export_rows(
                     "metodo_pago": _enum_text(getattr(mov, "metodo_pago", "")),
                 },
             )
+            resolved_dir, resolved_city = _resolve_egreso_contacto(
+                direccion=mov.beneficiario_direccion,
+                city_id=mov.beneficiario_factus_municipality_id,
+                proveedor_catalogo_id=getattr(mov, "proveedor_catalogo_id", None),
+                numero_documento=num_doc,
+                by_id=cat_by_id,
+                by_doc=cat_by_doc,
+            )
             rows.append(
                 {
                     "formato": "1001",
@@ -1061,12 +1167,8 @@ def _build_export_rows(
                     "concepto_dian": ((mapeo_sel.concepto if mapeo_sel else "") or "5001").strip(),
                     "categoria": ((mapeo_sel.categoria if mapeo_sel else "") or "deducible").strip(),
                     "valor_reportado": f"{abs(Decimal(str(mov.monto or 0))):.2f}",
-                    "ciudad": (
-                        str(mov.beneficiario_factus_municipality_id)
-                        if mov.beneficiario_factus_municipality_id is not None
-                        else ""
-                    ),
-                    "direccion": (mov.beneficiario_direccion or "").strip(),
+                    "ciudad": str(resolved_city) if resolved_city is not None else "",
+                    "direccion": resolved_dir,
                     "fuente": "movimientos_caja",
                     "referencia": str(mov.id),
                 }
@@ -1135,6 +1237,14 @@ def _build_export_rows(
                     "metodo_pago": _enum_text(getattr(mov, "metodo_pago", "")),
                 },
             )
+            resolved_dir, resolved_city = _resolve_egreso_contacto(
+                direccion=mov.beneficiario_direccion,
+                city_id=mov.beneficiario_factus_municipality_id,
+                proveedor_catalogo_id=getattr(mov, "proveedor_catalogo_id", None),
+                numero_documento=num_doc,
+                by_id=cat_by_id,
+                by_doc=cat_by_doc,
+            )
             rows.append(
                 {
                     "formato": "1001",
@@ -1145,12 +1255,8 @@ def _build_export_rows(
                     "concepto_dian": ((mapeo_sel.concepto if mapeo_sel else "") or "5001").strip(),
                     "categoria": ((mapeo_sel.categoria if mapeo_sel else "") or "deducible").strip(),
                     "valor_reportado": f"{abs(Decimal(str(mov.monto or 0))):.2f}",
-                    "ciudad": (
-                        str(mov.beneficiario_factus_municipality_id)
-                        if mov.beneficiario_factus_municipality_id is not None
-                        else ""
-                    ),
-                    "direccion": (mov.beneficiario_direccion or "").strip(),
+                    "ciudad": str(resolved_city) if resolved_city is not None else "",
+                    "direccion": resolved_dir,
                     "fuente": "movimientos_tesoreria",
                     "referencia": str(mov.id),
                 }
@@ -1460,6 +1566,137 @@ def upsert_exogena_config(
         topes_por_formato_json=dict(params.topes_por_formato_json or {}),
         version_normativa=params.version_normativa,
         updated_at=params.updated_at,
+        mapeos=[ExogenaMapeoOut.model_validate(row) for row in mapeos],
+    )
+
+
+@router.post("/config/clonar", response_model=ExogenaConfigResponse)
+def clonar_exogena_config(
+    body: ExogenaClonarConfigRequest,
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """
+    Copia solo mapeos/reglas del año origen al destino.
+
+    No copia UVT ni topes: esos valores cambian cada año gravable y clonarlos
+    genera riesgo de exportar con umbrales del año anterior.
+    """
+    anio_origen = (body.anio_origen or "").strip()
+    anio_destino = (body.anio_destino or "").strip()
+    if not anio_origen.isdigit() or not anio_destino.isdigit():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Los años deben ser numéricos en formato YYYY.",
+        )
+    if anio_origen == anio_destino:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El año origen y destino deben ser distintos.",
+        )
+
+    mapeos_origen = (
+        db.query(ExogenaMapeo)
+        .filter(
+            ExogenaMapeo.tenant_id == current_user.tenant_id,
+            ExogenaMapeo.anio == anio_origen,
+        )
+        .order_by(ExogenaMapeo.formato.asc(), ExogenaMapeo.cuenta_contable.asc(), ExogenaMapeo.concepto.asc())
+        .all()
+    )
+    if not mapeos_origen:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No hay mapeos exógena para el año {anio_origen}.",
+        )
+
+    params_destino = (
+        db.query(ExogenaAnualParametro)
+        .filter(
+            ExogenaAnualParametro.tenant_id == current_user.tenant_id,
+            ExogenaAnualParametro.anio == anio_destino,
+        )
+        .first()
+    )
+    mapeos_destino_count = (
+        db.query(func.count(ExogenaMapeo.id))
+        .filter(
+            ExogenaMapeo.tenant_id == current_user.tenant_id,
+            ExogenaMapeo.anio == anio_destino,
+        )
+        .scalar()
+        or 0
+    )
+
+    if mapeos_destino_count and not body.reemplazar_destino:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Ya existen mapeos para {anio_destino}. "
+                "Confirme reemplazar_destino=true para sobrescribir solo los mapeos "
+                "(UVT y topes del año destino no se tocan)."
+            ),
+        )
+
+    # Shell de parámetros del año destino sin heredar UVT/topes del origen.
+    if not params_destino:
+        params_destino = ExogenaAnualParametro(
+            tenant_id=current_user.tenant_id,
+            anio=anio_destino,
+            uvt_anual=0,
+            topes_por_formato_json={},
+            version_normativa=None,
+            updated_by=current_user.id,
+        )
+        db.add(params_destino)
+    else:
+        params_destino.updated_by = current_user.id
+        params_destino.updated_at = datetime.now(timezone.utc)
+
+    (
+        db.query(ExogenaMapeo)
+        .filter(
+            ExogenaMapeo.tenant_id == current_user.tenant_id,
+            ExogenaMapeo.anio == anio_destino,
+        )
+        .delete(synchronize_session=False)
+    )
+
+    for m in mapeos_origen:
+        db.add(
+            ExogenaMapeo(
+                tenant_id=current_user.tenant_id,
+                anio=anio_destino,
+                formato=(m.formato or "").strip(),
+                cuenta_contable=(m.cuenta_contable or "").strip(),
+                concepto=(m.concepto or "").strip(),
+                categoria=(m.categoria or "").strip(),
+                saldo_a_reportar=(m.saldo_a_reportar or "saldo_final").strip(),
+                source_rule=(m.source_rule or "").strip() or None,
+                activo=(m.activo or "si").strip().lower(),
+                updated_by=current_user.id,
+            )
+        )
+
+    db.commit()
+    db.refresh(params_destino)
+
+    mapeos = (
+        db.query(ExogenaMapeo)
+        .filter(
+            ExogenaMapeo.tenant_id == current_user.tenant_id,
+            ExogenaMapeo.anio == anio_destino,
+        )
+        .order_by(ExogenaMapeo.formato.asc(), ExogenaMapeo.cuenta_contable.asc(), ExogenaMapeo.concepto.asc())
+        .all()
+    )
+
+    return ExogenaConfigResponse(
+        anio=anio_destino,
+        uvt_anual=int(params_destino.uvt_anual or 0),
+        topes_por_formato_json=dict(params_destino.topes_por_formato_json or {}),
+        version_normativa=params_destino.version_normativa,
+        updated_at=params_destino.updated_at,
         mapeos=[ExogenaMapeoOut.model_validate(row) for row in mapeos],
     )
 
