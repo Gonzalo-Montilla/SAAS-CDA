@@ -476,6 +476,13 @@ export default function ReportesPage() {
   const [dsEmitLoadingId, setDsEmitLoadingId] = useState<string | null>(null);
   const [dsPdfLoadingId, setDsPdfLoadingId] = useState<string | null>(null);
   const [contingenciaEmitLoadingId, setContingenciaEmitLoadingId] = useState<string | null>(null);
+  const [contingenciaRegularizar, setContingenciaRegularizar] = useState<{
+    vehiculoId: string;
+    sucursalId?: string | null;
+    placa: string;
+    numero: string;
+  } | null>(null);
+  const [contingenciaRegularizarLoading, setContingenciaRegularizarLoading] = useState(false);
   const rangoInvalido = modoVista === 'rango' && fechaInicio > fechaFin;
   const periodoActual = modoVista === 'rango' ? `${fechaInicio} a ${fechaFin}` : fechaSeleccionada;
   const reportesEnabled = !rangoInvalido;
@@ -822,6 +829,48 @@ export default function ReportesPage() {
       setContingenciaEmitLoadingId(null);
     },
   });
+
+  const marcarContingenciaRegularizada = async () => {
+    if (!contingenciaRegularizar) return;
+    const numero = contingenciaRegularizar.numero.trim();
+    if (!numero) {
+      showToast('error', 'Facturación contingencia', 'Indique el número de factura ya emitida en Factus.');
+      return;
+    }
+    setContingenciaRegularizarLoading(true);
+    try {
+      const resp = await reportesApi.marcarFacturaContingenciaRegularizada(
+        contingenciaRegularizar.vehiculoId,
+        { numero_factura_dian: numero },
+        { sucursalId: contingenciaRegularizar.sucursalId },
+      );
+      const placaOk = contingenciaRegularizar.placa;
+      setContingenciaRegularizar(null);
+      await queryClient.invalidateQueries({ queryKey: ['reportes-facturacion-contingencia'] });
+      await queryClient.invalidateQueries({ queryKey: ['tramites-detallados'] });
+      showToast(
+        'success',
+        'Contingencia',
+        `Placa ${placaOk}: marcada con factura ${resp.numero_factura_dian} (sin reemitir).`,
+      );
+    } catch (error: unknown) {
+      const message =
+        error &&
+        typeof error === 'object' &&
+        'response' in error &&
+        error.response &&
+        typeof error.response === 'object' &&
+        'data' in error.response &&
+        error.response.data &&
+        typeof error.response.data === 'object' &&
+        'detail' in error.response.data
+          ? String((error.response.data as { detail: unknown }).detail)
+          : 'No se pudo marcar como regularizada.';
+      showToast('error', 'Facturación contingencia', message);
+    } finally {
+      setContingenciaRegularizarLoading(false);
+    }
+  };
 
   // Filtrar movimientos localmente (memoizado para evitar recálculo en cada render).
   const movimientosFiltrados = useMemo(() => {
@@ -2283,8 +2332,10 @@ export default function ReportesPage() {
                 Facturación en contingencia
               </h3>
               <p className="mt-1 max-w-3xl text-sm text-slate-600">
-                Lista de cobros pagados sin factura electrónica Factus. Use <strong>Generar factura</strong> para regularizar
-                cada caso cuando Factus ya esté disponible.
+                Cobros pagados sin factura electrónica registrada en CDASOFT. Use{' '}
+                <strong>Generar factura</strong> si aún no existe en Factus, o{' '}
+                <strong>Ya en Factus</strong> si la emitió/validó en el panel Factus (como IQV62G) y no debe
+                reemitirse.
               </p>
             </div>
             <button
@@ -2382,31 +2433,113 @@ export default function ReportesPage() {
                       </span>
                     </td>
                     <td className="px-3 py-2.5 text-center">
-                      <button
-                        type="button"
-                        disabled={
-                          !item.puede_emitir ||
-                          emitirFacturaContingenciaMutation.isLoading ||
-                          contingenciaEmitLoadingId === item.vehiculo_id
-                        }
-                        onClick={() =>
-                          emitirFacturaContingenciaMutation.mutate({
-                            vehiculoId: item.vehiculo_id,
-                            sucursalId: item.sucursal_id ?? null,
-                          })
-                        }
-                        className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
-                        title={!item.puede_emitir ? 'Debe activar modo Factus y completar credenciales para emitir.' : ''}
-                      >
-                        <Receipt className="h-3.5 w-3.5" />
-                        {contingenciaEmitLoadingId === item.vehiculo_id ? 'Generando...' : 'Generar factura'}
-                      </button>
+                      <div className="inline-flex flex-col gap-1.5 items-stretch min-w-[9.5rem]">
+                        <button
+                          type="button"
+                          disabled={
+                            !item.puede_emitir ||
+                            emitirFacturaContingenciaMutation.isLoading ||
+                            contingenciaEmitLoadingId === item.vehiculo_id
+                          }
+                          onClick={() =>
+                            emitirFacturaContingenciaMutation.mutate({
+                              vehiculoId: item.vehiculo_id,
+                              sucursalId: item.sucursal_id ?? null,
+                            })
+                          }
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          title={
+                            !item.puede_emitir
+                              ? 'Debe activar modo Factus y completar credenciales para emitir.'
+                              : 'Emitir FE nueva desde CDASOFT vía Factus'
+                          }
+                        >
+                          <Receipt className="h-3.5 w-3.5" />
+                          {contingenciaEmitLoadingId === item.vehiculo_id ? 'Generando...' : 'Generar factura'}
+                        </button>
+                        <button
+                          type="button"
+                          disabled={contingenciaRegularizarLoading}
+                          onClick={() =>
+                            setContingenciaRegularizar({
+                              vehiculoId: item.vehiculo_id,
+                              sucursalId: item.sucursal_id ?? null,
+                              placa: item.placa,
+                              numero: (item.numero_factura_dian || '').trim(),
+                            })
+                          }
+                          className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-800 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          title="Si ya validó/emitió esta FE en el panel Factus, márquela aquí sin volver a generar."
+                        >
+                          Ya en Factus
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+
+          {contingenciaRegularizar && (
+            <div
+              className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+              role="presentation"
+              onClick={(e) => {
+                if (e.target === e.currentTarget && !contingenciaRegularizarLoading) {
+                  setContingenciaRegularizar(null);
+                }
+              }}
+            >
+              <div
+                className="modal-panel max-w-md w-full shadow-xl p-5 space-y-4"
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="contingencia-regularizar-titulo"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <h4 id="contingencia-regularizar-titulo" className="text-base font-bold text-slate-900">
+                  Ya emitida en Factus — {contingenciaRegularizar.placa}
+                </h4>
+                <p className="text-sm text-slate-600">
+                  Use esto solo si la factura ya quedó validada en el panel Factus (como al destrabar la cola). No
+                  vuelve a emitir; solo la saca de contingencia en CDASOFT.
+                </p>
+                <label className="block text-sm font-medium text-slate-700">
+                  Número de factura DIAN / Factus
+                  <input
+                    className="input-corporate mt-1 w-full"
+                    value={contingenciaRegularizar.numero}
+                    onChange={(e) =>
+                      setContingenciaRegularizar((prev) =>
+                        prev ? { ...prev, numero: e.target.value } : prev,
+                      )
+                    }
+                    placeholder="Ej. SETT123 o el número que aparece en Factus"
+                    autoFocus
+                  />
+                </label>
+                <div className="flex flex-col-reverse sm:flex-row gap-2 pt-1">
+                  <button
+                    type="button"
+                    className="flex-1 btn-corporate-muted px-3 py-2 text-sm"
+                    disabled={contingenciaRegularizarLoading}
+                    onClick={() => setContingenciaRegularizar(null)}
+                  >
+                    Cancelar
+                  </button>
+                  <button
+                    type="button"
+                    className="flex-1 btn-primary-solid px-3 py-2 text-sm"
+                    disabled={contingenciaRegularizarLoading || !contingenciaRegularizar.numero.trim()}
+                    onClick={() => void marcarContingenciaRegularizada()}
+                  >
+                    {contingenciaRegularizarLoading ? 'Guardando…' : 'Marcar regularizada'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
         )}
 

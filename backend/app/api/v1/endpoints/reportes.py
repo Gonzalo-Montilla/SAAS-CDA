@@ -4636,6 +4636,20 @@ class FacturacionContingenciaEmitResponse(BaseModel):
     emitted_at: str
 
 
+class FacturacionContingenciaMarcarBody(BaseModel):
+    """Registrar FE ya emitida fuera de CDASOFT (p. ej. panel Factus) para sacarla de contingencia."""
+
+    numero_factura_dian: str = Field(..., min_length=1, max_length=80)
+    cufe: Optional[str] = Field(None, max_length=200)
+    public_url: Optional[str] = Field(None, max_length=800)
+
+
+class FacturacionContingenciaMarcarResponse(BaseModel):
+    vehiculo_id: UUID
+    numero_factura_dian: str
+    regularizado_at: str
+
+
 @router.get("/estado-cambios-patrimonio-gerencial", response_model=EstadoCambiosPatrimonioGerencialResponse)
 def estado_cambios_patrimonio_gerencial(
     request: Request,
@@ -5083,4 +5097,98 @@ def emitir_factura_contingencia(
         cufe=cufe,
         public_url=public_url,
         emitted_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+@router.post(
+    "/facturacion-contingencia/{vehiculo_id}/marcar-regularizada",
+    response_model=FacturacionContingenciaMarcarResponse,
+)
+def marcar_factura_contingencia_regularizada(
+    vehiculo_id: UUID,
+    body: FacturacionContingenciaMarcarBody,
+    request: Request,
+    sucursal_id: Optional[UUID] = Query(None),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_contador_or_admin),
+):
+    """
+    Quita un cobro de la bandeja de contingencia cuando la FE ya se emitió/validó
+    en el panel Factus (u otro canal) y no debe volver a generarse desde CDASOFT.
+    """
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=sucursal_id,
+        consolidar_todas=False,
+    )
+    tenant_id = current_user.tenant_id
+    numero = (body.numero_factura_dian or "").strip()
+    if not numero:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Indique el número de factura DIAN/Factus ya emitida.",
+        )
+
+    vehiculo = (
+        db.query(VehiculoProceso)
+        .filter(_vp_scope(tenant_id, scope_sid, VehiculoProceso.id == vehiculo_id))
+        .first()
+    )
+    if not vehiculo:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Cobro no encontrado para este alcance de sede.",
+        )
+    if vehiculo.fecha_pago is None or Decimal(str(vehiculo.total_cobrado or 0)) <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El cobro no está en estado pagado válido.",
+        )
+
+    factura_existente = (
+        db.query(FacturaElectronica)
+        .filter(
+            FacturaElectronica.tenant_id == tenant_id,
+            FacturaElectronica.vehiculo_proceso_id == vehiculo.id,
+        )
+        .order_by(FacturaElectronica.created_at.desc())
+        .first()
+    )
+    if factura_existente is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Este cobro ya tiene una factura electrónica registrada; ya no está en contingencia.",
+        )
+
+    ref = f"contingencia-ext-{vehiculo.id.hex[:12]}"
+    cufe = (body.cufe or "").strip() or None
+    public_url = (body.public_url or "").strip() or None
+    fe = FacturaElectronica(
+        tenant_id=tenant_id,
+        vehiculo_proceso_id=vehiculo.id,
+        reference_code=ref[:120],
+        factus_bill_id=None,
+        numero_documento=numero[:80],
+        cufe=cufe[:200] if cufe else None,
+        public_url=public_url[:800] if public_url else None,
+        emitido_por_usuario_id=current_user.id,
+    )
+    db.add(fe)
+    vehiculo.numero_factura_dian = numero[:80]
+    try:
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"No se pudo marcar la factura como regularizada: {exc}",
+        ) from exc
+
+    return FacturacionContingenciaMarcarResponse(
+        vehiculo_id=vehiculo.id,
+        numero_factura_dian=numero[:80],
+        regularizado_at=datetime.now(timezone.utc).isoformat(),
     )

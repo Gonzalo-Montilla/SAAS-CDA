@@ -453,6 +453,12 @@ export interface FacturacionContingenciaEmitResponse {
   emitted_at: string;
 }
 
+export interface FacturacionContingenciaMarcarResponse {
+  vehiculo_id: string;
+  numero_factura_dian: string;
+  regularizado_at: string;
+}
+
 async function fetchFacturaSoporteGastoBlob(
   origen: 'caja' | 'tesoreria' | string,
   movimientoId: string,
@@ -817,6 +823,21 @@ export const reportesApi = {
     const suffix = qp.toString();
     const response = await apiClient.post<FacturacionContingenciaEmitResponse>(
       `/reportes/facturacion-contingencia/${vehiculoId}/emitir${suffix ? `?${suffix}` : ''}`,
+    );
+    return response.data;
+  },
+
+  marcarFacturaContingenciaRegularizada: async (
+    vehiculoId: string,
+    payload: { numero_factura_dian: string; cufe?: string; public_url?: string },
+    params?: { sucursalId?: string | null },
+  ): Promise<FacturacionContingenciaMarcarResponse> => {
+    const qp = new URLSearchParams();
+    if (params?.sucursalId) qp.set('sucursal_id', params.sucursalId);
+    const suffix = qp.toString();
+    const response = await apiClient.post<FacturacionContingenciaMarcarResponse>(
+      `/reportes/facturacion-contingencia/${vehiculoId}/marcar-regularizada${suffix ? `?${suffix}` : ''}`,
+      payload,
     );
     return response.data;
   },
