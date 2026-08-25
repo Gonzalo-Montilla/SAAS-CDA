@@ -532,6 +532,12 @@ export default function Recepcion() {
   const [mostrarModalReinspeccion, setMostrarModalReinspeccion] = useState(false);
   const [placaEvaluadaReinspeccion, setPlacaEvaluadaReinspeccion] = useState('');
   const [esReingresoRechazoInicial, setEsReingresoRechazoInicial] = useState(false);
+  /** idle | loading | ok | error — no registrar si falla la consulta de elegibilidad. */
+  const [reinspeccionConsultaEstado, setReinspeccionConsultaEstado] = useState<
+    'idle' | 'loading' | 'ok' | 'error'
+  >('idle');
+  const [reinspeccionConsultaError, setReinspeccionConsultaError] = useState('');
+  const [reinspeccionRetryToken, setReinspeccionRetryToken] = useState(0);
   const [historialClienteSugerido, setHistorialClienteSugerido] = useState<{
     fuente: string;
     placa: string;
@@ -631,13 +637,21 @@ export default function Recepcion() {
       setMostrarModalReinspeccion(false);
       setPlacaEvaluadaReinspeccion('');
       setEsReingresoRechazoInicial(false);
+      setReinspeccionConsultaEstado('idle');
+      setReinspeccionConsultaError('');
       return;
     }
+    setReinspeccionConsultaEstado('loading');
+    setReinspeccionConsultaError('');
     const handle = window.setTimeout(async () => {
       try {
         const data = await vehiculosApi.consultarElegibilidadReinspeccion(placaUpper);
         setReinspeccionInfo(data);
-        if (!data.elegible_reingreso) {
+        setReinspeccionConsultaEstado('ok');
+        setReinspeccionConsultaError('');
+        if (data.elegible_reingreso) {
+          setEsReingresoRechazoInicial(true);
+        } else {
           setEsReingresoRechazoInicial(false);
         }
         const esNuevaPlaca = placaEvaluadaReinspeccion !== placaUpper;
@@ -647,10 +661,20 @@ export default function Recepcion() {
         }
       } catch {
         setReinspeccionInfo(null);
+        setEsReingresoRechazoInicial(false);
+        setReinspeccionConsultaEstado('error');
+        setReinspeccionConsultaError(
+          'No se pudo verificar si esta placa tiene reinspección elegible. Reintenta antes de registrar.',
+        );
+        showToast(
+          'error',
+          'Reinspección',
+          'No se pudo consultar el historial de la placa. Reintenta; no registres hasta confirmar.',
+        );
       }
     }, 450);
     return () => window.clearTimeout(handle);
-  }, [formData.placa, modoEdicion, placaEvaluadaReinspeccion]);
+  }, [formData.placa, modoEdicion, placaEvaluadaReinspeccion, showToast, reinspeccionRetryToken]);
 
   useEffect(() => {
     if (modoEdicion) return;
@@ -1743,12 +1767,30 @@ export default function Recepcion() {
       );
       return;
     }
+    if (!modoEdicion && reinspeccionConsultaEstado === 'loading') {
+      showToast(
+        'warning',
+        'Espera un momento',
+        'Aún se está verificando si la placa tiene reinspección elegible.',
+      );
+      return;
+    }
+    if (!modoEdicion && reinspeccionConsultaEstado === 'error') {
+      showToast(
+        'error',
+        'Reinspección',
+        reinspeccionConsultaError ||
+          'No se pudo verificar la placa. Reintenta la consulta antes de registrar.',
+      );
+      return;
+    }
     if (!modoEdicion && reinspeccionInfo?.elegible_reingreso && !esReingresoRechazoInicial) {
       showToast(
         'warning',
         'Confirma tipo de ingreso',
-        'Esta placa tiene reinspección elegible. Marca "Sí, es reingreso por rechazo inicial" antes de registrar.'
+        'Esta placa tiene reinspección elegible. Debes confirmar el reingreso por rechazo inicial (sin cobro).',
       );
+      setEsReingresoRechazoInicial(true);
       setMostrarModalReinspeccion(true);
       return;
     }
@@ -2426,6 +2468,18 @@ export default function Recepcion() {
                   {historialClienteSugerido.fecha_ultima_atencion
                     ? ` · última atención: ${formatServerDateTimeToBogota(historialClienteSugerido.fecha_ultima_atencion)}`
                     : ''}
+                </div>
+              )}
+              {reinspeccionConsultaEstado === 'error' && (
+                <div className="mt-1 text-xs rounded-lg border border-red-200 bg-red-50 p-2 text-red-800 flex flex-wrap items-center gap-2">
+                  <span>{reinspeccionConsultaError || 'Error al consultar reinspección.'}</span>
+                  <button
+                    type="button"
+                    onClick={() => setReinspeccionRetryToken((n) => n + 1)}
+                    className="underline font-semibold"
+                  >
+                    Reintentar
+                  </button>
                 </div>
               )}
               {reinspeccionInfo?.tiene_historial && (
@@ -3345,10 +3399,23 @@ export default function Recepcion() {
                 Debes capturar y guardar las firmas del titular y del operario para registrar cuando diligencias el Formato Prerevision.
               </div>
             )}
+            {!modoEdicion && reinspeccionConsultaEstado === 'error' && (
+              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+                No se pudo verificar reinspección de la placa. Usa «Reintentar» arriba antes de registrar.
+              </div>
+            )}
             <div className="flex gap-4 mt-6">
               <button
                 type="submit"
-                disabled={registrarMutation.isLoading || editarMutation.isLoading || bloqueoFirmaRegistro}
+                disabled={
+                  registrarMutation.isLoading ||
+                  editarMutation.isLoading ||
+                  bloqueoFirmaRegistro ||
+                  (!modoEdicion &&
+                    ((formData.placa || '').trim().length >= 5 &&
+                      (reinspeccionConsultaEstado === 'loading' ||
+                        reinspeccionConsultaEstado === 'error')))
+                }
                 className="flex-1 btn-pos btn-primary disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {(registrarMutation.isLoading || editarMutation.isLoading) ? (
@@ -3962,7 +4029,10 @@ export default function Recepcion() {
                   onChange={(e) => setEsReingresoRechazoInicial(e.target.checked)}
                   className="mt-0.5"
                 />
-                <span>Sí, este registro corresponde a reingreso por rechazo inicial (sin cobro).</span>
+                <span>
+                  Sí, este registro corresponde a reingreso por rechazo inicial (sin cobro). Queda marcado por
+                  defecto; desmárcalo solo si no es reinspección.
+                </span>
               </label>
             ) : (
               <p className="mt-4 text-sm text-slate-700 rounded-lg border border-slate-200 bg-slate-50 p-3">
@@ -3972,10 +4042,15 @@ export default function Recepcion() {
             <div className="mt-4 flex justify-end gap-2">
               <button
                 type="button"
-                onClick={() => setMostrarModalReinspeccion(false)}
+                onClick={() => {
+                  if (reinspeccionInfo.elegible_reingreso && !esReingresoRechazoInicial) {
+                    setEsReingresoRechazoInicial(true);
+                  }
+                  setMostrarModalReinspeccion(false);
+                }}
                 className="px-4 py-2 rounded-lg border border-slate-300 bg-white text-slate-700 font-semibold hover:bg-slate-50"
               >
-                Cerrar
+                {reinspeccionInfo.elegible_reingreso ? 'Confirmar y continuar' : 'Cerrar'}
               </button>
             </div>
           </div>

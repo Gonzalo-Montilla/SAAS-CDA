@@ -1,6 +1,7 @@
 """
 Endpoints de Vehículos
 """
+import logging
 import re
 import json
 import time
@@ -123,6 +124,7 @@ from app.schemas.vehiculo import (
 )
 
 router = APIRouter()
+_log_veh = logging.getLogger(__name__)
 REINSPECCION_MAX_INTENTOS = 3
 REINSPECCION_VENTANA_DIAS = 15
 RTM_OBLIGATORIA_BLOQUEO_DIAS = 365
@@ -1578,6 +1580,45 @@ def _build_reinspeccion_context_for_origen(
     }
 
 
+def _preview_reinspeccion_elegible_por_placa(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    placa_upper: str,
+    excluir_vehiculo_id: Optional[UUID] = None,
+) -> dict[str, Any] | None:
+    """
+    Evalúa si la placa tiene reinspección elegible (sin cobro).
+    Si `excluir_vehiculo_id` se pasa (p. ej. el trámite actual en Caja), no cuenta como 'latest'.
+    """
+    q = db.query(VehiculoProceso).filter(
+        VehiculoProceso.tenant_id == tenant_id,
+        VehiculoProceso.placa == placa_upper,
+    )
+    if excluir_vehiculo_id is not None:
+        q = q.filter(VehiculoProceso.id != excluir_vehiculo_id)
+    historial = q.order_by(VehiculoProceso.fecha_registro.desc()).all()
+    latest: Optional[VehiculoProceso] = None
+    for row in historial:
+        if _es_servicio_obligatorio(getattr(row, "tipo_vehiculo", None)):
+            latest = row
+            break
+    if latest is None:
+        return None
+    origen = latest
+    if latest.reinspeccion_origen_id is not None:
+        origen = (
+            db.query(VehiculoProceso)
+            .filter(
+                VehiculoProceso.id == latest.reinspeccion_origen_id,
+                VehiculoProceso.tenant_id == tenant_id,
+            )
+            .first()
+            or latest
+        )
+    return _build_reinspeccion_context_for_origen(db, tenant_id=tenant_id, origen=origen)
+
+
 def _es_servicio_preventiva(tipo_vehiculo: Optional[str]) -> bool:
     return (tipo_vehiculo or "").strip().lower() == "preventiva"
 
@@ -2345,6 +2386,17 @@ def registrar_vehiculo(
                 db, tenant_id=current_user.tenant_id, origen=origen
             )
             if preview_ctx["elegible"] and vehiculo_data.tipo_vehiculo != "preventiva":
+                origen_id = getattr(preview_ctx.get("origen"), "id", None)
+                _log_veh.warning(
+                    "reinspeccion_bloqueada_sin_confirmacion tenant=%s placa=%s origen_id=%s "
+                    "usuario_id=%s intentos_usados=%s vence_at=%s",
+                    current_user.tenant_id,
+                    placa_upper,
+                    origen_id,
+                    current_user.id,
+                    preview_ctx.get("intentos_usados"),
+                    preview_ctx.get("vence_at"),
+                )
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=(
@@ -2917,6 +2969,40 @@ def cobrar_vehiculo(
     es_reinspeccion_exenta = bool(getattr(vehiculo, "reinspeccion_exenta", False))
     es_prueba_auditoria = _es_prueba_auditoria(getattr(vehiculo, "tipo_vehiculo", None))
     es_cobro_exento = es_reinspeccion_exenta or es_prueba_auditoria
+    # Red de seguridad: si recepción registró cobro normal pero la placa es elegible
+    # a reinpección, no permitir cobrar dinero (caso CZK66E Putumayo).
+    if (
+        not es_cobro_exento
+        and not _es_servicio_preventiva(getattr(vehiculo, "tipo_vehiculo", None))
+        and Decimal(str(vehiculo.total_cobrado or 0)) > 0
+    ):
+        placa_chk = (vehiculo.placa or "").strip().upper()
+        preview = _preview_reinspeccion_elegible_por_placa(
+            db,
+            tenant_id=current_user.tenant_id,
+            placa_upper=placa_chk,
+            excluir_vehiculo_id=vehiculo.id,
+        )
+        if preview and preview.get("elegible"):
+            origen_id = getattr(preview.get("origen"), "id", None)
+            _log_veh.warning(
+                "cobro_bloqueado_reinspeccion_elegible tenant=%s placa=%s vehiculo_id=%s "
+                "origen_id=%s total=%s usuario_id=%s",
+                current_user.tenant_id,
+                placa_chk,
+                vehiculo.id,
+                origen_id,
+                vehiculo.total_cobrado,
+                current_user.id,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=(
+                    "Esta placa tiene reinspección elegible sin cobro (rechazo reciente). "
+                    "No se puede cobrar tarifa normal. En Recepción debe registrarse como "
+                    "'reingreso por rechazo inicial' o corregir el trámite pendiente (valor $0 / exenta)."
+                ),
+            )
     metodo_pago = (
         "reinspeccion_exenta"
         if es_reinspeccion_exenta
