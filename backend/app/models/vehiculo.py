@@ -1,14 +1,18 @@
 """
 Modelo de Vehículos en Proceso
 """
-from sqlalchemy import Column, String, Integer, Numeric, Boolean, DateTime, ForeignKey, Enum as SQLEnum, Text
+from sqlalchemy import Column, String, Integer, Numeric, Boolean, DateTime, ForeignKey, Enum as SQLEnum, Text, event
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
+from decimal import Decimal
 import uuid
 import enum
 
 from app.db.database import Base
+
+TIPO_VEHICULO_PRUEBAS_AUDITORIA = "pruebas_auditoria"
+_ZERO_COBRO = Decimal("0.00")
 
 
 class EstadoVehiculo(str, enum.Enum):
@@ -117,3 +121,29 @@ class VehiculoProceso(Base):
         """Calcular antigüedad del vehículo"""
         ano_actual = datetime.now().year
         return ano_actual - self.ano_modelo
+
+
+def enforce_tramite_sin_cobro_montos(target: VehiculoProceso) -> None:
+    """
+    Candado de persistencia: reinspección exenta y pruebas de auditoría
+    no pueden quedar con tarifa. Cubre registrar, editar, cobrar y cualquier
+    UPDATE futuro (regresión MWQ631 tras CZK66E).
+    """
+    tipo = (getattr(target, "tipo_vehiculo", None) or "").strip().lower()
+    exenta = bool(getattr(target, "reinspeccion_exenta", False))
+    if not exenta and tipo != TIPO_VEHICULO_PRUEBAS_AUDITORIA:
+        return
+    target.valor_rtm = _ZERO_COBRO
+    target.comision_soat = _ZERO_COBRO
+    target.total_cobrado = _ZERO_COBRO
+    target.tiene_soat = False
+
+
+@event.listens_for(VehiculoProceso, "before_insert")
+def _vehiculo_before_insert(_mapper, _connection, target: VehiculoProceso) -> None:
+    enforce_tramite_sin_cobro_montos(target)
+
+
+@event.listens_for(VehiculoProceso, "before_update")
+def _vehiculo_before_update(_mapper, _connection, target: VehiculoProceso) -> None:
+    enforce_tramite_sin_cobro_montos(target)

@@ -168,6 +168,48 @@ def _es_prueba_auditoria(tipo_vehiculo: str | None) -> bool:
     return (tipo_vehiculo or "").strip().lower() == TIPO_VEHICULO_PRUEBAS_AUDITORIA
 
 
+def _es_tramite_sin_cobro(tipo_vehiculo: str | None, reinspeccion_exenta: Any) -> bool:
+    return bool(reinspeccion_exenta) or _es_prueba_auditoria(tipo_vehiculo)
+
+
+def _coaccionar_montos_sin_cobro(
+    *,
+    tipo_vehiculo: str | None,
+    reinspeccion_exenta: Any,
+    valor_rtm: Any,
+    comision_soat: Any,
+    total_cobrado: Any,
+    tiene_soat: Any,
+    placa: Optional[str] = None,
+) -> tuple[Any, Any, Any, bool]:
+    """
+    Reinspección exenta y pruebas de auditoría no se cobran.
+    Si la BD quedó con tarifa llena (p. ej. tras editar en Recepción),
+    la API no debe devolver ese monto a Caja ni al listado.
+    """
+    zero = Decimal("0.00")
+    if not _es_tramite_sin_cobro(tipo_vehiculo, reinspeccion_exenta):
+        return (
+            valor_rtm,
+            comision_soat if comision_soat is not None else 0,
+            total_cobrado,
+            bool(tiene_soat),
+        )
+    try:
+        total_num = Decimal(str(total_cobrado or 0))
+    except Exception:
+        total_num = zero
+    if total_num > 0:
+        _log_veh.warning(
+            "reinspeccion_monto_inconsistente placa=%s total=%s exenta=%s tipo=%s",
+            placa,
+            total_num,
+            reinspeccion_exenta,
+            tipo_vehiculo,
+        )
+    return zero, zero, zero, False
+
+
 MOTIVOS_CORRECCION_FACTURA = {"placa", "documento", "nombre", "identificacion", "valor"}
 
 
@@ -346,6 +388,24 @@ def _build_vehiculo_response_with_correccion(
     if compact:
         # Evita enviar JSON pesado de recepción en listados rápidos de Caja.
         update_data["recepcion_formato_extra_json"] = None
+    valor_rtm, comision_soat, total_cobrado, tiene_soat = _coaccionar_montos_sin_cobro(
+        tipo_vehiculo=getattr(vehiculo, "tipo_vehiculo", None),
+        reinspeccion_exenta=getattr(vehiculo, "reinspeccion_exenta", False),
+        valor_rtm=vehiculo.valor_rtm,
+        comision_soat=vehiculo.comision_soat,
+        total_cobrado=vehiculo.total_cobrado,
+        tiene_soat=vehiculo.tiene_soat,
+        placa=getattr(vehiculo, "placa", None),
+    )
+    if _es_tramite_sin_cobro(getattr(vehiculo, "tipo_vehiculo", None), getattr(vehiculo, "reinspeccion_exenta", False)):
+        update_data.update(
+            {
+                "valor_rtm": valor_rtm,
+                "comision_soat": comision_soat,
+                "total_cobrado": total_cobrado,
+                "tiene_soat": tiene_soat,
+            }
+        )
     out = VehiculoResponse.model_validate(vehiculo)
     return out.model_copy(update=update_data) if update_data else out
 
@@ -387,6 +447,15 @@ def _build_vehiculo_pendiente_caja_response(
     source = getattr(vehiculo, "kilometraje", None) if kilometraje is None else kilometraje
     km = str(source).strip() if source is not None else ""
     km = km or None
+    valor_rtm, comision_soat, total_cobrado, tiene_soat = _coaccionar_montos_sin_cobro(
+        tipo_vehiculo=vehiculo.tipo_vehiculo,
+        reinspeccion_exenta=vehiculo.reinspeccion_exenta,
+        valor_rtm=vehiculo.valor_rtm,
+        comision_soat=vehiculo.comision_soat,
+        total_cobrado=vehiculo.total_cobrado,
+        tiene_soat=vehiculo.tiene_soat,
+        placa=vehiculo.placa,
+    )
     return VehiculoPendienteCajaResponse(
         id=vehiculo.id,
         placa=vehiculo.placa,
@@ -401,10 +470,10 @@ def _build_vehiculo_pendiente_caja_response(
         cliente_email=vehiculo.cliente_email,
         cliente_direccion=vehiculo.cliente_direccion,
         cliente_factus_municipality_id=vehiculo.cliente_factus_municipality_id,
-        valor_rtm=vehiculo.valor_rtm,
-        tiene_soat=bool(vehiculo.tiene_soat),
-        comision_soat=vehiculo.comision_soat or 0,
-        total_cobrado=vehiculo.total_cobrado,
+        valor_rtm=valor_rtm,
+        tiene_soat=tiene_soat,
+        comision_soat=comision_soat,
+        total_cobrado=total_cobrado,
         metodo_pago=str(vehiculo.metodo_pago or "") or None,
         numero_factura_dian=vehiculo.numero_factura_dian,
         registrado_runt=bool(vehiculo.registrado_runt),
@@ -429,6 +498,15 @@ def _build_vehiculo_pendiente_caja_from_row(row: Any) -> VehiculoPendienteCajaRe
     km = km or None
     ano = int(row.ano_modelo) if row.ano_modelo is not None else 0
     estado = row.estado.value if hasattr(row.estado, "value") else str(row.estado or "")
+    valor_rtm, comision_soat, total_cobrado, tiene_soat = _coaccionar_montos_sin_cobro(
+        tipo_vehiculo=row.tipo_vehiculo,
+        reinspeccion_exenta=getattr(row, "reinspeccion_exenta", None),
+        valor_rtm=row.valor_rtm,
+        comision_soat=row.comision_soat,
+        total_cobrado=row.total_cobrado,
+        tiene_soat=row.tiene_soat,
+        placa=row.placa,
+    )
     return VehiculoPendienteCajaResponse(
         id=row.id,
         placa=row.placa,
@@ -443,10 +521,10 @@ def _build_vehiculo_pendiente_caja_from_row(row: Any) -> VehiculoPendienteCajaRe
         cliente_email=row.cliente_email,
         cliente_direccion=row.cliente_direccion,
         cliente_factus_municipality_id=row.cliente_factus_municipality_id,
-        valor_rtm=row.valor_rtm,
-        tiene_soat=bool(row.tiene_soat),
-        comision_soat=row.comision_soat or 0,
-        total_cobrado=row.total_cobrado,
+        valor_rtm=valor_rtm,
+        tiene_soat=tiene_soat,
+        comision_soat=comision_soat,
+        total_cobrado=total_cobrado,
         metodo_pago=str(row.metodo_pago or "") or None,
         numero_factura_dian=row.numero_factura_dian,
         registrado_runt=bool(row.registrado_runt),
@@ -470,6 +548,15 @@ def _build_vehiculo_cobrado_hoy_response(
     correccion: FacturaCorreccion | None = None,
 ) -> VehiculoCobradoHoyResponse:
     es_corregida_ok = bool(correccion and str(correccion.estado or "").lower() == "completed")
+    _valor, _comision, total_cobrado, _tiene_soat = _coaccionar_montos_sin_cobro(
+        tipo_vehiculo=vehiculo.tipo_vehiculo,
+        reinspeccion_exenta=getattr(vehiculo, "reinspeccion_exenta", False),
+        valor_rtm=vehiculo.valor_rtm,
+        comision_soat=vehiculo.comision_soat,
+        total_cobrado=vehiculo.total_cobrado,
+        tiene_soat=vehiculo.tiene_soat,
+        placa=vehiculo.placa,
+    )
     return VehiculoCobradoHoyResponse(
         id=vehiculo.id,
         placa=vehiculo.placa,
@@ -480,7 +567,7 @@ def _build_vehiculo_cobrado_hoy_response(
         cliente_email=vehiculo.cliente_email,
         cliente_direccion=vehiculo.cliente_direccion,
         metodo_pago=str(vehiculo.metodo_pago or "") or None,
-        total_cobrado=vehiculo.total_cobrado,
+        total_cobrado=total_cobrado,
         numero_factura_dian=vehiculo.numero_factura_dian,
         factura_corregida=es_corregida_ok,
         factura_correccion_estado=(correccion.estado if correccion else None),
@@ -2629,8 +2716,8 @@ def editar_vehiculo(
                 detail=f"Ya existe otro vehículo con placa {placa_upper} en estado {vehiculo_existente.estado}"
             )
     
-    # Pruebas de auditoría: sin cobro ni SOAT.
-    if _es_prueba_auditoria(vehiculo_data.tipo_vehiculo):
+    # Reinspección exenta y pruebas de auditoría: nunca recalcular tarifa (caso MWQ631).
+    if bool(getattr(vehiculo, "reinspeccion_exenta", False)) or _es_prueba_auditoria(vehiculo_data.tipo_vehiculo):
         valor_rtm = Decimal(0)
         comision_soat = Decimal(0)
         total_cobrado = Decimal(0)
@@ -2701,7 +2788,12 @@ def editar_vehiculo(
     vehiculo.cliente_email = str(vehiculo_data.cliente_email).strip().lower()
     vehiculo.cliente_direccion = vehiculo_data.cliente_direccion
     vehiculo.cliente_factus_municipality_id = vehiculo_data.cliente_factus_municipality_id
-    vehiculo.tiene_soat = False if _es_prueba_auditoria(vehiculo_data.tipo_vehiculo) else vehiculo_data.tiene_soat
+    vehiculo.tiene_soat = (
+        False
+        if bool(getattr(vehiculo, "reinspeccion_exenta", False))
+        or _es_prueba_auditoria(vehiculo_data.tipo_vehiculo)
+        else vehiculo_data.tiene_soat
+    )
     vehiculo.observaciones = vehiculo_data.observaciones
     vehiculo.recepcion_formato_extra_json = vehiculo_data.recepcion_formato_extra
     vehiculo.kilometraje = _kilometraje_column_from_formato(vehiculo_data.recepcion_formato_extra)

@@ -1128,8 +1128,8 @@ export default function Recepcion() {
   useEffect(() => {
     let cancelled = false;
 
-    // Preventiva y pruebas de auditoría: no requieren cálculo de tarifa en recepción.
-    if (esPreventiva || formData.tipo_vehiculo === 'pruebas_auditoria') {
+    // Preventiva, pruebas de auditoría y reinspección sin cobro: no mostrar tarifa RTM.
+    if (esPreventiva || formData.tipo_vehiculo === 'pruebas_auditoria' || esReingresoRechazoInicial) {
       setTarifaCalculada(null);
       setTarifaError('');
       return;
@@ -1168,7 +1168,7 @@ export default function Recepcion() {
     return () => {
       cancelled = true;
     };
-  }, [formData.ano_modelo, formData.tipo_vehiculo, anoActual, esPreventiva]);
+  }, [formData.ano_modelo, formData.tipo_vehiculo, anoActual, esPreventiva, esReingresoRechazoInicial]);
 
   const resetForm = () => {
     // Limpiar fotos
@@ -1227,6 +1227,7 @@ export default function Recepcion() {
     
     setModoEdicion(true);
     setVehiculoEditando(vehiculo.id);
+    setEsReingresoRechazoInicial(Boolean(vehiculo.reinspeccion_exenta));
     setFotosVehiculo(fotos);
     setConsultaRunt({
       document_type: (vehiculo.cliente_tipo_documento || 'CC') as 'CC' | 'CE' | 'PA' | 'NIT',
@@ -2172,6 +2173,7 @@ export default function Recepcion() {
 
   // Calcular total con SOAT si aplica
   const calcularTotalConSOAT = () => {
+    if (esReingresoRechazoInicial) return 0;
     if (formData.tipo_vehiculo === 'pruebas_auditoria') return 0;
     if (!tarifaCalculada) return 0;
     
@@ -2275,7 +2277,11 @@ export default function Recepcion() {
           escaparCsv(vehiculo.cliente_telefono),
           escaparCsv(vehiculo.cliente_email),
           escaparCsv(vehiculo.cliente_direccion),
-          escaparCsv(vehiculo.total_cobrado),
+          escaparCsv(
+            vehiculo.reinspeccion_exenta || vehiculo.tipo_vehiculo === 'pruebas_auditoria'
+              ? 0
+              : vehiculo.total_cobrado
+          ),
           escaparCsv(fotos.length),
           escaparCsv(fotos[0] || ''),
           escaparCsv(fotos[1] || ''),
@@ -3458,7 +3464,22 @@ export default function Recepcion() {
               Tarifa a Cobrar
             </h3>
 
-            {esPreventiva ? (
+            {esReingresoRechazoInicial ? (
+              <div>
+                <div className="bg-emerald-50 border-2 border-emerald-300 rounded-lg p-6 text-center">
+                  <p className="text-lg font-bold text-emerald-900 mb-2">
+                    Reinspección sin cobro
+                  </p>
+                  <p className="text-sm text-emerald-800">
+                    Reingreso por rechazo inicial. No se cobra tarifa.
+                  </p>
+                </div>
+                <div className="mt-4 bg-primary-600 text-white rounded-lg p-4">
+                  <p className="text-sm mb-1">TOTAL A COBRAR</p>
+                  <p className="text-3xl font-bold">{formatCOP(0)}</p>
+                </div>
+              </div>
+            ) : esPreventiva ? (
               <div>
                 <div className="bg-yellow-50 border-2 border-yellow-300 rounded-lg p-6 text-center">
                   <DollarSign className="w-16 h-16 text-yellow-600 mx-auto mb-3" />
@@ -3834,8 +3855,17 @@ export default function Recepcion() {
                     <p className="text-slate-700">
                       <span className="font-semibold">Modelo:</span> {vehiculo.ano_modelo}
                     </p>
+                    {vehiculo.reinspeccion_exenta && (
+                      <p className="text-xs font-semibold text-emerald-700 mt-1">
+                        Reintento por rechazo · sin cobro
+                      </p>
+                    )}
                     <p className="text-lg font-bold text-primary-600 mt-2">
-                      {formatCOP(vehiculo.total_cobrado)}
+                      {formatCOP(
+                        vehiculo.reinspeccion_exenta || vehiculo.tipo_vehiculo === 'pruebas_auditoria'
+                          ? 0
+                          : vehiculo.total_cobrado
+                      )}
                     </p>
                   </div>
 

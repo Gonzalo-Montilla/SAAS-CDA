@@ -1262,7 +1262,13 @@ function VehiculosPendientes({
 
               <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50/90 p-3">
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Total a cobrar</p>
-                <p className="text-2xl font-bold tabular-nums text-slate-900">${formatCurrency(vehiculo.total_cobrado)}</p>
+                <p className="text-2xl font-bold tabular-nums text-slate-900">
+                  ${formatCurrency(
+                    vehiculo.reinspeccion_exenta || vehiculo.tipo_vehiculo === 'pruebas_auditoria'
+                      ? 0
+                      : vehiculo.total_cobrado
+                  )}
+                </p>
               </div>
 
               <button
@@ -1353,6 +1359,7 @@ function ModalCobro({
 
   // Calcular total a cobrar ajustado
   const calcularTotalAjustado = () => {
+    if (esCobroExento) return 0;
     if (esPreventiva) {
       const valorBase = valorPreventivaNum || 0;
       const comision = clientePagaSOAT ? vehiculo.comision_soat : 0;
