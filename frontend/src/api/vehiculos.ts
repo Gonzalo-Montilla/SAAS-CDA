@@ -130,10 +130,16 @@ export const vehiculosApi = {
   },
 
   // Consultar si la placa puede reingresar por rechazo inicial
-  consultarElegibilidadReinspeccion: async (placa: string): Promise<ReinspeccionElegibilidad> => {
+  consultarElegibilidadReinspeccion: async (
+    placa: string,
+    excluirVehiculoId?: string | null,
+  ): Promise<ReinspeccionElegibilidad> => {
     const cleaned = (placa || '').trim().toUpperCase();
     const response = await apiClient.get<ReinspeccionElegibilidad>(
-      `/vehiculos/reinspeccion/elegibilidad/${encodeURIComponent(cleaned)}`
+      `/vehiculos/reinspeccion/elegibilidad/${encodeURIComponent(cleaned)}`,
+      excluirVehiculoId
+        ? { params: { excluir_vehiculo_id: excluirVehiculoId } }
+        : undefined,
     );
     return response.data;
   },

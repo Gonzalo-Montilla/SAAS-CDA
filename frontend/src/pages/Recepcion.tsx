@@ -630,13 +630,12 @@ export default function Recepcion() {
   }, [mostrarFormatoExtra, versionFormatoTenant]);
 
   useEffect(() => {
-    if (modoEdicion) return;
     const placaUpper = (formData.placa || '').trim().toUpperCase();
     if (placaUpper.length < 5) {
       setReinspeccionInfo(null);
       setMostrarModalReinspeccion(false);
       setPlacaEvaluadaReinspeccion('');
-      setEsReingresoRechazoInicial(false);
+      if (!modoEdicion) setEsReingresoRechazoInicial(false);
       setReinspeccionConsultaEstado('idle');
       setReinspeccionConsultaError('');
       return;
@@ -645,13 +644,16 @@ export default function Recepcion() {
     setReinspeccionConsultaError('');
     const handle = window.setTimeout(async () => {
       try {
-        const data = await vehiculosApi.consultarElegibilidadReinspeccion(placaUpper);
+        const data = await vehiculosApi.consultarElegibilidadReinspeccion(
+          placaUpper,
+          modoEdicion ? vehiculoEditando : undefined,
+        );
         setReinspeccionInfo(data);
         setReinspeccionConsultaEstado('ok');
         setReinspeccionConsultaError('');
         if (data.elegible_reingreso) {
           setEsReingresoRechazoInicial(true);
-        } else {
+        } else if (!modoEdicion) {
           setEsReingresoRechazoInicial(false);
         }
         const esNuevaPlaca = placaEvaluadaReinspeccion !== placaUpper;
@@ -661,7 +663,7 @@ export default function Recepcion() {
         }
       } catch {
         setReinspeccionInfo(null);
-        setEsReingresoRechazoInicial(false);
+        if (!modoEdicion) setEsReingresoRechazoInicial(false);
         setReinspeccionConsultaEstado('error');
         setReinspeccionConsultaError(
           'No se pudo verificar si esta placa tiene reinspección elegible. Reintenta antes de registrar.',
@@ -674,7 +676,14 @@ export default function Recepcion() {
       }
     }, 450);
     return () => window.clearTimeout(handle);
-  }, [formData.placa, modoEdicion, placaEvaluadaReinspeccion, showToast, reinspeccionRetryToken]);
+  }, [
+    formData.placa,
+    modoEdicion,
+    vehiculoEditando,
+    placaEvaluadaReinspeccion,
+    showToast,
+    reinspeccionRetryToken,
+  ]);
 
   useEffect(() => {
     if (modoEdicion) return;
@@ -1228,6 +1237,7 @@ export default function Recepcion() {
     setModoEdicion(true);
     setVehiculoEditando(vehiculo.id);
     setEsReingresoRechazoInicial(Boolean(vehiculo.reinspeccion_exenta));
+    setPlacaEvaluadaReinspeccion((vehiculo.placa || '').trim().toUpperCase());
     setFotosVehiculo(fotos);
     setConsultaRunt({
       document_type: (vehiculo.cliente_tipo_documento || 'CC') as 'CC' | 'CE' | 'PA' | 'NIT',

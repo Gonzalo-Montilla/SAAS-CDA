@@ -1706,6 +1706,24 @@ def _preview_reinspeccion_elegible_por_placa(
     return _build_reinspeccion_context_for_origen(db, tenant_id=tenant_id, origen=origen)
 
 
+def _vincular_vehiculo_a_reinspeccion_exenta(
+    vehiculo: VehiculoProceso,
+    ctx: dict[str, Any],
+) -> None:
+    origen = ctx["origen"]
+    vehiculo.reinspeccion_origen_id = origen.id
+    vehiculo.reinspeccion_exenta = True
+    vehiculo.reinspeccion_intento = int(ctx["intentos_usados"]) + 1
+    vehiculo.reinspeccion_vence_at = ctx["vence_at"]
+
+
+def _limpiar_vinculo_reinspeccion(vehiculo: VehiculoProceso) -> None:
+    vehiculo.reinspeccion_origen_id = None
+    vehiculo.reinspeccion_exenta = False
+    vehiculo.reinspeccion_intento = 1
+    vehiculo.reinspeccion_vence_at = None
+
+
 def _es_servicio_preventiva(tipo_vehiculo: Optional[str]) -> bool:
     return (tipo_vehiculo or "").strip().lower() == "preventiva"
 
@@ -2328,6 +2346,7 @@ def _calcular_snapshot_iva_servicio(
 @router.get("/reinspeccion/elegibilidad/{placa}", response_model=ReinspeccionElegibilidadResponse)
 def consultar_elegibilidad_reinspeccion(
     placa: str,
+    excluir_vehiculo_id: Optional[UUID] = Query(default=None),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_recepcionista_or_admin),
 ):
@@ -2335,35 +2354,19 @@ def consultar_elegibilidad_reinspeccion(
     if len(placa_upper) < 5:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Placa inválida")
 
-    latest = _obtener_ultimo_servicio_obligatorio_por_placa(
+    ctx = _preview_reinspeccion_elegible_por_placa(
         db,
         tenant_id=current_user.tenant_id,
         placa_upper=placa_upper,
+        excluir_vehiculo_id=excluir_vehiculo_id,
     )
-    if not latest:
+    if not ctx:
         return ReinspeccionElegibilidadResponse(
             placa=placa_upper,
             tiene_historial=False,
             elegible_reingreso=False,
             motivo="Sin historial previo de revisión obligatoria para esta placa en el CDA.",
         )
-
-    origen = latest
-    if latest.reinspeccion_origen_id is not None:
-        origen = (
-            db.query(VehiculoProceso)
-            .filter(
-                VehiculoProceso.id == latest.reinspeccion_origen_id,
-                VehiculoProceso.tenant_id == current_user.tenant_id,
-            )
-            .first()
-            or latest
-        )
-    ctx = _build_reinspeccion_context_for_origen(
-        db,
-        tenant_id=current_user.tenant_id,
-        origen=origen,
-    )
     return ReinspeccionElegibilidadResponse(
         placa=placa_upper,
         tiene_historial=True,
@@ -2716,13 +2719,46 @@ def editar_vehiculo(
                 detail=f"Ya existe otro vehículo con placa {placa_upper} en estado {vehiculo_existente.estado}"
             )
     
-    # Reinspección exenta y pruebas de auditoría: nunca recalcular tarifa (caso MWQ631).
-    if bool(getattr(vehiculo, "reinspeccion_exenta", False)) or _es_prueba_auditoria(vehiculo_data.tipo_vehiculo):
+    # Reinspección: si la placa (nueva o igual) es elegible, forzar $0 (caso TDW965→TDW966).
+    # Si ya era exenta y no cambió de placa, conservar $0 (caso MWQ631).
+    preview_reinspeccion = None
+    if not _es_prueba_auditoria(vehiculo_data.tipo_vehiculo) and vehiculo_data.tipo_vehiculo != "preventiva":
+        preview_reinspeccion = _preview_reinspeccion_elegible_por_placa(
+            db,
+            tenant_id=current_user.tenant_id,
+            placa_upper=placa_upper,
+            excluir_vehiculo_id=vehiculo.id,
+        )
+    placa_cambio = placa_upper != (vehiculo.placa or "").strip().upper()
+    ya_exenta = bool(getattr(vehiculo, "reinspeccion_exenta", False))
+    preview_elegible = bool(preview_reinspeccion and preview_reinspeccion.get("elegible"))
+
+    if _es_prueba_auditoria(vehiculo_data.tipo_vehiculo):
         valor_rtm = Decimal(0)
         comision_soat = Decimal(0)
         total_cobrado = Decimal(0)
         vehiculo_data.tiene_soat = False
-    # Si es PREVENTIVA, no calcular tarifa
+    elif preview_elegible:
+        if not ya_exenta and preview_reinspeccion:
+            _vincular_vehiculo_a_reinspeccion_exenta(vehiculo, preview_reinspeccion)
+            _log_veh.warning(
+                "reinspeccion_aplicada_en_edicion tenant=%s placa=%s vehiculo_id=%s "
+                "origen_id=%s placa_cambio=%s",
+                current_user.tenant_id,
+                placa_upper,
+                vehiculo.id,
+                getattr(preview_reinspeccion.get("origen") if preview_reinspeccion else None, "id", None),
+                placa_cambio,
+            )
+        valor_rtm = Decimal(0)
+        comision_soat = Decimal(0)
+        total_cobrado = Decimal(0)
+        vehiculo_data.tiene_soat = False
+    elif ya_exenta and not placa_cambio:
+        valor_rtm = Decimal(0)
+        comision_soat = Decimal(0)
+        total_cobrado = Decimal(0)
+        vehiculo_data.tiene_soat = False
     elif vehiculo_data.tipo_vehiculo == "preventiva":
         valor_rtm = Decimal(0)
         comision_soat = Decimal(0)
@@ -2745,6 +2781,8 @@ def editar_vehiculo(
                 comision_soat = comision.valor_comision
                 total_cobrado = comision_soat
     else:
+        if ya_exenta and placa_cambio:
+            _limpiar_vinculo_reinspeccion(vehiculo)
         # REUTILIZAR LÓGICA DE REGISTRO: Calcular tarifa según tipo y antigüedad
         tarifa = calcular_tarifa_por_antiguedad(
             vehiculo_data.ano_modelo,

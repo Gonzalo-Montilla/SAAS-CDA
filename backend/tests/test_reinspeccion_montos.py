@@ -70,6 +70,23 @@ def test_modelo_exenta_no_puede_quedar_con_tarifa():
     assert vehiculo.tiene_soat is False
 
 
+def test_vincular_reinspeccion_exenta_deja_intento_siguiente():
+    from types import SimpleNamespace
+    from app.api.v1.endpoints.vehiculos import _vincular_vehiculo_a_reinspeccion_exenta
+
+    vehiculo = VehiculoProceso()
+    vehiculo.reinspeccion_exenta = False
+    vehiculo.reinspeccion_intento = 1
+    origen = SimpleNamespace(id="adef8898-db1c-4636-bda5-5eadf529ba4a")
+    _vincular_vehiculo_a_reinspeccion_exenta(
+        vehiculo,
+        {"origen": origen, "intentos_usados": 1, "vence_at": "2026-09-06"},
+    )
+    assert vehiculo.reinspeccion_exenta is True
+    assert vehiculo.reinspeccion_intento == 2
+    assert vehiculo.reinspeccion_origen_id == origen.id
+
+
 def test_modelo_cobro_normal_no_se_toca():
     vehiculo = VehiculoProceso()
     vehiculo.tipo_vehiculo = "moto"
