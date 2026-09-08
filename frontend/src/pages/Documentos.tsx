@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Filter,
   Download,
@@ -30,6 +31,7 @@ import { useAuth } from '../contexts/AuthContext';
 import {
   documentosApi,
   type AlcanceSedeFiltro,
+  type DocumentoAuditoriaItem,
   type TenantDocumento,
 } from '../api/documentos';
 import type { Usuario } from '../types';
@@ -39,6 +41,9 @@ function formatBytes(n: number): string {
   if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
   return `${(n / (1024 * 1024)).toFixed(1)} MB`;
 }
+
+const MOTIVO_CAMBIO_MIN = 15;
+const MOTIVO_CAMBIO_MAX = 500;
 
 /** Tipos que el navegador suele mostrar bien dentro de un iframe con blob: URL. */
 function mimePermiteVistaPreviaEnIframe(mime: string): boolean {
@@ -88,6 +93,7 @@ const EXTENSIONES_DOCUMENTO_PERMITIDAS = new Set([
 const MAX_DOCUMENTO_BYTES = 25 * 1024 * 1024;
 const UNCATEGORIZED_FOLDER_KEY = '__sin_categoria__';
 const VISTA_CARPETA_STORAGE_KEY = 'cdasoft-documentos-vista-carpeta';
+const DOCUMENTOS_PAGE_SIZE = 50;
 
 function leerVistaCarpetaGuardada(): 'tabla' | 'tarjetas' {
   try {
@@ -102,6 +108,7 @@ function leerVistaCarpetaGuardada(): 'tabla' | 'tarjetas' {
 type CarpetaCategoria = {
   key: string;
   nombre: string;
+  categoria: string | null;
   total: number;
 };
 
@@ -117,7 +124,7 @@ function extensionDeNombre(nombre: string): string {
 function categoriaFolderKey(categoria: string | null | undefined): string {
   const c = (categoria ?? '').trim();
   if (!c) return UNCATEGORIZED_FOLDER_KEY;
-  return c.toLocaleLowerCase('es-CO');
+  return c;
 }
 
 function validarArchivoDocumento(file: File, maxBytes: number = MAX_DOCUMENTO_BYTES): string | null {
@@ -205,13 +212,17 @@ export default function Documentos() {
   }, []);
   const [ordenCampo, setOrdenCampo] = useState<OrdenDocumentosCampo>('fecha');
   const [ordenDir, setOrdenDir] = useState<OrdenDocumentosDir>('desc');
+  const [listPage, setListPage] = useState(1);
   const [alcanceSede, setAlcanceSede] = useState<AlcanceSedeFiltro>('todas');
   const [soloActuales, setSoloActuales] = useState(true);
   const [historialPara, setHistorialPara] = useState<TenantDocumento | null>(null);
+  const [observacionVersion, setObservacionVersion] = useState<TenantDocumento | null>(null);
+  const [auditoriaDetalle, setAuditoriaDetalle] = useState<DocumentoAuditoriaItem | null>(null);
   const [nuevaVersionPara, setNuevaVersionPara] = useState<TenantDocumento | null>(null);
   const [nvTitulo, setNvTitulo] = useState('');
   const [nvCategoria, setNvCategoria] = useState('');
   const [nvSucursalId, setNvSucursalId] = useState('');
+  const [nvMotivo, setNvMotivo] = useState('');
   const [nvDragActivo, setNvDragActivo] = useState(false);
   const fileInputNvRef = useRef<HTMLInputElement>(null);
   const [docAccionesMenuId, setDocAccionesMenuId] = useState<string | null>(null);
@@ -263,16 +274,13 @@ export default function Documentos() {
     return m;
   }, [sucursales]);
 
-  const listFilters = useMemo(
+  const carpetasFilters = useMemo(
     () => ({
-      skip: 0,
-      limit: 100,
-      q: debouncedSearch || undefined,
       sucursalId: activeSucursalId,
       alcanceSede,
       soloActuales,
     }),
-    [debouncedSearch, activeSucursalId, alcanceSede, soloActuales]
+    [activeSucursalId, alcanceSede, soloActuales]
   );
 
   const categoriasQuery = useQuery({
@@ -288,51 +296,72 @@ export default function Documentos() {
 
   const maxDocumentoBytes = storageQuery.data?.max_file_bytes ?? MAX_DOCUMENTO_BYTES;
 
-  const listQuery = useQuery({
-    queryKey: ['tenant-documentos', listFilters],
-    queryFn: () => documentosApi.listar(listFilters),
+  const carpetasQuery = useQuery({
+    queryKey: ['tenant-documentos-carpetas', carpetasFilters],
+    queryFn: () => documentosApi.listarCarpetas(carpetasFilters),
   });
 
   const carpetas = useMemo<CarpetaCategoria[]>(() => {
-    const map = new Map<string, CarpetaCategoria>();
-    for (const doc of listQuery.data ?? []) {
-      const nombre = (doc.categoria ?? '').trim() || 'Sin categoría';
-      const key = categoriaFolderKey(doc.categoria);
-      const prev = map.get(key);
-      if (prev) {
-        prev.total += 1;
-        continue;
-      }
-      map.set(key, { key, nombre, total: 1 });
-    }
-    return Array.from(map.values()).sort((a, b) => {
-      if (a.key === UNCATEGORIZED_FOLDER_KEY) return 1;
-      if (b.key === UNCATEGORIZED_FOLDER_KEY) return -1;
-      return a.nombre.localeCompare(b.nombre, 'es-CO');
-    });
-  }, [listQuery.data]);
+    return (carpetasQuery.data?.items ?? []).map((it) => ({
+      key: categoriaFolderKey(it.categoria),
+      nombre: it.nombre,
+      categoria: it.categoria,
+      total: it.total,
+    }));
+  }, [carpetasQuery.data]);
 
-  const documentosCarpetaActiva = useMemo(() => {
-    const docs = listQuery.data ?? [];
-    const filtrados = carpetaActiva ? docs.filter((d) => categoriaFolderKey(d.categoria) === carpetaActiva) : docs;
-    const out = [...filtrados];
-    out.sort((a, b) => {
-      let cmp = 0;
-      if (ordenCampo === 'fecha') {
-        cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
-      } else {
-        cmp = a.titulo.localeCompare(b.titulo, 'es-CO');
-      }
-      return ordenDir === 'asc' ? cmp : -cmp;
-    });
-    return out;
-  }, [listQuery.data, carpetaActiva, ordenCampo, ordenDir]);
+  const mostrarBusquedaGlobal = !carpetaActiva && Boolean(debouncedSearch);
+  const mostrarListado = Boolean(carpetaActiva) || mostrarBusquedaGlobal;
 
-  const nombreCarpetaActiva = useMemo(() => {
-    if (!carpetaActiva) return null;
-    const found = carpetas.find((c) => c.key === carpetaActiva);
-    return found?.nombre ?? 'Sin categoría';
-  }, [carpetaActiva, carpetas]);
+  const carpetaSeleccionada = useMemo(
+    () => (carpetaActiva ? carpetas.find((c) => c.key === carpetaActiva) ?? null : null),
+    [carpetaActiva, carpetas]
+  );
+
+  const listFilters = useMemo(
+    () => ({
+      skip: (listPage - 1) * DOCUMENTOS_PAGE_SIZE,
+      limit: DOCUMENTOS_PAGE_SIZE,
+      q: debouncedSearch || undefined,
+      categoria:
+        carpetaActiva && carpetaActiva !== UNCATEGORIZED_FOLDER_KEY
+          ? carpetaSeleccionada?.categoria ?? carpetaActiva
+          : undefined,
+      sinCategoria: carpetaActiva === UNCATEGORIZED_FOLDER_KEY,
+      sucursalId: activeSucursalId,
+      alcanceSede,
+      soloActuales,
+      orden: ordenCampo,
+      dir: ordenDir,
+    }),
+    [
+      listPage,
+      debouncedSearch,
+      carpetaActiva,
+      carpetaSeleccionada,
+      activeSucursalId,
+      alcanceSede,
+      soloActuales,
+      ordenCampo,
+      ordenDir,
+    ]
+  );
+
+  const listQuery = useQuery({
+    queryKey: ['tenant-documentos', listFilters],
+    queryFn: () => documentosApi.listar(listFilters),
+    enabled:
+      mostrarListado &&
+      (!carpetaActiva ||
+        carpetaActiva === UNCATEGORIZED_FOLDER_KEY ||
+        Boolean(carpetaSeleccionada)),
+  });
+
+  const documentosPagina = listQuery.data?.items ?? [];
+  const totalListado = listQuery.data?.total ?? 0;
+  const totalPaginasListado = Math.max(1, Math.ceil(totalListado / DOCUMENTOS_PAGE_SIZE) || 1);
+
+  const nombreCarpetaActiva = carpetaSeleccionada?.nombre ?? (carpetaActiva ? 'Carpeta' : null);
 
   const auditoriaParams = useMemo(
     () => ({
@@ -373,6 +402,7 @@ export default function Documentos() {
 
   const invalidateDocumentos = () => {
     void queryClient.invalidateQueries({ queryKey: ['tenant-documentos'] });
+    void queryClient.invalidateQueries({ queryKey: ['tenant-documentos-carpetas'] });
     void queryClient.invalidateQueries({ queryKey: ['tenant-documentos-categorias'] });
     void queryClient.invalidateQueries({ queryKey: ['tenant-documentos-versiones'] });
     void queryClient.invalidateQueries({ queryKey: ['tenant-documentos-auditoria'] });
@@ -387,6 +417,7 @@ export default function Documentos() {
           categoria: nvCategoria.trim() || undefined,
           sucursal_id: nvSucursalId.trim() || null,
           sustituye_a_id: nuevaVersionPara.id,
+          motivo_cambio: nvMotivo.trim(),
         });
       }
       return documentosApi.subir(file, {
@@ -415,6 +446,7 @@ export default function Documentos() {
         setNvTitulo('');
         setNvCategoria('');
         setNvSucursalId('');
+        setNvMotivo('');
         setArchivoPendienteNv(null);
         if (fileInputNvRef.current) fileInputNvRef.current.value = '';
       } else {
@@ -543,11 +575,17 @@ export default function Documentos() {
     }
   };
 
+  const cerrarHistorial = useCallback(() => {
+    setHistorialPara(null);
+    setObservacionVersion(null);
+  }, []);
+
   const cerrarModalNuevaVersion = useCallback(() => {
     setNuevaVersionPara(null);
     setNvTitulo('');
     setNvCategoria('');
     setNvSucursalId('');
+    setNvMotivo('');
     setNvDragActivo(false);
     setArchivoPendienteNv(null);
     if (fileInputNvRef.current) fileInputNvRef.current.value = '';
@@ -558,11 +596,12 @@ export default function Documentos() {
     setNvTitulo(row.titulo);
     setNvCategoria(row.categoria ?? '');
     setNvSucursalId(row.sucursal_id ?? '');
+    setNvMotivo('');
     setArchivoPendienteNv(null);
     if (fileInputNvRef.current) fileInputNvRef.current.value = '';
     setArchivoPendientePrincipal(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
-    setHistorialPara(null);
+    cerrarHistorial();
     setEditing(null);
     setDocAccionesMenuId(null);
   };
@@ -577,7 +616,7 @@ export default function Documentos() {
   }, []);
 
   const abrirVistaPrevia = async (doc: TenantDocumento) => {
-    setHistorialPara(null);
+    cerrarHistorial();
     setEditing(null);
     cerrarModalNuevaVersion();
     setPreviewUrl((prev) => {
@@ -621,14 +660,18 @@ export default function Documentos() {
   useEffect(() => {
     const hayModal =
       Boolean(previewDoc) ||
+      Boolean(observacionVersion) ||
+      Boolean(auditoriaDetalle) ||
       Boolean(historialPara) ||
       Boolean(editing && esAdmin) ||
       Boolean(nuevaVersionPara);
     if (!hayModal) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== 'Escape') return;
-      if (previewDoc) cerrarVistaPrevia();
-      else if (historialPara) setHistorialPara(null);
+      if (observacionVersion) setObservacionVersion(null);
+      else if (auditoriaDetalle) setAuditoriaDetalle(null);
+      else if (previewDoc) cerrarVistaPrevia();
+      else if (historialPara) cerrarHistorial();
       else if (editing && esAdmin) setEditing(null);
       else if (nuevaVersionPara) cerrarModalNuevaVersion();
     };
@@ -636,11 +679,14 @@ export default function Documentos() {
     return () => window.removeEventListener('keydown', onKey);
   }, [
     previewDoc,
+    observacionVersion,
+    auditoriaDetalle,
     historialPara,
     editing,
     esAdmin,
     nuevaVersionPara,
     cerrarVistaPrevia,
+    cerrarHistorial,
     cerrarModalNuevaVersion,
   ]);
 
@@ -649,7 +695,7 @@ export default function Documentos() {
     setEditTitulo(row.titulo);
     setEditCategoria(row.categoria ?? '');
     setEditSucursalId(row.sucursal_id ?? '');
-    setHistorialPara(null);
+    cerrarHistorial();
     cerrarModalNuevaVersion();
   };
 
@@ -664,6 +710,7 @@ export default function Documentos() {
     setCarpetaActiva(null);
     setAlcanceSede('todas');
     setSoloActuales(true);
+    setListPage(1);
   }, []);
 
   const asignarArchivoSeleccionado = (file: File | undefined, origen: 'principal' | 'nv') => {
@@ -713,6 +760,13 @@ export default function Documentos() {
       setFeedback({ type: 'error', message: 'Indique un título para el documento.' });
       return;
     }
+    if (nvMotivo.trim().length < MOTIVO_CAMBIO_MIN) {
+      setFeedback({
+        type: 'error',
+        message: `Indique el motivo del cambio (mínimo ${MOTIVO_CAMBIO_MIN} caracteres).`,
+      });
+      return;
+    }
     uploadMutation.mutate(archivoPendienteNv);
   };
 
@@ -737,7 +791,15 @@ export default function Documentos() {
     }
   }, [auditoriaPage, auditoriaTotalPages]);
 
-  const totalListado = documentosCarpetaActiva.length;
+  useEffect(() => {
+    setListPage(1);
+  }, [debouncedSearch, carpetaActiva, alcanceSede, soloActuales, ordenCampo, ordenDir, activeSucursalId]);
+
+  useEffect(() => {
+    if (listPage > totalPaginasListado) {
+      setListPage(totalPaginasListado);
+    }
+  }, [listPage, totalPaginasListado]);
 
   return (
     <Layout title="Documentos del CDA">
@@ -1151,23 +1213,29 @@ export default function Documentos() {
                 <p className="text-xs text-slate-500 mb-0.5">
                   Documentos <span className="mx-1">/</span> <span className="text-slate-700">{nombreCarpetaActiva}</span>{' '}
                   <span className="mx-1 text-slate-300">·</span>
-                  <span>{documentosCarpetaActiva.length} archivo{documentosCarpetaActiva.length === 1 ? '' : 's'}</span>
+                  <span>{totalListado} archivo{totalListado === 1 ? '' : 's'}</span>
                 </p>
               )}
               <h2 className="text-lg font-semibold text-slate-900">
-                {carpetaActiva ? `Carpeta: ${nombreCarpetaActiva}` : 'Carpetas'}
+                {carpetaActiva
+                  ? `Carpeta: ${nombreCarpetaActiva}`
+                  : mostrarBusquedaGlobal
+                    ? 'Resultados de búsqueda'
+                    : 'Carpetas'}
               </h2>
-              {listQuery.data && !listQuery.isLoading && (
+              {!listQuery.isLoading && (
                 <p className="text-xs text-slate-500 mt-0.5">
                   {carpetaActiva
-                    ? `Mostrando ${totalListado} documento${totalListado === 1 ? '' : 's'} en esta carpeta`
-                    : `Mostrando ${carpetas.length} carpeta${carpetas.length === 1 ? '' : 's'}`}
+                    ? `Mostrando página ${listPage} de ${totalPaginasListado} · ${totalListado} documento${totalListado === 1 ? '' : 's'} en esta carpeta`
+                    : mostrarBusquedaGlobal
+                      ? `${totalListado} resultado${totalListado === 1 ? '' : 's'} en todo el archivo`
+                      : `Mostrando ${carpetas.length} carpeta${carpetas.length === 1 ? '' : 's'} · ${carpetasQuery.data?.total_documentos ?? 0} documento${(carpetasQuery.data?.total_documentos ?? 0) === 1 ? '' : 's'}`}
                 </p>
               )}
               </div>
             </div>
             <div className="flex items-center gap-2">
-              {carpetaActiva && (
+              {mostrarListado && (
                 <>
                 <select
                   className="text-xs rounded-lg border border-slate-200 px-2 py-1.5 text-slate-700 bg-white"
@@ -1221,51 +1289,66 @@ export default function Documentos() {
                   Volver a carpetas
                 </button>
               )}
-              {listQuery.isFetching && <span className="text-xs text-slate-500">Actualizando…</span>}
+              {(listQuery.isFetching || carpetasQuery.isFetching) && <span className="text-xs text-slate-500">Actualizando…</span>}
             </div>
           </div>
-          {listQuery.isError && (
+          {carpetasQuery.isError && !mostrarListado && (
+            <p className="p-5 text-sm text-red-600">No se pudieron cargar las carpetas. Intenta de nuevo.</p>
+          )}
+          {listQuery.isError && mostrarListado && (
             <p className="p-5 text-sm text-red-600">No se pudo cargar el listado. Intenta de nuevo.</p>
           )}
-          {listQuery.data && listQuery.data.length === 0 && (
-            <div className="p-8 text-center text-slate-600 text-sm space-y-3 max-w-md mx-auto">
-              <p>No hay documentos con estos filtros.</p>
-              <ol className="text-left text-xs text-slate-600 space-y-1.5 list-decimal list-inside border border-slate-100 rounded-lg p-4 bg-slate-50/80">
-                <li>Abra «Subir archivo» y elija un PDF, Word u otro formato admitido.</li>
-                <li>
-                  Elija el archivo, complete el título y pulse <strong>Subir documento</strong> (la subida no es
-                  automática).
-                </li>
-                <li>Use la tabla para descargar, vista previa o subir una nueva versión (menú de cada fila).</li>
-              </ol>
-            </div>
+          {!mostrarListado && !carpetasQuery.isError && (
+            <>
+              {carpetasQuery.isLoading && (
+                <p className="p-8 text-center text-sm text-slate-500">Cargando carpetas…</p>
+              )}
+              {!carpetasQuery.isLoading && carpetas.length === 0 && (
+                <div className="p-8 text-center text-slate-600 text-sm space-y-3 max-w-md mx-auto">
+                  <p>No hay documentos con estos filtros.</p>
+                  <ol className="text-left text-xs text-slate-600 space-y-1.5 list-decimal list-inside border border-slate-100 rounded-lg p-4 bg-slate-50/80">
+                    <li>Abra «Subir archivo» y elija un PDF, Word u otro formato admitido.</li>
+                    <li>
+                      Elija el archivo, complete el título y pulse <strong>Subir documento</strong> (la subida no es
+                      automática).
+                    </li>
+                    <li>Use la tabla para descargar, vista previa o subir una nueva versión (menú de cada fila).</li>
+                  </ol>
+                </div>
+              )}
+              {carpetas.length > 0 && (
+                <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                  {carpetas.map((c) => (
+                    <button
+                      key={c.key}
+                      type="button"
+                      onClick={() => setCarpetaActiva(c.key)}
+                      className="text-left rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-4 py-3 shadow-sm"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Folder className="w-4 h-4 text-amber-600" />
+                        <p className="font-medium text-slate-900 truncate">{c.nombre}</p>
+                      </div>
+                      <p className="text-xs text-slate-500 mt-1">
+                        {c.total} documento{c.total === 1 ? '' : 's'}
+                      </p>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </>
           )}
-          {listQuery.data && listQuery.data.length > 0 && !carpetaActiva && (
-            <div className="p-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {carpetas.map((c) => (
-                <button
-                  key={c.key}
-                  type="button"
-                  onClick={() => setCarpetaActiva(c.key)}
-                  className="text-left rounded-xl border border-slate-200 bg-white hover:bg-slate-50 px-4 py-3 shadow-sm"
-                >
-                  <div className="flex items-center gap-2">
-                    <Folder className="w-4 h-4 text-amber-600" />
-                    <p className="font-medium text-slate-900 truncate">{c.nombre}</p>
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1">
-                    {c.total} documento{c.total === 1 ? '' : 's'}
-                  </p>
-                </button>
-              ))}
-            </div>
+          {mostrarListado && listQuery.isLoading && (
+            <p className="p-8 text-center text-sm text-slate-500">Cargando documentos…</p>
           )}
-          {listQuery.data && listQuery.data.length > 0 && carpetaActiva && documentosCarpetaActiva.length === 0 && (
+          {mostrarListado && !listQuery.isLoading && !listQuery.isError && totalListado === 0 && (
             <div className="p-8 text-center text-slate-600 text-sm">
-              No hay documentos en esta carpeta con los filtros actuales.
+              {carpetaActiva
+                ? 'No hay documentos en esta carpeta con los filtros actuales.'
+                : 'No hay documentos que coincidan con la búsqueda.'}
             </div>
           )}
-          {listQuery.data && listQuery.data.length > 0 && carpetaActiva && documentosCarpetaActiva.length > 0 && (
+          {mostrarListado && !listQuery.isLoading && documentosPagina.length > 0 && (
             <>
             {vistaCarpeta === 'tabla' ? (
             <div className="overflow-x-auto">
@@ -1284,7 +1367,7 @@ export default function Documentos() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {documentosCarpetaActiva.map((row) => (
+                  {documentosPagina.map((row) => (
                     <tr key={row.id} className="hover:bg-slate-50/80">
                       <td className="px-4 py-3">
                         <span className="inline-flex items-center rounded-md bg-slate-100 px-2 py-0.5 text-xs font-mono text-slate-800">
@@ -1359,6 +1442,7 @@ export default function Documentos() {
                                     className="w-full text-left px-3 py-2 text-sm text-slate-800 hover:bg-slate-50 flex items-center gap-2"
                                     onClick={() => {
                                       setHistorialPara(row);
+                                      setObservacionVersion(null);
                                       setEditing(null);
                                       cerrarModalNuevaVersion();
                                       setDocAccionesMenuId(null);
@@ -1433,7 +1517,7 @@ export default function Documentos() {
             </div>
             ) : (
               <div className="p-4 grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
-                {documentosCarpetaActiva.map((row) => (
+                {documentosPagina.map((row) => (
                   <article key={row.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm hover:shadow-md transition-shadow">
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0">
@@ -1486,6 +1570,7 @@ export default function Documentos() {
                         title="Historial de versiones"
                         onClick={() => {
                           setHistorialPara(row);
+                          setObservacionVersion(null);
                           setEditing(null);
                           cerrarModalNuevaVersion();
                         }}
@@ -1532,6 +1617,33 @@ export default function Documentos() {
                     </div>
                   </article>
                 ))}
+              </div>
+            )}
+            {totalListado > DOCUMENTOS_PAGE_SIZE && (
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 px-5 py-3 border-t border-slate-100">
+                <p className="text-xs text-slate-600">
+                  Página {listPage} de {totalPaginasListado}
+                </p>
+                <div className="flex gap-1 justify-center sm:justify-end">
+                  <button
+                    type="button"
+                    className="p-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                    disabled={listPage <= 1 || listQuery.isFetching}
+                    onClick={() => setListPage((p) => Math.max(1, p - 1))}
+                    aria-label="Página anterior"
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </button>
+                  <button
+                    type="button"
+                    className="p-2 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 disabled:opacity-40"
+                    disabled={listPage >= totalPaginasListado || listQuery.isFetching}
+                    onClick={() => setListPage((p) => Math.min(totalPaginasListado, p + 1))}
+                    aria-label="Página siguiente"
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             )}
             </>
@@ -1675,8 +1787,18 @@ export default function Documentos() {
                         <td className="px-4 py-2 font-mono text-xs text-slate-600">
                           {ev.documento_id ? `${ev.documento_id.slice(0, 8)}…` : '—'}
                         </td>
-                        <td className="px-4 py-2 text-slate-700 max-w-md truncate" title={ev.detalle ?? ''}>
-                          {ev.detalle ?? '—'}
+                        <td className="px-4 py-2">
+                          {(ev.detalle ?? '').trim() ? (
+                            <button
+                              type="button"
+                              className="text-primary-600 text-xs font-medium hover:underline whitespace-nowrap"
+                              onClick={() => setAuditoriaDetalle(ev)}
+                            >
+                              Ver detalle
+                            </button>
+                          ) : (
+                            <span className="text-xs text-slate-400">—</span>
+                          )}
                         </td>
                       </tr>
                     ))}
@@ -1720,7 +1842,7 @@ export default function Documentos() {
           role="dialog"
           aria-modal="true"
           aria-labelledby="documentos-historial-titulo"
-          onClick={() => setHistorialPara(null)}
+          onClick={cerrarHistorial}
         >
           <div
             className="bg-white rounded-2xl shadow-xl w-full max-w-4xl max-h-[90vh] flex flex-col overflow-hidden border border-slate-200"
@@ -1737,7 +1859,7 @@ export default function Documentos() {
                 type="button"
                 className="p-2 rounded-lg text-slate-500 hover:bg-slate-200/80 shrink-0"
                 aria-label="Cerrar historial"
-                onClick={() => setHistorialPara(null)}
+                onClick={cerrarHistorial}
               >
                 <X className="w-5 h-5" aria-hidden />
               </button>
@@ -1759,6 +1881,7 @@ export default function Documentos() {
                         <th className="px-3 py-2 font-medium">Tamaño</th>
                         <th className="px-3 py-2 font-medium">Fecha</th>
                         <th className="px-3 py-2 font-medium">Estado</th>
+                        <th className="px-3 py-2 font-medium">Observación</th>
                         <th className="px-3 py-2 font-medium w-24"> </th>
                       </tr>
                     </thead>
@@ -1781,6 +1904,19 @@ export default function Documentos() {
                             )}
                           </td>
                           <td className="px-3 py-2">
+                            {(v.motivo_cambio ?? '').trim() ? (
+                              <button
+                                type="button"
+                                className="text-primary-600 text-xs font-medium hover:underline whitespace-nowrap"
+                                onClick={() => setObservacionVersion(v)}
+                              >
+                                Ver observación
+                              </button>
+                            ) : (
+                              <span className="text-xs text-slate-400">—</span>
+                            )}
+                          </td>
+                          <td className="px-3 py-2">
                             <button
                               type="button"
                               className="text-primary-600 text-xs font-medium hover:underline"
@@ -1798,6 +1934,104 @@ export default function Documentos() {
               {versionesQuery.data && versionesQuery.data.length === 0 && !versionesQuery.isLoading && (
                 <p className="text-sm text-slate-600">No hay versiones en el historial.</p>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {observacionVersion && (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="documentos-observacion-titulo"
+          onClick={() => setObservacionVersion(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden border border-slate-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-100 bg-slate-50 shrink-0">
+              <h2 id="documentos-observacion-titulo" className="text-lg font-semibold text-slate-900">
+                Observación — v{observacionVersion.version_seq}
+              </h2>
+              <button
+                type="button"
+                className="p-2 rounded-lg text-slate-500 hover:bg-slate-200/80 shrink-0"
+                aria-label="Cerrar observación"
+                onClick={() => setObservacionVersion(null)}
+              >
+                <X className="w-5 h-5" aria-hidden />
+              </button>
+            </div>
+            <div className="p-5 overflow-y-auto space-y-3">
+              <p className="text-xs text-slate-500">
+                {new Date(observacionVersion.created_at).toLocaleString('es-CO')}
+                {observacionVersion.created_by_nombre
+                  ? ` · ${observacionVersion.created_by_nombre}`
+                  : ''}
+              </p>
+              <p className="text-sm text-slate-800 whitespace-pre-wrap break-words">
+                {observacionVersion.motivo_cambio}
+              </p>
+            </div>
+            <div className="px-4 py-3 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                className="px-4 py-2 rounded-lg border border-slate-300 text-sm"
+                onClick={() => setObservacionVersion(null)}
+              >
+                Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {auditoriaDetalle && (
+        <div
+          className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="documentos-auditoria-detalle-titulo"
+          onClick={() => setAuditoriaDetalle(null)}
+        >
+          <div
+            className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col overflow-hidden border border-slate-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-slate-100 bg-slate-50 shrink-0">
+              <h2 id="documentos-auditoria-detalle-titulo" className="text-lg font-semibold text-slate-900">
+                {etiquetaAccionAuditoria(auditoriaDetalle.accion)}
+              </h2>
+              <button
+                type="button"
+                className="p-2 rounded-lg text-slate-500 hover:bg-slate-200/80 shrink-0"
+                aria-label="Cerrar detalle"
+                onClick={() => setAuditoriaDetalle(null)}
+              >
+                <X className="w-5 h-5" aria-hidden />
+              </button>
+            </div>
+            <div className="p-5 overflow-y-auto space-y-3">
+              <p className="text-xs text-slate-500">
+                {new Date(auditoriaDetalle.created_at).toLocaleString('es-CO')}
+                {auditoriaDetalle.usuario_nombre?.trim()
+                  ? ` · ${auditoriaDetalle.usuario_nombre}`
+                  : ''}
+              </p>
+              <p className="text-sm text-slate-800 whitespace-pre-wrap break-words">
+                {auditoriaDetalle.detalle}
+              </p>
+            </div>
+            <div className="px-4 py-3 border-t border-slate-100 flex justify-end">
+              <button
+                type="button"
+                className="px-4 py-2 rounded-lg border border-slate-300 text-sm"
+                onClick={() => setAuditoriaDetalle(null)}
+              >
+                Cerrar
+              </button>
             </div>
           </div>
         </div>
@@ -2032,6 +2266,23 @@ export default function Documentos() {
                     ))}
                   </select>
                 </div>
+                <div>
+                  <label className="block text-xs font-medium text-slate-500 mb-1">
+                    Motivo del cambio <span className="text-red-600">*</span>
+                  </label>
+                  <textarea
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm min-h-[5.5rem] resize-y"
+                    value={nvMotivo}
+                    maxLength={MOTIVO_CAMBIO_MAX}
+                    onChange={(e) => setNvMotivo(e.target.value)}
+                    placeholder="Ej. Factura ilegible; se reemplaza por el PDF claro del proveedor."
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    {nvMotivo.trim().length < MOTIVO_CAMBIO_MIN
+                      ? `Obligatorio · mínimo ${MOTIVO_CAMBIO_MIN} caracteres (${nvMotivo.trim().length}/${MOTIVO_CAMBIO_MIN})`
+                      : `${nvMotivo.trim().length}/${MOTIVO_CAMBIO_MAX}`}
+                  </p>
+                </div>
               </div>
               <div className="flex flex-wrap justify-end gap-2 pt-1">
                 <button
@@ -2048,6 +2299,7 @@ export default function Documentos() {
                   disabled={
                     !archivoPendienteNv ||
                     !nvTitulo.trim() ||
+                    nvMotivo.trim().length < MOTIVO_CAMBIO_MIN ||
                     uploadMutation.isLoading ||
                     !nuevaVersionPara
                   }
@@ -2132,7 +2384,7 @@ export default function Documentos() {
                       className="px-4 py-2 rounded-lg border border-primary-200 text-primary-800 text-sm font-medium hover:bg-primary-50 disabled:opacity-50"
                       disabled={listQuery.isFetching}
                       onClick={() => {
-                        const fresh = listQuery.data?.find((d) => d.id === previewDoc.id);
+                        const fresh = documentosPagina.find((d) => d.id === previewDoc.id);
                         if (fresh) void abrirVistaPrevia(fresh);
                       }}
                     >

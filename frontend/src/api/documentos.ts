@@ -13,8 +13,10 @@ export interface TenantDocumento {
   mime_type: string;
   tamano_bytes: number;
   preview_pdf_relpath?: string | null;
+  motivo_cambio?: string | null;
   created_at: string;
   created_by: string | null;
+  created_by_nombre?: string | null;
   updated_at?: string | null;
   updated_by?: string | null;
 }
@@ -26,11 +28,32 @@ export interface ListarDocumentosParams {
   limit?: number;
   q?: string;
   categoria?: string;
+  sinCategoria?: boolean;
   /** UUID sede; se usa junto con alcanceSede */
   sucursalId?: string | null;
   alcanceSede?: AlcanceSedeFiltro;
   /** Por defecto solo la versión vigente de cada documento */
   soloActuales?: boolean;
+  orden?: 'fecha' | 'titulo';
+  dir?: 'asc' | 'desc';
+}
+
+export interface DocumentoListPage {
+  items: TenantDocumento[];
+  total: number;
+  skip: number;
+  limit: number;
+}
+
+export interface DocumentoCarpetaItem {
+  nombre: string;
+  categoria: string | null;
+  total: number;
+}
+
+export interface DocumentoCarpetasResponse {
+  items: DocumentoCarpetaItem[];
+  total_documentos: number;
 }
 
 export interface DocumentoMetadataPatch {
@@ -85,11 +108,17 @@ export interface CertificacionCuentaGenerada {
 function buildListParams(p: ListarDocumentosParams): Record<string, string | number | boolean> {
   const params: Record<string, string | number | boolean> = {
     skip: p.skip ?? 0,
-    limit: p.limit ?? 100,
+    limit: p.limit ?? 50,
     solo_actuales: p.soloActuales ?? true,
+    orden: p.orden ?? 'fecha',
+    dir: p.dir ?? 'desc',
   };
   if (p.q?.trim()) params.q = p.q.trim();
-  if (p.categoria?.trim()) params.categoria = p.categoria.trim();
+  if (p.sinCategoria) {
+    params.sin_categoria = true;
+  } else if (p.categoria?.trim()) {
+    params.categoria = p.categoria.trim();
+  }
 
   const alcance = p.alcanceSede ?? 'todas';
   const sid = p.sucursalId?.trim() || null;
@@ -118,6 +147,24 @@ export const documentosApi = {
     return response.data;
   },
 
+  listarCarpetas: async (p: {
+    sucursalId?: string | null;
+    alcanceSede?: AlcanceSedeFiltro;
+    soloActuales?: boolean;
+  } = {}): Promise<DocumentoCarpetasResponse> => {
+    const params: Record<string, string | number | boolean> = {
+      solo_actuales: p.soloActuales ?? true,
+    };
+    const alcance = p.alcanceSede ?? 'todas';
+    const sid = p.sucursalId?.trim() || null;
+    if (alcance !== 'todas' && sid) {
+      params.sucursal_id = sid;
+      params.solo_esta_sede = alcance === 'solo_sede';
+    }
+    const response = await apiClient.get<DocumentoCarpetasResponse>('/documentos/carpetas', { params });
+    return response.data;
+  },
+
   usoAlmacenamiento: async (): Promise<DocumentoStorageUsage> => {
     const response = await apiClient.get<DocumentoStorageUsage>('/documentos/almacenamiento');
     return response.data;
@@ -139,8 +186,8 @@ export const documentosApi = {
     return response.data;
   },
 
-  listar: async (p: ListarDocumentosParams = {}): Promise<TenantDocumento[]> => {
-    const response = await apiClient.get<TenantDocumento[]>('/documentos/', {
+  listar: async (p: ListarDocumentosParams = {}): Promise<DocumentoListPage> => {
+    const response = await apiClient.get<DocumentoListPage>('/documentos/', {
       params: buildListParams(p),
     });
     return response.data;
@@ -154,6 +201,8 @@ export const documentosApi = {
       sucursal_id?: string | null;
       /** ID de cualquier versión del mismo documento (cadena de versiones) */
       sustituye_a_id?: string | null;
+      /** Obligatorio al sustituir (nueva versión). */
+      motivo_cambio?: string | null;
     }
   ): Promise<TenantDocumento> => {
     const form = new FormData();
@@ -169,6 +218,9 @@ export const documentosApi = {
     }
     if (opts?.sustituye_a_id?.trim()) {
       form.append('sustituye_a_id', opts.sustituye_a_id.trim());
+    }
+    if (opts?.motivo_cambio?.trim()) {
+      form.append('motivo_cambio', opts.motivo_cambio.trim());
     }
     const response = await apiClient.post<TenantDocumento>('/documentos/', form);
     return response.data;

@@ -1662,6 +1662,7 @@ def ensure_tenant_documentos_schema(db):
         )
     )
     db.execute(text(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS preview_pdf_relpath VARCHAR(800)"))
+    db.execute(text(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS motivo_cambio TEXT"))
     db.execute(text(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITHOUT TIME ZONE"))
     db.execute(
         text(

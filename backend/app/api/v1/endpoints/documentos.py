@@ -17,7 +17,7 @@ from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile, status
 from fastapi.responses import FileResponse, HTMLResponse, Response
 from sqlalchemy import func, or_
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.config import settings
 from app.core.deps import get_admin, get_current_user, get_db
@@ -31,6 +31,9 @@ from app.schemas.documento import (
     CertificacionCuentaVerificacionResponse,
     DocumentoAuditoriaPageResponse,
     DocumentoAuditoriaResponse,
+    DocumentoCarpetaItem,
+    DocumentoCarpetasResponse,
+    DocumentoListPageResponse,
     DocumentoMetadataUpdate,
     DocumentoResponse,
     DocumentoStorageUsageResponse,
@@ -191,6 +194,122 @@ def _normalize_categoria(raw: str | None) -> str | None:
     if not s:
         return None
     return s[:120]
+
+
+MOTIVO_CAMBIO_MIN = 15
+MOTIVO_CAMBIO_MAX = 500
+
+
+def _parse_motivo_cambio(raw: str | None) -> str | None:
+    """Recorta espacios; vacío → None. No valida obligatoriedad."""
+    if raw is None:
+        return None
+    s = raw.strip()
+    if not s:
+        return None
+    return s[:MOTIVO_CAMBIO_MAX]
+
+
+def _validar_motivo_nueva_version(raw: str | None) -> str:
+    """Obligatorio al sustituir un documento (v2+)."""
+    s = _parse_motivo_cambio(raw)
+    if not s:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Indique el motivo del cambio de versión.",
+        )
+    if len(s) < MOTIVO_CAMBIO_MIN:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"El motivo del cambio debe tener al menos {MOTIVO_CAMBIO_MIN} caracteres.",
+        )
+    return s
+
+
+def _documento_response(doc: TenantDocumento) -> DocumentoResponse:
+    nombre = None
+    creador = getattr(doc, "creador", None)
+    if creador is not None:
+        nombre = getattr(creador, "nombre_completo", None)
+    return DocumentoResponse.model_validate(doc).model_copy(update={"created_by_nombre": nombre})
+
+
+def _nombre_sucursal_tenant(db: Session, tenant_id: UUID, sucursal_id: UUID | None) -> str | None:
+    if sucursal_id is None:
+        return None
+    suc = (
+        db.query(Sucursal)
+        .filter(Sucursal.id == sucursal_id, Sucursal.tenant_id == tenant_id)
+        .first()
+    )
+    return suc.nombre if suc else None
+
+
+def _linea_cambio_metadatos(campo: str, antes: str, despues: str) -> str | None:
+    if antes == despues:
+        return None
+    return f"{campo}: {antes} → {despues}"
+
+
+def _detalle_cambio_metadatos(*, titulo_actual: str, partes: list[str | None]) -> str | None:
+    """Texto de auditoría: solo campos que cambiaron. Prefija el documento si el título no cambió."""
+    lineas = [p for p in partes if p]
+    if not lineas:
+        return None
+    cuerpo = "; ".join(lineas)
+    if any(p.startswith("Título:") for p in lineas):
+        return cuerpo
+    t = (titulo_actual or "").strip() or "sin título"
+    return f"«{t}». {cuerpo}"
+
+
+def _query_documentos_filtrados(
+    db: Session,
+    tenant_id: UUID,
+    *,
+    q: str | None = None,
+    categoria: str | None = None,
+    sin_categoria: bool = False,
+    sucursal_id: UUID | None = None,
+    solo_esta_sede: bool = False,
+    solo_actuales: bool = True,
+):
+    """Query de metadatos por tenant. No carga archivos."""
+    query = db.query(TenantDocumento).filter(TenantDocumento.tenant_id == tenant_id)
+
+    if solo_actuales:
+        query = query.filter(TenantDocumento.es_version_actual.is_(True))
+
+    if q and q.strip():
+        term = f"%{q.strip()}%"
+        query = query.filter(
+            or_(
+                TenantDocumento.titulo.ilike(term),
+                TenantDocumento.nombre_archivo_original.ilike(term),
+            )
+        )
+
+    if sin_categoria:
+        query = query.filter(
+            or_(
+                TenantDocumento.categoria.is_(None),
+                func.btrim(TenantDocumento.categoria) == "",
+            )
+        )
+    elif categoria and categoria.strip():
+        query = query.filter(TenantDocumento.categoria == categoria.strip())
+
+    if sucursal_id is not None:
+        if solo_esta_sede:
+            query = query.filter(TenantDocumento.sucursal_id == sucursal_id)
+        else:
+            query = query.filter(
+                or_(
+                    TenantDocumento.sucursal_id.is_(None),
+                    TenantDocumento.sucursal_id == sucursal_id,
+                )
+            )
+    return query
 
 
 def _parse_sustituye_id(raw: str | None) -> UUID | None:
@@ -808,6 +927,44 @@ def listar_categorias_documentos(
     return vals
 
 
+@router.get("/carpetas", response_model=DocumentoCarpetasResponse)
+def listar_carpetas_documentos(
+    sucursal_id: UUID | None = Query(default=None),
+    solo_esta_sede: bool = Query(default=False),
+    solo_actuales: bool = Query(default=True),
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_current_user),
+):
+    """
+    Carpetas = categorías del tenant con conteo.
+    No recorta por fecha ni por un tope de 100: es un GROUP BY liviano.
+    """
+    base = _query_documentos_filtrados(
+        db,
+        current_user.tenant_id,
+        sucursal_id=sucursal_id,
+        solo_esta_sede=solo_esta_sede,
+        solo_actuales=solo_actuales,
+    )
+    etiqueta = func.nullif(func.btrim(TenantDocumento.categoria), "").label("carpeta")
+    rows = (
+        base.with_entities(etiqueta, func.count(TenantDocumento.id))
+        .group_by(etiqueta)
+        .all()
+    )
+    items: list[DocumentoCarpetaItem] = []
+    total_docs = 0
+    for nombre_raw, cnt in rows:
+        n = int(cnt or 0)
+        total_docs += n
+        if nombre_raw:
+            items.append(DocumentoCarpetaItem(nombre=str(nombre_raw), categoria=str(nombre_raw), total=n))
+        else:
+            items.append(DocumentoCarpetaItem(nombre="Sin categoría", categoria=None, total=n))
+    items.sort(key=lambda it: (it.categoria is None, it.nombre.casefold()))
+    return DocumentoCarpetasResponse(items=items, total_documentos=total_docs)
+
+
 @router.get("/almacenamiento", response_model=DocumentoStorageUsageResponse)
 def uso_almacenamiento_documentos(
     db: Session = Depends(get_db),
@@ -841,51 +998,43 @@ def uso_almacenamiento_documentos(
     )
 
 
-@router.get("/", response_model=list[DocumentoResponse])
+@router.get("/", response_model=DocumentoListPageResponse)
 def listar_documentos(
     skip: int = 0,
     limit: int = 50,
     q: str | None = Query(default=None, max_length=200),
     categoria: str | None = Query(default=None, max_length=120),
+    sin_categoria: bool = Query(default=False),
     sucursal_id: UUID | None = Query(default=None),
     solo_esta_sede: bool = Query(default=False),
     solo_actuales: bool = Query(default=True),
+    orden: str = Query(default="fecha", pattern="^(fecha|titulo)$"),
+    dir_orden: str = Query(default="desc", alias="dir", pattern="^(asc|desc)$"),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
+    if skip < 0:
+        skip = 0
+    if limit < 1:
+        limit = 50
     if limit > settings.MAX_PAGE_SIZE:
         limit = settings.MAX_PAGE_SIZE
 
-    query = db.query(TenantDocumento).filter(TenantDocumento.tenant_id == current_user.tenant_id)
-
-    if solo_actuales:
-        query = query.filter(TenantDocumento.es_version_actual.is_(True))
-
-    if q and q.strip():
-        term = f"%{q.strip()}%"
-        query = query.filter(
-            or_(
-                TenantDocumento.titulo.ilike(term),
-                TenantDocumento.nombre_archivo_original.ilike(term),
-            )
-        )
-
-    if categoria and categoria.strip():
-        query = query.filter(TenantDocumento.categoria == categoria.strip())
-
-    if sucursal_id is not None:
-        if solo_esta_sede:
-            query = query.filter(TenantDocumento.sucursal_id == sucursal_id)
-        else:
-            query = query.filter(
-                or_(
-                    TenantDocumento.sucursal_id.is_(None),
-                    TenantDocumento.sucursal_id == sucursal_id,
-                )
-            )
-
-    rows = query.order_by(TenantDocumento.created_at.desc()).offset(skip).limit(limit).all()
-    return rows
+    query = _query_documentos_filtrados(
+        db,
+        current_user.tenant_id,
+        q=q,
+        categoria=categoria,
+        sin_categoria=sin_categoria,
+        sucursal_id=sucursal_id,
+        solo_esta_sede=solo_esta_sede,
+        solo_actuales=solo_actuales,
+    )
+    total = int(query.count() or 0)
+    col = TenantDocumento.titulo if orden == "titulo" else TenantDocumento.created_at
+    order_by = col.asc() if dir_orden == "asc" else col.desc()
+    rows = query.order_by(order_by).offset(skip).limit(limit).all()
+    return DocumentoListPageResponse(items=rows, total=total, skip=skip, limit=limit)
 
 
 @router.post("/", response_model=DocumentoResponse, status_code=status.HTTP_201_CREATED)
@@ -896,6 +1045,7 @@ def subir_documento(
     categoria: str | None = Form(default=None),
     sucursal_id: str | None = Form(default=None),
     sustituye_a_id: str | None = Form(default=None),
+    motivo_cambio: str | None = Form(default=None),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
@@ -919,6 +1069,11 @@ def subir_documento(
                 "Elimine versiones antiguas o contacte a soporte CDASOFT."
             ),
         )
+
+    sust_uuid = _parse_sustituye_id(sustituye_a_id)
+    motivo: str | None = None
+    if sust_uuid is not None:
+        motivo = _validar_motivo_nueva_version(motivo_cambio)
 
     mime = (file.content_type or "application/octet-stream").strip()[:200]
 
@@ -945,7 +1100,6 @@ def subir_documento(
             ),
         )
 
-    sust_uuid = _parse_sustituye_id(sustituye_a_id)
     prev: TenantDocumento | None = None
     if sust_uuid is not None:
         prev = (
@@ -1017,18 +1171,22 @@ def subir_documento(
         mime_type=mime,
         tamano_bytes=size_written,
         storage_relpath=relpath,
+        motivo_cambio=motivo,
         created_by=current_user.id,
     )
     db.add(doc)
     # Persistir el documento antes de auditoría: la FK exige que exista en tenant_documentos.
     db.flush()
+    detalle_aud = f"{doc.titulo} (v{doc.version_seq})"
+    if motivo:
+        detalle_aud = f"{detalle_aud} — {motivo}"
     _log_documento_auditoria(
         db,
         tenant_id=current_user.tenant_id,
         documento_id=doc.id,
         usuario_id=current_user.id,
         accion="subir",
-        detalle=f"{doc.titulo} (v{doc.version_seq})",
+        detalle=detalle_aud,
     )
     db.commit()
     db.refresh(doc)
@@ -1225,6 +1383,7 @@ def listar_versiones_documento(
 
     rows = (
         db.query(TenantDocumento)
+        .options(joinedload(TenantDocumento.creador))
         .filter(
             TenantDocumento.grupo_id == base.grupo_id,
             TenantDocumento.tenant_id == current_user.tenant_id,
@@ -1232,7 +1391,7 @@ def listar_versiones_documento(
         .order_by(TenantDocumento.version_seq.desc())
         .all()
     )
-    return rows
+    return [_documento_response(r) for r in rows]
 
 
 @router.patch("/{documento_id}", response_model=DocumentoResponse)
@@ -1256,6 +1415,11 @@ def actualizar_metadata_documento(
     data = body.model_dump(exclude_unset=True)
     if not data:
         return doc
+
+    titulo_antes = (doc.titulo or "").strip()
+    cat_antes = _normalize_categoria(doc.categoria)
+    sede_id_antes = doc.sucursal_id
+    sede_nombre_antes = _nombre_sucursal_tenant(db, admin.tenant_id, sede_id_antes)
 
     if "titulo" in data:
         t = (data["titulo"] or "").strip()
@@ -1282,6 +1446,32 @@ def actualizar_metadata_documento(
                 )
             doc.sucursal_id = sid
 
+    titulo_despues = (doc.titulo or "").strip()
+    cat_despues = _normalize_categoria(doc.categoria)
+    sede_nombre_despues = _nombre_sucursal_tenant(db, admin.tenant_id, doc.sucursal_id)
+    detalle = _detalle_cambio_metadatos(
+        titulo_actual=titulo_despues,
+        partes=[
+            _linea_cambio_metadatos(
+                "Título",
+                f"«{titulo_antes}»" if titulo_antes else "—",
+                f"«{titulo_despues}»" if titulo_despues else "—",
+            ),
+            _linea_cambio_metadatos(
+                "Categoría",
+                cat_antes or "sin categoría",
+                cat_despues or "sin categoría",
+            ),
+            _linea_cambio_metadatos(
+                "Sede",
+                sede_nombre_antes or "Todas las sedes",
+                sede_nombre_despues or "Todas las sedes",
+            ),
+        ],
+    )
+    if not detalle:
+        return doc
+
     doc.updated_at = datetime.now(timezone.utc)
     doc.updated_by = admin.id
     _log_documento_auditoria(
@@ -1290,7 +1480,7 @@ def actualizar_metadata_documento(
         documento_id=doc.id,
         usuario_id=admin.id,
         accion="metadata_update",
-        detalle=f"título={doc.titulo!r}",
+        detalle=detalle,
     )
     db.commit()
     db.refresh(doc)

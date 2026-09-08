@@ -21,12 +21,36 @@ class DocumentoResponse(BaseModel):
     mime_type: str
     tamano_bytes: int
     preview_pdf_relpath: str | None = None
+    motivo_cambio: str | None = None
     created_at: datetime
     created_by: UUID | None
+    created_by_nombre: str | None = None
     updated_at: datetime | None = None
     updated_by: UUID | None = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+class DocumentoCarpetaItem(BaseModel):
+    """Carpeta virtual = categoría. `categoria` null = sin categoría."""
+
+    nombre: str
+    categoria: str | None = None
+    total: int
+
+
+class DocumentoCarpetasResponse(BaseModel):
+    items: list[DocumentoCarpetaItem]
+    total_documentos: int
+
+
+class DocumentoListPageResponse(BaseModel):
+    """Página de metadatos (sin binarios). `limit` acotado por MAX_PAGE_SIZE."""
+
+    items: list[DocumentoResponse]
+    total: int
+    skip: int
+    limit: int
 
 
 class DocumentoStorageUsageResponse(BaseModel):

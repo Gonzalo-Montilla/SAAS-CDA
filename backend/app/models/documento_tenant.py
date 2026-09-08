@@ -4,7 +4,7 @@ Documentos almacenados por tenant (metadatos en BD, binarios en disco privado).
 from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import Column, String, BigInteger, DateTime, ForeignKey, Integer, Boolean
+from sqlalchemy import Column, String, BigInteger, DateTime, ForeignKey, Integer, Boolean, Text
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 
@@ -30,6 +30,8 @@ class TenantDocumento(Base):
     storage_relpath = Column(String(800), nullable=False)
     # PDF u otro derivado para vista previa (fase B — conversión servidor); NULL si no aplica
     preview_pdf_relpath = Column(String(800), nullable=True)
+    # Obligatorio al subir una versión nueva (v2+). Null en la primera carga y en versiones antiguas.
+    motivo_cambio = Column(Text, nullable=True)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     created_by = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"))
