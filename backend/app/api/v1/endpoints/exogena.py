@@ -394,6 +394,10 @@ def _run_validaciones(
                     invalid_doc_number = 0
                     city_missing = 0
                     address_missing = 0
+                    city_ejemplos: list[dict] = []
+                    address_ejemplos: list[dict] = []
+                    city_seen: set[tuple[str, str]] = set()
+                    address_seen: set[tuple[str, str]] = set()
                     for _, td, nd, nm, direccion, city_id, cat_id in list(quality_rows_caja) + list(
                         quality_rows_tes
                     ):
@@ -411,10 +415,35 @@ def _run_validaciones(
                             by_id=cat_by_id,
                             by_doc=cat_by_doc,
                         )
+                        en_ficha = _egreso_tiene_ficha_catalogo(
+                            proveedor_catalogo_id=cat_id,
+                            numero_documento=nd,
+                            by_id=cat_by_id,
+                            by_doc=cat_by_doc,
+                        )
+                        detalle = (
+                            "está en Proveedores; complete municipio/dirección en la ficha"
+                            if en_ficha
+                            else "no está en el catálogo (pago a mano); créelo con el mismo documento"
+                        )
                         if resolved_city is None:
                             city_missing += 1
+                            _append_tercero_ejemplo(
+                                city_ejemplos,
+                                city_seen,
+                                nombre=nm,
+                                documento=nd,
+                                detalle=detalle,
+                            )
                         if not resolved_dir:
                             address_missing += 1
+                            _append_tercero_ejemplo(
+                                address_ejemplos,
+                                address_seen,
+                                nombre=nm,
+                                documento=nd,
+                                detalle=detalle,
+                            )
                     if invalid_doc_type > 0:
                         results.append(
                             _crear_validacion(
@@ -454,9 +483,12 @@ def _run_validaciones(
                                 formato="1001",
                                 severidad=ExogenaValidationSeverity.WARNING,
                                 codigo="CITY_MISSING",
-                                mensaje="Hay terceros sin ciudad/municipio asociado (id Factus).",
+                                mensaje="Hay pagos sin municipio del proveedor.",
                                 referencia_origen=f"1001:{anio}",
-                                metadata_json={"city_missing_rows": int(city_missing)},
+                                metadata_json={
+                                    "city_missing_rows": int(city_missing),
+                                    "ejemplos": city_ejemplos,
+                                },
                                 ejecucion_id=ejecucion_id,
                             )
                         )
@@ -469,9 +501,12 @@ def _run_validaciones(
                                 formato="1001",
                                 severidad=ExogenaValidationSeverity.WARNING,
                                 codigo="ADDRESS_MISSING",
-                                mensaje="Hay terceros sin dirección; complete dato para estructura DIAN final.",
+                                mensaje="Hay pagos sin dirección del proveedor.",
                                 referencia_origen=f"1001:{anio}",
-                                metadata_json={"address_missing_rows": int(address_missing)},
+                                metadata_json={
+                                    "address_missing_rows": int(address_missing),
+                                    "ejemplos": address_ejemplos,
+                                },
                                 ejecucion_id=ejecucion_id,
                             )
                         )
@@ -520,6 +555,7 @@ def _run_validaciones(
                             VehiculoProceso.cliente_nombre,
                             VehiculoProceso.cliente_direccion,
                             VehiculoProceso.cliente_factus_municipality_id,
+                            VehiculoProceso.placa,
                         )
                         .filter(
                             VehiculoProceso.tenant_id == tenant_id,
@@ -542,7 +578,11 @@ def _run_validaciones(
                     invalid_doc_number = 0
                     city_missing = 0
                     address_missing = 0
-                    for _, td, nd, nm, direccion, city_id in quality_rows_veh:
+                    city_ejemplos: list[dict] = []
+                    address_ejemplos: list[dict] = []
+                    city_seen: set[tuple[str, str]] = set()
+                    address_seen: set[tuple[str, str]] = set()
+                    for _, td, nd, nm, direccion, city_id, placa in quality_rows_veh:
                         if _is_missing_party_data(td, nd, nm):
                             continue
                         if not _is_valid_doc_type(td):
@@ -551,8 +591,22 @@ def _run_validaciones(
                             invalid_doc_number += 1
                         if city_id is None:
                             city_missing += 1
+                            _append_tercero_ejemplo(
+                                city_ejemplos,
+                                city_seen,
+                                nombre=nm,
+                                documento=nd,
+                                placa=placa,
+                            )
                         if not (direccion or "").strip():
                             address_missing += 1
+                            _append_tercero_ejemplo(
+                                address_ejemplos,
+                                address_seen,
+                                nombre=nm,
+                                documento=nd,
+                                placa=placa,
+                            )
                     if invalid_doc_type > 0:
                         results.append(
                             _crear_validacion(
@@ -592,9 +646,12 @@ def _run_validaciones(
                                 formato="1007",
                                 severidad=ExogenaValidationSeverity.WARNING,
                                 codigo="CITY_MISSING",
-                                mensaje="Hay terceros sin ciudad/municipio asociado (id Factus).",
+                                mensaje="Hay trámites cobrados sin municipio Factus del cliente (no es un proveedor).",
                                 referencia_origen=f"1007:{anio}",
-                                metadata_json={"city_missing_rows": int(city_missing)},
+                                metadata_json={
+                                    "city_missing_rows": int(city_missing),
+                                    "ejemplos": city_ejemplos,
+                                },
                                 ejecucion_id=ejecucion_id,
                             )
                         )
@@ -607,9 +664,12 @@ def _run_validaciones(
                                 formato="1007",
                                 severidad=ExogenaValidationSeverity.WARNING,
                                 codigo="ADDRESS_MISSING",
-                                mensaje="Hay terceros sin dirección; complete dato para estructura DIAN final.",
+                                mensaje="Hay trámites cobrados sin dirección del cliente (no es un proveedor).",
                                 referencia_origen=f"1007:{anio}",
-                                metadata_json={"address_missing_rows": int(address_missing)},
+                                metadata_json={
+                                    "address_missing_rows": int(address_missing),
+                                    "ejemplos": address_ejemplos,
+                                },
                                 ejecucion_id=ejecucion_id,
                             )
                         )
@@ -819,6 +879,47 @@ def _is_missing_party_data(tipo_documento: str | None, numero_documento: str | N
     nm = (nombre or "").strip().upper()
     invalid_values = {"", "N/A", "NA", "NULL", "NONE", "0"}
     return td in invalid_values or nd in invalid_values or nm in invalid_values
+
+
+def _append_tercero_ejemplo(
+    bucket: list[dict],
+    seen: set[tuple[str, str]],
+    *,
+    nombre: str | None,
+    documento: str | None,
+    placa: str | None = None,
+    detalle: str | None = None,
+    limit: int = 8,
+) -> None:
+    doc = (documento or "").strip()
+    nom = (nombre or "").strip()
+    key = (doc, nom.upper())
+    if key in seen or len(bucket) >= limit:
+        return
+    seen.add(key)
+    item: dict = {
+        "nombre": nom or "Sin nombre",
+        "documento": doc or "—",
+        "placa": (placa or "").strip() or None,
+    }
+    if detalle:
+        item["detalle"] = detalle
+    bucket.append(item)
+
+
+def _egreso_tiene_ficha_catalogo(
+    *,
+    proveedor_catalogo_id,
+    numero_documento: str | None,
+    by_id: dict,
+    by_doc: dict[str, dict],
+) -> bool:
+    if proveedor_catalogo_id is not None and proveedor_catalogo_id in by_id:
+        return True
+    for key in _doc_lookup_keys(numero_documento):
+        if key in by_doc:
+            return True
+    return False
 
 
 def _doc_digits(numero_documento: str | None) -> str:

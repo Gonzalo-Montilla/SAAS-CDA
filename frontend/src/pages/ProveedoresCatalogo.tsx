@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { isAxiosError } from 'axios';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import { extractApiErrorMessage } from '../utils/apiError';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
@@ -30,6 +31,7 @@ import {
   Percent,
   ChevronDown,
   ChevronRight,
+  ArrowUpRight,
 } from 'lucide-react';
 
 const LS_DSE_ENTORNO_ABIERTO = 'proveedores-catalogo:dse-entorno-retencion-abierto';
@@ -106,13 +108,22 @@ const emptyForm: ProveedorCatalogoCreate = {
   direccion: '',
   email: '',
   telefono: '',
-  factus_municipality_id: 1,
+  factus_municipality_id: 0,
   activo: true,
   concepto_retencion_dse: 'servicios',
 };
 
+function direccionListaParaExogena(direccion: string): boolean {
+  return (direccion || '').trim().length >= 8;
+}
+
+function municipioPorConfirmar(id: number): boolean {
+  return !Number.isFinite(id) || id < 1 || id === 1;
+}
+
 export default function ProveedoresCatalogoPage() {
   const qc = useQueryClient();
+  const navigate = useNavigate();
   const { user } = useAuth();
   const esAdmin = user?.rol === 'administrador';
   const puedeVistaPreviaMotor = user?.rol === 'administrador' || user?.rol === 'contador';
@@ -399,7 +410,7 @@ export default function ProveedoresCatalogoPage() {
   };
 
   const abrirCrear = () => {
-    setForm({ ...emptyForm, tipo_identificacion: 'NIT', factus_municipality_id: 1 });
+    setForm({ ...emptyForm, tipo_identificacion: 'NIT' });
     setEditId(null);
     setTieneAdjuntoRut(false);
     setRutFile(null);
@@ -418,7 +429,7 @@ export default function ProveedoresCatalogoPage() {
     e.preventDefault();
     const mid = Number(form.factus_municipality_id);
     if (!Number.isFinite(mid) || mid < 1) {
-      window.alert('Indique un id de municipio Factus válido.');
+      window.alert('Busque y seleccione el municipio. No lo deje vacío: Exógena 1001 y el documento soporte lo usan.');
       return;
     }
     const payload: ProveedorCatalogoCreate = {
@@ -478,12 +489,12 @@ export default function ProveedoresCatalogoPage() {
       <section className="module-hero">
         <p className="module-hero-title flex items-center gap-2">
           <BookUser className="w-5 h-5 text-primary-600 shrink-0" />
-          Catálogo de proveedores (documento soporte DIAN)
+          Catálogo de proveedores
         </p>
         <p className="module-hero-subtitle max-w-3xl">
-          Registre una vez el nombre y número de identificación (como en el RUT/DIAN), más dirección, correo, teléfono y
-          municipio Factus. Adjunte solo el PDF de certificación RUT emitido por la DIAN (no cédula escaneada). En caja y
-          tesorería podrá elegir el proveedor sin volver a teclear esos datos.
+          Nombre y documento como en el RUT, más dirección y municipio. Caja y Tesorería los reutilizan. Contador →
+          Exógena 1001 (pagos) completa ciudad y dirección desde aquí, aunque el egreso viejo no los tenga. Los clientes
+          del 1007 se corrigen en Recepción, no en este catálogo.
         </p>
       </section>
 
@@ -749,14 +760,33 @@ export default function ProveedoresCatalogoPage() {
             <div>
               <h2 className="text-lg font-semibold text-slate-900">Proveedores registrados</h2>
               <p className="text-sm text-slate-500 mt-0.5">
-                Datos usados en egresos de caja y tesorería y en documento soporte Factus.
+                Dirección y municipio alimentan Exógena 1001. Un proveedor inactivo no se usa en ese cierre.
               </p>
             </div>
-            <button type="button" onClick={abrirCrear} className="btn-pos btn-primary inline-flex items-center gap-2 shrink-0">
-              <Plus className="w-5 h-5" />
-              Nuevo proveedor
-            </button>
+            <div className="flex flex-wrap items-center gap-2 shrink-0">
+              <button
+                type="button"
+                className="btn-pos btn-secondary inline-flex items-center gap-2"
+                onClick={() => navigate('/contador')}
+              >
+                Ir a Contador
+                <ArrowUpRight className="w-4 h-4" />
+              </button>
+              <button type="button" onClick={abrirCrear} className="btn-pos btn-primary inline-flex items-center gap-2">
+                <Plus className="w-5 h-5" />
+                Nuevo proveedor
+              </button>
+            </div>
           </div>
+
+          {(items ?? []).some(
+            (p) => !p.activo || !direccionListaParaExogena(p.direccion) || municipioPorConfirmar(p.factus_municipality_id),
+          ) && (
+            <div className="mb-4 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              Hay filas que Exógena 1001 puede seguir marcando: inactivo, dirección corta o municipio 1 (valor inicial
+              del formulario; confírmelo buscando la ciudad). Edite la fila y vuelva a validar en Contador.
+            </div>
+          )}
 
           <div className="table-shell">
             <table className="table-enterprise">
@@ -765,8 +795,8 @@ export default function ProveedoresCatalogoPage() {
                   <th>Alias</th>
                   <th>Razón social / nombre RUT</th>
                   <th>Doc.</th>
-                  <th>Correo</th>
-                  <th>Mcp. Factus</th>
+                  <th>Dirección</th>
+                  <th>Municipio</th>
                   <th>Activo</th>
                   <th>Retención</th>
                   <th>RUT (PDF)</th>
@@ -776,8 +806,9 @@ export default function ProveedoresCatalogoPage() {
               <tbody>
                 {items?.length === 0 ? (
                   <tr>
-                    <td colSpan={9} className="text-sm text-slate-600 text-center py-10">
-                      No hay proveedores. Cree el primero con «Nuevo proveedor».
+                    <td colSpan={9} className="text-slate-600 text-sm leading-relaxed py-5 text-center">
+                      No hay proveedores. Cree el primero y complete dirección y municipio: Caja, Tesorería y Exógena
+                      1001 los usan.
                     </td>
                   </tr>
                 ) : (
@@ -788,9 +819,30 @@ export default function ProveedoresCatalogoPage() {
                       <td className="text-slate-600 whitespace-nowrap">
                         {p.tipo_identificacion} {p.numero_identificacion}
                       </td>
-                      <td className="text-slate-600">{p.email}</td>
-                      <td className="text-slate-600 tabular-nums">{p.factus_municipality_id}</td>
-                      <td>{p.activo ? 'Sí' : 'No'}</td>
+                      <td className="text-slate-600 max-w-[14rem]">
+                        <span className="line-clamp-2" title={p.direccion}>
+                          {p.direccion?.trim() || '—'}
+                        </span>
+                        {!direccionListaParaExogena(p.direccion) && (
+                          <p className="text-xs text-amber-700 mt-0.5">Completar para Exógena 1001</p>
+                        )}
+                      </td>
+                      <td className="text-slate-600">
+                        <span className="tabular-nums">{p.factus_municipality_id || '—'}</span>
+                        {municipioPorConfirmar(p.factus_municipality_id) && (
+                          <p className="text-xs text-amber-700 mt-0.5">Confirme la ciudad (búsq. el municipio)</p>
+                        )}
+                      </td>
+                      <td>
+                        {p.activo ? (
+                          'Sí'
+                        ) : (
+                          <span>
+                            No
+                            <span className="block text-xs text-amber-700">No entra en Exógena 1001</span>
+                          </span>
+                        )}
+                      </td>
                       <td className="text-slate-600 text-sm">
                         {LABEL_CONCEPTO_DSE[p.concepto_retencion_dse] ?? p.concepto_retencion_dse ?? '—'}
                       </td>
@@ -840,7 +892,7 @@ export default function ProveedoresCatalogoPage() {
               {modal === 'crear' ? 'Nuevo proveedor' : 'Editar proveedor'}
             </h3>
             <p className="text-sm text-slate-500 mb-4">
-              Los mismos datos se reutilizan al registrar egresos y al emitir documento soporte.
+              Los mismos datos se reutilizan en Caja, Tesorería, documento soporte y Exógena 1001 (pagos).
             </p>
             {errMsg && (
               <div className="mb-3 text-sm text-red-800 bg-red-50 border border-red-200 rounded-xl px-3 py-2.5">
@@ -905,14 +957,20 @@ export default function ProveedoresCatalogoPage() {
                 </p>
               </div>
               <div>
-                <label className="block text-xs font-semibold text-slate-700 mb-1">Dirección</label>
+                <label className="block text-xs font-semibold text-slate-700 mb-1">
+                  Dirección (calle, número, barrio — la usa Exógena 1001)
+                </label>
                 <textarea
                   className="input-pos w-full min-h-[72px]"
                   value={form.direccion}
                   onChange={(e) => setForm((f) => ({ ...f, direccion: e.target.value }))}
                   required
                   minLength={8}
+                  placeholder="Ej. Calle 10 # 5-20, centro"
                 />
+                <p className="text-xs text-slate-500 mt-1">
+                  Mínimo 8 caracteres. Al validar en Contador se toma de aquí aunque el egreso antiguo no la tenga.
+                </p>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                 <div>
@@ -943,10 +1001,10 @@ export default function ProveedoresCatalogoPage() {
                     factus_municipality_id: parseInt(idDigits, 10) || 0,
                   }))
                 }
-                disabled={factusCfg?.modo !== 'factus'}
-                searchLabel="Municipio (Factus)"
+                searchLabel="Municipio / ciudad"
                 idInputLabel="Id municipio Factus"
-                helperText="Mismo catálogo que en Organización."
+                helperText="Escriba la ciudad y selecciónela. Ese dato es el que pide Exógena 1001 (id Factus, no el código DIAN). No deje 1 por defecto."
+                searchPlaceholder="Escriba el municipio (2 letras o más)…"
               />
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">
@@ -985,7 +1043,8 @@ export default function ProveedoresCatalogoPage() {
                   checked={form.activo !== false}
                   onChange={(e) => setForm((f) => ({ ...f, activo: e.target.checked }))}
                 />
-                Activo (visible en caja / tesorería)
+                Activo (Caja, Tesorería y Exógena 1001). Si lo desmarca, el cierre no toma ciudad ni dirección de esta
+                ficha.
               </label>
 
               {editId && (

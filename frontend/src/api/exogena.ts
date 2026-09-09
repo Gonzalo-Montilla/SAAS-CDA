@@ -50,6 +50,7 @@ export interface ExogenaValidacionResumenItem {
   mensaje: string;
   formato?: string;
   referencia_origen?: string | null;
+  metadata_json?: Record<string, unknown>;
 }
 
 export interface ExogenaValidarResponse {

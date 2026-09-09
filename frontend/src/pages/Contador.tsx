@@ -110,6 +110,27 @@ function firstDayOfMonthLocalDate(): string {
   return `${y}-${m}-01`;
 }
 
+function formatFechaCorta(iso: string): string {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return iso || '—';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function LineaFechas(props: {
+  tipo: 'periodo' | 'corte' | 'cartera';
+  desde?: string;
+  hasta?: string;
+  corte?: string;
+}) {
+  const txt =
+    props.tipo === 'cartera'
+      ? 'Cartera a hoy: no usa el periodo de la cabecera.'
+      : props.tipo === 'corte'
+        ? `Usando corte ${formatFechaCorta(props.corte || '')}.`
+        : `Usando periodo ${formatFechaCorta(props.desde || '')} → ${formatFechaCorta(props.hasta || '')}.`;
+  return <p className="text-xs text-slate-500 mt-1">{txt}</p>;
+}
+
 function parseTopeFormato(value: unknown): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed < 0) return 0;
@@ -142,6 +163,9 @@ export default function Contador() {
   const [periodoDesde, setPeriodoDesde] = useState(firstDayOfMonthLocalDate());
   const [periodoHasta, setPeriodoHasta] = useState(currentLocalDate());
   const [fechaCorte, setFechaCorte] = useState(currentLocalDate());
+  const [aplicadoDesde, setAplicadoDesde] = useState(firstDayOfMonthLocalDate());
+  const [aplicadoHasta, setAplicadoHasta] = useState(currentLocalDate());
+  const [aplicadoCorte, setAplicadoCorte] = useState(currentLocalDate());
   const [anio, setAnio] = useState(currentYear());
   const [uvt, setUvt] = useState<number>(0);
   const [topeMinimo1001, setTopeMinimo1001] = useState<number>(0);
@@ -153,6 +177,7 @@ export default function Contador() {
   const [historialFiltro, setHistorialFiltro] = useState<'success' | 'error' | 'all'>('success');
   const [historialPagina, setHistorialPagina] = useState(1);
   const [mapeosAbiertos, setMapeosAbiertos] = useState(false);
+  const [checklistDetalleAbierto, setChecklistDetalleAbierto] = useState(false);
   const [modoExportacion, setModoExportacion] = useState<'consolidado' | 'detalle'>('consolidado');
   const [formatoExportActivo, setFormatoExportActivo] = useState<'1001' | '1007' | null>(null);
   const [expandedEjecucionId, setExpandedEjecucionId] = useState<string | null>(null);
@@ -330,7 +355,7 @@ export default function Contador() {
     {
       id: 'ventas-sucursal',
       titulo: 'Ventas por sucursal',
-      detalle: 'Consolidado por sede. CSV disponible.',
+      detalle: 'Consolidado por sede. Excel.',
       ruta: 'tab:ventas_sucursal',
       categoria: 'Ventas',
       zona: 'operacion',
@@ -444,11 +469,11 @@ export default function Contador() {
   });
 
   const cxcQuery = useQuery({
-    queryKey: ['reportes-cxc-general-cliente'],
-    queryFn: () => reportesApi.getCxcGeneralCliente({ limit: 500 }),
+    queryKey: ['reportes-cxc-general-cliente', aplicadoCorte],
+    queryFn: () => reportesApi.getCxcGeneralCliente({ fechaCorte: aplicadoCorte, limit: 500 }),
     staleTime: 60000,
     refetchInterval: 120000,
-    enabled: activeTab === 'cxc',
+    enabled: activeTab === 'cxc' && !!aplicadoCorte,
   });
   const cxpQuery = useQuery({
     queryKey: ['reportes-cxp-general-proveedor'],
@@ -489,25 +514,25 @@ export default function Contador() {
     enabled: activeTab === 'obligaciones' || activeTab === 'panel' || activeTab === 'estado_situacion',
   });
   const cierreQuery = useQuery({
-    queryKey: ['reportes-cierre-periodo', periodoDesde, periodoHasta],
+    queryKey: ['reportes-cierre-periodo', aplicadoDesde, aplicadoHasta],
     queryFn: () =>
       reportesApi.getCierrePeriodoResumen({
-        fechaInicio: periodoDesde,
-        fechaFin: periodoHasta,
+        fechaInicio: aplicadoDesde,
+        fechaFin: aplicadoHasta,
       }),
     staleTime: 60000,
-    enabled: activeTab === 'panel' && !!periodoDesde && !!periodoHasta,
+    enabled: activeTab === 'panel' && !!aplicadoDesde && !!aplicadoHasta,
   });
   const cxcDetalleQuery = useQuery({
-    queryKey: ['reportes-cxc-detalle', cxcDetalleDoc, cxcDetalleNombre, fechaCorte],
+    queryKey: ['reportes-cxc-detalle', cxcDetalleDoc, cxcDetalleNombre, aplicadoCorte],
     queryFn: () =>
       reportesApi.getCxcClienteDetalle({
         clienteDocumento: cxcDetalleDoc || '',
         clienteNombre: cxcDetalleNombre || undefined,
-        fechaCorte,
+        fechaCorte: aplicadoCorte,
         limit: 200,
       }),
-    enabled: !!cxcDetalleDoc,
+    enabled: !!cxcDetalleDoc && !!aplicadoCorte,
   });
   const ventasVendedorQuery = useQuery({
     queryKey: ['reportes-ventas-por-vendedor', ventasVendedorDesde, ventasVendedorHasta],
@@ -829,25 +854,69 @@ export default function Contador() {
 
   const validacionChecklist = useMemo(() => {
     const items = validacionResult?.items || [];
-    const counts = new Map<string, { codigo: string; severidad: string; mensaje: string; count: number }>();
+    const counts = new Map<
+      string,
+      {
+        codigo: string;
+        severidad: string;
+        mensaje: string;
+        count: number;
+        formato?: string;
+        filas?: number;
+        ejemplos?: Array<{ nombre: string; documento: string; placa?: string | null; detalle?: string | null }>;
+      }
+    >();
     for (const it of items) {
-      const key = `${it.severidad}|${it.codigo}|${it.mensaje}`;
+      const key = `${it.formato || ''}|${it.severidad}|${it.codigo}|${it.mensaje}`;
+      const meta = it.metadata_json || {};
+      const filasRaw =
+        meta.city_missing_rows ?? meta.address_missing_rows ?? meta.invalid_doc_type_rows ?? meta.invalid_doc_number_rows;
+      const filas = typeof filasRaw === 'number' ? filasRaw : undefined;
+      const rawEj = meta.ejemplos;
+      const ejemplos = Array.isArray(rawEj)
+        ? rawEj
+            .map((e) => {
+              if (!e || typeof e !== 'object') return null;
+              const row = e as { nombre?: unknown; documento?: unknown; placa?: unknown; detalle?: unknown };
+              return {
+                nombre: String(row.nombre || 'Sin nombre'),
+                documento: String(row.documento || '—'),
+                placa: row.placa ? String(row.placa) : null,
+                detalle: row.detalle ? String(row.detalle) : null,
+              };
+            })
+            .filter((e): e is { nombre: string; documento: string; placa: string | null; detalle: string | null } => e != null)
+        : undefined;
       const prev = counts.get(key);
       if (prev) prev.count += 1;
-      else counts.set(key, { codigo: it.codigo, severidad: it.severidad, mensaje: it.mensaje, count: 1 });
+      else
+        counts.set(key, {
+          codigo: it.codigo,
+          severidad: it.severidad,
+          mensaje: it.mensaje,
+          count: 1,
+          formato: it.formato,
+          filas,
+          ejemplos,
+        });
     }
     return [...counts.values()].sort((a, b) => {
       if (a.severidad !== b.severidad) return a.severidad === 'error' ? -1 : 1;
-      return b.count - a.count;
+      return (a.formato || '').localeCompare(b.formato || '') || b.count - a.count;
     });
   }, [validacionResult]);
 
-  const hintCorreccionTercero = (codigo: string): string | null => {
+  const hintCorreccionTercero = (codigo: string, formato?: string): string | null => {
+    const es1007 = formato === '1007';
     if (['CITY_MISSING', 'ADDRESS_MISSING'].includes(codigo)) {
-      return 'Complete ciudad/dirección en Proveedores. Al validar de nuevo se toma del catálogo aunque el egreso antiguo no lo tenga.';
+      return es1007
+        ? 'Advertencia de clientes (ingresos). El municipio vacío en factura ya toma el del CDA; la dirección no es obligatoria en Recepción. Puede exportar igual.'
+        : 'Abajo está quién falta. Si dice que está en Proveedores, complete municipio y dirección en esa ficha. Si dice pago a mano, créelo en el catálogo con el mismo NIT/cédula (o elija el proveedor al egresar). Es advertencia: puede exportar.';
     }
     if (['DOC_TYPE_INVALID', 'DOC_NUMBER_INVALID'].includes(codigo)) {
-      return 'Corregir tipo o número de documento del tercero en Proveedores / Caja / Tesorería.';
+      return es1007
+        ? 'Corregir tipo o número de documento del cliente en Recepción / Caja.'
+        : 'Corregir tipo o número de documento del tercero en Proveedores / Caja / Tesorería.';
     }
     if (codigo === 'MAPEO_EMPTY' || codigo === 'PARAMS_MISSING') {
       return 'Falta configuración anual o mapeos activos.';
@@ -857,6 +926,7 @@ export default function Contador() {
 
   const accionChecklist = (
     codigo: string,
+    formato?: string,
   ): { label: string; onClick: () => void } | null => {
     if (codigo === 'MAPEO_EMPTY' || codigo === 'PARAMS_MISSING') {
       return {
@@ -868,6 +938,9 @@ export default function Contador() {
       };
     }
     if (['DOC_TYPE_INVALID', 'DOC_NUMBER_INVALID', 'CITY_MISSING', 'ADDRESS_MISSING'].includes(codigo)) {
+      if (formato === '1007') {
+        return null;
+      }
       return {
         label: 'Ir a Proveedores',
         onClick: () => navigate('/proveedores-catalogo'),
@@ -877,6 +950,9 @@ export default function Contador() {
   };
 
   const aplicarPeriodoGlobal = () => {
+    setAplicadoDesde(periodoDesde);
+    setAplicadoHasta(periodoHasta);
+    setAplicadoCorte(fechaCorte);
     setVentasVendedorDesde(periodoDesde);
     setVentasVendedorHasta(periodoHasta);
     setVentasSucursalDesde(periodoDesde);
@@ -898,18 +974,18 @@ export default function Contador() {
     activeTab === 'panel' ? 'inicio' : activeTab === 'exogena' ? 'cierre' : 'operacion';
 
   const tabsOperacion: Array<{ id: ContadorTab; label: string }> = [
-    { id: 'cxc', label: 'CxC' },
+    { id: 'cxc', label: 'Cuentas por cobrar' },
     { id: 'obligaciones', label: 'Obligaciones' },
-    { id: 'cxp', label: 'Egresos prov.' },
+    { id: 'cxp', label: 'Egresos a proveedores' },
     { id: 'gastos', label: 'Gastos' },
-    { id: 'ventas_vendedor', label: 'Ventas vendedor' },
-    { id: 'ventas_sucursal', label: 'Ventas sucursal' },
-    { id: 'estado_resultado', label: 'Resultado' },
-    { id: 'estado_flujo', label: 'Flujo' },
-    { id: 'estado_patrimonio', label: 'Patrimonio' },
-    { id: 'estado_situacion', label: 'Situación' },
-    { id: 'balance_prueba', label: 'Balance' },
-    { id: 'balance_tercero', label: 'Balance tercero' },
+    { id: 'ventas_vendedor', label: 'Ventas por vendedor' },
+    { id: 'ventas_sucursal', label: 'Ventas por sucursal' },
+    { id: 'estado_resultado', label: 'Estado de resultado' },
+    { id: 'estado_flujo', label: 'Flujo de efectivo' },
+    { id: 'estado_patrimonio', label: 'Cambios en patrimonio' },
+    { id: 'estado_situacion', label: 'Situación financiera' },
+    { id: 'balance_prueba', label: 'Balance de prueba' },
+    { id: 'balance_tercero', label: 'Balance por tercero' },
   ];
 
   const exogenaSemaforo = useMemo(() => {
@@ -1578,7 +1654,7 @@ export default function Contador() {
           className="mt-4 btn-corporate-muted w-full inline-flex items-center justify-center gap-1.5 text-xs"
           onClick={() => abrirRutaContable(item.ruta)}
         >
-          Abrir
+          Ir
           <ArrowUpRight className="w-3.5 h-3.5" />
         </button>
       </div>
@@ -1608,6 +1684,12 @@ export default function Contador() {
     titulo: string;
     detalle: string;
     actions?: ReactNode;
+    fechas?: {
+      tipo: 'periodo' | 'corte' | 'cartera';
+      desde?: string;
+      hasta?: string;
+      corte?: string;
+    };
   }) => (
     <div className="flex flex-wrap items-start justify-between gap-3">
       <div className="flex items-start gap-3 min-w-0">
@@ -1617,6 +1699,7 @@ export default function Contador() {
         <div className="min-w-0">
           <h3 className="text-base font-semibold text-slate-900">{opts.titulo}</h3>
           <p className="text-sm text-slate-600 mt-0.5">{opts.detalle}</p>
+          {opts.fechas ? <LineaFechas {...opts.fechas} /> : null}
         </div>
       </div>
       {opts.actions ? <div className="flex flex-wrap items-center gap-2">{opts.actions}</div> : null}
@@ -1643,12 +1726,12 @@ export default function Contador() {
                 Módulo Contador
               </h2>
               <p className="module-hero-subtitle">
-                Control operativo e insumos para el contador. No es contabilidad NIIF oficial.
+                Elija fechas y pulse Aplicar fechas. Insumo gerencial para el cierre.
               </p>
             </div>
             <div className="flex flex-wrap items-end gap-2 rounded-xl border border-slate-200 bg-slate-50/90 px-3 py-2.5 shadow-sm">
               <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] uppercase tracking-wide text-slate-500">Periodo desde</span>
+                <span className="text-[10px] uppercase tracking-wide text-slate-500">Desde</span>
                 <input
                   type="date"
                   className="input-corporate text-sm"
@@ -1657,12 +1740,16 @@ export default function Contador() {
                 />
               </label>
               <label className="flex flex-col gap-0.5">
-                <span className="text-[10px] uppercase tracking-wide text-slate-500">Periodo hasta</span>
+                <span className="text-[10px] uppercase tracking-wide text-slate-500">Hasta</span>
                 <input
                   type="date"
                   className="input-corporate text-sm"
                   value={periodoHasta}
-                  onChange={(e) => setPeriodoHasta(e.target.value)}
+                  onChange={(e) => {
+                    const hasta = e.target.value;
+                    setPeriodoHasta(hasta);
+                    setFechaCorte(hasta);
+                  }}
                 />
               </label>
               <label className="flex flex-col gap-0.5">
@@ -1675,10 +1762,14 @@ export default function Contador() {
                 />
               </label>
               <button type="button" className="btn-corporate-primary px-3 text-sm" onClick={aplicarPeriodoGlobal}>
-                Aplicar a reportes
+                Aplicar fechas
               </button>
             </div>
           </div>
+          <p className="text-xs text-slate-600">
+            Periodo aplicado: {formatFechaCorta(aplicadoDesde)} → {formatFechaCorta(aplicadoHasta)} · Corte:{' '}
+            {formatFechaCorta(aplicadoCorte)}
+          </p>
 
           <div className="flex flex-wrap gap-2">
             <button
@@ -1710,7 +1801,7 @@ export default function Contador() {
                 <button
                   key={t.id}
                   type="button"
-                  className={`btn-chip text-xs ${activeTab === t.id ? chipActivo : chipInactivo}`}
+                  className={`btn-chip text-xs text-center leading-snug whitespace-normal ${activeTab === t.id ? chipActivo : chipInactivo}`}
                   onClick={() => setActiveTab(t.id)}
                 >
                   {t.label}
@@ -1725,31 +1816,10 @@ export default function Contador() {
             <div className="section-card p-5 sm:p-6 space-y-4">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                  <h3 className="text-lg font-semibold text-slate-900">¿Qué quieres hacer?</h3>
-                  <p className="text-sm text-slate-600 mt-1 max-w-2xl">
-                    Elige por intención. Los reportes son gerenciales (insumo Excel); la exógena es el cierre DIAN.
-                  </p>
-                </div>
-                <span className="badge badge-info">Gerencial + DIAN</span>
-              </div>
-              <div className="rounded-xl border border-primary-100 bg-gradient-to-r from-primary-50/80 to-slate-50 px-4 py-3">
-                <p className="text-sm font-semibold text-slate-900">Alcance del módulo</p>
-                <p className="text-xs text-slate-600 mt-1 leading-relaxed">
-                  Insumo gerencial y operativo para el contador del CDA. <strong>No es contabilidad NIIF
-                  oficial</strong>. CxC = cartera de trámites sin pago. Obligaciones = facturas por pagar.
-                  Egresos proveedores = pagos ya ejecutados. Excel en reportes de operación; exógena DIAN en
-                  su flujo.
-                </p>
-              </div>
-            </div>
-
-            <div className="section-card p-5 sm:p-6 space-y-4">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div>
                   <h3 className="text-base font-semibold text-slate-900">Cierre del periodo</h3>
                   <p className="text-sm text-slate-600">
-                    Checklist calculado ({periodoDesde} → {periodoHasta}). Usa “Aplicar a reportes” en la
-                    cabecera para cambiar el rango.
+                    Checklist del {formatFechaCorta(aplicadoDesde)} al {formatFechaCorta(aplicadoHasta)}. Pulse un
+                    ítem para abrir el reporte. Si cambió las fechas de arriba, pulse Aplicar fechas.
                   </p>
                 </div>
                 {cierreQuery.isFetching && (
@@ -1813,8 +1883,8 @@ export default function Contador() {
 
             <div className="section-card p-5 sm:p-6 space-y-4">
               {renderZonaHeader({
-                paso: 'Zona 1',
-                titulo: 'Operación del periodo',
+                paso: 'Reportes',
+                titulo: 'Del mes',
                 detalle: 'Cartera, obligaciones, ventas y estados gerenciales.',
                 Icon: BarChart3,
               })}
@@ -1826,8 +1896,8 @@ export default function Contador() {
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
               <div className="section-card p-5 sm:p-6 space-y-4">
                 {renderZonaHeader({
-                  paso: 'Zona 2',
-                  titulo: 'Cierre / impuestos',
+                  paso: 'Cierre anual',
+                  titulo: 'Exógena DIAN',
                   detalle: 'Configurar → validar → corregir → exportar.',
                   Icon: FileSpreadsheet,
                 })}
@@ -1838,8 +1908,8 @@ export default function Contador() {
 
               <div className="section-card p-5 sm:p-6 space-y-4">
                 {renderZonaHeader({
-                  paso: 'Zona 3',
-                  titulo: 'Maestros y soporte',
+                  paso: 'Catálogos',
+                  titulo: 'Maestros',
                   detalle: 'Terceros y evidencia de caja para alimentar reportes.',
                   Icon: Building2,
                 })}
@@ -1857,7 +1927,8 @@ export default function Contador() {
               Icon: Wallet,
               titulo: 'Cuentas por cobrar',
               detalle:
-                'Cartera operativa (corte actual): trámites registrados y aún no pagados. Clic en fila para detalle.',
+                'Trámites registrados y aún no pagados al corte. Aging y saldos son a esa fecha. Clic en fila para detalle.',
+              fechas: { tipo: 'corte', corte: aplicadoCorte },
               actions: (
                 <>
                   <input
@@ -1947,8 +2018,10 @@ export default function Contador() {
                   )}
                   {!cxcQuery.isLoading && cxcRows.length === 0 && (
                     <tr>
-                      <td className="text-slate-500" colSpan={9}>
-                        No hay registros para el filtro actual.
+                      <td className="text-slate-600 text-sm leading-relaxed py-5" colSpan={9}>
+                        {cxcFiltro
+                          ? 'No hay coincidencias. Quite el texto de búsqueda para ver toda la cartera.'
+                          : 'No hay trámites pendientes de cobro a este corte. Ajuste el corte (suele ser el Hasta del periodo) y pulse Aplicar fechas, o revísela en Recepción.'}
                       </td>
                     </tr>
                   )}
@@ -2064,6 +2137,7 @@ export default function Contador() {
               titulo: 'Egresos a proveedores (pagados)',
               detalle:
                 'Ya egresados desde tesorería. No es CxP por pagar — use la pestaña Obligaciones para facturas pendientes.',
+              fechas: { tipo: 'cartera' },
               actions: (
                 <>
                   <input
@@ -2131,8 +2205,10 @@ export default function Contador() {
                   )}
                   {!cxpQuery.isLoading && cxpRows.length === 0 && (
                     <tr>
-                      <td className="text-slate-500" colSpan={9}>
-                        No hay egresos a proveedores para el filtro actual.
+                      <td className="text-slate-600 text-sm leading-relaxed py-5" colSpan={9}>
+                        {cxpFiltro
+                          ? 'No hay coincidencias. Quite el texto de búsqueda para ver todos los egresos.'
+                          : 'No hay egresos a proveedores. Los pagos se registran en Tesorería.'}
                       </td>
                     </tr>
                   )}
@@ -2193,6 +2269,7 @@ export default function Contador() {
               titulo: 'Obligaciones / facturas de compra',
               detalle:
                 'CxP formal (crédito) — en estudio. Para el caso “ya pagué y luego llega la factura del almacén”, adjunte la factura al egreso en Tesorería; el contador la ve en Gastos.',
+              fechas: { tipo: 'cartera' },
               actions: (
                 <>
                   <input
@@ -2386,8 +2463,10 @@ export default function Contador() {
                   {!obligacionesQuery.isLoading &&
                     (obligacionesQuery.data?.items || []).length === 0 && (
                       <tr>
-                        <td colSpan={7} className="text-slate-500">
-                          Sin obligaciones para el filtro.
+                        <td colSpan={7} className="text-slate-600 text-sm leading-relaxed py-5">
+                          {obligacionesFiltro
+                            ? 'No hay coincidencias. Quite el texto de búsqueda o desmarque “solo pendientes”.'
+                            : 'No hay facturas por pagar. Registre una obligación aquí o adjunte la factura al egreso en Tesorería.'}
                         </td>
                       </tr>
                     )}
@@ -2498,6 +2577,7 @@ export default function Contador() {
               titulo: 'Gastos del periodo',
               detalle:
                 'Egresos ejecutados. Si hay factura de compra adjunta al egreso, ábrala aquí (sin entrar a Tesorería).',
+              fechas: { tipo: 'periodo', desde: gastosDesde, hasta: gastosHasta },
               actions: (
                 <>
                   <input
@@ -2599,8 +2679,10 @@ export default function Contador() {
                   )}
                   {!gastosQuery.isLoading && gastosRows.length === 0 && (
                     <tr>
-                      <td className="text-slate-500" colSpan={10}>
-                        No hay egresos para el filtro actual.
+                      <td className="text-slate-600 text-sm leading-relaxed py-5" colSpan={10}>
+                        {gastosFiltro
+                          ? 'No hay coincidencias. Quite el filtro o cambie origen/clasificación.'
+                          : 'No hay egresos en este periodo. Cambie las fechas y pulse Aplicar fechas, o registre egresos en Tesorería o Caja.'}
                       </td>
                     </tr>
                   )}
@@ -2860,6 +2942,7 @@ export default function Contador() {
                 <p className="text-sm text-slate-600">
                   Consolidado por sede (centro operativo) con ticket promedio y metodos de pago.
                 </p>
+                <LineaFechas tipo="periodo" desde={ventasSucursalDesde} hasta={ventasSucursalHasta} />
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <input
@@ -2944,8 +3027,10 @@ export default function Contador() {
                   )}
                   {!ventasSucursalQuery.isLoading && ventasSucursalRows.length === 0 && (
                     <tr>
-                      <td className="text-slate-500" colSpan={9}>
-                        No hay datos para el rango o filtro actual.
+                      <td className="text-slate-600 text-sm leading-relaxed py-5" colSpan={9}>
+                        {ventasSucursalFiltro
+                          ? 'No hay coincidencias. Quite el texto de búsqueda.'
+                          : 'No hay ventas en este periodo. Cambie las fechas y pulse Aplicar fechas, o revise Recepción y Caja.'}
                       </td>
                     </tr>
                   )}
@@ -2989,6 +3074,7 @@ export default function Contador() {
                 <p className="text-sm text-slate-600">
                   Ranking de cobros por usuario. Se toma `cobrado_por` y, si falta, `registrado_por`.
                 </p>
+                <LineaFechas tipo="periodo" desde={ventasVendedorDesde} hasta={ventasVendedorHasta} />
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <input
@@ -3072,8 +3158,10 @@ export default function Contador() {
                   )}
                   {!ventasVendedorQuery.isLoading && ventasVendedorRows.length === 0 && (
                     <tr>
-                      <td className="text-slate-500" colSpan={8}>
-                        No hay datos para el rango o filtro actual.
+                      <td className="text-slate-600 text-sm leading-relaxed py-5" colSpan={8}>
+                        {ventasVendedorFiltro
+                          ? 'No hay coincidencias. Quite el texto de búsqueda.'
+                          : 'No hay ventas en este periodo. Cambie las fechas y pulse Aplicar fechas, o revise Recepción y Caja.'}
                       </td>
                     </tr>
                   )}
@@ -3120,6 +3208,7 @@ export default function Contador() {
                   <p className="text-sm text-slate-600">
                     Periodo seleccionado · gerencial preliminar (insumo para el contador, no NIIF oficial).
                   </p>
+                  <LineaFechas tipo="periodo" desde={estadoResultadoDesde} hasta={estadoResultadoHasta} />
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -3220,6 +3309,7 @@ export default function Contador() {
                 <p className="text-sm text-slate-600">
                   Flujo gerencial preliminar por actividades de operación, inversión y financiación.
                 </p>
+                <LineaFechas tipo="periodo" desde={estadoFlujoDesde} hasta={estadoFlujoHasta} />
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <input
@@ -3347,6 +3437,7 @@ export default function Contador() {
                 <p className="text-sm text-slate-600">
                   Reporte gerencial preliminar de patrimonio inicial, movimientos del periodo y patrimonio final.
                 </p>
+                <LineaFechas tipo="periodo" desde={estadoPatrimonioDesde} hasta={estadoPatrimonioHasta} />
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 <input
@@ -3449,6 +3540,7 @@ export default function Contador() {
                 <p className="text-sm text-slate-600">
                   Versión gerencial preliminar para control interno, con corte por fecha.
                 </p>
+                <LineaFechas tipo="corte" corte={estadoSituacionCorte} />
               </div>
               <div className="flex items-center gap-2">
                 <span className="kpi-label">Fecha corte</span>
@@ -3542,8 +3634,10 @@ export default function Contador() {
                 <div>
                   <h3 className="text-base font-semibold text-slate-900">Balance de prueba general</h3>
                   <p className="text-sm text-slate-600">
-                    Corte {balancePruebaCorte} · gerencial preliminar de débitos y créditos por cuenta de control.
+                    Corte {formatFechaCorta(balancePruebaCorte)} · gerencial preliminar de débitos y créditos por
+                    cuenta de control.
                   </p>
+                  <LineaFechas tipo="corte" corte={balancePruebaCorte} />
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -3621,8 +3715,10 @@ export default function Contador() {
                   )}
                   {!balancePruebaQuery.isLoading && balancePruebaRows.length === 0 && (
                     <tr>
-                      <td className="text-slate-500" colSpan={7}>
-                        No hay cuentas para el corte o filtro seleccionado.
+                      <td className="text-slate-600 text-sm leading-relaxed py-5" colSpan={7}>
+                        {balancePruebaFiltro
+                          ? 'No hay coincidencias. Quite el texto de búsqueda.'
+                          : 'No hay cuentas para este corte. Cambie la fecha de corte y pulse Aplicar fechas.'}
                       </td>
                     </tr>
                   )}
@@ -3664,8 +3760,9 @@ export default function Contador() {
                 <div>
                   <h3 className="text-base font-semibold text-slate-900">Balance de prueba por tercero</h3>
                   <p className="text-sm text-slate-600">
-                    Corte {balanceTerceroCorte} · gerencial preliminar por cuenta y tercero.
+                    Corte {formatFechaCorta(balanceTerceroCorte)} · gerencial preliminar por cuenta y tercero.
                   </p>
+                  <LineaFechas tipo="corte" corte={balanceTerceroCorte} />
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -3743,8 +3840,10 @@ export default function Contador() {
                   )}
                   {!balanceTerceroQuery.isLoading && balanceTerceroRows.length === 0 && (
                     <tr>
-                      <td className="text-slate-500" colSpan={7}>
-                        No hay filas para el corte o filtro seleccionado.
+                      <td className="text-slate-600 text-sm leading-relaxed py-5" colSpan={7}>
+                        {balanceTerceroFiltro
+                          ? 'No hay coincidencias. Quite el texto de búsqueda.'
+                          : 'No hay filas para este corte. Cambie la fecha de corte y pulse Aplicar fechas.'}
                       </td>
                     </tr>
                   )}
@@ -4114,25 +4213,39 @@ export default function Contador() {
             {validacionResult && (
               <div className="section-card p-5 sm:p-6 space-y-3">
                 <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <ClipboardCheck className="w-4 h-4 text-primary-600" />
+                  <button
+                    type="button"
+                    className="flex items-center gap-2 text-left min-w-0"
+                    onClick={() => setChecklistDetalleAbierto((v) => !v)}
+                    aria-expanded={checklistDetalleAbierto}
+                  >
+                    <ClipboardCheck className="w-4 h-4 text-primary-600 shrink-0" />
                     <p className="text-sm font-semibold text-slate-900">Checklist de validación</p>
-                  </div>
+                    <ChevronDown
+                      className={`w-4 h-4 text-slate-500 shrink-0 transition-transform ${
+                        checklistDetalleAbierto ? 'rotate-180' : ''
+                      }`}
+                    />
+                  </button>
                   <div className="flex flex-wrap gap-2">
                     <span className="badge badge-danger">{validacionResult.total_errors} errores</span>
                     <span className="badge badge-warning">{validacionResult.total_warnings} advertencias</span>
                   </div>
                 </div>
-                {validacionChecklist.length === 0 ? (
+                {!checklistDetalleAbierto && validacionChecklist.length > 0 && (
+                  <p className="text-xs text-slate-500">Pulsa el título para ver el detalle de cada aviso.</p>
+                )}
+                {checklistDetalleAbierto &&
+                  (validacionChecklist.length === 0 ? (
                   <p className="text-xs text-emerald-700">Sin hallazgos. Puede exportar 1001/1007.</p>
                 ) : (
-                  <ul className="space-y-1.5 max-h-56 overflow-auto">
+                  <ul className="space-y-1.5">
                     {validacionChecklist.map((item) => {
-                      const hint = hintCorreccionTercero(item.codigo);
-                      const accion = accionChecklist(item.codigo);
+                      const hint = hintCorreccionTercero(item.codigo, item.formato);
+                      const accion = accionChecklist(item.codigo, item.formato);
                       return (
                         <li
-                          key={`${item.severidad}-${item.codigo}-${item.mensaje}`}
+                          key={`${item.formato}-${item.severidad}-${item.codigo}-${item.mensaje}`}
                           className="rounded-md border border-slate-200 bg-white px-2.5 py-2 text-xs"
                         >
                           <div className="flex flex-wrap items-center gap-2">
@@ -4141,13 +4254,43 @@ export default function Contador() {
                             >
                               {item.severidad}
                             </span>
+                            {item.formato ? (
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-700">
+                                {item.formato === '1001'
+                                  ? '1001 pagos'
+                                  : item.formato === '1007'
+                                    ? '1007 ingresos'
+                                    : item.formato}
+                              </span>
+                            ) : null}
                             <span className="font-mono text-slate-600">{item.codigo}</span>
-                            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-700">
-                              ×{item.count}
-                            </span>
+                            {item.filas != null ? (
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-700">
+                                {item.filas} {item.formato === '1007' ? 'trámite(s)' : 'egreso(s)'}
+                              </span>
+                            ) : (
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-slate-700">
+                                ×{item.count}
+                              </span>
+                            )}
                           </div>
                           <p className="mt-1 text-slate-800">{item.mensaje}</p>
                           {hint && <p className="mt-1 text-slate-600">{hint}</p>}
+                          {item.ejemplos && item.ejemplos.length > 0 ? (
+                            <ul className="mt-2 space-y-0.5 text-slate-700 border-t border-slate-100 pt-2">
+                              {item.ejemplos.map((ej, idx) => (
+                                <li key={`${ej.documento}-${ej.placa || idx}`}>
+                                  <span>
+                                    {ej.nombre} · {ej.documento}
+                                    {ej.placa ? ` · placa ${ej.placa}` : ''}
+                                  </span>
+                                  {ej.detalle ? (
+                                    <span className="block text-slate-500">{ej.detalle}</span>
+                                  ) : null}
+                                </li>
+                              ))}
+                            </ul>
+                          ) : null}
                           {accion && (
                             <button
                               type="button"
@@ -4162,8 +4305,8 @@ export default function Contador() {
                       );
                     })}
                   </ul>
-                )}
-                {validacionChecklist.some((i) => i.codigo === 'MAPEO_EMPTY') && (
+                ))}
+                {checklistDetalleAbierto && validacionChecklist.some((i) => i.codigo === 'MAPEO_EMPTY') && (
                   <button
                     type="button"
                     className="btn-corporate-muted px-3 text-xs inline-flex items-center gap-1"
@@ -4476,8 +4619,9 @@ export default function Contador() {
                     })}
                     {ejecuciones.length === 0 && (
                       <tr>
-                        <td className="text-slate-500" colSpan={9}>
-                          No hay ejecuciones para el filtro actual.
+                        <td className="text-slate-600 text-sm leading-relaxed py-5" colSpan={9}>
+                          No hay ejecuciones con este filtro. Cambie a Todas o genere una exportación en el paso
+                          Exportar.
                         </td>
                       </tr>
                     )}
