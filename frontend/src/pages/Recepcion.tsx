@@ -1805,7 +1805,13 @@ export default function Recepcion() {
       );
       return;
     }
-    if (!modoEdicion && reinspeccionInfo?.elegible_reingreso && !esReingresoRechazoInicial) {
+    if (
+      !modoEdicion &&
+      reinspeccionInfo?.elegible_reingreso &&
+      !esReingresoRechazoInicial &&
+      !esPreventiva &&
+      formData.tipo_vehiculo !== 'pruebas_auditoria'
+    ) {
       showToast(
         'warning',
         'Confirma tipo de ingreso',
@@ -1834,9 +1840,15 @@ export default function Recepcion() {
         texto: formData.observaciones || '',
         fotos: fotosVehiculo
       }),
-      es_reingreso_rechazo_inicial: esReingresoRechazoInicial,
+      es_reingreso_rechazo_inicial:
+        esReingresoRechazoInicial &&
+        !esPreventiva &&
+        formData.tipo_vehiculo !== 'pruebas_auditoria',
       reinspeccion_vehiculo_origen_id:
-        esReingresoRechazoInicial && reinspeccionInfo?.vehiculo_origen_id
+        esReingresoRechazoInicial &&
+        !esPreventiva &&
+        formData.tipo_vehiculo !== 'pruebas_auditoria' &&
+        reinspeccionInfo?.vehiculo_origen_id
           ? reinspeccionInfo.vehiculo_origen_id
           : undefined,
     };
@@ -1866,6 +1878,9 @@ export default function Recepcion() {
   const handleEsPreventivaChange = (checked: boolean) => {
     if (formData.tipo_vehiculo === 'pruebas_auditoria') return;
     setEsPreventiva(checked);
+    if (checked) {
+      setEsReingresoRechazoInicial(false);
+    }
     // Asegura que el formato tenga tipo visual físico (no "preventiva").
     if (isTipoVehiculoFisico(formData.tipo_vehiculo)) {
       setFormatoExtra((prev) => syncFormatoConTipoFisico(prev, formData.tipo_vehiculo));

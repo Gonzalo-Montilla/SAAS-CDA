@@ -1620,6 +1620,21 @@ def _build_reinspeccion_context_for_origen(
             return dt
         return dt.astimezone(timezone.utc).replace(tzinfo=None)
 
+    # Preventiva/auditoría nunca son origen de reinspección RTM (caso VZH780).
+    if not _es_servicio_obligatorio(getattr(origen, "tipo_vehiculo", None)):
+        base_at = getattr(origen, "fecha_registro", None)
+        naive_base = _to_naive_utc(base_at) if isinstance(base_at, datetime) else datetime.now(timezone.utc).replace(tzinfo=None)
+        return {
+            "elegible": False,
+            "motivo": "La preventiva o auditoría no abre reinspección de la RTM anual.",
+            "origen": origen,
+            "primer_intento_at": naive_base,
+            "ultimo_intento_at": naive_base,
+            "intentos_usados": 1,
+            "intentos_restantes": REINSPECCION_MAX_INTENTOS - 1,
+            "vence_at": naive_base + timedelta(days=REINSPECCION_VENTANA_DIAS),
+        }
+
     intentos = (
         db.query(VehiculoProceso)
         .filter(
@@ -1779,16 +1794,15 @@ def _obtener_ultimo_servicio_obligatorio_por_placa(
     *,
     tenant_id: UUID,
     placa_upper: str,
+    excluir_vehiculo_id: Optional[UUID] = None,
 ) -> Optional[VehiculoProceso]:
-    historial = (
-        db.query(VehiculoProceso)
-        .filter(
-            VehiculoProceso.tenant_id == tenant_id,
-            VehiculoProceso.placa == placa_upper,
-        )
-        .order_by(VehiculoProceso.fecha_registro.desc())
-        .all()
+    q = db.query(VehiculoProceso).filter(
+        VehiculoProceso.tenant_id == tenant_id,
+        VehiculoProceso.placa == placa_upper,
     )
+    if excluir_vehiculo_id is not None:
+        q = q.filter(VehiculoProceso.id != excluir_vehiculo_id)
+    historial = q.order_by(VehiculoProceso.fecha_registro.desc()).all()
     for row in historial:
         if _es_servicio_obligatorio(getattr(row, "tipo_vehiculo", None)):
             return row
@@ -1800,11 +1814,13 @@ def _validar_bloqueo_anual_obligatoria(
     *,
     tenant_id: UUID,
     placa_upper: str,
+    excluir_vehiculo_id: Optional[UUID] = None,
 ) -> None:
     ultimo_obligatorio = _obtener_ultimo_servicio_obligatorio_por_placa(
         db,
         tenant_id=tenant_id,
         placa_upper=placa_upper,
+        excluir_vehiculo_id=excluir_vehiculo_id,
     )
     if not ultimo_obligatorio:
         return
@@ -1817,12 +1833,15 @@ def _validar_bloqueo_anual_obligatoria(
     dias_transcurridos = (_co_today_date() - fecha_base).days
     if dias_transcurridos < RTM_OBLIGATORIA_BLOQUEO_DIAS:
         dias_restantes = RTM_OBLIGATORIA_BLOQUEO_DIAS - dias_transcurridos
+        tipo_prev = (ultimo_obligatorio.tipo_vehiculo or "obligatoria").strip()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
-                "Esta placa ya tiene una revisión obligatoria registrada en el último año "
-                f"({fecha_base.isoformat()}). Podrá registrarse nuevamente en {dias_restantes} día(s), "
-                "salvo que aplique reinspección por rechazo."
+                "Esta placa ya tiene una revisión obligatoria "
+                f"({tipo_prev}) registrada el {fecha_base.isoformat()}. "
+                f"Podrá registrarse nuevamente en {dias_restantes} día(s), "
+                "salvo que aplique reinspección por rechazo. "
+                "Una preventiva no consume este año."
             ),
         )
 
@@ -2421,6 +2440,11 @@ def registrar_vehiculo(
 
     es_reingreso = bool(vehiculo_data.es_reingreso_rechazo_inicial)
     es_servicio_obligatorio_nuevo = _es_servicio_obligatorio(vehiculo_data.tipo_vehiculo)
+    if es_reingreso and not es_servicio_obligatorio_nuevo:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="La preventiva o auditoría no se registra como reingreso de la RTM anual.",
+        )
     if es_servicio_obligatorio_nuevo and not es_reingreso:
         _validar_bloqueo_anual_obligatoria(
             db,
@@ -2457,33 +2481,15 @@ def registrar_vehiculo(
                 detail=reinspeccion_ctx["motivo"] or "Esta placa no es elegible para reinspección sin cobro.",
             )
     else:
-        # Si existe caso elegible de reinspección, obligamos a confirmarlo explícitamente.
-        # Excepción: para servicios PREVENTIVA no forzamos flujo de reinspección RTM.
-        latest = (
-            db.query(VehiculoProceso)
-            .filter(
-                VehiculoProceso.tenant_id == current_user.tenant_id,
-                VehiculoProceso.placa == placa_upper,
+        # Reinspección RTM solo si hay obligatoria rechazada elegible.
+        # No usar el último trámite a ciegas: una preventiva rechazada no abre este flujo.
+        if _es_servicio_obligatorio(vehiculo_data.tipo_vehiculo):
+            preview_ctx = _preview_reinspeccion_elegible_por_placa(
+                db,
+                tenant_id=current_user.tenant_id,
+                placa_upper=placa_upper,
             )
-            .order_by(VehiculoProceso.fecha_registro.desc())
-            .first()
-        )
-        if latest:
-            origen = latest
-            if latest.reinspeccion_origen_id is not None:
-                origen = (
-                    db.query(VehiculoProceso)
-                    .filter(
-                        VehiculoProceso.id == latest.reinspeccion_origen_id,
-                        VehiculoProceso.tenant_id == current_user.tenant_id,
-                    )
-                    .first()
-                    or latest
-                )
-            preview_ctx = _build_reinspeccion_context_for_origen(
-                db, tenant_id=current_user.tenant_id, origen=origen
-            )
-            if preview_ctx["elegible"] and vehiculo_data.tipo_vehiculo != "preventiva":
+            if preview_ctx and preview_ctx.get("elegible"):
                 origen_id = getattr(preview_ctx.get("origen"), "id", None)
                 _log_veh.warning(
                     "reinspeccion_bloqueada_sin_confirmacion tenant=%s placa=%s origen_id=%s "
@@ -2498,8 +2504,9 @@ def registrar_vehiculo(
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail=(
-                        "Esta placa tiene reinspección elegible (sin cobro). "
-                        "Confirma 'reingreso por rechazo inicial' para continuar."
+                        "Esta placa tiene reinspección elegible (sin cobro) de una revisión "
+                        "obligatoria rechazada. Confirma 'reingreso por rechazo inicial' para continuar. "
+                        "Si el ingreso es preventiva, no uses ese reingreso."
                     ),
                 )
     
@@ -2740,6 +2747,19 @@ def editar_vehiculo(
     placa_cambio = placa_upper != (vehiculo.placa or "").strip().upper()
     ya_exenta = bool(getattr(vehiculo, "reinspeccion_exenta", False))
     preview_elegible = bool(preview_reinspeccion and preview_reinspeccion.get("elegible"))
+    es_nuevo_obligatorio = _es_servicio_obligatorio(vehiculo_data.tipo_vehiculo)
+    ya_era_obligatorio = _es_servicio_obligatorio(getattr(vehiculo, "tipo_vehiculo", None))
+    # Conservar $0 solo si el trámite ya era anual exenta (MWQ631). No vale preventiva→anual.
+    conservar_exenta = ya_exenta and not placa_cambio and ya_era_obligatorio and es_nuevo_obligatorio
+    # Misma regla que al registrar: editar preventiva→anual no puede saltarse el candado de 365 días.
+    # No tocar reingreso $0 (MWQ631) ni placa elegible a reinspección (TDW).
+    if es_nuevo_obligatorio and not preview_elegible and not conservar_exenta:
+        _validar_bloqueo_anual_obligatoria(
+            db,
+            tenant_id=current_user.tenant_id,
+            placa_upper=placa_upper,
+            excluir_vehiculo_id=vehiculo.id,
+        )
 
     if _es_prueba_auditoria(vehiculo_data.tipo_vehiculo):
         valor_rtm = Decimal(0)
@@ -2762,12 +2782,14 @@ def editar_vehiculo(
         comision_soat = Decimal(0)
         total_cobrado = Decimal(0)
         vehiculo_data.tiene_soat = False
-    elif ya_exenta and not placa_cambio:
+    elif conservar_exenta:
         valor_rtm = Decimal(0)
         comision_soat = Decimal(0)
         total_cobrado = Decimal(0)
         vehiculo_data.tiene_soat = False
     elif vehiculo_data.tipo_vehiculo == "preventiva":
+        if ya_exenta:
+            _limpiar_vinculo_reinspeccion(vehiculo)
         valor_rtm = Decimal(0)
         comision_soat = Decimal(0)
         total_cobrado = Decimal(0)
