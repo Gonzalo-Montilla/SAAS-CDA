@@ -11,20 +11,12 @@ from sqlalchemy import and_, func, case
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_db, require_saas_role
+from app.core.timezone_utils import get_app_timezone
 from app.models.saas_user import SaaSUser
 from app.models.tenant import Tenant
 from app.models.runt_metrica import RuntConsultaMetrica
 
 router = APIRouter()
-
-
-def _window(days: int) -> tuple[datetime, datetime]:
-    end = datetime.now(timezone.utc).replace(tzinfo=None)
-    if int(days) == 0:
-        start = end.replace(hour=0, minute=0, second=0, microsecond=0)
-    else:
-        start = end - timedelta(days=days)
-    return start, end
 
 
 def _as_naive_utc(value: datetime | None) -> datetime | None:
@@ -33,6 +25,41 @@ def _as_naive_utc(value: datetime | None) -> datetime | None:
     if value.tzinfo is None:
         return value
     return value.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _iso_utc_z(value: datetime) -> str:
+    naive = _as_naive_utc(value) or value
+    return naive.replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def _window(days: int) -> tuple[datetime, datetime]:
+    """
+    Ventanas en zona de la app (America/Bogota):
+    - 0: hoy desde 00:00 local hasta ahora
+    - 1: últimas 24 horas
+    - 7/30/90: N días calendario locales incluyendo hoy, desde 00:00
+    """
+    tz = get_app_timezone()
+    now_utc = datetime.now(timezone.utc)
+    end = now_utc.replace(tzinfo=None)
+    n = int(days)
+    if n == 0:
+        start_local = now_utc.astimezone(tz).replace(hour=0, minute=0, second=0, microsecond=0)
+        return start_local.astimezone(timezone.utc).replace(tzinfo=None), end
+    if n == 1:
+        return end - timedelta(days=1), end
+    start_local = (now_utc.astimezone(tz) - timedelta(days=n - 1)).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    return start_local.astimezone(timezone.utc).replace(tzinfo=None), end
+
+
+def _provider_live_success(provider: str):
+    return and_(
+        RuntConsultaMetrica.provider_resolved == provider,
+        RuntConsultaMetrica.status == "success",
+        RuntConsultaMetrica.cached == False,  # noqa: E712
+    )
 
 
 @router.get("/summary")
@@ -62,46 +89,15 @@ def resumen_metricas_runt(
     if sucursal_id is not None:
         base.append(RuntConsultaMetrica.sucursal_id == sucursal_id)
 
-    # Regla de negocio vigente:
-    # si PlacaAPI no resuelve y entra fallback a Verifik, no hay costo extra de PlacaAPI.
-    # Esta normalización también corrige métricas históricas guardadas con lógica anterior.
-    placaapi_fallback_to_verifik = and_(
-        RuntConsultaMetrica.provider_configured == "placaapi",
-        RuntConsultaMetrica.fallback_used == True,
-        RuntConsultaMetrica.provider_resolved == "verifik",
-    )
-    fallback_extra_cost_cop_effective = case(
-        (placaapi_fallback_to_verifik, 0),
-        else_=RuntConsultaMetrica.fallback_extra_cost_cop,
-    )
-    fallback_extra_cost_usd_effective = case(
-        (placaapi_fallback_to_verifik, 0),
-        else_=RuntConsultaMetrica.fallback_extra_cost_usd,
-    )
-    estimated_cost_cop_effective = case(
-        (
-            placaapi_fallback_to_verifik,
-            func.greatest(
-                RuntConsultaMetrica.estimated_cost_cop - RuntConsultaMetrica.fallback_extra_cost_cop,
-                0,
-            ),
-        ),
-        else_=RuntConsultaMetrica.estimated_cost_cop,
-    )
-    estimated_cost_usd_effective = case(
-        (
-            placaapi_fallback_to_verifik,
-            func.greatest(
-                RuntConsultaMetrica.estimated_cost_usd - RuntConsultaMetrica.fallback_extra_cost_usd,
-                0,
-            ),
-        ),
-        else_=RuntConsultaMetrica.estimated_cost_usd,
-    )
-    # "Resuelto" siempre debe reflejar el costo del proveedor que resolvió.
-    # No se descuenta fallback aquí.
+    # Costo estimado = lo registrado en cada consulta (intentos cobrados).
+    # No se reescribe en el resumen: un parche anterior restaba fallback_extra
+    # en PlacaAPI→Verifik y borraba el costo real de CoreSoft.
+    estimated_cost_cop_effective = RuntConsultaMetrica.estimated_cost_cop
+    estimated_cost_usd_effective = RuntConsultaMetrica.estimated_cost_usd
     resolved_cost_cop_effective = RuntConsultaMetrica.resolved_cost_cop
     resolved_cost_usd_effective = RuntConsultaMetrica.resolved_cost_usd
+    fallback_extra_cost_cop_effective = RuntConsultaMetrica.fallback_extra_cost_cop
+    fallback_extra_cost_usd_effective = RuntConsultaMetrica.fallback_extra_cost_usd
 
     total = db.query(func.count(RuntConsultaMetrica.id)).filter(and_(*base)).scalar() or 0
     success = (
@@ -124,7 +120,38 @@ def resumen_metricas_runt(
     )
     fallback_count = (
         db.query(func.count(RuntConsultaMetrica.id))
-        .filter(and_(*base, RuntConsultaMetrica.fallback_used == True))
+        .filter(and_(*base, RuntConsultaMetrica.fallback_used == True))  # noqa: E712
+        .scalar()
+        or 0
+    )
+    cached_count = (
+        db.query(func.count(RuntConsultaMetrica.id))
+        .filter(and_(*base, RuntConsultaMetrica.cached == True))  # noqa: E712
+        .scalar()
+        or 0
+    )
+    billed_count = max(int(total) - int(cached_count), 0)
+    billed_success = (
+        db.query(func.count(RuntConsultaMetrica.id))
+        .filter(
+            and_(
+                *base,
+                RuntConsultaMetrica.status == "success",
+                RuntConsultaMetrica.cached == False,  # noqa: E712
+            )
+        )
+        .scalar()
+        or 0
+    )
+    billed_fallback = (
+        db.query(func.count(RuntConsultaMetrica.id))
+        .filter(
+            and_(
+                *base,
+                RuntConsultaMetrica.fallback_used == True,  # noqa: E712
+                RuntConsultaMetrica.cached == False,  # noqa: E712
+            )
+        )
         .scalar()
         or 0
     )
@@ -166,7 +193,13 @@ def resumen_metricas_runt(
     )
     avg_fx = (
         db.query(func.coalesce(func.avg(RuntConsultaMetrica.fx_rate_usd_cop_applied), 0))
-        .filter(and_(*base))
+        .filter(
+            and_(
+                *base,
+                RuntConsultaMetrica.cached == False,  # noqa: E712
+                RuntConsultaMetrica.fx_rate_usd_cop_applied > 0,
+            )
+        )
         .scalar()
         or Decimal("0")
     )
@@ -175,6 +208,10 @@ def resumen_metricas_runt(
         db.query(
             RuntConsultaMetrica.provider_resolved,
             func.count(RuntConsultaMetrica.id),
+            func.coalesce(
+                func.sum(case((RuntConsultaMetrica.cached == True, 1), else_=0)),  # noqa: E712
+                0,
+            ),
             func.coalesce(func.sum(estimated_cost_cop_effective), 0),
             func.coalesce(func.sum(estimated_cost_usd_effective), 0),
             func.coalesce(func.sum(resolved_cost_cop_effective), 0),
@@ -190,12 +227,13 @@ def resumen_metricas_runt(
         {
             "provider": (r[0] or "unknown"),
             "consultas": int(r[1] or 0),
-            "costo_estimado_cop": float(r[2] or 0),
-            "costo_estimado_usd": float(r[3] or 0),
-            "costo_resuelto_cop": float(r[4] or 0),
-            "costo_resuelto_usd": float(r[5] or 0),
-            "costo_fallback_extra_cop": float(r[6] or 0),
-            "costo_fallback_extra_usd": float(r[7] or 0),
+            "cached_consultas": int(r[2] or 0),
+            "costo_estimado_cop": float(r[3] or 0),
+            "costo_estimado_usd": float(r[4] or 0),
+            "costo_resuelto_cop": float(r[5] or 0),
+            "costo_resuelto_usd": float(r[6] or 0),
+            "costo_fallback_extra_cop": float(r[7] or 0),
+            "costo_fallback_extra_usd": float(r[8] or 0),
         }
         for r in provider_rows
     ]
@@ -210,12 +248,25 @@ def resumen_metricas_runt(
             func.coalesce(func.sum(resolved_cost_cop_effective), 0),
             func.coalesce(func.sum(resolved_cost_usd_effective), 0),
             func.coalesce(
+                func.sum(case((RuntConsultaMetrica.status == "success", 1), else_=0)),
+                0,
+            ),
+            func.coalesce(
+                func.sum(case((RuntConsultaMetrica.status == "empty", 1), else_=0)),
+                0,
+            ),
+            func.coalesce(
+                func.sum(case((RuntConsultaMetrica.status == "error", 1), else_=0)),
+                0,
+            ),
+            func.coalesce(
+                func.sum(case((_provider_live_success("placaapi"), 1), else_=0)),
+                0,
+            ),
+            func.coalesce(
                 func.sum(
                     case(
-                        (
-                            RuntConsultaMetrica.status == "success",
-                            1,
-                        ),
+                        (_provider_live_success("placaapi"), resolved_cost_cop_effective),
                         else_=0,
                     )
                 ),
@@ -224,10 +275,20 @@ def resumen_metricas_runt(
             func.coalesce(
                 func.sum(
                     case(
-                        (
-                            RuntConsultaMetrica.status == "empty",
-                            1,
-                        ),
+                        (_provider_live_success("placaapi"), resolved_cost_usd_effective),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+            func.coalesce(
+                func.sum(case((_provider_live_success("coresoft"), 1), else_=0)),
+                0,
+            ),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (_provider_live_success("coresoft"), resolved_cost_cop_effective),
                         else_=0,
                     )
                 ),
@@ -236,10 +297,20 @@ def resumen_metricas_runt(
             func.coalesce(
                 func.sum(
                     case(
-                        (
-                            RuntConsultaMetrica.status == "error",
-                            1,
-                        ),
+                        (_provider_live_success("coresoft"), resolved_cost_usd_effective),
+                        else_=0,
+                    )
+                ),
+                0,
+            ),
+            func.coalesce(
+                func.sum(case((_provider_live_success("verifik"), 1), else_=0)),
+                0,
+            ),
+            func.coalesce(
+                func.sum(
+                    case(
+                        (_provider_live_success("verifik"), resolved_cost_cop_effective),
                         else_=0,
                     )
                 ),
@@ -248,133 +319,7 @@ def resumen_metricas_runt(
             func.coalesce(
                 func.sum(
                     case(
-                        (
-                            and_(
-                                RuntConsultaMetrica.provider_resolved == "placaapi",
-                                RuntConsultaMetrica.status == "success",
-                            ),
-                            1,
-                        ),
-                        else_=0,
-                    )
-                ),
-                0,
-            ),
-            func.coalesce(
-                func.sum(
-                    case(
-                        (
-                            and_(
-                                RuntConsultaMetrica.provider_resolved == "placaapi",
-                                RuntConsultaMetrica.status == "success",
-                            ),
-                            resolved_cost_cop_effective,
-                        ),
-                        else_=0,
-                    )
-                ),
-                0,
-            ),
-            func.coalesce(
-                func.sum(
-                    case(
-                        (
-                            and_(
-                                RuntConsultaMetrica.provider_resolved == "placaapi",
-                                RuntConsultaMetrica.status == "success",
-                            ),
-                            resolved_cost_usd_effective,
-                        ),
-                        else_=0,
-                    )
-                ),
-                0,
-            ),
-            func.coalesce(
-                func.sum(
-                    case(
-                        (
-                            and_(
-                                RuntConsultaMetrica.provider_resolved == "coresoft",
-                                RuntConsultaMetrica.status == "success",
-                            ),
-                            1,
-                        ),
-                        else_=0,
-                    )
-                ),
-                0,
-            ),
-            func.coalesce(
-                func.sum(
-                    case(
-                        (
-                            and_(
-                                RuntConsultaMetrica.provider_resolved == "coresoft",
-                                RuntConsultaMetrica.status == "success",
-                            ),
-                            resolved_cost_cop_effective,
-                        ),
-                        else_=0,
-                    )
-                ),
-                0,
-            ),
-            func.coalesce(
-                func.sum(
-                    case(
-                        (
-                            and_(
-                                RuntConsultaMetrica.provider_resolved == "coresoft",
-                                RuntConsultaMetrica.status == "success",
-                            ),
-                            resolved_cost_usd_effective,
-                        ),
-                        else_=0,
-                    )
-                ),
-                0,
-            ),
-            func.coalesce(
-                func.sum(
-                    case(
-                        (
-                            and_(
-                                RuntConsultaMetrica.provider_resolved == "verifik",
-                                RuntConsultaMetrica.status == "success",
-                            ),
-                            1,
-                        ),
-                        else_=0,
-                    )
-                ),
-                0,
-            ),
-            func.coalesce(
-                func.sum(
-                    case(
-                        (
-                            and_(
-                                RuntConsultaMetrica.provider_resolved == "verifik",
-                                RuntConsultaMetrica.status == "success",
-                            ),
-                            resolved_cost_cop_effective,
-                        ),
-                        else_=0,
-                    )
-                ),
-                0,
-            ),
-            func.coalesce(
-                func.sum(
-                    case(
-                        (
-                            and_(
-                                RuntConsultaMetrica.provider_resolved == "verifik",
-                                RuntConsultaMetrica.status == "success",
-                            ),
-                            resolved_cost_usd_effective,
-                        ),
+                        (_provider_live_success("verifik"), resolved_cost_usd_effective),
                         else_=0,
                     )
                 ),
@@ -414,30 +359,35 @@ def resumen_metricas_runt(
         for r in tenant_rows
     ]
 
+    billed_success_rate = round((billed_success / billed_count) * 100, 2) if billed_count else 0.0
+    billed_fallback_rate = round((billed_fallback / billed_count) * 100, 2) if billed_count else 0.0
+
     return {
         "periodo_dias": days,
-        "from_date": start_dt.isoformat(),
-        "to_date": end_dt.isoformat(),
+        "from_date": _iso_utc_z(start_dt),
+        "to_date": _iso_utc_z(end_dt),
         "total_consultas": int(total),
+        "cached_count": int(cached_count),
+        "billed_count": int(billed_count),
         "success_count": int(success),
         "empty_count": int(empty),
         "error_count": int(error),
         "fallback_count": int(fallback_count),
-        "success_rate_pct": round((success / total) * 100, 2) if total else 0.0,
-        "fallback_rate_pct": round((fallback_count / total) * 100, 2) if total else 0.0,
+        "success_rate_pct": billed_success_rate,
+        "fallback_rate_pct": billed_fallback_rate,
+        "success_rate_all_pct": round((success / total) * 100, 2) if total else 0.0,
         "costo_estimado_total_cop": float(total_cost or 0),
         "costo_estimado_total_usd": float(total_cost_usd or 0),
         "costo_resuelto_total_cop": float(total_resolved_cost or 0),
         "costo_resuelto_total_usd": float(total_resolved_cost_usd or 0),
         "costo_fallback_extra_total_cop": float(total_fallback_extra_cost or 0),
         "costo_fallback_extra_total_usd": float(total_fallback_extra_cost_usd or 0),
-        "costo_promedio_cop": round(float(total_cost or 0) / total, 2) if total else 0.0,
-        "costo_promedio_usd": round(float(total_cost_usd or 0) / total, 6) if total else 0.0,
+        "costo_promedio_cop": round(float(total_cost or 0) / billed_count, 2) if billed_count else 0.0,
+        "costo_promedio_usd": round(float(total_cost_usd or 0) / billed_count, 6) if billed_count else 0.0,
         "fx_rate_avg_usd_cop": float(avg_fx or 0),
         "by_provider": by_provider,
         "by_tenant": by_tenant,
         "tenant_id_filter": str(tenant_id) if tenant_id else None,
         "generated_by": current_user.email,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     }
-

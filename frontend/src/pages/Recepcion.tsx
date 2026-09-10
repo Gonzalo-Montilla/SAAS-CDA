@@ -1481,9 +1481,20 @@ export default function Recepcion() {
       showToast('warning', 'Placa incompleta', 'Ingresa una placa válida antes de consultar.');
       return;
     }
-    const documentInputRaw = (consultaRunt.document_number || '').trim();
+    const isPassport = consultaRunt.document_type === 'PA';
+    const documentNumber = isPassport
+      ? (consultaRunt.document_number || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+      : (consultaRunt.document_number || '').replace(/\D/g, '');
+    if (documentNumber.length < 5) {
+      showToast(
+        'warning',
+        'Documento requerido',
+        'Ingresa el documento del titular (mínimo 5 caracteres) para consultar RUNT.'
+      );
+      return;
+    }
     const documentNormalizedForCheck = normalizarDocumentoCliente(
-      documentInputRaw,
+      documentNumber,
       consultaRunt.document_type as VehiculoRegistro['cliente_tipo_documento']
     );
     const inconsistenciaConsulta = validarConsistenciaDocumentoCliente(
@@ -1498,7 +1509,6 @@ export default function Recepcion() {
       );
       return;
     }
-    const documentNumber = (consultaRunt.document_number || '').replace(/\D/g, '');
     consultarRuntMutation.mutate({
       placa,
       documentType: consultaRunt.document_type,
@@ -2432,12 +2442,17 @@ export default function Recepcion() {
                   </label>
                   <select
                     value={consultaRunt.document_type}
-                    onChange={(e) =>
+                    onChange={(e) => {
+                      const nextType = e.target.value as typeof consultaRunt.document_type;
                       setConsultaRunt((prev) => ({
                         ...prev,
-                        document_type: e.target.value as typeof prev.document_type,
-                      }))
-                    }
+                        document_type: nextType,
+                        document_number:
+                          nextType === 'PA'
+                            ? prev.document_number.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+                            : prev.document_number.replace(/\D/g, ''),
+                      }));
+                    }}
                     className="input-pos"
                   >
                     <option value="CC">CC</option>
@@ -2456,7 +2471,10 @@ export default function Recepcion() {
                     onChange={(e) =>
                       setConsultaRunt((prev) => ({
                         ...prev,
-                        document_number: e.target.value.replace(/\D/g, ''),
+                        document_number:
+                          prev.document_type === 'PA'
+                            ? e.target.value.replace(/[^A-Za-z0-9]/g, '').toUpperCase()
+                            : e.target.value.replace(/\D/g, ''),
                       }))
                     }
                     className="input-pos"

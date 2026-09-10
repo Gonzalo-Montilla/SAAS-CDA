@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import String, func, or_
+from sqlalchemy import String, case, func, or_
 from sqlalchemy.orm import Session, aliased
 from uuid import UUID
 
@@ -63,6 +63,14 @@ from app.services.saas_billing_plans import (
     PLAN_DEFINITIONS,
     calculate_chargeable_branches_for_tenant,
     calculate_plan_quote,
+)
+from app.services.saas_billing_payments import (
+    checkout_paid_at,
+    checkout_receipt_reference,
+    parse_iso_datetime,
+    parse_money,
+    period_end_after_payment,
+    resolve_last_payment,
 )
 from app.services.tenant_billing_state import refresh_tenant_billing_state
 from app.integrations.saas_factus_billing import try_emit_saas_billing_electronic_invoice
@@ -303,6 +311,9 @@ class SaaSSupportSummary(BaseModel):
     sin_resolver: int
     criticos_abiertos: int
     notificaciones_pendientes: int
+    sla_vencidos: int = 0
+    sin_asignar: int = 0
+    attention_tickets: list[SaaSSupportTicketItem] = Field(default_factory=list)
 
 
 class SaaSBillingPlanItem(BaseModel):
@@ -375,6 +386,7 @@ class SaaSBillingOverviewItem(BaseModel):
     last_payment_amount: float | None = None
     last_receipt_reference: str | None = None
     last_payment_log_id: str | None = None
+    last_payment_source: str | None = None
 
 
 class SaaSOpenSanctionsUsageTenantItem(BaseModel):
@@ -384,6 +396,8 @@ class SaaSOpenSanctionsUsageTenantItem(BaseModel):
     recepcion_calls: int
     manual_calls: int
     lote_calls: int
+    screening_calls: int = 0
+    failed_calls: int = 0
     total_calls: int
     estimated_cost_eur: float
     estimated_cost_cop: float
@@ -406,6 +420,8 @@ class SaaSOpenSanctionsUsageOut(BaseModel):
     recepcion_calls: int
     manual_calls: int
     lote_calls: int
+    screening_calls: int = 0
+    failed_calls: int = 0
     total_calls: int
     estimated_cost_eur: float
     estimated_cost_cop: float
@@ -414,6 +430,7 @@ class SaaSOpenSanctionsUsageOut(BaseModel):
     billed_subtotal_cop: float
     billed_iva_cop: float
     billed_total_cop: float
+    generated_at: datetime | None = None
     tenants: list[SaaSOpenSanctionsUsageTenantItem] = Field(default_factory=list)
 
 
@@ -433,6 +450,7 @@ class SaaSPaymentHistoryItem(BaseModel):
     receipt_download_url: str
     actor_email: str | None = None
     notes: str | None = None
+    source: str = "manual"
 
 
 class SaaSCheckoutSessionItem(BaseModel):
@@ -1476,11 +1494,11 @@ def register_tenant_payment(
     if not tenant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado")
 
-    paid_at = payload.paid_at or datetime.now(timezone.utc).replace(tzinfo=None)
-    cycle_days = tenant.billing_cycle_days or 30
-    next_billing_at = paid_at + timedelta(days=cycle_days)
+    paid_at = as_naive_utc(payload.paid_at) or datetime.now(timezone.utc).replace(tzinfo=None)
     plan_code = (tenant.plan_actual or "demo").strip().lower()
     plan = PLAN_DEFINITIONS.get(plan_code, PLAN_DEFINITIONS["demo"])
+    cycle_days = int(tenant.billing_cycle_days or plan.get("duration_days") or 30)
+    next_billing_at = period_end_after_payment(paid_at, tenant.next_billing_at, cycle_days)
     chargeable_additional, included_branches = calculate_chargeable_branches_for_tenant(
         tenant.plan_actual,
         tenant.sedes_totales,
@@ -1489,10 +1507,11 @@ def register_tenant_payment(
 
     tenant.last_payment_at = paid_at
     tenant.next_billing_at = next_billing_at
-    if tenant.plan_actual == "demo":
+    if plan_code == "demo":
         tenant.subscription_status = "trial"
     else:
         tenant.subscription_status = "active"
+        tenant.plan_ends_at = next_billing_at
     db.commit()
 
     payment_log = create_saas_audit_log(
@@ -1515,6 +1534,7 @@ def register_tenant_payment(
             "period_days": cycle_days,
             "comprobante_referencia": comprobante_referencia,
             "notes": (payload.notes or "").strip()[:300],
+            "source": "manual",
         },
     )
 
@@ -1797,6 +1817,21 @@ def list_billing_overview(
         if tenant_id and tenant_id not in last_payment_by_tenant:
             last_payment_by_tenant[tenant_id] = log
 
+    paid_checkouts = (
+        db.query(TenantBillingCheckoutSession)
+        .filter(TenantBillingCheckoutSession.status == "paid")
+        .order_by(
+            TenantBillingCheckoutSession.completed_at.desc().nullslast(),
+            TenantBillingCheckoutSession.created_at.desc(),
+        )
+        .all()
+    )
+    last_checkout_by_tenant: dict[str, TenantBillingCheckoutSession] = {}
+    for session_row in paid_checkouts:
+        tenant_key = str(session_row.tenant_id)
+        if tenant_key not in last_checkout_by_tenant:
+            last_checkout_by_tenant[tenant_key] = session_row
+
     items: list[SaaSBillingOverviewItem] = []
     for tenant in tenants:
         plan_code = (tenant.plan_actual or "demo").strip().lower()
@@ -1804,12 +1839,28 @@ def list_billing_overview(
         chargeable, _ = calculate_chargeable_branches_for_tenant(plan_code, tenant.sedes_totales)
         last_log = last_payment_by_tenant.get(str(tenant.id))
         last_meta = extract_payment_metadata(last_log) if last_log else {}
+        checkout_row = last_checkout_by_tenant.get(str(tenant.id))
 
-        last_amount_raw = last_meta.get("amount")
-        try:
-            last_amount = round(float(last_amount_raw), 2) if last_amount_raw is not None else None
-        except (TypeError, ValueError):
-            last_amount = None
+        last_view = resolve_last_payment(
+            tenant_last_payment_at=tenant.last_payment_at,
+            manual_log_id=str(last_log.id) if last_log else None,
+            manual_paid_at=parse_iso_datetime(last_meta.get("paid_at"), last_log.created_at if last_log else None),
+            manual_amount=parse_money(last_meta.get("amount")),
+            manual_reference=(str(last_meta.get("comprobante_referencia") or "").strip() or None),
+            checkout_paid_at_value=(
+                checkout_paid_at(checkout_row.completed_at, checkout_row.created_at) if checkout_row else None
+            ),
+            checkout_amount=parse_money(checkout_row.total_cop) if checkout_row else None,
+            checkout_reference=(
+                checkout_receipt_reference(
+                    payment_ref=checkout_row.payment_ref,
+                    epayco_ref=checkout_row.epayco_ref,
+                    session_id=checkout_row.id,
+                )
+                if checkout_row
+                else None
+            ),
+        )
 
         items.append(
             SaaSBillingOverviewItem(
@@ -1823,13 +1874,34 @@ def list_billing_overview(
                 sedes_totales=tenant.sedes_totales,
                 sucursales_facturables=chargeable,
                 next_billing_at=tenant.next_billing_at,
-                last_payment_at=tenant.last_payment_at,
-                last_payment_amount=last_amount,
-                last_receipt_reference=last_meta.get("comprobante_referencia"),
-                last_payment_log_id=str(last_log.id) if last_log else None,
+                last_payment_at=last_view.paid_at,
+                last_payment_amount=last_view.amount,
+                last_receipt_reference=last_view.receipt_reference,
+                last_payment_log_id=last_view.payment_log_id,
+                last_payment_source=last_view.source,
             )
         )
     return items
+
+
+def _opensanctions_audit_counts(
+    db: Session,
+    *,
+    actions: list[str],
+    start_dt: datetime,
+    end_dt: datetime,
+) -> dict[str, int]:
+    rows = (
+        db.query(SarlaftAuditLog.tenant_id, func.count(SarlaftAuditLog.id))
+        .filter(
+            SarlaftAuditLog.action.in_(actions),
+            SarlaftAuditLog.created_at >= start_dt,
+            SarlaftAuditLog.created_at <= end_dt,
+        )
+        .group_by(SarlaftAuditLog.tenant_id)
+        .all()
+    )
+    return {str(tid): int(count or 0) for tid, count in rows}
 
 
 @router.get("/billing/opensanctions/usage", response_model=SaaSOpenSanctionsUsageOut)
@@ -1850,8 +1922,8 @@ def get_opensanctions_usage_summary(
     cost_per_call_cop = round(cost_per_call_eur * trm_cop, 2)
     prepaid_unit_price_cop = round(float(settings.OPENSANCTIONS_PREPAID_UNIT_PRICE_COP or 0), 2)
     prepaid_package_expires_days = int(settings.OPENSANCTIONS_PREPAID_PACKAGE_EXPIRES_DAYS or 365)
-    billed_unit_price_cop = 850.0
-    billed_iva_pct = 19.0
+    billed_unit_price_cop = round(float(settings.OPENSANCTIONS_BILLED_UNIT_PRICE_COP or 850.0), 2)
+    billed_iva_pct = float(settings.OPENSANCTIONS_BILLED_IVA_PCT or 19.0)
     billed_iva_factor = billed_iva_pct / 100.0
 
     tenants = db.query(Tenant).all()
@@ -1863,25 +1935,24 @@ def get_opensanctions_usage_summary(
         for t in tenants
     }
 
-    manual_rows = (
-        db.query(SarlaftAuditLog.tenant_id, func.count(SarlaftAuditLog.id))
-        .filter(
-            SarlaftAuditLog.action == "manual_check_created",
-            SarlaftAuditLog.created_at >= start_dt,
-            SarlaftAuditLog.created_at <= end_dt,
-        )
-        .group_by(SarlaftAuditLog.tenant_id)
-        .all()
+    manual_by_tenant = _opensanctions_audit_counts(
+        db, actions=["manual_check_created"], start_dt=start_dt, end_dt=end_dt
     )
-    recepcion_rows = (
-        db.query(SarlaftAuditLog.tenant_id, func.count(SarlaftAuditLog.id))
-        .filter(
-            SarlaftAuditLog.action == "auto_screening_from_recepcion",
-            SarlaftAuditLog.created_at >= start_dt,
-            SarlaftAuditLog.created_at <= end_dt,
-        )
-        .group_by(SarlaftAuditLog.tenant_id)
-        .all()
+    recepcion_by_tenant = _opensanctions_audit_counts(
+        db, actions=["auto_screening_from_recepcion"], start_dt=start_dt, end_dt=end_dt
+    )
+    screening_by_tenant = _opensanctions_audit_counts(
+        db, actions=["opensanctions_screening"], start_dt=start_dt, end_dt=end_dt
+    )
+    failed_audit_by_tenant = _opensanctions_audit_counts(
+        db,
+        actions=[
+            "auto_screening_from_cobro_failed",
+            "opensanctions_screening_failed",
+            "manual_check_failed",
+        ],
+        start_dt=start_dt,
+        end_dt=end_dt,
     )
     lote_rows = (
         db.query(SarlaftBatchRow.tenant_id, func.count(SarlaftBatchRow.id))
@@ -1894,26 +1965,43 @@ def get_opensanctions_usage_summary(
         .group_by(SarlaftBatchRow.tenant_id)
         .all()
     )
+    lote_error_rows = (
+        db.query(SarlaftBatchRow.tenant_id, func.count(SarlaftBatchRow.id))
+        .filter(
+            SarlaftBatchRow.status == "error",
+            SarlaftBatchRow.created_at >= start_dt,
+            SarlaftBatchRow.created_at <= end_dt,
+        )
+        .group_by(SarlaftBatchRow.tenant_id)
+        .all()
+    )
+    lote_by_tenant = {str(tid): int(count or 0) for tid, count in lote_rows}
+    lote_error_by_tenant = {str(tid): int(count or 0) for tid, count in lote_error_rows}
 
-    manual_by_tenant = {str(tenant_id): int(count or 0) for tenant_id, count in manual_rows}
-    recepcion_by_tenant = {str(tenant_id): int(count or 0) for tenant_id, count in recepcion_rows}
-    lote_by_tenant = {str(tenant_id): int(count or 0) for tenant_id, count in lote_rows}
-
-    tenant_ids = set(manual_by_tenant.keys()) | set(recepcion_by_tenant.keys()) | set(lote_by_tenant.keys())
+    tenant_ids = (
+        set(manual_by_tenant.keys())
+        | set(recepcion_by_tenant.keys())
+        | set(lote_by_tenant.keys())
+        | set(screening_by_tenant.keys())
+        | set(failed_audit_by_tenant.keys())
+        | set(lote_error_by_tenant.keys())
+    )
     if tenant_id is not None:
         tenant_filter = str(tenant_id)
         tenant_ids = {tid for tid in tenant_ids if tid == tenant_filter}
-        # Si el tenant filtrado existe pero no tuvo consumo en el rango, devolver fila en 0
-        # para facilitar control y facturación mensual.
         if tenant_filter in tenant_meta and tenant_filter not in tenant_ids:
             tenant_ids.add(tenant_filter)
     tenant_items: list[SaaSOpenSanctionsUsageTenantItem] = []
-    for tenant_id in tenant_ids:
-        recepcion_calls = recepcion_by_tenant.get(tenant_id, 0)
-        manual_calls = manual_by_tenant.get(tenant_id, 0)
-        lote_calls = lote_by_tenant.get(tenant_id, 0)
-        total_calls = recepcion_calls + manual_calls + lote_calls
-        info = tenant_meta.get(tenant_id, {"slug": "n/d", "name": "Tenant no encontrado"})
+    for item_tenant_id in tenant_ids:
+        recepcion_calls = recepcion_by_tenant.get(item_tenant_id, 0)
+        manual_calls = manual_by_tenant.get(item_tenant_id, 0)
+        lote_calls = lote_by_tenant.get(item_tenant_id, 0)
+        screening_calls = screening_by_tenant.get(item_tenant_id, 0)
+        failed_calls = failed_audit_by_tenant.get(item_tenant_id, 0) + lote_error_by_tenant.get(
+            item_tenant_id, 0
+        )
+        total_calls = recepcion_calls + manual_calls + lote_calls + screening_calls
+        info = tenant_meta.get(item_tenant_id, {"slug": "n/d", "name": "Tenant no encontrado"})
         estimated_cost_eur = round(total_calls * cost_per_call_eur, 4)
         estimated_cost_cop = round(total_calls * cost_per_call_cop, 2)
         billed_subtotal_cop = round(total_calls * billed_unit_price_cop, 2)
@@ -1921,12 +2009,14 @@ def get_opensanctions_usage_summary(
         billed_total_cop = round(billed_subtotal_cop + billed_iva_cop, 2)
         tenant_items.append(
             SaaSOpenSanctionsUsageTenantItem(
-                tenant_id=tenant_id,
+                tenant_id=item_tenant_id,
                 tenant_slug=info["slug"],
                 tenant_nombre=info["name"],
                 recepcion_calls=recepcion_calls,
                 manual_calls=manual_calls,
                 lote_calls=lote_calls,
+                screening_calls=screening_calls,
+                failed_calls=failed_calls,
                 total_calls=total_calls,
                 estimated_cost_eur=estimated_cost_eur,
                 estimated_cost_cop=estimated_cost_cop,
@@ -1942,14 +2032,17 @@ def get_opensanctions_usage_summary(
     recepcion_total = sum(x.recepcion_calls for x in tenant_items)
     manual_total = sum(x.manual_calls for x in tenant_items)
     lote_total = sum(x.lote_calls for x in tenant_items)
-    total_calls = recepcion_total + manual_total + lote_total
+    screening_total = sum(x.screening_calls for x in tenant_items)
+    failed_total = sum(x.failed_calls for x in tenant_items)
+    total_calls = recepcion_total + manual_total + lote_total + screening_total
     billed_subtotal_cop_total = round(total_calls * billed_unit_price_cop, 2)
     billed_iva_cop_total = round(billed_subtotal_cop_total * billed_iva_factor, 2)
     billed_total_cop_total = round(billed_subtotal_cop_total + billed_iva_cop_total, 2)
+    now_utc = datetime.now(timezone.utc)
 
     return SaaSOpenSanctionsUsageOut(
-        from_date=start_dt,
-        to_date=end_dt,
+        from_date=start_dt.replace(tzinfo=timezone.utc),
+        to_date=end_dt.replace(tzinfo=timezone.utc),
         trm_cop=trm_cop,
         cost_per_call_eur=cost_per_call_eur,
         cost_per_call_cop=cost_per_call_cop,
@@ -1959,6 +2052,8 @@ def get_opensanctions_usage_summary(
         recepcion_calls=recepcion_total,
         manual_calls=manual_total,
         lote_calls=lote_total,
+        screening_calls=screening_total,
+        failed_calls=failed_total,
         total_calls=total_calls,
         estimated_cost_eur=round(total_calls * cost_per_call_eur, 4),
         estimated_cost_cop=round(total_calls * cost_per_call_cop, 2),
@@ -1967,6 +2062,7 @@ def get_opensanctions_usage_summary(
         billed_subtotal_cop=billed_subtotal_cop_total,
         billed_iva_cop=billed_iva_cop_total,
         billed_total_cop=billed_total_cop_total,
+        generated_at=now_utc,
         tenants=tenant_items,
     )
 
@@ -2002,23 +2098,9 @@ def list_tenant_payment_history(
         if meta_tenant_id != str(tenant.id):
             continue
 
-        paid_at_raw = meta.get("paid_at")
-        try:
-            paid_at = datetime.fromisoformat(str(paid_at_raw)) if paid_at_raw else log.created_at
-        except ValueError:
-            paid_at = log.created_at
-
-        next_billing_raw = meta.get("next_billing_at")
-        try:
-            next_billing_at = datetime.fromisoformat(str(next_billing_raw)) if next_billing_raw else None
-        except ValueError:
-            next_billing_at = None
-
-        amount_raw = meta.get("amount")
-        try:
-            amount = round(float(amount_raw), 2) if amount_raw is not None else 0.0
-        except (TypeError, ValueError):
-            amount = 0.0
+        paid_at = parse_iso_datetime(meta.get("paid_at"), log.created_at) or log.created_at
+        next_billing_at = parse_iso_datetime(meta.get("next_billing_at"))
+        amount = parse_money(meta.get("amount")) or 0.0
 
         sedes_raw = meta.get("sedes_totales")
         fact_raw = meta.get("sucursales_facturables")
@@ -2048,13 +2130,58 @@ def list_tenant_payment_history(
                 receipt_download_url=f"{settings.BACKEND_PUBLIC_BASE_URL.rstrip('/')}/api/v1/saas/auth/billing/payments/{log.id}/receipt",
                 actor_email=log.usuario_email,
                 notes=meta.get("notes"),
+                source=str(meta.get("source") or "manual"),
             )
         )
 
-        if len(items) >= safe_limit:
-            break
+    checkout_rows = (
+        db.query(TenantBillingCheckoutSession)
+        .filter(TenantBillingCheckoutSession.tenant_id == tenant.id)
+        .filter(TenantBillingCheckoutSession.status == "paid")
+        .order_by(
+            TenantBillingCheckoutSession.completed_at.desc().nullslast(),
+            TenantBillingCheckoutSession.created_at.desc(),
+        )
+        .all()
+    )
+    for session_row in checkout_rows:
+        paid_at = checkout_paid_at(session_row.completed_at, session_row.created_at)
+        if paid_at is None:
+            continue
+        plan_code = (session_row.plan_code or "").strip().lower() or None
+        plan = PLAN_DEFINITIONS.get(plan_code or "", {})
+        chargeable, _included = calculate_chargeable_branches_for_tenant(
+            plan_code or "demo",
+            int(session_row.sedes_totales or 1),
+        )
+        provider = (session_row.payment_provider or "en línea").strip()
+        items.append(
+            SaaSPaymentHistoryItem(
+                id=str(session_row.id),
+                tenant_id=str(tenant.id),
+                tenant_slug=tenant.slug,
+                amount=parse_money(session_row.total_cop) or 0.0,
+                paid_at=paid_at,
+                next_billing_at=None,
+                plan_code=plan_code,
+                plan_label=plan.get("label") if plan else plan_code,
+                sedes_totales=int(session_row.sedes_totales or 1),
+                sucursales_facturables=chargeable,
+                comprobante_referencia=checkout_receipt_reference(
+                    payment_ref=session_row.payment_ref,
+                    epayco_ref=session_row.epayco_ref,
+                    session_id=session_row.id,
+                ),
+                payment_log_id="",
+                receipt_download_url="",
+                actor_email=None,
+                notes=f"Pago en línea ({provider})",
+                source="checkout",
+            )
+        )
 
-    return items
+    items.sort(key=lambda row: as_naive_utc(row.paid_at) or datetime.min, reverse=True)
+    return items[:safe_limit]
 
 
 @router.get("/billing/saas-factus/config", response_model=SaaSFactusIssuerConfigOut)
@@ -2628,21 +2755,82 @@ def support_summary(
     db: Session = Depends(get_db),
     _: SaaSUser = Depends(require_saas_role(["owner", "soporte", "comercial"])),
 ):
+    open_statuses = ("abierto", "en_progreso")
+    now_ts = utcnow_naive()
     total_tickets = db.query(SaaSSupportTicket).count()
     abiertos = db.query(SaaSSupportTicket).filter(SaaSSupportTicket.status == "abierto").count()
     en_progreso = db.query(SaaSSupportTicket).filter(SaaSSupportTicket.status == "en_progreso").count()
     criticos_abiertos = (
         db.query(SaaSSupportTicket)
-        .filter(SaaSSupportTicket.status.in_(["abierto", "en_progreso"]), SaaSSupportTicket.priority == "critica")
+        .filter(SaaSSupportTicket.status.in_(open_statuses), SaaSSupportTicket.priority == "critica")
         .count()
     )
+    sla_vencidos = (
+        db.query(SaaSSupportTicket)
+        .filter(
+            SaaSSupportTicket.status.in_(open_statuses),
+            SaaSSupportTicket.sla_due_at.isnot(None),
+            SaaSSupportTicket.sla_due_at < now_ts,
+        )
+        .count()
+    )
+    sin_asignar = (
+        db.query(SaaSSupportTicket)
+        .filter(
+            SaaSSupportTicket.status.in_(open_statuses),
+            SaaSSupportTicket.assigned_to_saas_user_id.is_(None),
+        )
+        .count()
+    )
+    assigned_user = aliased(SaaSUser)
+    created_user = aliased(SaaSUser)
+    priority_rank = case(
+        (SaaSSupportTicket.priority == "critica", 0),
+        (SaaSSupportTicket.priority == "alta", 1),
+        (SaaSSupportTicket.priority == "media", 2),
+        else_=3,
+    )
+    attention_rows = (
+        db.query(
+            SaaSSupportTicket,
+            Tenant.slug.label("tenant_slug"),
+            Tenant.nombre_comercial.label("tenant_nombre"),
+            assigned_user.email.label("assigned_email"),
+            created_user.email.label("created_email"),
+        )
+        .join(Tenant, Tenant.id == SaaSSupportTicket.tenant_id)
+        .outerjoin(created_user, created_user.id == SaaSSupportTicket.created_by_saas_user_id)
+        .outerjoin(assigned_user, assigned_user.id == SaaSSupportTicket.assigned_to_saas_user_id)
+        .filter(SaaSSupportTicket.status.in_(open_statuses))
+        .order_by(
+            priority_rank.asc(),
+            SaaSSupportTicket.sla_due_at.asc().nullslast(),
+            SaaSSupportTicket.created_at.desc(),
+        )
+        .limit(8)
+        .all()
+    )
+    attention_tickets = [
+        map_support_ticket_row(
+            ticket=ticket,
+            tenant_slug=t_slug,
+            tenant_name=t_name,
+            assigned_email=assigned_email,
+            created_email=created_email,
+        )
+        for ticket, t_slug, t_name, assigned_email, created_email in attention_rows
+    ]
+    sin_resolver = abiertos + en_progreso
     return SaaSSupportSummary(
         total_tickets=total_tickets,
         abiertos=abiertos,
         en_progreso=en_progreso,
-        sin_resolver=abiertos + en_progreso,
+        sin_resolver=sin_resolver,
         criticos_abiertos=criticos_abiertos,
-        notificaciones_pendientes=abiertos + en_progreso,
+        notificaciones_pendientes=sin_resolver,
+        sla_vencidos=sla_vencidos,
+        sin_asignar=sin_asignar,
+        attention_tickets=attention_tickets,
     )
 
 

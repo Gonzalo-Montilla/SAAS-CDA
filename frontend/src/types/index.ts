@@ -471,7 +471,7 @@ export interface SaaSBillingOverviewItem {
   plan_code: string;
   plan_label: string;
   subscription_status: string;
-  cobro_status: 'al_dia' | 'por_vencer' | 'vencido' | 'bloqueado' | 'trial' | 'sin_fecha';
+  cobro_status: 'al_dia' | 'por_vencer' | 'vencido' | 'bloqueado' | 'trial' | 'sin_fecha' | 'en_gracia';
   sedes_totales: number;
   sucursales_facturables: number;
   next_billing_at?: string | null;
@@ -479,6 +479,7 @@ export interface SaaSBillingOverviewItem {
   last_payment_amount?: number | null;
   last_receipt_reference?: string | null;
   last_payment_log_id?: string | null;
+  last_payment_source?: 'manual' | 'checkout' | string | null;
 }
 
 export interface SaaSOpenSanctionsUsageTenantItem {
@@ -488,6 +489,8 @@ export interface SaaSOpenSanctionsUsageTenantItem {
   recepcion_calls: number;
   manual_calls: number;
   lote_calls: number;
+  screening_calls?: number;
+  failed_calls?: number;
   total_calls: number;
   estimated_cost_eur: number;
   estimated_cost_cop: number;
@@ -510,6 +513,8 @@ export interface SaaSOpenSanctionsUsageSummary {
   recepcion_calls: number;
   manual_calls: number;
   lote_calls: number;
+  screening_calls?: number;
+  failed_calls?: number;
   total_calls: number;
   estimated_cost_eur: number;
   estimated_cost_cop: number;
@@ -518,6 +523,7 @@ export interface SaaSOpenSanctionsUsageSummary {
   billed_subtotal_cop: number;
   billed_iva_cop: number;
   billed_total_cop: number;
+  generated_at?: string;
   tenants: SaaSOpenSanctionsUsageTenantItem[];
 }
 
@@ -537,6 +543,7 @@ export interface SaaSPaymentHistoryItem {
   receipt_download_url: string;
   actor_email?: string | null;
   notes?: string | null;
+  source?: 'manual' | 'checkout' | string | null;
 }
 
 /** Checkouts PSP (suscripción) y emisión FE licencia (PROMETHEUS), backoffice SaaS. */
@@ -883,6 +890,9 @@ export interface SaaSSupportSummary {
   sin_resolver: number;
   criticos_abiertos: number;
   notificaciones_pendientes: number;
+  sla_vencidos?: number;
+  sin_asignar?: number;
+  attention_tickets?: SaaSSupportTicketItem[];
 }
 
 export type AuthScope = 'tenant' | 'saas';

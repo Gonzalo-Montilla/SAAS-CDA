@@ -17,7 +17,6 @@ import {
   Pencil,
   Link2,
   CreditCard,
-  KeyRound,
   UserPlus,
   Landmark,
   MapPin,
@@ -25,12 +24,14 @@ import {
   Download,
 } from 'lucide-react';
 import { BackofficeSectionHeading } from '../components/BackofficeSectionHeading';
+import { SaasResumenDashboard, isSlaOverdue } from '../components/SaasResumenDashboard';
 import FactusMunicipalitySearchField from '../components/FactusMunicipalitySearchField';
 import { useAuth } from '../contexts/AuthContext';
 import { apiClient } from '../api/client';
 import { patchSaasSucursalUbicacion, patchSaasTenantCoreData, patchSaasTenantLogo } from '../api/saasTenant';
 import { Fragment, useEffect, useRef, useState } from 'react';
 import { formatCurrency } from '../utils/formatNumber';
+import { formatDateShort, formatDateTimeShort } from '../utils/formatDate';
 import { runtMetricasApi, type RuntMetricasSummary } from '../api/runtMetricas';
 import type {
   SaaSAuditLogListResponse,
@@ -124,6 +125,22 @@ const bogotaDayEndUtcIso = (ymd: string): string => {
   const [y, m, d] = ymd.split('-').map(Number);
   const nextDayStartUtc = Date.UTC(y, (m || 1) - 1, (d || 1) + 1, 5, 0, 0, 0);
   return new Date(nextDayStartUtc - 1).toISOString();
+};
+
+const formatBillingDate = (value?: string | null, empty = '-'): string => {
+  if (!value) return empty;
+  return formatDateShort(value);
+};
+
+const formatBillingDateTime = (value?: string | null, empty = '-'): string => {
+  if (!value) return empty;
+  return formatDateTimeShort(value);
+};
+
+const lastPaymentSourceLabel = (source?: string | null): string => {
+  if (source === 'checkout') return 'En línea';
+  if (source === 'manual') return 'Manual';
+  return '';
 };
 
 export default function SaaSBackoffice() {
@@ -315,6 +332,9 @@ export default function SaaSBackoffice() {
       por_vencer: 'Por vencer',
       trial: 'Demo',
       vencido: 'Vencido',
+      bloqueado: 'Bloqueado',
+      en_gracia: 'En gracia',
+      sin_fecha: 'Sin fecha',
     };
     return labels[status] || status;
   };
@@ -365,8 +385,11 @@ export default function SaaSBackoffice() {
     if (status === 'past_due' || status === 'pending_plan' || status === 'soft_grace' || status === 'vencido') {
       return 'badge badge-warning';
     }
-    if (status === 'locked') {
+    if (status === 'locked' || status === 'bloqueado') {
       return 'badge badge-danger';
+    }
+    if (status === 'en_gracia') {
+      return 'badge badge-warning';
     }
     if (status === 'failed' || status === 'canceled' || status === 'cancelada') {
       return 'badge badge-danger';
@@ -489,6 +512,12 @@ export default function SaaSBackoffice() {
   const canReadSupport = currentSaaSRole === 'owner' || currentSaaSRole === 'soporte' || currentSaaSRole === 'comercial';
   const canManageSupport = currentSaaSRole === 'owner' || currentSaaSRole === 'soporte';
   const canRetrySaaSFe = currentSaaSRole === 'owner' || currentSaaSRole === 'finanzas';
+  const canReadBilling =
+    currentSaaSRole === 'owner' ||
+    currentSaaSRole === 'finanzas' ||
+    currentSaaSRole === 'comercial' ||
+    currentSaaSRole === 'soporte';
+  const canReadUsers = currentSaaSRole === 'owner' || currentSaaSRole === 'soporte';
 
   const tenantsQuery = useQuery({
     queryKey: ['saas-tenants-list'],
@@ -526,7 +555,7 @@ export default function SaaSBackoffice() {
       const response = await apiClient.get<SaaSUser[]>('/saas/auth/users');
       return response.data;
     },
-    enabled: activeModule === 'usuarios',
+    enabled: activeModule === 'usuarios' || (activeModule === 'resumen' && canReadUsers),
   });
 
   const supportTicketsQuery = useQuery({
@@ -787,7 +816,7 @@ export default function SaaSBackoffice() {
       const response = await apiClient.get<SaaSBillingOverviewItem[]>('/saas/auth/billing/overview');
       return response.data;
     },
-    enabled: activeModule === 'facturacion',
+    enabled: activeModule === 'facturacion' || (activeModule === 'resumen' && canReadBilling),
   });
   const opensanctionsUsageQuery = useQuery({
     queryKey: [
@@ -832,7 +861,8 @@ export default function SaaSBackoffice() {
       );
       return response.data;
     },
-    enabled: (activeModule === 'facturacion' || activeModule === 'opensanctions_metricas') && !opensanctionsCustomRangeInvalid,
+    enabled: activeModule === 'opensanctions_metricas' && !opensanctionsCustomRangeInvalid,
+    refetchInterval: activeModule === 'opensanctions_metricas' ? 30000 : false,
   });
 
   const checkoutSessionsQuery = useQuery({
@@ -1217,7 +1247,7 @@ export default function SaaSBackoffice() {
     onSuccess: (data) => {
       setBillingActionError('');
       setBillingActionSuccess(
-        `Pago registrado para /${data.tenant_slug}. Próximo cobro: ${data.next_billing_at ? new Date(data.next_billing_at).toLocaleDateString() : 'N/A'}`,
+        `Pago registrado para /${data.tenant_slug}. Próximo cobro: ${formatBillingDate(data.next_billing_at, 'N/A')}`,
       );
       setLastPaymentReceipt(data);
       setPaymentAmount('');
@@ -1312,6 +1342,9 @@ export default function SaaSBackoffice() {
   };
 
   const handleDownloadReceipt = async (downloadUrl: string, reference?: string | null) => {
+    if (!downloadUrl) {
+      return;
+    }
     const parsed = new URL(downloadUrl);
     const pathAndQuery = `${parsed.pathname}${parsed.search}`;
     const apiPath = pathAndQuery.includes('/api/v1/')
@@ -1373,48 +1406,37 @@ export default function SaaSBackoffice() {
   const renderModuleContent = () => {
     if (activeModule === 'resumen') {
       return (
-        <div className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div className="kpi-card">
-              <p className="kpi-label">Tenants registrados</p>
-              <p className="kpi-value">{tenantsQuery.data?.length || 0}</p>
-            </div>
-            <div className="kpi-card">
-              <p className="kpi-label">Tenants activos</p>
-              <p className="kpi-value text-emerald-700">
-                {tenantsQuery.data?.filter((t) => t.activo).length || 0}
-              </p>
-            </div>
-            <div className="kpi-card">
-              <p className="kpi-label">Usuarios SaaS</p>
-              <p className="kpi-value">{usersQuery.data?.length || '-'}</p>
-            </div>
-          </div>
-          <div className="section-card p-6">
-            <BackofficeSectionHeading
-              className="mb-4"
-              icon={KeyRound}
-              title="Permisos efectivos"
-              description="Permisos globales de tu rol en la plataforma"
-            />
-            {permissionsQuery.isLoading && <LoadingBlock lines={2} />}
-            {permissionsQuery.isError && (
-              <p className="text-sm text-red-600">No se pudieron cargar permisos globales.</p>
-            )}
-            {permissionsQuery.data && (
-              <div className="flex flex-wrap gap-2">
-                {permissionsQuery.data.permissions.map((permission, idx) => (
-                  <span
-                    key={`${permission}-${idx}`}
-                    className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-3 py-1 text-xs text-slate-700"
-                  >
-                    {permission}
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
+        <SaasResumenDashboard
+          tenants={tenantsQuery.data}
+          tenantsLoading={tenantsQuery.isLoading}
+          billing={billingOverviewQuery.data}
+          billingLoading={billingOverviewQuery.isLoading || permissionsQuery.isLoading}
+          billingError={billingOverviewQuery.isError}
+          canReadBilling={canReadBilling}
+          support={supportSummaryQuery.data}
+          supportLoading={supportSummaryQuery.isLoading || permissionsQuery.isLoading}
+          canReadSupport={canReadSupport}
+          usersCount={canReadUsers ? (usersQuery.data?.length ?? (usersQuery.isLoading ? null : 0)) : null}
+          formatCurrency={formatCurrency}
+          formatDate={formatBillingDate}
+          formatDateTime={formatBillingDateTime}
+          cobroStatusLabel={cobroStatusLabel}
+          statusBadgeClass={statusBadgeClass}
+          supportStatusLabel={supportStatusLabel}
+          supportPriorityBadgeClass={supportPriorityBadgeClass}
+          lastPaymentSourceLabel={lastPaymentSourceLabel}
+          onOpenFacturacion={() => setActiveModule('facturacion')}
+          onOpenSoporte={() => setActiveModule('soporte')}
+          onOpenTenants={() => setActiveModule('tenants')}
+          onOpenTenant={(tenantId) => {
+            const tenant = (tenantsQuery.data || []).find((row) => row.id === tenantId);
+            if (tenant) {
+              openTenantSheet(tenant);
+              return;
+            }
+            setActiveModule('facturacion');
+          }}
+        />
       );
     }
 
@@ -1426,7 +1448,7 @@ export default function SaaSBackoffice() {
               className="mb-4"
               icon={Activity}
               title="Métricas RUNT por proveedor"
-              description="Consumo, éxito y fallback de consultas para control de costos SaaS."
+              description="Consumo real por consulta cobrada. Caché aparte. Ventanas en hora Colombia."
             />
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
               <label className="text-sm text-slate-700">
@@ -1436,11 +1458,11 @@ export default function SaaSBackoffice() {
                   value={runtMetricasDays}
                   onChange={(e) => setRuntMetricasDays(Number(e.target.value))}
                 >
-                  <option value={0}>Hoy (desde 00:00)</option>
+                  <option value={0}>Hoy (desde 00:00 Colombia)</option>
                   <option value={1}>1 día (últimas 24h)</option>
-                  <option value={7}>7 días</option>
-                  <option value={30}>30 días</option>
-                  <option value={90}>90 días</option>
+                  <option value={7}>7 días calendario</option>
+                  <option value={30}>30 días calendario</option>
+                  <option value={90}>90 días calendario</option>
                   <option value={RUNT_CUSTOM_WINDOW}>Rango personalizado</option>
                 </select>
               </label>
@@ -1497,26 +1519,29 @@ export default function SaaSBackoffice() {
                 {(() => {
                   const data = runtMetricasQuery.data;
                   const verifikRow = data.by_provider.find((x) => String(x.provider || '').toLowerCase() === 'verifik');
-                  const verifikConsultas = Number(verifikRow?.consultas || 0);
+                  const verifikConsultas = Math.max(
+                    Number(verifikRow?.consultas || 0) - Number(verifikRow?.cached_consultas || 0),
+                    0,
+                  );
                   return (
                     <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
                       <div className={`rounded-lg border px-3 py-2 text-xs ${
                         data.success_rate_pct < 85 ? 'border-red-200 bg-red-50 text-red-800' : 'border-emerald-200 bg-emerald-50 text-emerald-800'
                       }`}>
                         <p className="font-semibold">Salud de resolución</p>
-                        <p>{data.success_rate_pct < 85 ? 'Alerta: éxito bajo (meta >= 85%)' : 'OK: tasa de éxito saludable'}</p>
+                        <p>{data.success_rate_pct < 85 ? 'Alerta: éxito bajo en consultas cobradas (meta >= 85%)' : 'OK: tasa de éxito saludable (consultas cobradas)'}</p>
                       </div>
                       <div className={`rounded-lg border px-3 py-2 text-xs ${
                         data.fallback_rate_pct > 40 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-sky-200 bg-sky-50 text-sky-800'
                       }`}>
                         <p className="font-semibold">Uso de fallback</p>
-                        <p>{data.fallback_rate_pct > 40 ? 'Alerta: fallback alto (revisar proveedor principal)' : 'OK: fallback controlado'}</p>
+                        <p>{data.fallback_rate_pct > 40 ? 'Alerta: fallback alto en consultas cobradas (revisar proveedor principal)' : 'OK: fallback controlado'}</p>
                       </div>
                       <div className={`rounded-lg border px-3 py-2 text-xs ${
                         verifikConsultas > 0 ? 'border-violet-200 bg-violet-50 text-violet-800' : 'border-slate-200 bg-slate-50 text-slate-700'
                       }`}>
                         <p className="font-semibold">Respaldo del respaldo</p>
-                        <p>{verifikConsultas > 0 ? `Verifik activo (${verifikConsultas} consultas en periodo)` : 'Sin uso de Verifik en el periodo'}</p>
+                        <p>{verifikConsultas > 0 ? `Verifik cobrado (${verifikConsultas} en periodo)` : 'Sin uso cobrado de Verifik en el periodo'}</p>
                       </div>
                     </div>
                   );
@@ -1527,41 +1552,68 @@ export default function SaaSBackoffice() {
                     <p className="kpi-value">{runtMetricasQuery.data.total_consultas}</p>
                   </div>
                   <div className="kpi-card">
-                    <p className="kpi-label">Éxito</p>
+                    <p className="kpi-label">Cobradas</p>
+                    <p className="kpi-value">{runtMetricasQuery.data.billed_count ?? runtMetricasQuery.data.total_consultas}</p>
+                    <p className="text-xs text-slate-500">sin caché</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">Caché</p>
+                    <p className="kpi-value text-slate-600">{runtMetricasQuery.data.cached_count ?? 0}</p>
+                    <p className="text-xs text-slate-500">costo 0</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">Vacías</p>
+                    <p className="kpi-value text-amber-700">{runtMetricasQuery.data.empty_count}</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">Errores</p>
+                    <p className="kpi-value text-red-700">{runtMetricasQuery.data.error_count}</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">Éxito cobradas</p>
                     <p className="kpi-value text-emerald-700">{runtMetricasQuery.data.success_rate_pct}%</p>
                   </div>
                   <div className="kpi-card">
-                    <p className="kpi-label">Fallback</p>
+                    <p className="kpi-label">Fallback cobradas</p>
                     <p className="kpi-value text-amber-700">{runtMetricasQuery.data.fallback_rate_pct}%</p>
                   </div>
                   <div className="kpi-card">
-                    <p className="kpi-label">Costo total</p>
+                    <p className="kpi-label">Costo estimado</p>
                     <p className="kpi-value">{formatCurrency(runtMetricasQuery.data.costo_estimado_total_cop)}</p>
                     <p className="text-xs text-slate-500">{formatUsd(runtMetricasQuery.data.costo_estimado_total_usd)}</p>
                   </div>
                   <div className="kpi-card">
                     <p className="kpi-label">TRM promedio</p>
                     <p className="kpi-value">{formatCurrency(runtMetricasQuery.data.fx_rate_avg_usd_cop)}</p>
-                    <p className="text-xs text-slate-500">USD/COP</p>
+                    <p className="text-xs text-slate-500">solo consultas cobradas</p>
                   </div>
                   <div className="kpi-card">
                     <p className="kpi-label">Costo promedio</p>
                     <p className="kpi-value">{formatCurrency(runtMetricasQuery.data.costo_promedio_cop)}</p>
-                    <p className="text-xs text-slate-500">{formatUsd(runtMetricasQuery.data.costo_promedio_usd)}</p>
+                    <p className="text-xs text-slate-500">{formatUsd(runtMetricasQuery.data.costo_promedio_usd)} / cobrada</p>
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-xs text-slate-500">Costo proveedor resuelto (sin extra fallback)</p>
+                    <p className="text-xs text-slate-500">Costo del proveedor que resolvió</p>
                     <p className="text-sm font-semibold text-slate-900">
                       {formatCurrency(runtMetricasQuery.data.costo_resuelto_total_cop)} · {formatUsd(runtMetricasQuery.data.costo_resuelto_total_usd)}
+                    </p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-xs text-slate-500">Costo extra de intentos que no resolvieron</p>
+                    <p className="text-sm font-semibold text-slate-900">
+                      {formatCurrency(runtMetricasQuery.data.costo_fallback_extra_total_cop || 0)} · {formatUsd(runtMetricasQuery.data.costo_fallback_extra_total_usd || 0)}
                     </p>
                   </div>
                 </div>
                 {runtMetricasQuery.data.from_date && runtMetricasQuery.data.to_date && (
                   <p className="text-xs text-slate-500">
-                    Periodo: {new Date(runtMetricasQuery.data.from_date).toLocaleDateString('es-CO', { timeZone: BOGOTA_TIME_ZONE })} -{' '}
-                    {new Date(runtMetricasQuery.data.to_date).toLocaleDateString('es-CO', { timeZone: BOGOTA_TIME_ZONE })}
+                    Periodo Colombia: {new Date(runtMetricasQuery.data.from_date).toLocaleString('es-CO', { timeZone: BOGOTA_TIME_ZONE })} —{' '}
+                    {new Date(runtMetricasQuery.data.to_date).toLocaleString('es-CO', { timeZone: BOGOTA_TIME_ZONE })}
+                    {runtMetricasQuery.data.generated_at
+                      ? ` · Actualizado ${new Date(runtMetricasQuery.data.generated_at).toLocaleTimeString('es-CO', { timeZone: BOGOTA_TIME_ZONE })}`
+                      : ''}
                   </p>
                 )}
 
@@ -1576,7 +1628,8 @@ export default function SaaSBackoffice() {
                         <tr>
                           <th>Proveedor</th>
                           <th>Consultas</th>
-                          <th>Costo total (COP / USD)</th>
+                          <th>Caché</th>
+                          <th>Costo estimado (COP / USD)</th>
                           <th>Resuelto (COP / USD)</th>
                         </tr>
                       </thead>
@@ -1585,6 +1638,7 @@ export default function SaaSBackoffice() {
                           <tr key={row.provider}>
                             <td className="font-semibold text-slate-900">{row.provider}</td>
                             <td>{row.consultas}</td>
+                            <td>{row.cached_consultas ?? 0}</td>
                             <td>
                               {formatCurrency(row.costo_estimado_cop)}
                               <span className="block text-xs text-slate-500">{formatUsd(row.costo_estimado_usd)}</span>
@@ -1603,7 +1657,7 @@ export default function SaaSBackoffice() {
                 <div className="section-card p-4 border border-slate-200">
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <p className="text-sm font-semibold text-slate-800">Top tenants por consultas</p>
-                    <span className="text-xs text-slate-500">Etiqueta verde: menor costo promedio resuelto</span>
+                    <span className="text-xs text-slate-500">Etiqueta verde: menor costo promedio resuelto (sin caché)</span>
                   </div>
                   <div className="table-shell">
                     <table className="table-enterprise">
@@ -1619,7 +1673,7 @@ export default function SaaSBackoffice() {
                           <th>Costo CoreSoft (COP / USD)</th>
                           <th>Verifik resueltas</th>
                           <th>Costo Verifik (COP / USD)</th>
-                          <th>Costo total (COP / USD)</th>
+                          <th>Costo resuelto (COP / USD)</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1712,8 +1766,8 @@ export default function SaaSBackoffice() {
             <BackofficeSectionHeading
               className="mb-4"
               icon={Coins}
-              title="Consumo OpenSanctions (API real)"
-              description="Medición global CDASoft y por CDA (incluye todas sus sucursales)"
+              title="Consumo OpenSanctions"
+              description="Llamadas cobradas a la API: cobro (Caja), consulta manual, lote y screening del oficial. Los fallos se ven aparte y no entran al costo."
             />
             <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-3">
               <label className="text-sm text-slate-700">
@@ -1723,11 +1777,11 @@ export default function SaaSBackoffice() {
                   value={opensanctionsDays}
                   onChange={(e) => setOpensanctionsDays(Number(e.target.value))}
                 >
-                  <option value={0}>Hoy (desde 00:00)</option>
+                  <option value={0}>Hoy (desde 00:00 Colombia)</option>
                   <option value={1}>1 día (últimas 24h)</option>
-                  <option value={30}>30 días</option>
-                  <option value={90}>90 días</option>
-                  <option value={365}>365 días</option>
+                  <option value={30}>30 días calendario</option>
+                  <option value={90}>90 días calendario</option>
+                  <option value={365}>365 días calendario</option>
                   <option value={OPENSANCTIONS_CUSTOM_WINDOW}>Rango personalizado</option>
                 </select>
               </label>
@@ -1794,13 +1848,13 @@ export default function SaaSBackoffice() {
             )}
             {opensanctionsUsageQuery.data && (
               <div className="space-y-4">
-                <div className="grid grid-cols-1 gap-2 rounded-xl border border-slate-200 bg-slate-50/70 p-2 text-xs sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-9">
+                <div className="grid grid-cols-1 gap-2 rounded-xl border border-slate-200 bg-slate-50/70 p-2 text-xs sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
                   <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
-                    <p className="text-slate-500">Total llamadas</p>
+                    <p className="text-slate-500">Llamadas cobradas</p>
                     <p className="font-semibold text-slate-900">{opensanctionsUsageQuery.data.total_calls.toLocaleString('es-CO')}</p>
                   </div>
                   <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
-                    <p className="text-slate-500">Recepción</p>
+                    <p className="text-slate-500">Cobro (Caja)</p>
                     <p className="font-semibold text-indigo-700">{opensanctionsUsageQuery.data.recepcion_calls.toLocaleString('es-CO')}</p>
                   </div>
                   <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
@@ -1812,45 +1866,54 @@ export default function SaaSBackoffice() {
                     <p className="font-semibold text-violet-700">{opensanctionsUsageQuery.data.lote_calls.toLocaleString('es-CO')}</p>
                   </div>
                   <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
-                    <p className="text-slate-500">Costo estimado EUR</p>
+                    <p className="text-slate-500">Screening oficial</p>
+                    <p className="font-semibold text-sky-700">{(opensanctionsUsageQuery.data.screening_calls ?? 0).toLocaleString('es-CO')}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
+                    <p className="text-slate-500">Fallos (no en costo)</p>
+                    <p className="font-semibold text-red-700">{(opensanctionsUsageQuery.data.failed_calls ?? 0).toLocaleString('es-CO')}</p>
+                  </div>
+                  <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
+                    <p className="text-slate-500">Costo proveedor EUR</p>
                     <p className="font-semibold text-slate-900">{formatEur(opensanctionsUsageQuery.data.estimated_cost_eur)}</p>
                   </div>
                   <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
-                    <p className="text-slate-500">Costo estimado COP</p>
+                    <p className="text-slate-500">Costo proveedor COP</p>
                     <p className="font-semibold text-slate-900">{formatCurrency(opensanctionsUsageQuery.data.estimated_cost_cop)}</p>
                   </div>
                   <div className="rounded-lg border border-indigo-200 bg-indigo-50/70 px-2 py-1.5 shadow-sm">
-                    <p className="text-slate-500">Neto facturable COP</p>
+                    <p className="text-slate-500">Venta neta al CDA</p>
                     <p className="font-semibold text-indigo-700">{formatCurrency(opensanctionsUsageQuery.data.billed_subtotal_cop)}</p>
                   </div>
                   <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-2 py-1.5 shadow-sm">
-                    <p className="text-slate-500">IVA facturable COP</p>
+                    <p className="text-slate-500">IVA venta</p>
                     <p className="font-semibold text-amber-700">{formatCurrency(opensanctionsUsageQuery.data.billed_iva_cop)}</p>
                   </div>
-                  <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 px-2 py-1.5 shadow-sm">
-                    <p className="text-slate-500">Total facturable COP</p>
+                  <div className="rounded-lg border border-emerald-200 bg-emerald-50/70 px-2 py-1.5 shadow-sm sm:col-span-2">
+                    <p className="text-slate-500">Total venta al CDA</p>
                     <p className="font-semibold text-emerald-700">{formatCurrency(opensanctionsUsageQuery.data.billed_total_cop)}</p>
                   </div>
                 </div>
                 <p className="text-xs text-slate-500">
-                  Periodo: {new Date(opensanctionsUsageQuery.data.from_date).toLocaleDateString('es-CO', { timeZone: BOGOTA_TIME_ZONE })} -{' '}
-                  {new Date(opensanctionsUsageQuery.data.to_date).toLocaleDateString('es-CO', { timeZone: BOGOTA_TIME_ZONE })} · TRM usada:{' '}
-                  {opensanctionsUsageQuery.data.trm_cop.toLocaleString('es-CO')} · Costo proveedor por llamada:{' '}
-                  {formatEur(opensanctionsUsageQuery.data.cost_per_call_eur)}
+                  Periodo Colombia: {new Date(opensanctionsUsageQuery.data.from_date).toLocaleString('es-CO', { timeZone: BOGOTA_TIME_ZONE })} —{' '}
+                  {new Date(opensanctionsUsageQuery.data.to_date).toLocaleString('es-CO', { timeZone: BOGOTA_TIME_ZONE })}
+                  {opensanctionsUsageQuery.data.generated_at
+                    ? ` · Actualizado ${new Date(opensanctionsUsageQuery.data.generated_at).toLocaleTimeString('es-CO', { timeZone: BOGOTA_TIME_ZONE })}`
+                    : ''}
+                  {' · '}TRM EUR/COP: {opensanctionsUsageQuery.data.trm_cop.toLocaleString('es-CO')}
+                  {' · '}Proveedor: {formatEur(opensanctionsUsageQuery.data.cost_per_call_eur)} / llamada
                 </p>
                 <div className="flex flex-wrap items-center gap-2 text-xs">
-                  <span className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 font-medium text-sky-800">
-                    Modelo: {opensanctionsUsageQuery.data.pricing_model}
-                  </span>
-                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">
-                    Precio prepago por consulta: {formatCurrency(opensanctionsUsageQuery.data.prepaid_unit_price_cop)}
-                  </span>
-                  <span className="rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 font-medium text-amber-800">
-                    Vigencia paquete: {opensanctionsUsageQuery.data.prepaid_package_expires_days} días
+                  <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 font-medium text-slate-700">
+                    Costo proveedor (OpenSanctions): {formatEur(opensanctionsUsageQuery.data.cost_per_call_eur)}
                   </span>
                   <span className="rounded-full border border-fuchsia-200 bg-fuchsia-50 px-2.5 py-1 font-medium text-fuchsia-800">
-                    Precio venta CDA por consulta: {formatCurrency(opensanctionsUsageQuery.data.billed_unit_price_cop)}
+                    Venta al CDA: {formatCurrency(opensanctionsUsageQuery.data.billed_unit_price_cop)}
                     {' '}+ IVA {opensanctionsUsageQuery.data.billed_iva_pct.toLocaleString('es-CO')}%
+                  </span>
+                  <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 font-medium text-emerald-800">
+                    Referencia prepago: {formatCurrency(opensanctionsUsageQuery.data.prepaid_unit_price_cop)} / consulta ·{' '}
+                    {opensanctionsUsageQuery.data.prepaid_package_expires_days} días (no suma aquí)
                   </span>
                 </div>
                 {opensanctionsUsageQuery.data.tenants.length > 0 ? (
@@ -1859,15 +1922,17 @@ export default function SaaSBackoffice() {
                       <thead>
                         <tr>
                           <th className="whitespace-nowrap">CDA</th>
-                          <th className="whitespace-nowrap text-right">Recepción</th>
+                          <th className="whitespace-nowrap text-right">Cobro</th>
                           <th className="whitespace-nowrap text-right">Manual</th>
                           <th className="whitespace-nowrap text-right">Lote</th>
-                          <th className="whitespace-nowrap text-right">Total</th>
-                          <th className="whitespace-nowrap text-right">Costo EUR</th>
-                          <th className="whitespace-nowrap text-right">Costo COP</th>
-                          <th className="whitespace-nowrap text-right">Neto facturable COP</th>
+                          <th className="whitespace-nowrap text-right">Screening</th>
+                          <th className="whitespace-nowrap text-right">Fallos</th>
+                          <th className="whitespace-nowrap text-right">Total cobradas</th>
+                          <th className="whitespace-nowrap text-right">Costo proveedor EUR</th>
+                          <th className="whitespace-nowrap text-right">Costo proveedor COP</th>
+                          <th className="whitespace-nowrap text-right">Venta neta COP</th>
                           <th className="whitespace-nowrap text-right">IVA COP</th>
-                          <th className="whitespace-nowrap text-right">Total facturable COP</th>
+                          <th className="whitespace-nowrap text-right">Total venta COP</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -1880,6 +1945,8 @@ export default function SaaSBackoffice() {
                             <td className="text-right tabular-nums">{item.recepcion_calls.toLocaleString('es-CO')}</td>
                             <td className="text-right tabular-nums">{item.manual_calls.toLocaleString('es-CO')}</td>
                             <td className="text-right tabular-nums">{item.lote_calls.toLocaleString('es-CO')}</td>
+                            <td className="text-right tabular-nums">{(item.screening_calls ?? 0).toLocaleString('es-CO')}</td>
+                            <td className="text-right tabular-nums text-red-700">{(item.failed_calls ?? 0).toLocaleString('es-CO')}</td>
                             <td className="text-right tabular-nums font-semibold text-slate-900">{item.total_calls.toLocaleString('es-CO')}</td>
                             <td className="text-right tabular-nums">{formatEur(item.estimated_cost_eur)}</td>
                             <td className="text-right tabular-nums">{formatCurrency(item.estimated_cost_cop)}</td>
@@ -1955,7 +2022,7 @@ export default function SaaSBackoffice() {
                           </span>
                         </td>
                         <td>
-                          {tenant.next_billing_at ? new Date(tenant.next_billing_at).toLocaleDateString() : '-'}
+                          {formatBillingDate(tenant.next_billing_at)}
                         </td>
                         <td className="table-enterprise-col-actions">
                           <div className="flex flex-wrap items-center justify-end gap-2">
@@ -2408,7 +2475,7 @@ export default function SaaSBackoffice() {
                                     {isExpanded ? 'Ocultar' : 'Ver'}
                                   </button>
                                 </td>
-                                <td>{new Date(row.created_at).toLocaleString()}</td>
+                                <td>{formatBillingDateTime(row.created_at)}</td>
                                 <td className="font-medium text-slate-900">{row.tenant_nombre}</td>
                                 <td>{row.plan_code}</td>
                                 <td>{formatCurrency(row.total_cop)}</td>
@@ -2544,7 +2611,7 @@ export default function SaaSBackoffice() {
               className="mb-4"
               icon={Wallet}
               title="Resumen global de facturación por tenant"
-              description="Cobros, planes y últimos pagos por tenant"
+              description="Último pago une cobro en línea y registro manual. El recibo PDF solo aplica a pagos registrados a mano."
             />
             {billingOverviewQuery.isLoading && <LoadingBlock lines={4} />}
             {billingOverviewQuery.isError && <p className="text-sm text-red-600">No fue posible cargar el resumen de facturación.</p>}
@@ -2552,6 +2619,25 @@ export default function SaaSBackoffice() {
               billingOverviewQuery.data.length === 0 ? (
                 <EmptyState message="No hay registros de facturación para mostrar todavía." />
               ) : (
+                <>
+                  <div className="mb-4 flex flex-wrap gap-2">
+                    {[
+                      ['al_dia', 'Al día'],
+                      ['por_vencer', 'Por vencer'],
+                      ['vencido', 'Vencido'],
+                      ['trial', 'Demo'],
+                    ].map(([status, label]) => {
+                      const count = billingOverviewQuery.data.filter((row) => row.cobro_status === status).length;
+                      return (
+                        <span
+                          key={status}
+                          className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-semibold text-slate-700"
+                        >
+                          {label}: {count}
+                        </span>
+                      );
+                    })}
+                  </div>
                 <div className="table-shell">
                   <table className="table-enterprise">
                     <thead>
@@ -2569,6 +2655,7 @@ export default function SaaSBackoffice() {
                     <tbody>
                       {billingOverviewQuery.data.map((item) => {
                         const tenant = (tenantsQuery.data || []).find((t) => t.id === item.tenant_id);
+                        const sourceLabel = lastPaymentSourceLabel(item.last_payment_source);
                         return (
                           <tr key={item.tenant_id}>
                             <td className="font-semibold text-slate-900">{item.tenant_nombre}</td>
@@ -2577,15 +2664,26 @@ export default function SaaSBackoffice() {
                             <td>
                               <span className={statusBadgeClass(item.cobro_status)}>{cobroStatusLabel(item.cobro_status)}</span>
                             </td>
-                            <td>{item.next_billing_at ? new Date(item.next_billing_at).toLocaleDateString() : '-'}</td>
+                            <td>{formatBillingDate(item.next_billing_at)}</td>
                             <td>
-                              {item.last_payment_amount != null
-                                ? `${formatCurrency(item.last_payment_amount)} (${
-                                    item.last_payment_at ? new Date(item.last_payment_at).toLocaleDateString() : '-'
-                                  })`
-                                : '-'}
+                              {item.last_payment_amount != null ? (
+                                <div>
+                                  <p className="font-semibold text-slate-900">{formatCurrency(item.last_payment_amount)}</p>
+                                  <p className="text-[11px] text-slate-500">
+                                    {formatBillingDate(item.last_payment_at)}
+                                    {sourceLabel ? ` · ${sourceLabel}` : ''}
+                                  </p>
+                                </div>
+                              ) : (
+                                formatBillingDate(item.last_payment_at)
+                              )}
                             </td>
-                            <td>{item.last_receipt_reference || '-'}</td>
+                            <td>
+                              <p className="font-mono text-xs">{item.last_receipt_reference || '-'}</p>
+                              {item.last_payment_source === 'checkout' && (
+                                <p className="text-[11px] text-slate-500">Sin PDF interno</p>
+                              )}
+                            </td>
                             <td className="table-enterprise-col-actions">
                               <div className="flex flex-wrap items-center justify-end gap-2">
                                 <button
@@ -2598,6 +2696,11 @@ export default function SaaSBackoffice() {
                                 <button
                                   type="button"
                                   disabled={!item.last_payment_log_id || resendReceiptMutation.isLoading}
+                                  title={
+                                    item.last_payment_source === 'checkout'
+                                      ? 'El pago en línea no genera recibo PDF interno.'
+                                      : undefined
+                                  }
                                   onClick={() => item.last_payment_log_id && resendReceiptMutation.mutate(item.last_payment_log_id)}
                                   className="btn-chip"
                                 >
@@ -2613,6 +2716,7 @@ export default function SaaSBackoffice() {
                     </tbody>
                   </table>
                 </div>
+                </>
               )
             )}
           </div>
@@ -2648,7 +2752,7 @@ export default function SaaSBackoffice() {
                 Tu rol tiene acceso de lectura a soporte. Solo owner y soporte pueden actualizar tickets.
               </p>
             )}
-            <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50/70 p-2 text-xs md:grid-cols-5">
+            <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-200 bg-slate-50/70 p-2 text-xs md:grid-cols-7">
               <div className="rounded-lg bg-white px-2 py-1.5">
                 <p className="text-slate-500">Total</p>
                 <p className="font-semibold text-slate-900">{supportSummaryQuery.data?.total_tickets ?? '-'}</p>
@@ -2668,6 +2772,14 @@ export default function SaaSBackoffice() {
               <div className="rounded-lg bg-white px-2 py-1.5">
                 <p className="text-slate-500">Críticos</p>
                 <p className="font-semibold text-red-700">{supportSummaryQuery.data?.criticos_abiertos ?? '-'}</p>
+              </div>
+              <div className="rounded-lg bg-white px-2 py-1.5">
+                <p className="text-slate-500">SLA vencido</p>
+                <p className="font-semibold text-red-700">{supportSummaryQuery.data?.sla_vencidos ?? '-'}</p>
+              </div>
+              <div className="rounded-lg bg-white px-2 py-1.5">
+                <p className="text-slate-500">Sin asignar</p>
+                <p className="font-semibold text-slate-800">{supportSummaryQuery.data?.sin_asignar ?? '-'}</p>
               </div>
             </div>
             <div className="flex items-center justify-end">
@@ -2786,7 +2898,14 @@ export default function SaaSBackoffice() {
                                   {isExpanded ? 'Ocultar' : 'Ver'}
                                 </button>
                               </td>
-                              <td>{new Date(ticket.created_at).toLocaleString()}</td>
+                              <td>
+                                <p>{formatBillingDateTime(ticket.created_at)}</p>
+                                {ticket.sla_due_at && (
+                                  <p className={`text-[11px] ${isSlaOverdue(ticket) ? 'font-semibold text-red-600' : 'text-slate-500'}`}>
+                                    SLA {formatBillingDateTime(ticket.sla_due_at)}
+                                  </p>
+                                )}
+                              </td>
                               <td>{ticket.tenant_nombre}</td>
                               <td>
                                 <p className="font-semibold text-slate-900">{ticket.title}</p>
@@ -2796,7 +2915,10 @@ export default function SaaSBackoffice() {
                                 <span className={supportPriorityBadgeClass(ticket.priority)}>{ticket.priority}</span>
                               </td>
                               <td>
-                                <span className={statusBadgeClass(ticket.status)}>{supportStatusLabel(ticket.status)}</span>
+                                <div className="flex flex-col items-start gap-1">
+                                  <span className={statusBadgeClass(ticket.status)}>{supportStatusLabel(ticket.status)}</span>
+                                  {isSlaOverdue(ticket) && <span className="badge badge-danger">SLA vencido</span>}
+                                </div>
                               </td>
                               <td>{ticket.assigned_to_user_email || '-'}</td>
                               <td>
@@ -2849,7 +2971,7 @@ export default function SaaSBackoffice() {
                                     </p>
                                     <p>
                                       <span className="font-semibold text-slate-900">SLA:</span>{' '}
-                                      {ticket.sla_due_at ? new Date(ticket.sla_due_at).toLocaleString() : '—'}
+                                      {ticket.sla_due_at ? formatBillingDateTime(ticket.sla_due_at) : '—'}
                                     </p>
                                     <p className="md:col-span-3 break-words">
                                       <span className="font-semibold text-slate-900">Respuesta al CDA:</span>{' '}
@@ -3279,7 +3401,7 @@ export default function SaaSBackoffice() {
     color: string;
     count?: number;
   }> = [
-    { id: 'resumen', title: 'Resumen', subtitle: 'KPIs y permisos globales', icon: Building2, color: 'text-blue-600' },
+    { id: 'resumen', title: 'Resumen', subtitle: 'Cobro, CDAs y soporte', icon: Building2, color: 'text-blue-600' },
     {
       id: 'tenants',
       title: 'Tenants',
@@ -3506,9 +3628,7 @@ export default function SaaSBackoffice() {
                       </span>
                       <span className="inline-flex rounded-full border border-slate-200 bg-white px-2.5 py-1 text-xs font-medium text-slate-700">
                         Próx. cobro:{' '}
-                        {tenantProfileQuery.data.next_billing_at
-                          ? new Date(tenantProfileQuery.data.next_billing_at).toLocaleDateString()
-                          : '—'}
+                        {formatBillingDate(tenantProfileQuery.data.next_billing_at, '—')}
                       </span>
                     </div>
                   </div>
@@ -3886,17 +4006,13 @@ export default function SaaSBackoffice() {
                                 <div className="space-y-1">
                                   <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Próximo cobro</p>
                                   <p className="text-sm font-semibold text-slate-900">
-                                    {tenantProfileQuery.data.next_billing_at
-                                      ? new Date(tenantProfileQuery.data.next_billing_at).toLocaleDateString()
-                                      : '—'}
+                                    {formatBillingDate(tenantProfileQuery.data.next_billing_at, '—')}
                                   </p>
                                 </div>
                                 <div className="space-y-1">
                                   <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Último pago</p>
                                   <p className="text-sm font-semibold text-slate-900">
-                                    {tenantProfileQuery.data.last_payment_at
-                                      ? new Date(tenantProfileQuery.data.last_payment_at).toLocaleDateString()
-                                      : '—'}
+                                    {formatBillingDate(tenantProfileQuery.data.last_payment_at, '—')}
                                   </p>
                                 </div>
                               </div>
@@ -4358,6 +4474,10 @@ export default function SaaSBackoffice() {
                           {billingActionSuccess && (
                             <p className="text-sm text-emerald-700 bg-emerald-50 border border-emerald-200 rounded-lg p-3">{billingActionSuccess}</p>
                           )}
+                          <p className="text-xs text-slate-500">
+                            Asignar plan activa el periodo desde ahora, sin registrar cobro. El pago en línea o el registro
+                            manual sí actualizan el último pago y la fecha de vencimiento.
+                          </p>
                           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                             <select
                               value={billingPlanCode}
@@ -4421,6 +4541,12 @@ export default function SaaSBackoffice() {
                             )}
                           </div>
 
+                          {(tenantProfileQuery.data.plan_actual || '').toLowerCase() === 'demo' && (
+                            <p className="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-3">
+                              Este CDA sigue en demo. Registrar un pago no cambia el plan: asigna un plan de pago primero.
+                            </p>
+                          )}
+
                           <div className="flex flex-wrap items-center gap-3">
                             <input
                               type="number"
@@ -4466,7 +4592,7 @@ export default function SaaSBackoffice() {
                               </p>
                               <p>
                                 <span className="text-emerald-700">Fecha pago:</span>{' '}
-                                {new Date(lastPaymentReceipt.paid_at).toLocaleString()}
+                                {formatBillingDateTime(lastPaymentReceipt.paid_at)}
                               </p>
                               <p>
                                 <span className="text-emerald-700">Sucursales:</span>{' '}
@@ -4474,9 +4600,7 @@ export default function SaaSBackoffice() {
                               </p>
                               <p>
                                 <span className="text-emerald-700">Próximo cobro:</span>{' '}
-                                {lastPaymentReceipt.next_billing_at
-                                  ? new Date(lastPaymentReceipt.next_billing_at).toLocaleDateString()
-                                  : 'N/A'}
+                                {formatBillingDate(lastPaymentReceipt.next_billing_at, 'N/A')}
                               </p>
                               <p>
                                 <span className="text-emerald-700">Correo enviado:</span>{' '}
@@ -4512,7 +4636,7 @@ export default function SaaSBackoffice() {
                   >
                     <div>
                       <p className="text-sm font-semibold text-slate-900">Historial de pagos</p>
-                      <p className="text-xs text-slate-500">Últimos movimientos y comprobantes</p>
+                      <p className="text-xs text-slate-500">Últimos movimientos: registro manual y pagos en línea</p>
                     </div>
                     <span className="text-xs font-semibold text-slate-600">
                       {tenantProfileSectionsOpen.payments ? 'Ocultar' : 'Mostrar'}
@@ -4530,7 +4654,7 @@ export default function SaaSBackoffice() {
                             embedded
                             icon={Wallet}
                             title="Historial de pagos"
-                            description="Últimos 10 movimientos registrados"
+                            description="Últimos 10 movimientos (manual y en línea)"
                           />
                           {tenantPaymentsQuery.data.length === 0 ? (
                             <div className="px-4 py-8 text-center">
@@ -4550,30 +4674,45 @@ export default function SaaSBackoffice() {
                                   </tr>
                                 </thead>
                                 <tbody>
-                                  {tenantPaymentsQuery.data.map((p) => (
-                                    <tr key={p.id}>
+                                  {tenantPaymentsQuery.data.map((p) => {
+                                    const canDownloadPdf = Boolean(p.receipt_download_url);
+                                    const sourceLabel = lastPaymentSourceLabel(p.source);
+                                    return (
+                                    <tr key={`${p.source || 'manual'}-${p.id}`}>
                                       <td className="whitespace-nowrap text-slate-600">
-                                        {new Date(p.paid_at).toLocaleString()}
+                                        {formatBillingDateTime(p.paid_at)}
                                       </td>
                                       <td className="font-semibold text-slate-900">
                                         {formatCurrency(p.amount)}
                                       </td>
-                                      <td>{p.plan_label || p.plan_code || '—'}</td>
+                                      <td>
+                                        <span>{p.plan_label || p.plan_code || '—'}</span>
+                                        {sourceLabel ? (
+                                          <span className="ml-2 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                                            {sourceLabel}
+                                          </span>
+                                        ) : null}
+                                      </td>
                                       <td className="font-mono text-xs">{p.comprobante_referencia || '—'}</td>
                                       <td>
-                                        {p.next_billing_at ? new Date(p.next_billing_at).toLocaleDateString() : '—'}
+                                        {formatBillingDate(p.next_billing_at, '—')}
                                       </td>
                                       <td className="table-enterprise-col-actions">
-                                        <button
-                                          type="button"
-                                          onClick={() => handleDownloadReceipt(p.receipt_download_url, p.comprobante_referencia)}
-                                          className="btn-chip"
-                                        >
-                                          Descargar PDF
-                                        </button>
+                                        {canDownloadPdf ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => handleDownloadReceipt(p.receipt_download_url, p.comprobante_referencia)}
+                                            className="btn-chip"
+                                          >
+                                            Descargar PDF
+                                          </button>
+                                        ) : (
+                                          <span className="text-[11px] text-slate-500">Sin PDF interno</span>
+                                        )}
                                       </td>
                                     </tr>
-                                  ))}
+                                    );
+                                  })}
                                 </tbody>
                               </table>
                             </div>

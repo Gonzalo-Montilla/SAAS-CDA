@@ -701,11 +701,19 @@ def _guardar_metrica_runt(
                     else (settings.RUNT_FX_USD_COP or 0)
                 )
             ),
+            created_at=datetime.now(timezone.utc).replace(tzinfo=None),
         )
         db.add(row)
         db.commit()
     except Exception:
         db.rollback()
+        _log_veh.exception(
+            "No se pudo guardar metrica RUNT tenant=%s placa=%s provider=%s status=%s",
+            tenant_id,
+            placa,
+            provider_resolved,
+            status,
+        )
 
 
 def _normalize_runt_doc_type(value: str | None) -> str:

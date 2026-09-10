@@ -3,6 +3,7 @@ import apiClient from './client';
 export interface RuntMetricasProviderRow {
   provider: string;
   consultas: number;
+  cached_consultas?: number;
   costo_estimado_cop: number;
   costo_estimado_usd: number;
   costo_resuelto_cop: number;
@@ -14,16 +15,21 @@ export interface RuntMetricasSummary {
   from_date?: string;
   to_date?: string;
   total_consultas: number;
+  cached_count?: number;
+  billed_count?: number;
   success_count: number;
   empty_count: number;
   error_count: number;
   fallback_count: number;
   success_rate_pct: number;
   fallback_rate_pct: number;
+  success_rate_all_pct?: number;
   costo_estimado_total_cop: number;
   costo_estimado_total_usd: number;
   costo_resuelto_total_cop: number;
   costo_resuelto_total_usd: number;
+  costo_fallback_extra_total_cop?: number;
+  costo_fallback_extra_total_usd?: number;
   costo_promedio_cop: number;
   costo_promedio_usd: number;
   fx_rate_avg_usd_cop: number;
@@ -72,4 +78,3 @@ export const runtMetricasApi = {
     return response.data;
   },
 };
-

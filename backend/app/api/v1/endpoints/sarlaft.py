@@ -761,12 +761,32 @@ def screening_opensanctions(
             limit=payload.limit,
         )
     except OpenSanctionsError as exc:
+        log_sarlaft_event(
+            db,
+            tenant_id=current_user.tenant_id,
+            actor_user=current_user,
+            action="opensanctions_screening_failed",
+            entity_type="screening",
+            entity_id=None,
+            after_json={
+                "error": str(exc),
+                "full_name": payload.full_name,
+                "dataset": payload.dataset,
+            },
+        )
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Error OpenSanctions: {str(exc)}",
         ) from exc
 
     raw_results = screening.get("results") or []
+    source_labels, source_coverage = _source_coverage_from_hits(
+        raw_results if isinstance(raw_results, list) else []
+    )
 
     case_id = payload.case_id
     if case_id and payload.persist_in_case:
@@ -863,6 +883,24 @@ def create_sarlaft_manual_check(
             limit=payload.limit,
         )
     except OpenSanctionsError as exc:
+        log_sarlaft_event(
+            db,
+            tenant_id=current_user.tenant_id,
+            actor_user=current_user,
+            action="manual_check_failed",
+            entity_type="manual_check",
+            entity_id=None,
+            after_json={
+                "error": str(exc),
+                "full_name": payload.full_name,
+                "subject_type": payload.subject_type,
+                "dataset": payload.dataset,
+            },
+        )
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"Error OpenSanctions: {str(exc)}",

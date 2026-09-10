@@ -221,6 +221,12 @@ class Settings(BaseSettings):
     OPENSANCTIONS_PREPAID_PACKAGE_EXPIRES_DAYS: int = Field(
         default=365, ge=1, le=3650, env="OPENSANCTIONS_PREPAID_PACKAGE_EXPIRES_DAYS"
     )
+    OPENSANCTIONS_BILLED_UNIT_PRICE_COP: float = Field(
+        default=850.0, ge=0.0, env="OPENSANCTIONS_BILLED_UNIT_PRICE_COP"
+    )
+    OPENSANCTIONS_BILLED_IVA_PCT: float = Field(
+        default=19.0, ge=0.0, le=100.0, env="OPENSANCTIONS_BILLED_IVA_PCT"
+    )
     
     # Facturación electrónica (Factus) — URLs oficiales en https://developers.factus.com.co/
     FACTUS_SANDBOX_BASE_URL: str = Field(default="https://api-sandbox.factus.com.co", env="FACTUS_SANDBOX_BASE_URL")
