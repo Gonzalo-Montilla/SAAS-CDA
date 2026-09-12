@@ -151,3 +151,36 @@ export function formatDateForInput(date: string | Date | number): string {
   const day = String(d.getDate()).padStart(2, '0');
   return `${year}-${month}-${day}`;
 }
+
+/** Día calendario actual en Colombia (YYYY-MM-DD), independiente del huso del PC. */
+export function colombiaTodayYmd(): string {
+  return new Intl.DateTimeFormat('en-CA', { timeZone: TIMEZONE }).format(new Date());
+}
+
+/** Suma días a una fecha civil YYYY-MM-DD (sin usar la zona del navegador). */
+export function addCalendarDaysYmd(ymd: string, days: number): string {
+  const parts = ymd.split('-').map(Number);
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return ymd;
+  const [y, m, d] = parts;
+  const dt = new Date(Date.UTC(y, m - 1, d + days));
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}
+
+export function firstDayOfMonthYmd(ymd: string): string {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(ymd)) return ymd;
+  return `${ymd.slice(0, 7)}-01`;
+}
+
+export function addCalendarMonthsYmd(ymd: string, months: number): string {
+  const parts = ymd.split('-').map(Number);
+  if (parts.length !== 3 || parts.some((n) => !Number.isFinite(n))) return ymd;
+  const [y, m, d] = parts;
+  const dt = new Date(Date.UTC(y, m - 1 + months, d));
+  const yy = dt.getUTCFullYear();
+  const mm = String(dt.getUTCMonth() + 1).padStart(2, '0');
+  const dd = String(dt.getUTCDate()).padStart(2, '0');
+  return `${yy}-${mm}-${dd}`;
+}

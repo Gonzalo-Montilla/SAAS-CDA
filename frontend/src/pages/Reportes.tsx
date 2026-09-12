@@ -3,7 +3,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { BarChart3, TrendingUp, TrendingDown, Wallet, Building2, FileText, Download, DollarSign, ArrowUpCircle, ArrowDownCircle, CalendarDays, TimerReset, AlertTriangle, GaugeCircle, Receipt, Landmark, X, Lock, Printer, FileCheck, Eye, Info } from 'lucide-react';
 import Layout from '../components/Layout';
-import LoadingSpinner from '../components/LoadingSpinner';
 import apiClient from '../api/client';
 import {
   reportesApi,
@@ -19,15 +18,15 @@ import { useBrand } from '../contexts/BrandContext';
 import { useToast } from '../contexts/ToastContext';
 import type { Usuario } from '../types';
 import { formatCOP } from '../utils/formatNumber';
+import {
+  addCalendarDaysYmd,
+  addCalendarMonthsYmd,
+  colombiaTodayYmd,
+  firstDayOfMonthYmd,
+  formatDateTime,
+} from '../utils/formatDate';
 
 const ReportesIngresosChart = lazy(() => import('../components/ReportesIngresosChart'));
-
-const formatLocalDate = (d: Date): string => {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
 
 /** Enlace que Factus a veces mete en JSON (logo PNG, CDN) y no es el visor DIAN del documento. */
 function urlPareceAssetMarcaOImagen(raw: string): boolean {
@@ -204,10 +203,10 @@ type ReportesSeccion =
   | 'detalle';
 
 const REPORTES_SECCIONES: { id: ReportesSeccion; label: string; hint: string }[] = [
-  { id: 'resumen', label: 'Resumen', hint: 'KPIs del día, comparativo por sede y tendencia de ingresos' },
+  { id: 'resumen', label: 'Resumen', hint: 'KPIs del periodo (hora Colombia), comparativo por sede y tendencia de ingresos' },
   { id: 'finanzas', label: 'Finanzas', hint: 'Caja, tesorería y recaudo por concepto y medio de pago' },
   { id: 'operacion', label: 'Operación', hint: 'SLA, colas de atención y casos en riesgo' },
-  { id: 'citas', label: 'Citas', hint: 'Métricas de agendamiento del tenant' },
+  { id: 'citas', label: 'Citas', hint: 'Métricas de agendamiento según la sede del selector' },
   { id: 'cierres', label: 'Cierres caja', hint: 'Historial de cierres por cajero y sede (auditoría)' },
   { id: 'provisiones', label: 'Provisiones IVA', hint: 'IVA causado por ventas y control de provisionado por periodo' },
   {
@@ -444,17 +443,15 @@ export default function ReportesPage() {
   const puedeElegirSedeReporte =
     !!tenantUser && (tenantUser.rol === 'gerente' || tenantUser.rol === 'contador');
 
-  const todayLocal = formatLocalDate(new Date());
+  const todayLocal = colombiaTodayYmd();
   /** Permite analizar citas ya programadas en el futuro; el tope evita fechas absurdas. */
-  const maxFechaReportes = useMemo(() => {
-    const d = new Date();
-    d.setMonth(d.getMonth() + 18);
-    return formatLocalDate(d);
-  }, []);
+  const maxFechaReportes = useMemo(() => addCalendarMonthsYmd(todayLocal, 18), [todayLocal]);
   const [modoVista, setModoVista] = useState<'dia' | 'rango'>('dia');
   const [fechaSeleccionada, setFechaSeleccionada] = useState<string>(todayLocal);
   const [fechaInicio, setFechaInicio] = useState<string>(todayLocal);
   const [fechaFin, setFechaFin] = useState<string>(todayLocal);
+  const [aplicadoInicio, setAplicadoInicio] = useState<string>(todayLocal);
+  const [aplicadoHasta, setAplicadoHasta] = useState<string>(todayLocal);
   const [reporteSedeScope, setReporteSedeScope] = useState<ReporteSedeScope>('activa');
   const [reporteSedeId, setReporteSedeId] = useState<string>('');
 
@@ -483,10 +480,47 @@ export default function ReportesPage() {
     numero: string;
   } | null>(null);
   const [contingenciaRegularizarLoading, setContingenciaRegularizarLoading] = useState(false);
+  const aplicarRango = useCallback((desde: string, hasta: string) => {
+    setFechaInicio(desde);
+    setFechaFin(hasta);
+    setAplicadoInicio(desde);
+    setAplicadoHasta(hasta);
+  }, []);
+
+  const cambiarModoVista = (next: 'dia' | 'rango') => {
+    if (next === modoVista) return;
+    if (next === 'dia') {
+      setFechaSeleccionada(aplicadoHasta);
+      setModoVista('dia');
+      return;
+    }
+    setFechaInicio(fechaSeleccionada);
+    setFechaFin(fechaSeleccionada);
+    setAplicadoInicio(fechaSeleccionada);
+    setAplicadoHasta(fechaSeleccionada);
+    setModoVista('rango');
+  };
+
+  const aplicarAtajoDias = (nDias: number) => {
+    const hasta = colombiaTodayYmd();
+    const desde = addCalendarDaysYmd(hasta, -(Math.max(1, nDias) - 1));
+    aplicarRango(desde, hasta);
+  };
+
   const rangoInvalido = modoVista === 'rango' && fechaInicio > fechaFin;
-  const periodoActual = modoVista === 'rango' ? `${fechaInicio} a ${fechaFin}` : fechaSeleccionada;
-  const reportesEnabled = !rangoInvalido;
-  const dashboardEnabled = modoVista === 'dia';
+  const periodoConsultaInicio = modoVista === 'rango' ? aplicadoInicio : fechaSeleccionada;
+  const periodoConsultaHasta = modoVista === 'rango' ? aplicadoHasta : fechaSeleccionada;
+  const consultaInvalida = periodoConsultaInicio > periodoConsultaHasta;
+  const periodoActual =
+    modoVista === 'rango'
+      ? `${periodoConsultaInicio} a ${periodoConsultaHasta}`
+      : fechaSeleccionada;
+  const rangoPendiente =
+    modoVista === 'rango' && (fechaInicio !== aplicadoInicio || fechaFin !== aplicadoHasta);
+  const esRango = modoVista === 'rango';
+  const reportesEnabled = !consultaInvalida;
+  const dashboardEnabled =
+    reportesEnabled && (reportesSeccion === 'resumen' || reportesSeccion === 'finanzas');
 
   const sedeQuerySuffix = useMemo(() => {
     if (!puedeElegirSedeReporte) return '';
@@ -498,8 +532,8 @@ export default function ReportesPage() {
   }, [puedeElegirSedeReporte, reporteSedeScope, reporteSedeId]);
 
   const cierresCajaQueryString = useMemo(() => {
-    const desde = modoVista === 'rango' ? fechaInicio : fechaSeleccionada;
-    const hasta = modoVista === 'rango' ? fechaFin : fechaSeleccionada;
+    const desde = periodoConsultaInicio;
+    const hasta = periodoConsultaHasta;
     let qs = `fecha_cierre_desde=${encodeURIComponent(desde)}&fecha_cierre_hasta=${encodeURIComponent(hasta)}&limit=200`;
     if (puedeElegirSedeReporte) {
       if (reporteSedeScope === 'todas') qs += '&consolidar_todas=true';
@@ -509,10 +543,8 @@ export default function ReportesPage() {
     }
     return qs;
   }, [
-    modoVista,
-    fechaInicio,
-    fechaFin,
-    fechaSeleccionada,
+    periodoConsultaInicio,
+    periodoConsultaHasta,
     puedeElegirSedeReporte,
     reporteSedeScope,
     reporteSedeId,
@@ -521,15 +553,12 @@ export default function ReportesPage() {
   const queryParams = useMemo(() => {
     const base =
       modoVista === 'rango'
-        ? `fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`
+        ? `fecha_inicio=${aplicadoInicio}&fecha_fin=${aplicadoHasta}`
         : `fecha=${fechaSeleccionada}`;
     return base + sedeQuerySuffix;
-  }, [modoVista, fechaInicio, fechaFin, fechaSeleccionada, sedeQuerySuffix]);
+  }, [modoVista, aplicadoInicio, aplicadoHasta, fechaSeleccionada, sedeQuerySuffix]);
 
-  const dashboardQueryString = useMemo(
-    () => `fecha=${fechaSeleccionada}${sedeQuerySuffix}`,
-    [fechaSeleccionada, sedeQuerySuffix],
-  );
+  const dashboardQueryString = queryParams;
 
   useEffect(() => {
     const seccionParam = (searchParams.get('seccion') || '').trim().toLowerCase() as ReportesSeccion;
@@ -548,26 +577,27 @@ export default function ReportesPage() {
     [searchParams, setSearchParams],
   );
 
-  // Query principal: Dashboard general
-  const { data, isLoading, isError } = useQuery<DashboardData>({
-    queryKey: ['dashboard-general', fechaSeleccionada, sedeQuerySuffix],
+  // KPIs del periodo: se piden siempre para no exportar ceros; el refresco automático solo en Resumen/Finanzas.
+  const { data, isLoading, isError, isFetching: isFetchingDashboard } = useQuery<DashboardData>({
+    queryKey: ['dashboard-general', queryParams],
     queryFn: async () => {
       const response = await apiClient.get(`/reportes/dashboard-general?${dashboardQueryString}`);
       return response.data;
     },
-    enabled: dashboardEnabled,
-    refetchInterval: 60000, // Actualizar cada minuto
+    enabled: reportesEnabled,
+    refetchInterval:
+      reportesSeccion === 'resumen' || reportesSeccion === 'finanzas' ? 120000 : false,
   });
 
   // Query: Movimientos detallados
   const { data: movimientosData, isFetching: isFetchingMovimientos } = useQuery({
-    queryKey: ['movimientos-detallados', modoVista, fechaSeleccionada, fechaInicio, fechaFin, sedeQuerySuffix],
+    queryKey: ['movimientos-detallados', queryParams],
     queryFn: async () => {
       const response = await apiClient.get(`/reportes/movimientos-detallados?${queryParams}`);
       return response.data;
     },
     enabled: reportesEnabled && reportesSeccion === 'detalle',
-    refetchInterval: reportesSeccion === 'detalle' ? 60000 : false,
+    refetchInterval: reportesSeccion === 'detalle' ? 120000 : false,
   });
 
   const emitirDocumentoSoporteMutation = useMutation({
@@ -608,41 +638,41 @@ export default function ReportesPage() {
 
   // Query: Desglose por conceptos
   const { data: conceptosData } = useQuery({
-    queryKey: ['desglose-conceptos', modoVista, fechaSeleccionada, fechaInicio, fechaFin, sedeQuerySuffix],
+    queryKey: ['desglose-conceptos', queryParams],
     queryFn: async () => {
       const response = await apiClient.get(`/reportes/desglose-conceptos?${queryParams}`);
       return response.data;
     },
     enabled: reportesEnabled && reportesSeccion === 'finanzas',
-    refetchInterval: reportesSeccion === 'finanzas' ? 60000 : false,
+    refetchInterval: reportesSeccion === 'finanzas' ? 120000 : false,
   });
 
   // Query: Desglose por medios de pago
   const { data: mediosPagoData } = useQuery({
-    queryKey: ['desglose-medios-pago', modoVista, fechaSeleccionada, fechaInicio, fechaFin, sedeQuerySuffix],
+    queryKey: ['desglose-medios-pago', queryParams],
     queryFn: async () => {
       const response = await apiClient.get(`/reportes/desglose-medios-pago?${queryParams}`);
       return response.data;
     },
     enabled: reportesEnabled && reportesSeccion === 'finanzas',
-    refetchInterval: reportesSeccion === 'finanzas' ? 60000 : false,
+    refetchInterval: reportesSeccion === 'finanzas' ? 120000 : false,
   });
 
   // Query: Trámites detallados
   const { data: tramitesData, isFetching: isFetchingTramites } = useQuery({
-    queryKey: ['tramites-detallados', modoVista, fechaSeleccionada, fechaInicio, fechaFin, sedeQuerySuffix],
+    queryKey: ['tramites-detallados', queryParams],
     queryFn: async () => {
       const response = await apiClient.get(`/reportes/tramites-detallados?${queryParams}`);
       return response.data;
     },
     enabled: reportesEnabled && reportesSeccion === 'detalle',
-    refetchInterval: reportesSeccion === 'detalle' ? 60000 : false,
+    refetchInterval: reportesSeccion === 'detalle' ? 120000 : false,
   });
 
   const { data: comparativoData } = useQuery({
-    queryKey: ['comparativo-sedes', fechaSeleccionada],
+    queryKey: ['comparativo-sedes', queryParams],
     queryFn: async () => {
-      const response = await apiClient.get(`/reportes/comparativo-sedes?fecha=${fechaSeleccionada}`);
+      const response = await apiClient.get(`/reportes/comparativo-sedes?${queryParams}`);
       return response.data as {
         fecha: string;
         sedes: Array<{
@@ -655,39 +685,33 @@ export default function ReportesPage() {
         }>;
       };
     },
-    enabled: reportesEnabled && reportesSeccion === 'resumen' && modoVista === 'dia' && puedeElegirSedeReporte,
-    refetchInterval: reportesSeccion === 'resumen' ? 60000 : false,
+    enabled: reportesEnabled && reportesSeccion === 'resumen' && puedeElegirSedeReporte,
+    refetchInterval: reportesSeccion === 'resumen' ? 120000 : false,
   });
 
   const { data: operativoData } = useQuery({
-    queryKey: ['dashboard-operativo', modoVista, fechaSeleccionada, fechaInicio, fechaFin, sedeQuerySuffix],
+    queryKey: ['dashboard-operativo', queryParams],
     queryFn: () =>
       reportesApi.getDashboardOperativo({
         modoVista,
         fechaSeleccionada,
-        fechaInicio,
-        fechaFin,
+        fechaInicio: aplicadoInicio,
+        fechaFin: aplicadoHasta,
         sedeQuerySuffix,
       }),
     enabled: reportesEnabled && reportesSeccion === 'operacion',
-    refetchInterval: reportesSeccion === 'operacion' ? 60000 : false,
+    refetchInterval: reportesSeccion === 'operacion' ? 120000 : false,
   });
-
-  const agendamientoQueryParams = useMemo(() => {
-    return modoVista === 'rango'
-      ? `fecha_inicio=${fechaInicio}&fecha_fin=${fechaFin}`
-      : `fecha=${fechaSeleccionada}`;
-  }, [modoVista, fechaInicio, fechaFin, fechaSeleccionada]);
 
   const {
     data: agendamientoMetricas,
     isFetching: isFetchingAgendamiento,
     isError: isErrorAgendamiento,
   } = useQuery<AgendamientoMetricasResponse>({
-    queryKey: ['reportes-agendamiento-metricas', agendamientoQueryParams],
-    queryFn: () => reportesApi.getAgendamientoMetricas(agendamientoQueryParams),
+    queryKey: ['reportes-agendamiento-metricas', queryParams],
+    queryFn: () => reportesApi.getAgendamientoMetricas(queryParams),
     enabled: reportesEnabled && reportesSeccion === 'citas',
-    refetchInterval: reportesSeccion === 'citas' ? 60000 : false,
+    refetchInterval: reportesSeccion === 'citas' ? 120000 : false,
   });
 
   const {
@@ -698,7 +722,7 @@ export default function ReportesPage() {
     queryKey: ['reportes-cierres-caja', cierresCajaQueryString, reportesSeccion],
     queryFn: () => reportesApi.getCierresCaja(cierresCajaQueryString),
     enabled: reportesEnabled && reportesSeccion === 'cierres',
-    refetchInterval: reportesSeccion === 'cierres' ? 60000 : false,
+    refetchInterval: reportesSeccion === 'cierres' ? 120000 : false,
   });
 
   const {
@@ -712,7 +736,7 @@ export default function ReportesPage() {
       return response.data as ProvisionIvaData;
     },
     enabled: reportesEnabled && reportesSeccion === 'provisiones',
-    refetchInterval: reportesSeccion === 'provisiones' ? 60000 : false,
+    refetchInterval: reportesSeccion === 'provisiones' ? 120000 : false,
   });
 
   const marcarProvisionIvaMutation = useMutation({
@@ -723,8 +747,8 @@ export default function ReportesPage() {
         sucursal_id?: string;
         consolidar_todas?: boolean;
       } = {
-        fecha_inicio: modoVista === 'rango' ? fechaInicio : fechaSeleccionada,
-        fecha_fin: modoVista === 'rango' ? fechaFin : fechaSeleccionada,
+        fecha_inicio: periodoConsultaInicio,
+        fecha_fin: periodoConsultaHasta,
       };
       if (puedeElegirSedeReporte) {
         if (reporteSedeScope === 'todas') {
@@ -792,7 +816,7 @@ export default function ReportesPage() {
     queryKey: ['reportes-facturacion-contingencia', contingenciaParams, reportesSeccion],
     queryFn: () => reportesApi.getFacturacionContingencia(contingenciaParams),
     enabled: reportesEnabled && reportesSeccion === 'contingencia',
-    refetchInterval: reportesSeccion === 'contingencia' ? 60000 : false,
+    refetchInterval: reportesSeccion === 'contingencia' ? 120000 : false,
   });
 
   const emitirFacturaContingenciaMutation = useMutation({
@@ -1005,7 +1029,7 @@ export default function ReportesPage() {
   // Función para exportar a CSV
   const exportarCSV = (datos: any[], nombreArchivo: string) => {
     const periodoArchivo = modoVista === 'rango'
-      ? `${fechaInicio}_a_${fechaFin}`
+      ? `${aplicadoInicio}_a_${aplicadoHasta}`
       : fechaSeleccionada;
 
     if (!datos || datos.length === 0) return;
@@ -1232,24 +1256,6 @@ export default function ReportesPage() {
     }
   };
 
-  if (dashboardEnabled && isLoading) {
-    return (
-      <Layout title="Reportes">
-        <LoadingSpinner message="Cargando panel de reportes..." />
-      </Layout>
-    );
-  }
-
-  if (dashboardEnabled && (isError || !data)) {
-    return (
-      <Layout title="Reportes">
-        <div className="bg-red-50 border border-red-200 rounded-lg p-6">
-          <p className="text-red-800 font-bold">No fue posible cargar los datos del dashboard.</p>
-        </div>
-      </Layout>
-    );
-  }
-
   const resumen = data?.resumen ?? {
     total_ingresos_dia: 0,
     total_egresos_dia: 0,
@@ -1262,232 +1268,255 @@ export default function ReportesPage() {
     tesoreria: { ingresos: 0, egresos: 0, saldo: 0 },
   };
   const grafica_ingresos_7_dias = data?.grafica_ingresos_7_dias ?? [];
+  const dashboardDelPeriodo = !!data && data.fecha === periodoActual;
+  const labelPeriodoCorto = esRango ? 'del periodo' : 'del día';
 
   return (
-    <Layout title="Reportes - Dashboard General">
+    <Layout title="Reportes">
       <div className="space-y-6">
-        {/* Header */}
-        <div className="flex justify-between items-center">
-          <div>
-            <h2 className="text-3xl font-bold text-slate-900 mb-2 flex items-center gap-3">
-              <BarChart3 className="w-8 h-8 text-primary-600" />
-              Dashboard General del CDA
-            </h2>
-            <p className="text-slate-600">
-              Resumen consolidado de todos los módulos
-            </p>
-            <p className="mt-1 text-sm text-primary-700 font-medium">
-              Periodo aplicado: {periodoActual}
-            </p>
-          </div>
-
-          {/* Controles de Fecha y Exportación */}
-          <div className="flex items-end gap-4">
-            {/* Selector de Modo */}
+        <div className="section-card overflow-hidden">
+          <div className="flex flex-wrap items-start justify-between gap-3 px-4 pt-4 pb-3 sm:px-6">
             <div>
-              <label className="block text-sm font-semibold text-gray-700 mb-2">
-                Modo:
-              </label>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setModoVista('dia')}
-                  className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                    modoVista === 'dia' 
-                      ? 'bg-blue-600 text-white shadow-md' 
-                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                  }`}
-                >
-                  Día
-                </button>
-                <button
-                  onClick={() => setModoVista('rango')}
-                  className={`px-4 py-2 rounded-lg font-semibold transition-all ${
-                    modoVista === 'rango' 
-                      ? 'bg-blue-600 text-white shadow-md' 
-                      : 'bg-gray-200 text-gray-700 hover:bg-gray-300'
-                  }`}
-                >
-                  Rango
-                </button>
-              </div>
+              <h2 className="module-hero-title mb-1">
+                <BarChart3 className="h-7 w-7 text-primary-600" />
+                Reportes
+              </h2>
+              <p className="module-hero-subtitle">
+                Periodo aplicado: <span className="font-mono font-medium text-slate-800">{periodoActual}</span>
+              </p>
             </div>
-
-            {/* Selector de Fecha(s) */}
-            {modoVista === 'dia' ? (
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Fecha:
-                </label>
-                <input
-                  type="date"
-                  value={fechaSeleccionada}
-                  onChange={(e) => setFechaSeleccionada(e.target.value)}
-                  max={maxFechaReportes}
-                  className="px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                />
-              </div>
-            ) : (
-              <>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Desde:
-                  </label>
-                  <input
-                    type="date"
-                    value={fechaInicio}
-                    onChange={(e) => setFechaInicio(e.target.value)}
-                    max={maxFechaReportes}
-                    className="px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                </div>
-                <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">
-                    Hasta:
-                  </label>
-                  <input
-                    type="date"
-                    value={fechaFin}
-                    onChange={(e) => setFechaFin(e.target.value)}
-                    max={maxFechaReportes}
-                    min={fechaInicio}
-                    className="px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-                  />
-                </div>
-              </>
-            )}
-
-            {/* Atajos rápidos en modo rango */}
-            {modoVista === 'rango' && (
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Atajos:
-                </label>
-                <div className="flex gap-2">
-                  <button
-                    onClick={() => {
-                      const hoy = new Date();
-                      const hace7dias = new Date(hoy);
-                      hace7dias.setDate(hace7dias.getDate() - 7);
-                      setFechaInicio(formatLocalDate(hace7dias));
-                      setFechaFin(formatLocalDate(hoy));
-                    }}
-                    className="px-3 py-2 bg-purple-100 hover:bg-purple-200 text-purple-800 text-sm font-semibold rounded transition"
-                  >
-                    Últimos 7 días
-                  </button>
-                  <button
-                    onClick={() => {
-                      const hoy = new Date();
-                      const hace15dias = new Date(hoy);
-                      hace15dias.setDate(hace15dias.getDate() - 15);
-                      setFechaInicio(formatLocalDate(hace15dias));
-                      setFechaFin(formatLocalDate(hoy));
-                    }}
-                    className="px-3 py-2 bg-purple-100 hover:bg-purple-200 text-purple-800 text-sm font-semibold rounded transition"
-                  >
-                    Últimos 15 días
-                  </button>
-                  <button
-                    onClick={() => {
-                      const hoy = new Date();
-                      const hace30dias = new Date(hoy);
-                      hace30dias.setDate(hace30dias.getDate() - 30);
-                      setFechaInicio(formatLocalDate(hace30dias));
-                      setFechaFin(formatLocalDate(hoy));
-                    }}
-                    className="px-3 py-2 bg-purple-100 hover:bg-purple-200 text-purple-800 text-sm font-semibold rounded transition"
-                  >
-                    Últimos 30 días
-                  </button>
-                  <button
-                    onClick={() => {
-                      const hoy = new Date();
-                      const primerDiaMes = new Date(hoy.getFullYear(), hoy.getMonth(), 1);
-                      setFechaInicio(formatLocalDate(primerDiaMes));
-                      setFechaFin(formatLocalDate(hoy));
-                    }}
-                    className="px-3 py-2 bg-purple-100 hover:bg-purple-200 text-purple-800 text-sm font-semibold rounded transition"
-                  >
-                    Este mes
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {puedeElegirSedeReporte && (
-              <div>
-                <label className="block text-sm font-semibold text-gray-700 mb-2">
-                  Alcance reporte:
-                </label>
-                <select
-                  className="px-4 py-2 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent min-w-[220px]"
-                  value={
-                    reporteSedeScope === 'sucursal' && reporteSedeId
-                      ? `s:${reporteSedeId}`
-                      : reporteSedeScope
-                  }
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    if (v === 'activa' || v === 'todas') {
-                      setReporteSedeScope(v);
-                      setReporteSedeId('');
-                    } else if (v.startsWith('s:')) {
-                      setReporteSedeScope('sucursal');
-                      setReporteSedeId(v.slice(2));
-                    }
-                  }}
-                >
-                  <option value="activa">Sede activa (selector)</option>
-                  <option value="todas">Todas las sedes</option>
-                  {(tenantUser?.sucursales || []).map((s) => (
-                    <option key={s.id} value={`s:${s.id}`}>
-                      {s.nombre}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
             <button
+              type="button"
+              title="Descarga un CSV con ingresos, egresos, utilidad, trámites y saldo actual del periodo. No incluye el listado de movimientos."
               onClick={() => {
-                // Exportar resumen consolidado
+                if (!dashboardDelPeriodo) return;
                 const resumenCompleto = [
-                  { 
-                    fecha: modoVista === 'rango' ? `${fechaInicio} a ${fechaFin}` : fechaSeleccionada,
-                    ingresos_dia: resumen.total_ingresos_dia,
-                    egresos_dia: resumen.total_egresos_dia,
-                    utilidad_dia: resumen.utilidad_dia,
-                    saldo_total: resumen.saldo_total,
+                  {
+                    fecha: periodoActual,
+                    ingresos_periodo: resumen.total_ingresos_dia,
+                    egresos_periodo: resumen.total_egresos_dia,
+                    utilidad_periodo: resumen.utilidad_dia,
+                    saldo_actual_caja_tesoreria: resumen.saldo_total,
                     tramites_atendidos: resumen.tramites_atendidos,
                     ingresos_caja: desglose_modulos.caja.ingresos,
                     egresos_caja: desglose_modulos.caja.egresos,
-                    saldo_caja: desglose_modulos.caja.saldo,
+                    saldo_actual_caja: desglose_modulos.caja.saldo,
                     ingresos_tesoreria: desglose_modulos.tesoreria.ingresos,
                     egresos_tesoreria: desglose_modulos.tesoreria.egresos,
-                    saldo_tesoreria: desglose_modulos.tesoreria.saldo
-                  }
+                    saldo_actual_tesoreria: desglose_modulos.tesoreria.saldo,
+                  },
                 ];
                 exportarCSV(
                   resumenCompleto,
                   modoVista === 'rango' ? 'reporte_completo_rango' : 'reporte_completo_dia',
                 );
               }}
-              disabled={rangoInvalido}
+              disabled={consultaInvalida || !dashboardDelPeriodo || (isLoading && !data)}
               className="flex items-center gap-2 btn-primary-solid disabled:bg-slate-300 disabled:cursor-not-allowed"
             >
-              <Download className="w-5 h-5" />
-              Exportar Reporte Completo
+              <Download className="h-5 w-5" />
+              Exportar resumen
             </button>
           </div>
-        </div>
+
+          <div className="space-y-3 border-t border-slate-100 px-4 py-3 sm:px-6">
+            <div className="flex flex-wrap items-end justify-between gap-3">
+              <div className="flex flex-wrap items-end gap-3">
+                <div>
+                  <span className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                    Periodo
+                  </span>
+                  <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
+                    <button
+                      type="button"
+                      onClick={() => cambiarModoVista('dia')}
+                      className={`rounded-md px-3 py-1.5 text-sm font-semibold ${
+                        modoVista === 'dia'
+                          ? 'bg-white text-slate-900 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Día
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => cambiarModoVista('rango')}
+                      className={`rounded-md px-3 py-1.5 text-sm font-semibold ${
+                        modoVista === 'rango'
+                          ? 'bg-white text-slate-900 shadow-sm'
+                          : 'text-slate-600 hover:text-slate-900'
+                      }`}
+                    >
+                      Rango
+                    </button>
+                  </div>
+                </div>
+
+                {modoVista === 'dia' ? (
+                  <div>
+                    <label
+                      className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+                      htmlFor="reporte-fecha"
+                    >
+                      Fecha
+                    </label>
+                    <input
+                      id="reporte-fecha"
+                      type="date"
+                      value={fechaSeleccionada}
+                      onChange={(e) => setFechaSeleccionada(e.target.value)}
+                      max={maxFechaReportes}
+                      className="input-corporate w-auto min-w-[11.5rem]"
+                    />
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <label
+                        className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+                        htmlFor="reporte-desde"
+                      >
+                        Desde
+                      </label>
+                      <input
+                        id="reporte-desde"
+                        type="date"
+                        value={fechaInicio}
+                        onChange={(e) => setFechaInicio(e.target.value)}
+                        max={maxFechaReportes}
+                        className="input-corporate w-auto min-w-[11.5rem]"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+                        htmlFor="reporte-hasta"
+                      >
+                        Hasta
+                      </label>
+                      <input
+                        id="reporte-hasta"
+                        type="date"
+                        value={fechaFin}
+                        onChange={(e) => setFechaFin(e.target.value)}
+                        max={maxFechaReportes}
+                        min={fechaInicio}
+                        className="input-corporate w-auto min-w-[11.5rem]"
+                      />
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => aplicarRango(fechaInicio, fechaFin)}
+                      disabled={rangoInvalido || !rangoPendiente}
+                      className="btn-primary-solid disabled:bg-slate-300 disabled:cursor-not-allowed"
+                    >
+                      Aplicar
+                    </button>
+                  </>
+                )}
+              </div>
+
+              {puedeElegirSedeReporte && (
+                <div>
+                  <label
+                    className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+                    htmlFor="reporte-sede"
+                  >
+                    Sede
+                  </label>
+                  <select
+                    id="reporte-sede"
+                    className="input-corporate min-w-[220px]"
+                    value={
+                      reporteSedeScope === 'sucursal' && reporteSedeId
+                        ? `s:${reporteSedeId}`
+                        : reporteSedeScope
+                    }
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === 'activa' || v === 'todas') {
+                        setReporteSedeScope(v);
+                        setReporteSedeId('');
+                      } else if (v.startsWith('s:')) {
+                        setReporteSedeScope('sucursal');
+                        setReporteSedeId(v.slice(2));
+                      }
+                    }}
+                  >
+                    <option value="activa">Sede activa (selector)</option>
+                    <option value="todas">Todas las sedes</option>
+                    {(tenantUser?.sucursales || []).map((s) => (
+                      <option key={s.id} value={`s:${s.id}`}>
+                        {s.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-wrap gap-2">
+              {modoVista === 'dia' ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setFechaSeleccionada(colombiaTodayYmd())}
+                    className="btn-chip"
+                  >
+                    Hoy
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setFechaSeleccionada(addCalendarDaysYmd(colombiaTodayYmd(), -1))}
+                    className="btn-chip"
+                  >
+                    Ayer
+                  </button>
+                </>
+              ) : (
+                <>
+                  <button type="button" onClick={() => aplicarAtajoDias(7)} className="btn-chip">
+                    7 días
+                  </button>
+                  <button type="button" onClick={() => aplicarAtajoDias(15)} className="btn-chip">
+                    15 días
+                  </button>
+                  <button type="button" onClick={() => aplicarAtajoDias(30)} className="btn-chip">
+                    30 días
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const hasta = colombiaTodayYmd();
+                      aplicarRango(firstDayOfMonthYmd(hasta), hasta);
+                    }}
+                    className="btn-chip"
+                  >
+                    Este mes
+                  </button>
+                </>
+              )}
+            </div>
+          </div>
 
         {rangoInvalido && (
-          <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+          <div className="mx-4 mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-800">
             La fecha inicial no puede ser mayor que la fecha final.
           </div>
         )}
+        {rangoPendiente && !rangoInvalido && (
+          <div className="mx-4 mb-3 rounded-lg border border-sky-200 bg-sky-50 px-4 py-2 text-sm text-sky-900">
+            Hay un rango distinto al aplicado. Pulse <strong>Aplicar</strong> (o un atajo) para consultar esas fechas.
+            Ahora se muestra: <span className="font-mono">{periodoActual}</span>.
+          </div>
+        )}
+        {dashboardEnabled && isError && (
+          <div className="mx-4 mb-3 rounded-lg border border-red-200 bg-red-50 px-4 py-2 text-sm text-red-800">
+            No fue posible cargar los KPIs del periodo. El resto del módulo sigue disponible.
+          </div>
+        )}
 
-        <div className="sticky top-0 z-10 rounded-xl border border-slate-200/90 bg-white/95 shadow-sm backdrop-blur-sm supports-[backdrop-filter]:bg-white/90">
+          <div className="sticky top-0 z-10 bg-white/95 backdrop-blur-sm supports-[backdrop-filter]:bg-white/90">
           <div
             className="flex overflow-x-auto gap-0 border-b border-slate-100 px-1 pt-1 sm:px-2"
             role="tablist"
@@ -1517,35 +1546,34 @@ export default function ReportesPage() {
             {REPORTES_SECCIONES.find((x) => x.id === reportesSeccion)?.hint}
           </p>
         </div>
+        </div>
 
         {reportesSeccion === 'resumen' && (
         <>
-        {/* Tarjetas de Resumen Principal - Solo en modo día */}
-        {modoVista === 'dia' && (
+        {dashboardEnabled && (isLoading || isFetchingDashboard) && !data && (
+          <p className="text-sm text-slate-500">Cargando KPIs del periodo…</p>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4">
-          {/* Ingresos del Día */}
           <div className="card-pos bg-gradient-to-br from-green-50 to-green-100 border-2 border-green-300">
             <p className="text-sm text-green-700 mb-1 flex items-center gap-2">
               <ArrowUpCircle className="w-4 h-4" />
-              Ingresos del Día
+              Ingresos {labelPeriodoCorto}
             </p>
             <p className="text-3xl font-bold text-green-900">
               {formatCOP(resumen.total_ingresos_dia)}
             </p>
           </div>
 
-          {/* Egresos del Día */}
           <div className="card-pos bg-gradient-to-br from-red-50 to-red-100 border-2 border-red-300">
             <p className="text-sm text-red-700 mb-1 flex items-center gap-2">
               <ArrowDownCircle className="w-4 h-4" />
-              Egresos del Día
+              Egresos {labelPeriodoCorto}
             </p>
             <p className="text-3xl font-bold text-red-900">
               {formatCOP(resumen.total_egresos_dia)}
             </p>
           </div>
 
-          {/* Utilidad del Día */}
           <div className={`card-pos border-2 ${
             resumen.utilidad_dia >= 0 
               ? 'bg-gradient-to-br from-blue-50 to-blue-100 border-blue-300' 
@@ -1553,26 +1581,24 @@ export default function ReportesPage() {
           }`}>
             <p className={`text-sm mb-1 flex items-center gap-2 ${resumen.utilidad_dia >= 0 ? 'text-blue-700' : 'text-orange-700'}`}>
               {resumen.utilidad_dia >= 0 ? <TrendingUp className="w-4 h-4" /> : <TrendingDown className="w-4 h-4" />}
-              Utilidad del Día
+              Utilidad {labelPeriodoCorto}
             </p>
             <p className={`text-3xl font-bold ${resumen.utilidad_dia >= 0 ? 'text-blue-900' : 'text-orange-900'}`}>
               {formatCOP(resumen.utilidad_dia)}
             </p>
           </div>
 
-          {/* Saldo Total */}
           <div className="card-pos bg-gradient-to-br from-purple-50 to-purple-100 border-2 border-purple-300">
             <p className="text-sm text-purple-700 mb-1 flex items-center gap-2">
               <Building2 className="w-4 h-4" />
-              Saldo Total
+              Saldo actual
             </p>
             <p className="text-3xl font-bold text-purple-900">
               {formatCOP(resumen.saldo_total)}
             </p>
-            <p className="text-xs text-purple-600 mt-1">Caja + Tesorería</p>
+            <p className="text-xs text-purple-600 mt-1">Caja + tesorería (posición de ahora, no del periodo)</p>
           </div>
 
-          {/* Trámites Atendidos */}
           <div className="card-pos bg-gradient-to-br from-yellow-50 to-yellow-100 border-2 border-yellow-300">
             <p className="text-sm text-yellow-700 mb-1 flex items-center gap-2">
               <FileText className="w-4 h-4" />
@@ -1581,12 +1607,11 @@ export default function ReportesPage() {
             <p className="text-3xl font-bold text-yellow-900">
               {resumen.tramites_atendidos}
             </p>
-            <p className="text-xs text-yellow-600 mt-1">Atendidos hoy</p>
+            <p className="text-xs text-yellow-600 mt-1">{esRango ? 'Registrados en el periodo' : 'Registrados el día'}</p>
           </div>
         </div>
-        )}
 
-        {modoVista === 'dia' && puedeElegirSedeReporte && (comparativoData?.sedes?.length ?? 0) > 0 && (
+        {puedeElegirSedeReporte && (comparativoData?.sedes?.length ?? 0) > 0 && (
           <div className="card-pos">
             <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
               <Building2 className="w-6 h-6 text-primary-600" />
@@ -1619,77 +1644,23 @@ export default function ReportesPage() {
           </div>
         )}
 
-        {/* Gráfica de Ingresos - Últimos 7 Días - Solo en modo día */}
-        {modoVista === 'dia' && (
         <div className="card-pos">
           <h3 className="text-xl font-bold text-gray-900 mb-4 flex items-center gap-2">
             <TrendingUp className="w-6 h-6 text-primary-600" />
-            Tendencia de Ingresos - Últimos 7 Días
+            Tendencia de ingresos — 7 días calendario hasta {periodoConsultaHasta}
           </h3>
+          <p className="text-xs text-slate-500 mb-3 -mt-2">
+            Cada barra es un día en hora de Colombia, no el rango completo seleccionado.
+          </p>
           <Suspense fallback={<div className="h-[300px] rounded-lg bg-slate-100 animate-pulse" />}>
             <ReportesIngresosChart data={grafica_ingresos_7_dias} />
           </Suspense>
         </div>
-        )}
-
-        {modoVista === 'rango' && !rangoInvalido && (
-          <div className="rounded-xl border border-slate-200 bg-gradient-to-br from-slate-50 to-white px-5 py-4 shadow-sm">
-            <p className="text-sm text-slate-700 leading-relaxed">
-              <span className="font-semibold text-slate-900">Vista Resumen en modo Rango.</span> Las tarjetas de KPI, el
-              comparativo por sede y la tendencia de 7 días están disponibles en{' '}
-              <span className="font-semibold">modo Día</span>. Para el periodo{' '}
-              <span className="font-mono text-slate-800">{periodoActual}</span> abre{' '}
-              <button
-                type="button"
-                className="font-semibold text-primary-700 underline decoration-primary-300 underline-offset-2 hover:no-underline"
-                onClick={() => setReportesSeccion('finanzas')}
-              >
-                Finanzas
-              </button>
-              ,{' '}
-              <button
-                type="button"
-                className="font-semibold text-primary-700 underline decoration-primary-300 underline-offset-2 hover:no-underline"
-                onClick={() => setReportesSeccion('operacion')}
-              >
-                Operación
-              </button>
-              ,{' '}
-              <button
-                type="button"
-                className="font-semibold text-primary-700 underline decoration-primary-300 underline-offset-2 hover:no-underline"
-                onClick={() => setReportesSeccion('citas')}
-              >
-                Citas
-              </button>{' '}
-              o{' '}
-              <button
-                type="button"
-                className="font-semibold text-primary-700 underline decoration-primary-300 underline-offset-2 hover:no-underline"
-                onClick={() => setReportesSeccion('detalle')}
-              >
-                Detalle
-              </button>
-              .
-            </p>
-          </div>
-        )}
         </>
         )}
 
         {reportesSeccion === 'finanzas' && (
         <>
-        {modoVista === 'rango' && !rangoInvalido && (
-          <div className="rounded-lg border border-amber-200/80 bg-amber-50/90 px-4 py-3 text-sm text-amber-950">
-            En <strong>modo Rango</strong>, los bloques de Caja y Tesorería siguen mostrando saldos del{' '}
-            <strong>dashboard diario</strong> (no se recalculan por el rango). Para el periodo{' '}
-            <span className="font-mono">{periodoActual}</span> usa los desgloses por concepto y por medio de pago, o
-            cambia a <strong>modo Día</strong> para alinear todo a una sola fecha.
-          </div>
-        )}
-
-        {/* Desglose por Módulo - Solo en modo día */}
-        {modoVista === 'dia' && (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Módulo Caja */}
           <div className="card-pos">
@@ -1697,6 +1668,9 @@ export default function ReportesPage() {
               <Wallet className="w-6 h-6 text-primary-600" />
               Módulo de Caja
             </h3>
+            <p className="text-xs text-slate-500 -mt-2 mb-3">
+              Ingresos y egresos {labelPeriodoCorto}. El saldo es la posición actual, no el del periodo.
+            </p>
             <div className="space-y-3">
               <div className="flex justify-between items-center p-3 bg-green-50 rounded-lg">
                 <span className="font-semibold text-gray-700">Ingresos</span>
@@ -1725,6 +1699,9 @@ export default function ReportesPage() {
               <Building2 className="w-6 h-6 text-primary-600" />
               Módulo de Tesorería
             </h3>
+            <p className="text-xs text-slate-500 -mt-2 mb-3">
+              Ingresos y egresos {labelPeriodoCorto}. El saldo es la posición actual, no el del periodo.
+            </p>
             <div className="space-y-3">
               <div className="flex justify-between items-center p-3 bg-green-50 rounded-lg">
                 <span className="font-semibold text-gray-700">Ingresos</span>
@@ -1747,7 +1724,6 @@ export default function ReportesPage() {
             </div>
           </div>
         </div>
-        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           <div className="card-pos">
@@ -1888,20 +1864,20 @@ export default function ReportesPage() {
                 Métricas de agendamiento
               </h3>
               <p className="text-sm text-slate-600 mt-1 max-w-3xl">
-                KPIs según la <span className="font-semibold">fecha y hora programada de la cita</span> dentro del
-                periodo <span className="font-semibold text-sky-800">«{agendamientoMetricas?.periodo ?? periodoActual}»</span>{' '}
-                (mismo filtro que arriba: Día o Rango). Alcance: <span className="font-semibold">todo el tenant</span>{' '}
-                (sin sede por cita en el modelo actual).
+                KPIs según la <span className="font-semibold">fecha y hora programada de la cita</span> en hora de
+                Colombia, dentro del periodo{' '}
+                <span className="font-semibold text-sky-800">«{agendamientoMetricas?.periodo ?? periodoActual}»</span>.
+                Respeta el alcance de sede del selector de arriba (sede activa, una sede o todas).
               </p>
               <p className="text-xs text-slate-500 mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
                 <span className="inline-flex items-center gap-1">
                   <TimerReset className="w-3.5 h-3.5" />
-                  Auto-actualización cada 60 s
+                  Auto-actualización cada 2 min en esta pestaña
                 </span>
                 <span>
                   Último cálculo:{' '}
                   {agendamientoMetricas?.fecha_generacion
-                    ? new Date(agendamientoMetricas.fecha_generacion).toLocaleString('es-CO')
+                    ? formatDateTime(agendamientoMetricas.fecha_generacion)
                     : '—'}
                 </span>
               </p>
@@ -1937,7 +1913,7 @@ export default function ReportesPage() {
                   exportarCSV(m.serie_diaria, `agendamiento_serie_${m.periodo.replace(/\s+/g, '_').replace(/[^a-zA-Z0-9_-]/g, '')}`);
                 }
               }}
-              disabled={rangoInvalido || !agendamientoMetricas}
+              disabled={consultaInvalida || !agendamientoMetricas}
               className="flex items-center gap-2 btn-corporate-muted disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
             >
               <Download className="w-4 h-4" />
@@ -2081,14 +2057,14 @@ export default function ReportesPage() {
                 Cierres de caja por cajero
               </h3>
               <p className="mt-1 max-w-3xl text-sm text-slate-600">
-                Listado según <strong>día de cierre</strong> en Colombia, alineado al periodo de arriba (
-                {modoVista === 'dia' ? `día ${fechaSeleccionada}` : `rango ${fechaInicio} → ${fechaFin}`}).
+                Listado según <strong>día de cierre</strong> en Colombia, alineado al periodo aplicado (
+                {periodoActual}).
                 Respeta el alcance de sede del encabezado (activa, una sede o todas).
               </p>
             </div>
             <button
               type="button"
-              disabled={rangoInvalido || cierresCajaRows.length === 0}
+              disabled={consultaInvalida || cierresCajaRows.length === 0}
               onClick={() => {
                 const filas = cierresCajaRows.map((r) => ({
                   cajero: r.cajero_nombre,
@@ -2211,7 +2187,7 @@ export default function ReportesPage() {
             <div className="flex shrink-0 items-center gap-2">
               <button
                 type="button"
-                disabled={rangoInvalido || (provisionIvaData?.ventas.length || 0) === 0 || marcarProvisionIvaMutation.isLoading}
+                disabled={consultaInvalida || (provisionIvaData?.ventas.length || 0) === 0 || marcarProvisionIvaMutation.isLoading}
                 onClick={() => marcarProvisionIvaMutation.mutate()}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-primary-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-primary-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -2220,7 +2196,7 @@ export default function ReportesPage() {
               </button>
               <button
                 type="button"
-                disabled={rangoInvalido || (provisionIvaData?.ventas.length || 0) === 0}
+                disabled={consultaInvalida || (provisionIvaData?.ventas.length || 0) === 0}
                 onClick={() => exportarCSV(provisionIvaData?.ventas || [], 'provisiones_iva')}
                 className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -2340,7 +2316,7 @@ export default function ReportesPage() {
             </div>
             <button
               type="button"
-              disabled={rangoInvalido || (facturacionContingenciaData?.items.length || 0) === 0}
+              disabled={consultaInvalida || (facturacionContingenciaData?.items.length || 0) === 0}
               onClick={() => exportarCSV(facturacionContingenciaData?.items || [], 'facturacion_contingencia')}
               className="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50"
             >
@@ -2588,7 +2564,7 @@ export default function ReportesPage() {
                   modoVista === 'rango' ? 'movimientos_rango' : 'movimientos_dia',
                 )
               }
-              disabled={rangoInvalido || movimientosFiltrados.length === 0}
+              disabled={consultaInvalida || movimientosFiltrados.length === 0}
               className="flex items-center gap-2 btn-success-solid disabled:bg-slate-300 disabled:cursor-not-allowed"
             >
               <Download className="w-5 h-5" />
@@ -2597,6 +2573,12 @@ export default function ReportesPage() {
           </div>
           {isFetchingMovimientos && (
             <p className="mb-3 text-sm text-slate-500">Actualizando movimientos...</p>
+          )}
+          {movimientosData?.truncado && (
+            <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+              Hay más de 4.000 movimientos en este periodo. Se muestran los primeros 4.000 (más antiguos primero).
+              Acote el rango o exporte por día para no perder filas.
+            </div>
           )}
 
           {/* Barra de Filtros */}
@@ -2968,7 +2950,7 @@ export default function ReportesPage() {
                   modoVista === 'rango' ? 'tramites_rango' : 'tramites_dia',
                 )
               }
-              disabled={rangoInvalido || (tramitesData?.tramites || []).length === 0}
+              disabled={consultaInvalida || (tramitesData?.tramites || []).length === 0}
               className="flex items-center gap-2 btn-primary-solid disabled:bg-slate-300 disabled:cursor-not-allowed"
             >
               <Download className="w-5 h-5" />
@@ -2977,6 +2959,11 @@ export default function ReportesPage() {
           </div>
           {isFetchingTramites && (
             <p className="mb-3 text-sm text-slate-500">Actualizando trámites...</p>
+          )}
+          {tramitesData?.truncado && (
+            <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
+              Hay más de 2.000 trámites en este periodo. Se muestran los primeros 2.000. Acote el rango para ver el resto.
+            </div>
           )}
           <div className="overflow-x-auto">
             <table className="min-w-full text-sm">

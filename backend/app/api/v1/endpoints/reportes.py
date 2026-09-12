@@ -268,17 +268,80 @@ def _calcular_iva_causado_vehiculo(
     return (base, iva, excluido.quantize(Decimal("0.01")), fuente)
 
 
+def _ingresos_serie_ultimos_dias(
+    db: Session,
+    tid,
+    scope_sid: Optional[UUID],
+    fecha_hasta: date,
+    n: int = 7,
+) -> list[dict]:
+    """Ingresos caja+tesorería agrupados por día calendario Colombia (2 consultas, no un par por día)."""
+    n = max(1, min(n, 31))
+    fecha_desde = fecha_hasta - timedelta(days=n - 1)
+    d0, _, _ = resolve_report_date_window(fecha=fecha_desde, fecha_inicio=None, fecha_fin=None)
+    _, d1, _ = resolve_report_date_window(fecha=fecha_hasta, fecha_inicio=None, fecha_fin=None)
+    buckets: dict[date, float] = {
+        fecha_desde + timedelta(days=i): 0.0 for i in range((fecha_hasta - fecha_desde).days + 1)
+    }
+    caja_rows = (
+        db.query(MovimientoCaja.created_at, MovimientoCaja.monto)
+        .filter(
+            _mc_scope(
+                db,
+                tid,
+                scope_sid,
+                MovimientoCaja.created_at >= d0,
+                MovimientoCaja.created_at <= d1,
+                MovimientoCaja.monto > 0,
+            )
+        )
+        .all()
+    )
+    tes_rows = (
+        db.query(MovimientoTesoreria.fecha_movimiento, MovimientoTesoreria.monto)
+        .filter(
+            _mt_scope(
+                tid,
+                scope_sid,
+                MovimientoTesoreria.fecha_movimiento >= d0,
+                MovimientoTesoreria.fecha_movimiento <= d1,
+                MovimientoTesoreria.monto > 0,
+            )
+        )
+        .all()
+    )
+    for ts, monto in list(caja_rows) + list(tes_rows):
+        local = _as_report_tz(ts)
+        if local is None:
+            continue
+        key = local.date()
+        if key in buckets:
+            buckets[key] += float(monto or 0)
+    return [
+        {
+            "fecha": dia.strftime("%Y-%m-%d"),
+            "dia_semana": dia.strftime("%a"),
+            "ingresos": buckets[dia],
+        }
+        for dia in sorted(buckets.keys())
+    ]
+
+
 @router.get("/dashboard-general")
 def obtener_dashboard_general(
     request: Request,
-    fecha: Optional[date] = Query(None, description="Fecha específica (default: hoy)"),
+    fecha: Optional[date] = Query(None, description="Fecha específica (default: hoy Colombia)"),
+    fecha_inicio: Optional[date] = Query(None, description="Inicio de rango (Colombia)"),
+    fecha_fin: Optional[date] = Query(None, description="Fin de rango (Colombia)"),
     sucursal_id: Optional[UUID] = Query(None, description="Filtrar por sede (admin/contador)"),
     consolidar_todas: bool = Query(False, description="Incluir todas las sedes"),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_contador_or_admin),
 ):
     """
-    Dashboard General del CDA - Consolidado de todos los módulos
+    Dashboard General del CDA - Consolidado de todos los módulos.
+    Ingresos/egresos/trámites usan el día o el rango en America/Bogota.
+    saldo_total es posición actual (histórico), no del periodo.
     """
     payload = getattr(request.state, "tenant_jwt_payload", None) or {}
     scope_sid = resolve_reporte_sucursal_id(
@@ -290,20 +353,29 @@ def obtener_dashboard_general(
     )
     tid = current_user.tenant_id
 
-    fecha_inicio, fecha_fin, etiqueta_fecha = resolve_report_date_window(
-        fecha=fecha,
-        fecha_inicio=None,
-        fecha_fin=None,
-    )
-    fecha_base = datetime.strptime(etiqueta_fecha, "%Y-%m-%d").date()
+    try:
+        fecha_inicio_dt, fecha_fin_dt, etiqueta_fecha = resolve_report_date_window(
+            fecha=fecha,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+    if fecha_inicio and fecha_fin:
+        fecha_base = fecha_fin
+    elif fecha is not None:
+        fecha_base = fecha
+    else:
+        fecha_base = datetime.now(REPORT_TZ).date()
 
     ingresos_caja = db.query(func.sum(MovimientoCaja.monto)).filter(
         _mc_scope(
             db,
             tid,
             scope_sid,
-            MovimientoCaja.created_at >= fecha_inicio,
-            MovimientoCaja.created_at <= fecha_fin,
+            MovimientoCaja.created_at >= fecha_inicio_dt,
+            MovimientoCaja.created_at <= fecha_fin_dt,
             MovimientoCaja.monto > 0,
         )
     ).scalar() or Decimal(0)
@@ -312,8 +384,8 @@ def obtener_dashboard_general(
         _mt_scope(
             tid,
             scope_sid,
-            MovimientoTesoreria.fecha_movimiento >= fecha_inicio,
-            MovimientoTesoreria.fecha_movimiento <= fecha_fin,
+            MovimientoTesoreria.fecha_movimiento >= fecha_inicio_dt,
+            MovimientoTesoreria.fecha_movimiento <= fecha_fin_dt,
             MovimientoTesoreria.monto > 0,
         )
     ).scalar() or Decimal(0)
@@ -325,8 +397,8 @@ def obtener_dashboard_general(
             db,
             tid,
             scope_sid,
-            MovimientoCaja.created_at >= fecha_inicio,
-            MovimientoCaja.created_at <= fecha_fin,
+            MovimientoCaja.created_at >= fecha_inicio_dt,
+            MovimientoCaja.created_at <= fecha_fin_dt,
             MovimientoCaja.monto < 0,
         )
     ).scalar() or Decimal(0)
@@ -335,8 +407,8 @@ def obtener_dashboard_general(
         _mt_scope(
             tid,
             scope_sid,
-            MovimientoTesoreria.fecha_movimiento >= fecha_inicio,
-            MovimientoTesoreria.fecha_movimiento <= fecha_fin,
+            MovimientoTesoreria.fecha_movimiento >= fecha_inicio_dt,
+            MovimientoTesoreria.fecha_movimiento <= fecha_fin_dt,
             MovimientoTesoreria.monto < 0,
         )
     ).scalar() or Decimal(0)
@@ -359,53 +431,15 @@ def obtener_dashboard_general(
             _vp_scope(
                 tid,
                 scope_sid,
-                VehiculoProceso.fecha_registro >= fecha_inicio,
-                VehiculoProceso.fecha_registro <= fecha_fin,
+                VehiculoProceso.fecha_registro >= fecha_inicio_dt,
+                VehiculoProceso.fecha_registro <= fecha_fin_dt,
             )
         )
         .scalar()
         or 0
     )
 
-    ingresos_7_dias = []
-    for i in range(6, -1, -1):
-        dia = fecha_base - timedelta(days=i)
-        dia_inicio, dia_fin, _ = resolve_report_date_window(
-            fecha=dia,
-            fecha_inicio=None,
-            fecha_fin=None,
-        )
-
-        ing_caja = db.query(func.sum(MovimientoCaja.monto)).filter(
-            _mc_scope(
-                db,
-                tid,
-                scope_sid,
-                MovimientoCaja.created_at >= dia_inicio,
-                MovimientoCaja.created_at <= dia_fin,
-                MovimientoCaja.monto > 0,
-            )
-        ).scalar() or Decimal(0)
-
-        ing_tesoreria = db.query(func.sum(MovimientoTesoreria.monto)).filter(
-            _mt_scope(
-                tid,
-                scope_sid,
-                MovimientoTesoreria.fecha_movimiento >= dia_inicio,
-                MovimientoTesoreria.fecha_movimiento <= dia_fin,
-                MovimientoTesoreria.monto > 0,
-            )
-        ).scalar() or Decimal(0)
-
-        total_dia = float(ing_caja + ing_tesoreria)
-
-        ingresos_7_dias.append(
-            {
-                "fecha": dia.strftime("%Y-%m-%d"),
-                "dia_semana": dia.strftime("%a"),
-                "ingresos": total_dia,
-            }
-        )
+    ingresos_7_dias = _ingresos_serie_ultimos_dias(db, tid, scope_sid, fecha_base, 7)
 
     desglose_modulos = {
         "caja": {
@@ -421,7 +455,7 @@ def obtener_dashboard_general(
     }
 
     return {
-        "fecha": fecha_base.strftime("%Y-%m-%d"),
+        "fecha": etiqueta_fecha,
         "resumen": {
             "total_ingresos_dia": total_ingresos_dia,
             "total_egresos_dia": total_egresos_dia,
@@ -437,19 +471,23 @@ def obtener_dashboard_general(
 
 @router.get("/comparativo-sedes")
 def comparativo_sedes(
-    fecha: Optional[date] = Query(None, description="Día de referencia (default: hoy)"),
+    fecha: Optional[date] = Query(None, description="Día de referencia (default: hoy Colombia)"),
+    fecha_inicio: Optional[date] = Query(None),
+    fecha_fin: Optional[date] = Query(None),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_contador_or_admin),
 ):
     """
-    Ranking simple por sede: trámites registrados e ingresos (caja+tesorería) en el día.
+    Ranking simple por sede: trámites registrados e ingresos (caja+tesorería) en el día o rango.
     """
-    d0, d1, etiqueta_fecha = resolve_report_date_window(
-        fecha=fecha,
-        fecha_inicio=None,
-        fecha_fin=None,
-    )
-    fecha_base = datetime.strptime(etiqueta_fecha, "%Y-%m-%d").date()
+    try:
+        d0, d1, etiqueta_fecha = resolve_report_date_window(
+            fecha=fecha,
+            fecha_inicio=fecha_inicio,
+            fecha_fin=fecha_fin,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
     tid = current_user.tenant_id
 
     sedes = db.query(Sucursal).filter(Sucursal.tenant_id == tid, Sucursal.activa.is_(True)).all()
@@ -763,6 +801,7 @@ def obtener_movimientos_detallados(
             )
         )
         .order_by(MovimientoCaja.created_at.asc())
+        .limit(4001)
         .all()
     )
 
@@ -864,6 +903,7 @@ def obtener_movimientos_detallados(
             )
         )
         .order_by(MovimientoTesoreria.fecha_movimiento.asc())
+        .limit(4001)
         .all()
     )
 
@@ -1123,12 +1163,18 @@ def obtener_movimientos_detallados(
     # Combinar y ordenar por hora
     todos_movimientos = lista_caja + lista_tesoreria
     todos_movimientos.sort(key=lambda x: x["_sort_ts"])
+    truncado = False
+    max_filas = 4000
+    if len(todos_movimientos) > max_filas:
+        todos_movimientos = todos_movimientos[:max_filas]
+        truncado = True
     for mov in todos_movimientos:
         mov.pop("_sort_ts", None)
     
     return {
         "fecha": etiqueta_fecha,
         "total_movimientos": len(todos_movimientos),
+        "truncado": truncado,
         "movimientos": todos_movimientos
     }
 
@@ -1640,8 +1686,12 @@ def obtener_tramites_detallados(
             )
         )
         .order_by(VehiculoProceso.fecha_registro.asc())
+        .limit(2001)
         .all()
     )
+    tramites_truncado = len(vehiculos) > 2000
+    if tramites_truncado:
+        vehiculos = vehiculos[:2000]
 
     corrections_map: dict[UUID, FacturaCorreccion] = {}
     veh_ids = [v.id for v in vehiculos if v and v.id]
@@ -1716,6 +1766,7 @@ def obtener_tramites_detallados(
     return {
         "fecha": etiqueta_fecha,
         "total_tramites": len(lista_tramites),
+        "truncado": tramites_truncado,
         "resumen": {
             "total_rtm": total_rtm,
             "total_soat": total_soat,
@@ -1749,19 +1800,19 @@ def obtener_resumen_mensual(
     )
     tid = current_user.tenant_id
 
-    # Si no se especifica, usar mes actual
+    # Si no se especifica, usar mes actual en Colombia (no date.today() del servidor UTC).
     if not mes or not anio:
-        hoy = date.today()
+        hoy = datetime.now(REPORT_TZ).date()
         mes = hoy.month
         anio = hoy.year
 
-    # Primer y último día del mes
-    fecha_inicio = datetime(anio, mes, 1)
-    if mes == 12:
-        fecha_fin = datetime(anio + 1, 1, 1) - timedelta(seconds=1)
-    else:
-        fecha_fin = datetime(anio, mes + 1, 1) - timedelta(seconds=1)
-    dias_mes = monthrange(anio, mes)[1]
+    ultimo_dia = monthrange(anio, mes)[1]
+    fecha_inicio, fecha_fin, _ = resolve_report_date_window(
+        fecha=None,
+        fecha_inicio=date(anio, mes, 1),
+        fecha_fin=date(anio, mes, ultimo_dia),
+    )
+    dias_mes = ultimo_dia
 
     # Ingresos del mes
     ingresos_caja = db.query(func.sum(MovimientoCaja.monto)).filter(
@@ -1838,7 +1889,7 @@ def obtener_resumen_mensual(
     }
 
 
-# --- Métricas de agendamiento (tenant completo; las citas no llevan sede en el modelo actual) ---
+# --- Métricas de agendamiento (filtro de sede vía Appointment.sucursal_id) ---
 
 
 class AgendamientoMetricasPorEstado(BaseModel):
@@ -1883,15 +1934,18 @@ class AgendamientoMetricasResponse(BaseModel):
 
 @router.get("/agendamiento-metricas", response_model=AgendamientoMetricasResponse)
 def obtener_agendamiento_metricas(
+    request: Request,
     fecha: Optional[date] = Query(None, description="Día único (default hoy si no hay rango)"),
     fecha_inicio: Optional[date] = Query(None),
     fecha_fin: Optional[date] = Query(None),
+    sucursal_id: Optional[UUID] = Query(None),
+    consolidar_todas: bool = Query(False),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_contador_or_admin),
 ):
     """
-    KPIs de citas del tenant para el panel de reportes (actualización periódica vía refetch en el cliente).
-    Alcance: todo el tenant; el modelo de citas no discrimina por sede.
+    KPIs de citas del tenant. Día/rango en America/Bogota.
+    Gerente/contador pueden filtrar por sede (appointments.sucursal_id).
     """
     try:
         inicio_dt, fin_dt, etiqueta = resolve_report_date_window(
@@ -1902,16 +1956,23 @@ def obtener_agendamiento_metricas(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
-    tid = current_user.tenant_id
-    rows = (
-        db.query(Appointment)
-        .filter(
-            Appointment.tenant_id == tid,
-            Appointment.scheduled_at >= inicio_dt,
-            Appointment.scheduled_at <= fin_dt,
-        )
-        .all()
+    payload = getattr(request.state, "tenant_jwt_payload", None) or {}
+    scope_sid = resolve_reporte_sucursal_id(
+        db,
+        current_user,
+        payload if isinstance(payload, dict) else {},
+        sucursal_id_param=sucursal_id,
+        consolidar_todas=consolidar_todas,
     )
+    tid = current_user.tenant_id
+    q = db.query(Appointment).filter(
+        Appointment.tenant_id == tid,
+        Appointment.scheduled_at >= inicio_dt,
+        Appointment.scheduled_at <= fin_dt,
+    )
+    if scope_sid is not None:
+        q = q.filter(Appointment.sucursal_id == scope_sid)
+    rows = q.all()
 
     por_estado = AgendamientoMetricasPorEstado()
     origen_pub = 0
@@ -1962,7 +2023,8 @@ def obtener_agendamiento_metricas(
         elif rs == "pending" and (r.cliente_email or "").strip():
             rec_pendientes += 1
 
-        day_key = r.scheduled_at.date().isoformat() if r.scheduled_at else None
+        local_sched = _as_report_tz(r.scheduled_at)
+        day_key = local_sched.date().isoformat() if local_sched else None
         if day_key:
             serie[day_key]["total"] += 1
             if st == "checked_in":
