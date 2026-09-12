@@ -22,7 +22,9 @@ import {
 } from 'lucide-react';
 import { formatCurrency, formatCOP } from '../utils/formatNumber';
 import { useAuth } from '../contexts/AuthContext';
+import { useToast } from '../contexts/ToastContext';
 import { isGerente } from '../utils/roles';
+import type { Usuario } from '../types';
 
 function parsePositiveInt(value: string): number {
   const parsed = parseInt(value, 10);
@@ -46,18 +48,19 @@ function preventNumberWheelChange(e: React.WheelEvent<HTMLInputElement>): void {
 
 export default function TarifasPage() {
   const { user } = useAuth();
+  const tenantUser = user && 'tenant_id' in user ? (user as Usuario) : null;
   const [vistaActual, setVistaActual] = useState<'tarifas' | 'comisiones'>('tarifas');
   const [anoSeleccionado, setAnoSeleccionado] = useState(new Date().getFullYear());
   const [mostrarModalCrear, setMostrarModalCrear] = useState(false);
   const [tarifaEditar, setTarifaEditar] = useState<Tarifa | null>(null);
   const [alcance, setAlcance] = useState<'catalogo' | 'sede'>('catalogo');
-  const sedes = user?.sucursales || [];
+  const sedes = tenantUser?.sucursales || [];
   const multiSede = sedes.length > 1;
   const sedeActivaNombre =
-    sedes.find((s) => s.id === user?.active_sucursal_id)?.nombre || 'sede activa';
+    sedes.find((s) => s.id === tenantUser?.active_sucursal_id)?.nombre || 'sede activa';
   const sucursalFiltro =
-    multiSede && alcance === 'sede' ? user?.active_sucursal_id || undefined : undefined;
-  const puedeCatalogo = isGerente(user?.rol) || user?.rol === 'contador';
+    multiSede && alcance === 'sede' ? tenantUser?.active_sucursal_id || undefined : undefined;
+  const puedeCatalogo = isGerente(tenantUser?.rol) || tenantUser?.rol === 'contador';
 
   return (
     <Layout title="Gestión de Tarifas">

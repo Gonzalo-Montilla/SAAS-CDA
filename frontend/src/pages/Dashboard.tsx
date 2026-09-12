@@ -69,7 +69,8 @@ export default function Dashboard() {
   }, [location.pathname, location.state, navigate]);
 
   const showSedesWizard =
-    isGerente(tenantUser?.rol) &&
+    !!tenantUser &&
+    isGerente(tenantUser.rol) &&
     tenantUser.sucursales?.length === 1 &&
     tenantUser.sucursales[0].nombre === 'Sede principal' &&
     !localStorage.getItem(WIZARD_KEY);

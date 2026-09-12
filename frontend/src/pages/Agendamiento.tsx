@@ -21,7 +21,7 @@ import Layout from '../components/Layout';
 import { appointmentsApi, type AppointmentCreatePayload } from '../api/appointments';
 import { qualityApi } from '../api/quality';
 import apiClient from '../api/client';
-import type { AppointmentItem } from '../types';
+import type { AppointmentItem, Usuario } from '../types';
 import { useAuth } from '../contexts/AuthContext';
 import { formatCurrency } from '../utils/formatNumber';
 
@@ -57,6 +57,7 @@ export default function Agendamiento() {
   const navigate = useNavigate();
   const location = useLocation();
   const { user } = useAuth();
+  const tenantUser = user && 'tenant_id' in user ? (user as Usuario) : null;
   const queryClient = useQueryClient();
   const [fecha, setFecha] = useState(todayIso);
   const [statusFilter, setStatusFilter] = useState('');
@@ -96,7 +97,7 @@ export default function Agendamiento() {
   );
 
   const query = useQuery({
-    queryKey: ['appointments', fecha, statusFilter, user?.active_sucursal_id],
+    queryKey: ['appointments', fecha, statusFilter, tenantUser?.active_sucursal_id],
     queryFn: () => appointmentsApi.listByDate(fecha, statusFilter || undefined),
   });
 
@@ -109,7 +110,7 @@ export default function Agendamiento() {
   });
 
   const estimatedRtmQuery = useQuery({
-    queryKey: ['internal-appointment-estimated-rtm', form.tipo_vehiculo, anoModelo, user?.active_sucursal_id],
+    queryKey: ['internal-appointment-estimated-rtm', form.tipo_vehiculo, anoModelo, tenantUser?.active_sucursal_id],
     enabled: canEstimate,
     queryFn: () => appointmentsApi.getInternalEstimatedRtm(anoModeloNumber, form.tipo_vehiculo),
   });
@@ -312,9 +313,10 @@ export default function Agendamiento() {
               </p>
               <p className="module-hero-subtitle">
                 Gestiona citas creadas por link público y por el equipo comercial/recepción.
-                {user?.sucursales && user.sucursales.length > 1
+                {tenantUser?.sucursales && tenantUser.sucursales.length > 1
                   ? ` Mostrando la sede ${
-                      user.sucursales.find((s) => s.id === user.active_sucursal_id)?.nombre || 'activa'
+                      tenantUser.sucursales.find((s) => s.id === tenantUser.active_sucursal_id)?.nombre ||
+                      'activa'
                     }.`
                   : ''}
               </p>
