@@ -19,6 +19,7 @@ import {
   type DseRetencionPreviewOut,
 } from '../api/dseRetencion';
 import { useAuth } from '../contexts/AuthContext';
+import { isGerenteOrAdmin } from '../utils/roles';
 import {
   BookUser,
   Plus,
@@ -125,8 +126,8 @@ export default function ProveedoresCatalogoPage() {
   const qc = useQueryClient();
   const navigate = useNavigate();
   const { user } = useAuth();
-  const esAdmin = user?.rol === 'administrador';
-  const puedeVistaPreviaMotor = user?.rol === 'administrador' || user?.rol === 'contador';
+  const esAdmin = isGerenteOrAdmin(user?.rol);
+  const puedeVistaPreviaMotor = isGerenteOrAdmin(user?.rol) || user?.rol === 'contador';
 
   const [entornoRetencionAbierto, setEntornoRetencionAbierto] = useState(() =>
     readCollapsedPref(LS_DSE_ENTORNO_ABIERTO),

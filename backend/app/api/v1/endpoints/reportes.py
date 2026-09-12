@@ -36,6 +36,7 @@ from app.integrations.factus_emit import (
 )
 from app.services.factus_tenant_settings import creds_complete_for_active_env
 from app.services import egreso_factura_soporte as factura_soporte_svc
+from app.services.tarifas_resolver import resolver_tarifa_vigente
 
 router = APIRouter()
 REPORT_TZ = get_app_timezone()
@@ -209,29 +210,15 @@ def _obtener_tarifa_referencia_para_vehiculo(
         return None
     fecha_ref = (vehiculo.fecha_pago or vehiculo.fecha_registro or datetime.utcnow()).date()
     ano_ref = (vehiculo.fecha_pago or vehiculo.fecha_registro or datetime.utcnow()).year
-    antiguedad = max(0, ano_ref - int(vehiculo.ano_modelo or ano_ref))
-
-    def _buscar(ant: int) -> Tarifa | None:
-        return (
-            db.query(Tarifa)
-            .filter(
-                and_(
-                    Tarifa.tenant_id == vehiculo.tenant_id,
-                    Tarifa.tipo_vehiculo == vehiculo.tipo_vehiculo,
-                    Tarifa.activa == True,
-                    Tarifa.vigencia_inicio <= fecha_ref,
-                    or_(Tarifa.vigencia_fin >= fecha_ref, Tarifa.vigencia_fin == None),
-                    Tarifa.antiguedad_min <= ant,
-                    or_(Tarifa.antiguedad_max == None, Tarifa.antiguedad_max >= ant),
-                )
-            )
-            .first()
-        )
-
-    tarifa = _buscar(antiguedad)
-    if tarifa is None and antiguedad == 0:
-        tarifa = _buscar(1)
-    return tarifa
+    return resolver_tarifa_vigente(
+        db,
+        tenant_id=vehiculo.tenant_id,
+        tipo_vehiculo=vehiculo.tipo_vehiculo,
+        ano_modelo=int(vehiculo.ano_modelo or ano_ref),
+        sucursal_id=vehiculo.sucursal_id,
+        fecha=fecha_ref,
+        ano_referencia=ano_ref,
+    )
 
 
 def _calcular_iva_causado_vehiculo(

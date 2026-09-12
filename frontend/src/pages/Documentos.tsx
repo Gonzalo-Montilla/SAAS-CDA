@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import Layout from '../components/Layout';
 import { useAuth } from '../contexts/AuthContext';
+import { isGerenteOrAdmin } from '../utils/roles';
 import {
   documentosApi,
   type AlcanceSedeFiltro,
@@ -254,7 +255,7 @@ export default function Documentos() {
   const [auditoriaPage, setAuditoriaPage] = useState(0);
   const [auditoriaPageSize, setAuditoriaPageSize] = useState(50);
 
-  const esAdmin = user?.rol === 'administrador';
+  const esAdmin = isGerenteOrAdmin(user?.rol);
   const activeSucursalId = tenantUser?.active_sucursal_id?.trim() || null;
   const sucursales = tenantUser?.sucursales ?? [];
 

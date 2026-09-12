@@ -6,18 +6,21 @@ import hashlib
 from typing import Literal, Optional
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, HTTPException, Response, status
+from uuid import UUID
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field, EmailStr, TypeAdapter, field_validator
-from sqlalchemy import and_, func, or_
+from sqlalchemy import and_, func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.timezone_utils import zoneinfo_from_name
-from app.core.deps import get_current_user, get_db, get_agendamiento_or_admin
+from app.core.deps import get_active_sucursal_id, get_agendamiento_or_admin, get_db
 from app.models.appointment import Appointment
-from app.models.tarifa import Tarifa
+from app.models.sucursal import Sucursal
 from app.models.tenant import Tenant
 from app.models.usuario import Usuario
+from app.services.tarifas_resolver import resolver_tarifa_vigente
 from app.utils.email import (
     enviar_email,
     generar_email_confirmacion_cita,
@@ -68,6 +71,7 @@ class PublicAppointmentCreateRequest(BaseModel):
     fecha: str
     hora: str
     notes: Optional[str] = Field(default=None, max_length=1000)
+    sucursal_id: Optional[UUID] = None
 
     @field_validator("cliente_nombre", "placa", mode="before")
     @classmethod
@@ -138,6 +142,7 @@ class AppointmentResponse(BaseModel):
     created_at: datetime
     reminder_status: str = "pending"
     reminder_sent_at: Optional[datetime] = None
+    sucursal_id: Optional[str] = None
 
 
 class AppointmentStatusUpdateRequest(BaseModel):
@@ -174,6 +179,7 @@ def _appointment_to_response(row: Appointment) -> AppointmentResponse:
         created_at=row.created_at,
         reminder_status=row.reminder_status or "pending",
         reminder_sent_at=row.reminder_sent_at,
+        sucursal_id=str(row.sucursal_id) if getattr(row, "sucursal_id", None) else None,
     )
 
 
@@ -231,16 +237,55 @@ def _get_tenant_or_404(db: Session, tenant_slug: str) -> Tenant:
     return tenant
 
 
-def _count_slot_occupancy(db: Session, tenant_id, slot_dt: datetime) -> int:
+def _count_slot_occupancy(db: Session, tenant_id, slot_dt: datetime, sucursal_id) -> int:
     return (
         db.query(func.count(Appointment.id))
         .filter(
             Appointment.tenant_id == tenant_id,
+            Appointment.sucursal_id == sucursal_id,
             Appointment.scheduled_at == slot_dt,
             Appointment.status.in_(ACTIVE_STATUSES),
         )
         .scalar()
         or 0
+    )
+
+
+class PublicSedeItem(BaseModel):
+    id: str
+    nombre: str
+    es_principal: bool = False
+
+
+def _list_sedes_activas(db: Session, tenant_id) -> list[Sucursal]:
+    return (
+        db.query(Sucursal)
+        .filter(Sucursal.tenant_id == tenant_id, Sucursal.activa == True)
+        .order_by(Sucursal.es_principal.desc(), Sucursal.nombre.asc())
+        .all()
+    )
+
+
+def _resolve_public_sucursal_id(db: Session, tenant_id, sucursal_id: Optional[UUID]) -> UUID:
+    sedes = _list_sedes_activas(db, tenant_id)
+    if not sedes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="El CDA no tiene sedes activas para agendar.",
+        )
+    if sucursal_id is not None:
+        match = next((s for s in sedes if s.id == sucursal_id), None)
+        if not match:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Sede no encontrada o inactiva.",
+            )
+        return match.id
+    if len(sedes) == 1:
+        return sedes[0].id
+    raise HTTPException(
+        status_code=status.HTTP_400_BAD_REQUEST,
+        detail="Selecciona una sede para consultar cupos y agendar.",
     )
 
 
@@ -285,6 +330,7 @@ def _estimate_tarifa_for_tenant(
     tenant_id,
     ano_modelo: int,
     tipo_vehiculo: str,
+    sucursal_id: Optional[UUID] = None,
 ) -> AppointmentEstimatedRtmResponse:
     tipo_normalizado = _normalize_tarifa_tipo_vehiculo(tipo_vehiculo)
     if tipo_normalizado in {"preventiva", "pruebas_auditoria"}:
@@ -302,21 +348,12 @@ def _estimate_tarifa_for_tenant(
             detail=f"Año de modelo inválido. Debe estar entre 1950 y {ano_actual + 1}.",
         )
 
-    antiguedad = max(ano_actual - ano_modelo, 0)
-    hoy = date.today()
-    tarifa = (
-        db.query(Tarifa)
-        .filter(
-            Tarifa.tenant_id == tenant_id,
-            Tarifa.activa == True,
-            Tarifa.tipo_vehiculo == tipo_normalizado,
-            Tarifa.vigencia_inicio <= hoy,
-            Tarifa.vigencia_fin >= hoy,
-            Tarifa.antiguedad_min <= antiguedad,
-            or_(Tarifa.antiguedad_max.is_(None), Tarifa.antiguedad_max >= antiguedad),
-        )
-        .order_by(Tarifa.vigencia_inicio.desc(), Tarifa.antiguedad_min.desc())
-        .first()
+    tarifa = resolver_tarifa_vigente(
+        db,
+        tenant_id=tenant_id,
+        tipo_vehiculo=tipo_normalizado,
+        ano_modelo=ano_modelo,
+        sucursal_id=sucursal_id,
     )
     if not tarifa:
         return AppointmentEstimatedRtmResponse(
@@ -473,6 +510,7 @@ def _send_appointment_email_notification(
                     tenant_id=tenant.id,
                     ano_modelo=int(raw_ano),
                     tipo_vehiculo=tipo_vehiculo,
+                    sucursal_id=getattr(appointment, "sucursal_id", None),
                 )
                 if estimated.disponible and estimated.valor_total is not None:
                     valor_aproximado = _format_cop_amount(estimated.valor_total)
@@ -582,13 +620,24 @@ def process_due_appointment_reminders(
     return sent_count
 
 
+@router.get("/public/{tenant_slug}/sedes", response_model=list[PublicSedeItem])
+def get_public_sedes(tenant_slug: str, db: Session = Depends(get_db)):
+    tenant = _get_tenant_or_404(db, tenant_slug)
+    return [
+        PublicSedeItem(id=str(s.id), nombre=s.nombre, es_principal=bool(s.es_principal))
+        for s in _list_sedes_activas(db, tenant.id)
+    ]
+
+
 @router.get("/public/{tenant_slug}/availability", response_model=list[AppointmentSlot])
 def get_public_availability(
     tenant_slug: str,
     fecha: str,
+    sucursal_id: Optional[UUID] = Query(default=None),
     db: Session = Depends(get_db),
 ):
     tenant = _get_tenant_or_404(db, tenant_slug)
+    sede_id = _resolve_public_sucursal_id(db, tenant.id, sucursal_id)
     target_date = _parse_date(fecha)
     slots = _build_slot_datetimes(target_date)
     now = _now_colombia_naive()
@@ -605,7 +654,7 @@ def get_public_availability(
                 )
             )
             continue
-        ocupados = _count_slot_occupancy(db, tenant.id, slot_dt)
+        ocupados = _count_slot_occupancy(db, tenant.id, slot_dt, sede_id)
         cupos_disponibles = max(SLOT_CAPACITY - ocupados, 0)
         response.append(
             AppointmentSlot(
@@ -625,6 +674,7 @@ def book_public_appointment(
     db: Session = Depends(get_db),
 ):
     tenant = _get_tenant_or_404(db, tenant_slug)
+    sede_id = _resolve_public_sucursal_id(db, tenant.id, payload.sucursal_id)
     target_date = _parse_date(payload.fecha)
     target_time = _parse_time(payload.hora)
     scheduled_at = _ensure_slot_allowed(target_date, target_time)
@@ -632,12 +682,13 @@ def book_public_appointment(
     if scheduled_at < _now_colombia_naive():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No puedes agendar en una hora pasada")
 
-    ocupados = _count_slot_occupancy(db, tenant.id, scheduled_at)
+    ocupados = _count_slot_occupancy(db, tenant.id, scheduled_at, sede_id)
     if ocupados >= SLOT_CAPACITY:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Este horario ya no tiene cupos disponibles")
 
     appointment = Appointment(
         tenant_id=tenant.id,
+        sucursal_id=sede_id,
         cliente_nombre=payload.cliente_nombre.strip().upper(),
         cliente_tipo_documento=(payload.cliente_tipo_documento or "").strip().upper() or None,
         cliente_documento=(payload.cliente_documento or "").strip().upper() or None,
@@ -677,14 +728,17 @@ def get_public_estimated_rtm(
     tenant_slug: str,
     ano_modelo: int,
     tipo_vehiculo: str,
+    sucursal_id: Optional[UUID] = Query(default=None),
     db: Session = Depends(get_db),
 ):
     tenant = _get_tenant_or_404(db, tenant_slug)
+    sede_id = _resolve_public_sucursal_id(db, tenant.id, sucursal_id)
     return _estimate_tarifa_for_tenant(
         db,
         tenant_id=tenant.id,
         ano_modelo=ano_modelo,
         tipo_vehiculo=tipo_vehiculo,
+        sucursal_id=sede_id,
     )
 
 
@@ -694,9 +748,13 @@ def list_appointments(
     status_filter: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_agendamiento_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     process_due_appointment_reminders(db, tenant_id=current_user.tenant_id, limit=100)
-    query = db.query(Appointment).filter(Appointment.tenant_id == current_user.tenant_id)
+    query = db.query(Appointment).filter(
+        Appointment.tenant_id == current_user.tenant_id,
+        Appointment.sucursal_id == active_sucursal_id,
+    )
     if fecha:
         target_date = _parse_date(fecha)
         start_dt = datetime.combine(target_date, time.min)
@@ -715,12 +773,14 @@ def get_internal_estimated_rtm(
     tipo_vehiculo: str,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_agendamiento_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     return _estimate_tarifa_for_tenant(
         db,
         tenant_id=current_user.tenant_id,
         ano_modelo=ano_modelo,
         tipo_vehiculo=tipo_vehiculo,
+        sucursal_id=active_sucursal_id,
     )
 
 
@@ -729,6 +789,7 @@ def create_internal_appointment(
     payload: InternalAppointmentCreateRequest,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_agendamiento_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     target_date = _parse_date(payload.fecha)
     target_time = _parse_time(payload.hora)
@@ -736,7 +797,7 @@ def create_internal_appointment(
     if scheduled_at < _now_colombia_naive():
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No puedes agendar en una hora pasada")
 
-    ocupados = _count_slot_occupancy(db, current_user.tenant_id, scheduled_at)
+    ocupados = _count_slot_occupancy(db, current_user.tenant_id, scheduled_at, active_sucursal_id)
     if ocupados >= SLOT_CAPACITY:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="Este horario ya no tiene cupos disponibles")
 
@@ -746,6 +807,7 @@ def create_internal_appointment(
 
     appointment = Appointment(
         tenant_id=current_user.tenant_id,
+        sucursal_id=active_sucursal_id,
         cliente_nombre=payload.cliente_nombre.strip().upper(),
         cliente_tipo_documento=(payload.cliente_tipo_documento or "").strip().upper() or None,
         cliente_documento=(payload.cliente_documento or "").strip().upper() or None,
@@ -786,10 +848,15 @@ def update_appointment_status(
     payload: AppointmentStatusUpdateRequest,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_agendamiento_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     appointment = (
         db.query(Appointment)
-        .filter(Appointment.id == appointment_id, Appointment.tenant_id == current_user.tenant_id)
+        .filter(
+            Appointment.id == appointment_id,
+            Appointment.tenant_id == current_user.tenant_id,
+            Appointment.sucursal_id == active_sucursal_id,
+        )
         .first()
     )
     if not appointment:
@@ -866,10 +933,15 @@ def check_in_appointment(
     appointment_id: str,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_agendamiento_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     appointment = (
         db.query(Appointment)
-        .filter(Appointment.id == appointment_id, Appointment.tenant_id == current_user.tenant_id)
+        .filter(
+            Appointment.id == appointment_id,
+            Appointment.tenant_id == current_user.tenant_id,
+            Appointment.sucursal_id == active_sucursal_id,
+        )
         .first()
     )
     if not appointment:

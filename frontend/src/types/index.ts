@@ -61,7 +61,7 @@ export interface Usuario {
   tenant_slug?: string;
   email: string;
   nombre_completo: string;
-  rol: 'administrador' | 'oficial_cumplimiento' | 'cajero' | 'recepcionista' | 'contador' | 'comercial';
+  rol: 'gerente' | 'administrador' | 'oficial_cumplimiento' | 'cajero' | 'recepcionista' | 'contador' | 'comercial';
   rol_global?: 'owner' | 'finanzas' | 'comercial' | 'soporte';
   activo: boolean;
   created_at: string;
@@ -850,6 +850,7 @@ export interface AppointmentItem {
   created_at: string;
   reminder_status?: string;
   reminder_sent_at?: string | null;
+  sucursal_id?: string | null;
 }
 
 export interface SaaSSupportTicketItem {
@@ -1152,6 +1153,7 @@ export interface Tarifa {
   valor_total: number;
   activa: boolean;
   descripcion_antiguedad: string;
+  sucursal_id?: string | null;
 }
 
 export interface ComisionSOAT {
@@ -1161,6 +1163,7 @@ export interface ComisionSOAT {
   vigencia_inicio: string;
   vigencia_fin?: string;
   activa: boolean;
+  sucursal_id?: string | null;
 }
 
 // URLs Externas

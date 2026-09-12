@@ -7,6 +7,7 @@ import apiClient from '../api/client';
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import type { Usuario as TenantProfileUser } from '../types';
+import { isGerente, rolUsaListaSedes } from '../utils/roles';
 
 interface UsuarioListItem {
   id: string;
@@ -15,6 +16,7 @@ interface UsuarioListItem {
   rol: string;
   activo: boolean;
   sucursal_id?: string | null;
+  sucursal_ids?: string[];
   created_at: string;
   updated_at: string | null;
 }
@@ -43,11 +45,18 @@ const ROLE_PERMISSION_MATRIX: Array<{
   permisos: string;
 }> = [
   {
+    rol: 'Gerente',
+    colorClass: 'bg-rose-100 text-rose-800',
+    cardClass: 'border-rose-200 bg-gradient-to-br from-rose-50 to-white',
+    icon: '🏢',
+    permisos: 'Marca completa: todas las sedes, Factus, nuevas sucursales y usuarios de cualquier local.',
+  },
+  {
     rol: 'Administrador',
     colorClass: 'bg-red-100 text-red-800',
     cardClass: 'border-red-200 bg-gradient-to-br from-red-50 to-white',
     icon: '🛡️',
-    permisos: 'Acceso total: recepción, caja, agendamiento, calidad, tarifas, tesorería, reportes y usuarios.',
+    permisos: 'Jefe de local: operación y usuarios solo de las sedes asignadas.',
   },
   {
     rol: 'Oficial de Cumplimiento',
@@ -117,6 +126,7 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
     nombre_completo: '',
     rol: 'cajero',
     sucursal_id: '',
+    sucursal_ids: [] as string[],
   });
 
   const [passwordData, setPasswordData] = useState({
@@ -165,13 +175,14 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
   // Mutation: Crear usuario
   const crearMutation = useMutation({
     mutationFn: async (data: typeof formData) => {
-      const payload: Record<string, string> = {
+      const payload: Record<string, unknown> = {
         email: data.email,
         password: data.password,
         nombre_completo: data.nombre_completo,
         rol: data.rol,
       };
-      if (data.sucursal_id) payload.sucursal_id = data.sucursal_id;
+      const ids = data.sucursal_ids?.length ? data.sucursal_ids : data.sucursal_id ? [data.sucursal_id] : [];
+      if (ids.length) payload.sucursal_ids = ids;
       const response = await apiClient.post('/usuarios/', payload);
       return response.data;
     },
@@ -195,7 +206,7 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
       data,
     }: {
       id: string;
-      data: { email: string; nombre_completo: string; rol: string; sucursal_id?: string };
+      data: { email: string; nombre_completo: string; rol: string; sucursal_id?: string; sucursal_ids?: string[] };
     }) => {
       const response = await apiClient.put(`/usuarios/${id}`, data);
       return response.data;
@@ -272,12 +283,14 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
   });
 
   const resetForm = () => {
+    const home = defaultSedePref(tenantAuth);
     setFormData({
       email: '',
       password: '',
       nombre_completo: '',
       rol: 'cajero',
-      sucursal_id: defaultSedePref(tenantAuth),
+      sucursal_id: home,
+      sucursal_ids: home ? [home] : [],
     });
   };
 
@@ -289,16 +302,21 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
 
   const handleEditar = (usuario: UsuarioListItem) => {
     setUsuarioEditando(usuario);
+    const fromList = (usuario.sucursal_ids || []).filter((id) =>
+      sedesFormOptions.some((s) => s.id === id),
+    );
     const sid =
-      usuario.sucursal_id && sedesFormOptions.some((s) => s.id === usuario.sucursal_id)
+      fromList[0] ||
+      (usuario.sucursal_id && sedesFormOptions.some((s) => s.id === usuario.sucursal_id)
         ? usuario.sucursal_id
-        : defaultSedePref(tenantAuth);
+        : defaultSedePref(tenantAuth));
     setFormData({
       email: usuario.email,
       password: '',
       nombre_completo: usuario.nombre_completo,
       rol: usuario.rol,
       sucursal_id: sid,
+      sucursal_ids: fromList.length ? fromList : sid ? [sid] : [],
     });
     setMostrarFormulario(true);
   };
@@ -315,7 +333,7 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
           email: rest.email,
           nombre_completo: rest.nombre_completo,
           rol: rest.rol,
-          ...(rest.sucursal_id ? { sucursal_id: rest.sucursal_id } : {}),
+          sucursal_ids: rest.sucursal_ids?.length ? rest.sucursal_ids : rest.sucursal_id ? [rest.sucursal_id] : [],
         },
       });
     } else {
@@ -364,6 +382,7 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
 
   const getRolLabel = (rol: string) => {
     const labels: Record<string, string> = {
+      'gerente': 'Gerente',
       'administrador': 'Administrador',
       'oficial_cumplimiento': 'Oficial de Cumplimiento',
       'cajero': 'Cajero',
@@ -376,6 +395,7 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
 
   const getRolColor = (rol: string) => {
     const colors: Record<string, string> = {
+      'gerente': 'bg-rose-100 text-rose-800',
       'administrador': 'bg-red-100 text-red-800',
       'oficial_cumplimiento': 'bg-amber-100 text-amber-800',
       'cajero': 'bg-blue-100 text-blue-800',
@@ -386,10 +406,11 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
     return colors[rol] || 'bg-slate-100 text-slate-800';
   };
 
-  const labelSedeUsuario = (sucursalId?: string | null) => {
-    if (!sucursalId) return '—';
-    const s = sedesFormOptions.find((x) => x.id === sucursalId);
-    return s?.nombre ?? `Sede (${sucursalId.slice(0, 8)}…)`;
+  const labelSedeUsuario = (usuario: UsuarioListItem) => {
+    const ids = usuario.sucursal_ids?.length ? usuario.sucursal_ids : usuario.sucursal_id ? [usuario.sucursal_id] : [];
+    if (!ids.length) return usuario.rol === 'gerente' || usuario.rol === 'contador' || usuario.rol === 'oficial_cumplimiento' ? 'Todas' : '—';
+    const names = ids.map((id) => sedesFormOptions.find((x) => x.id === id)?.nombre ?? id.slice(0, 8));
+    return names.join(', ');
   };
 
   // Solo pantalla completa de carga en la primera carga sin datos; refetch no quita el modal
@@ -462,8 +483,8 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
               <p className="text-3xl font-bold text-red-900">{estadisticas.usuarios_inactivos}</p>
             </div>
             <div className="card-pos bg-gradient-to-br from-purple-50 to-purple-100 border-2 border-purple-300">
-              <p className="text-sm text-purple-700 mb-1">Administradores</p>
-              <p className="text-3xl font-bold text-purple-900">{estadisticas.por_rol.administrador || 0}</p>
+              <p className="text-sm text-purple-700 mb-1">Gerentes</p>
+              <p className="text-3xl font-bold text-purple-900">{estadisticas.por_rol.gerente || 0}</p>
             </div>
           </div>
         )}
@@ -525,6 +546,7 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
                 className="input"
               >
                 <option value="">Todos</option>
+                <option value="gerente">Gerente</option>
                 <option value="administrador">Administrador</option>
                 <option value="oficial_cumplimiento">Oficial de Cumplimiento</option>
                 <option value="cajero">Cajero</option>
@@ -591,8 +613,8 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
                           <p className="text-sm text-slate-600">{usuario.email}</p>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-slate-700 text-sm max-w-[10rem] truncate" title={labelSedeUsuario(usuario.sucursal_id)}>
-                        {labelSedeUsuario(usuario.sucursal_id)}
+                      <td className="px-4 py-3 text-slate-700 text-sm max-w-[10rem] truncate" title={labelSedeUsuario(usuario)}>
+                        {labelSedeUsuario(usuario)}
                       </td>
                       <td className="px-4 py-3">
                         <span className={`px-3 py-1 rounded-full text-sm font-semibold ${getRolColor(usuario.rol)}`}>
@@ -766,15 +788,19 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
                       className="input-corporate w-full px-4 py-3 cursor-pointer"
                       required
                     >
+                      {isGerente(tenantAuth?.rol) && <option value="gerente">Gerente</option>}
+                      <option value="administrador">Administrador de sede</option>
                       <option value="cajero">Cajero</option>
                       <option value="recepcionista">Recepcionista</option>
-                      <option value="contador">Contador</option>
+                      {isGerente(tenantAuth?.rol) && <option value="contador">Contador</option>}
                       <option value="comercial">Comercial</option>
-                      <option value="oficial_cumplimiento">Oficial de Cumplimiento</option>
-                      <option value="administrador">Administrador</option>
+                      {isGerente(tenantAuth?.rol) && (
+                        <option value="oficial_cumplimiento">Oficial de Cumplimiento</option>
+                      )}
                     </select>
                     <p className="text-xs text-slate-500 mt-2">
-                      {formData.rol === 'administrador' && 'Acceso total al sistema'}
+                      {formData.rol === 'gerente' && 'Dueño de la marca: todas las sedes, Factus y nuevas sucursales.'}
+                      {formData.rol === 'administrador' && 'Jefe de local: solo las sedes que le asignes.'}
                       {formData.rol === 'oficial_cumplimiento' && 'Acceso al proceso de cumplimiento SARLAFT'}
                       {formData.rol === 'cajero' && 'Acceso a caja y cobros'}
                       {formData.rol === 'recepcionista' && 'Acceso a recepción y registro'}
@@ -783,34 +809,52 @@ export default function UsuariosPage({ embedded = false }: { embedded?: boolean 
                     </p>
                   </div>
 
-                  {/* Sede por defecto (BD + JWT de respaldo) */}
+                  {rolUsaListaSedes(formData.rol) ? (
                   <div className="group">
                     <label className="block text-sm font-bold text-slate-700 mb-2 flex items-center gap-2">
                       <Building2 className="w-4 h-4 text-slate-500" />
-                      Sede asignada
+                      Sedes permitidas
                     </label>
                     {sedesFormOptions.length > 0 ? (
-                      <select
-                        value={formData.sucursal_id}
-                        onChange={(e) => setFormData({ ...formData, sucursal_id: e.target.value })}
-                        className="input-corporate w-full px-4 py-3 cursor-pointer"
-                      >
-                        {sedesFormOptions.map((s) => (
-                          <option key={s.id} value={s.id}>
-                            {s.nombre}
-                            {s.es_principal ? ' (principal)' : ''}
-                          </option>
-                        ))}
-                      </select>
+                      <div className="space-y-2 rounded-lg border border-slate-200 bg-white px-3 py-2">
+                        {sedesFormOptions.map((s) => {
+                          const checked = formData.sucursal_ids.includes(s.id);
+                          return (
+                            <label key={s.id} className="flex items-center gap-2 text-sm text-slate-800">
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => {
+                                  const next = checked
+                                    ? formData.sucursal_ids.filter((id) => id !== s.id)
+                                    : [...formData.sucursal_ids, s.id];
+                                  setFormData({
+                                    ...formData,
+                                    sucursal_ids: next,
+                                    sucursal_id: next[0] || '',
+                                  });
+                                }}
+                              />
+                              {s.nombre}
+                              {s.es_principal ? ' (principal)' : ''}
+                            </label>
+                          );
+                        })}
+                      </div>
                     ) : (
                       <p className="text-sm text-slate-600 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
                         Se usará la sede de tu usuario o la sede principal del centro.
                       </p>
                     )}
                     <p className="text-xs text-slate-500 mt-2">
-                      Queda guardada en el perfil del usuario; al operar, puede elegir otra sede si el centro tiene varias.
+                      Cajero, recepción y administrador de sede solo entran a las sedes marcadas. Una sola: no pregunta al ingresar.
                     </p>
                   </div>
+                  ) : (
+                    <p className="text-xs text-slate-500">
+                      Este rol opera en todas las sedes activas de la organización.
+                    </p>
+                  )}
 
                   {/* Alerta de edición */}
                   {usuarioEditando && (

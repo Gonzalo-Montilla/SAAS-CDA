@@ -204,30 +204,45 @@ def require_saas_role(allowed_roles: list[str]):
     return role_checker
 
 
-# Dependencias espec?ficas por rol
-def get_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
-    """Solo administradores"""
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+# Dependencias específicas por rol
+def get_gerente(current_user: Usuario = Depends(get_current_user)) -> Usuario:
+    """Dueño de la marca (todas las sedes): Organización de NIT, Factus matriz, nuevas sucursales."""
+    if current_user.rol != RolEnum.GERENTE:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo administradores pueden realizar esta acci?n"
+            detail="Solo el gerente de la organización puede realizar esta acción",
+        )
+    return current_user
+
+
+def get_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
+    """Gerente de marca o administrador de sede(s)."""
+    if current_user.rol not in (RolEnum.GERENTE, RolEnum.ADMINISTRADOR):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo gerentes o administradores pueden realizar esta acción"
         )
     return current_user
 
 
 def get_cajero_or_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
-    """Cajeros o administradores"""
-    if current_user.rol not in [RolEnum.CAJERO, RolEnum.ADMINISTRADOR]:
+    """Cajeros, administradores de sede o gerente."""
+    if current_user.rol not in (RolEnum.CAJERO, RolEnum.ADMINISTRADOR, RolEnum.GERENTE):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo cajeros o administradores pueden realizar esta acci?n"
+            detail="Solo cajeros, administradores o gerentes pueden realizar esta acción"
         )
     return current_user
 
 
 def get_cajero_contador_or_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
-    """Cajeros, contadores o administradores (p. ej. catálogo municipios Factus en egresos)."""
-    if current_user.rol not in (RolEnum.CAJERO, RolEnum.CONTADOR, RolEnum.ADMINISTRADOR):
+    """Cajeros, contadores, administradores o gerente (p. ej. catálogo municipios Factus en egresos)."""
+    if current_user.rol not in (
+        RolEnum.CAJERO,
+        RolEnum.CONTADOR,
+        RolEnum.ADMINISTRADOR,
+        RolEnum.GERENTE,
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tiene permiso para consultar datos de facturación electrónica.",
@@ -236,12 +251,13 @@ def get_cajero_contador_or_admin(current_user: Usuario = Depends(get_current_use
 
 
 def get_recepcionista_cajero_contador_or_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
-    """Recepción, caja, contabilidad o administración para consultas operativas de FE."""
+    """Recepción, caja, contabilidad, administración de sede o gerencia para consultas operativas de FE."""
     if current_user.rol not in (
         RolEnum.RECEPCIONISTA,
         RolEnum.CAJERO,
         RolEnum.CONTADOR,
         RolEnum.ADMINISTRADOR,
+        RolEnum.GERENTE,
     ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -251,31 +267,36 @@ def get_recepcionista_cajero_contador_or_admin(current_user: Usuario = Depends(g
 
 
 def get_recepcionista_or_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
-    """Recepcionistas o administradores"""
-    if current_user.rol not in [RolEnum.RECEPCIONISTA, RolEnum.ADMINISTRADOR]:
+    """Recepcionistas, administradores de sede o gerente."""
+    if current_user.rol not in (RolEnum.RECEPCIONISTA, RolEnum.ADMINISTRADOR, RolEnum.GERENTE):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo recepcionistas o administradores pueden realizar esta acci?n"
+            detail="Solo recepcionistas, administradores o gerentes pueden realizar esta acción"
         )
     return current_user
 
 
 def get_agendamiento_or_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
-    """Recepcionistas, comerciales o administradores."""
-    if current_user.rol not in [RolEnum.RECEPCIONISTA, RolEnum.COMERCIAL, RolEnum.ADMINISTRADOR]:
+    """Recepcionistas, comerciales, administradores de sede o gerente."""
+    if current_user.rol not in (
+        RolEnum.RECEPCIONISTA,
+        RolEnum.COMERCIAL,
+        RolEnum.ADMINISTRADOR,
+        RolEnum.GERENTE,
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo recepcionistas, comerciales o administradores pueden realizar esta acci?n"
+            detail="Solo recepcionistas, comerciales, administradores o gerentes pueden realizar esta acción"
         )
     return current_user
 
 
 def get_contador_or_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
-    """Contadores o administradores"""
-    if current_user.rol not in [RolEnum.CONTADOR, RolEnum.ADMINISTRADOR]:
+    """Contadores, administradores de sede o gerente."""
+    if current_user.rol not in (RolEnum.CONTADOR, RolEnum.ADMINISTRADOR, RolEnum.GERENTE):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo contadores o administradores pueden realizar esta acci?n"
+            detail="Solo contadores, administradores o gerentes pueden realizar esta acción"
         )
     return current_user
 

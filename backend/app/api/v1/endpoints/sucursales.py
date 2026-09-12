@@ -6,7 +6,8 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_db, get_current_user, get_admin
+from app.core.deps import get_db, get_current_user, get_admin, get_gerente
+from app.core.sucursal_scope import assert_user_may_operate_sucursal, es_gerente, sucursales_visibles_query
 from app.models.sucursal import Sucursal
 from app.models.tenant import Tenant
 from app.models.usuario import Usuario
@@ -20,9 +21,9 @@ def listar_sucursales(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
+    solo_activas = not es_gerente(current_user)
     return (
-        db.query(Sucursal)
-        .filter(Sucursal.tenant_id == current_user.tenant_id)
+        sucursales_visibles_query(db, current_user, solo_activas=solo_activas)
         .order_by(Sucursal.es_principal.desc(), Sucursal.nombre.asc())
         .all()
     )
@@ -32,7 +33,7 @@ def listar_sucursales(
 def crear_sucursal(
     body: SucursalCreate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin),
+    current_user: Usuario = Depends(get_gerente),
 ):
     tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
     existing = (
@@ -86,8 +87,15 @@ def actualizar_sucursal(
     )
     if not row:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sede no encontrada")
+    if not es_gerente(current_user):
+        assert_user_may_operate_sucursal(db, current_user, sucursal_id)
 
     data = body.model_dump(exclude_unset=True)
+    if ("es_principal" in data) and not es_gerente(current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo el gerente puede marcar la sede principal.",
+        )
     if "nombre" in data and data["nombre"] is not None:
         row.nombre = data["nombre"].strip()
     if "codigo" in data:

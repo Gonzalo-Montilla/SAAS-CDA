@@ -10,7 +10,7 @@ from fastapi.responses import Response
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.core.deps import get_admin, get_cajero_or_admin, get_current_user, get_db
+from app.core.deps import get_admin, get_cajero_or_admin, get_current_user, get_db, get_gerente
 from app.core.config import settings
 from app.models.usuario import Usuario
 from app.models.tenant import Tenant
@@ -332,7 +332,7 @@ def obtener_facturacion_ubicacion_tenant(
 def actualizar_facturacion_ubicacion_tenant(
     payload: TenantFacturacionUbicacionUpdate,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin),
+    current_user: Usuario = Depends(get_gerente),
 ):
     tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
     if not tenant:

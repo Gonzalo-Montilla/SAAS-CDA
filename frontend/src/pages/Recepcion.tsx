@@ -17,6 +17,7 @@ import ErrorBoundary from '../components/ErrorBoundary';
 import FactusMunicipalitySearchField from '../components/FactusMunicipalitySearchField';
 import { useToast } from '../contexts/ToastContext';
 import { useAuth } from '../contexts/AuthContext';
+import { isGerenteOrAdmin } from '../utils/roles';
 import { configApi } from '../api/config';
 import { vehiculosApi, type TarifaCalculada } from '../api/vehiculos';
 import { tarifasApi } from '../api/tarifas';
@@ -788,8 +789,8 @@ export default function Recepcion() {
 
   // Obtener comisiones SOAT
   const { data: comisionesSOAT } = useQuery({
-    queryKey: ['comisiones-soat'],
-    queryFn: tarifasApi.obtenerComisionesSOAT,
+    queryKey: ['comisiones-soat', tenantUser?.active_sucursal_id || 'catalogo'],
+    queryFn: () => tarifasApi.obtenerComisionesSOATResueltas(tenantUser?.active_sucursal_id),
     retry: 1,
     staleTime: 5 * 60 * 1000,
   });
@@ -3641,7 +3642,7 @@ export default function Recepcion() {
                       Tarifa no disponible
                     </p>
                     <p className="text-sm text-amber-800">{tarifaError}</p>
-                    {(user as { rol?: string } | null)?.rol === 'administrador' ? (
+                    {isGerenteOrAdmin((user as { rol?: string } | null)?.rol) ? (
                       <button
                         type="button"
                         onClick={() => navigate('/tarifas')}

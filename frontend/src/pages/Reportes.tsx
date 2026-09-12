@@ -442,7 +442,7 @@ export default function ReportesPage() {
   const { showToast } = useToast();
   const tenantUser = user && 'tenant_id' in user ? (user as Usuario) : null;
   const puedeElegirSedeReporte =
-    !!tenantUser && (tenantUser.rol === 'administrador' || tenantUser.rol === 'contador');
+    !!tenantUser && (tenantUser.rol === 'gerente' || tenantUser.rol === 'contador');
 
   const todayLocal = formatLocalDate(new Date());
   /** Permite analizar citas ya programadas en el futuro; el tope evita fechas absurdas. */

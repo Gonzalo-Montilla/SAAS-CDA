@@ -24,6 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.core.deps import (
     get_admin,
+    get_gerente,
     get_contador_or_admin,
     get_current_user,
     get_db,
@@ -100,7 +101,7 @@ def get_factus_settings(
 def patch_factus_documento_soporte_notificaciones(
     body: FactusDocumentoSoporteNotificacionesPatch,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin),
+    current_user: Usuario = Depends(get_gerente),
 ):
     """
     Notificación al proveedor vía Factus (send_email) y copia interna del CDA vía SMTP al emitir documento soporte.
@@ -127,7 +128,7 @@ def patch_factus_documento_soporte_notificaciones(
 def patch_factus_dse_entorno_retenciones(
     body: FactusDseEntornoRetencionesPatch,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin),
+    current_user: Usuario = Depends(get_gerente),
 ):
     """
     Conceptos de retención que el CDA usará en documento soporte (subconjunto del motor).
@@ -184,7 +185,7 @@ def patch_factus_dse_entorno_retenciones(
 def patch_factus_modo(
     body: FactusModoPatch,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_admin),
+    current_user: Usuario = Depends(get_gerente),
 ):
     """
     Conmutar solo entre facturación manual y Factus (administrador del CDA).

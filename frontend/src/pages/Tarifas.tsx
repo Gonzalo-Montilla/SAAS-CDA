@@ -21,7 +21,8 @@ import {
   Bike
 } from 'lucide-react';
 import { formatCurrency, formatCOP } from '../utils/formatNumber';
-import { useToast } from '../contexts/ToastContext';
+import { useAuth } from '../contexts/AuthContext';
+import { isGerente } from '../utils/roles';
 
 function parsePositiveInt(value: string): number {
   const parsed = parseInt(value, 10);
@@ -44,10 +45,19 @@ function preventNumberWheelChange(e: React.WheelEvent<HTMLInputElement>): void {
 }
 
 export default function TarifasPage() {
+  const { user } = useAuth();
   const [vistaActual, setVistaActual] = useState<'tarifas' | 'comisiones'>('tarifas');
   const [anoSeleccionado, setAnoSeleccionado] = useState(new Date().getFullYear());
   const [mostrarModalCrear, setMostrarModalCrear] = useState(false);
   const [tarifaEditar, setTarifaEditar] = useState<Tarifa | null>(null);
+  const [alcance, setAlcance] = useState<'catalogo' | 'sede'>('catalogo');
+  const sedes = user?.sucursales || [];
+  const multiSede = sedes.length > 1;
+  const sedeActivaNombre =
+    sedes.find((s) => s.id === user?.active_sucursal_id)?.nombre || 'sede activa';
+  const sucursalFiltro =
+    multiSede && alcance === 'sede' ? user?.active_sucursal_id || undefined : undefined;
+  const puedeCatalogo = isGerente(user?.rol) || user?.rol === 'contador';
 
   return (
     <Layout title="Gestión de Tarifas">
@@ -60,10 +70,45 @@ export default function TarifasPage() {
           Configura tarifas RTM y comisiones SOAT por vigencia con consistencia operativa.
         </p>
         <p className="mt-3 text-sm text-slate-600 max-w-3xl leading-relaxed">
-          <span className="font-medium text-slate-800">Alcance por CDA:</span> el listado es único para todo el tenant:
-          todas las sedes comparten las mismas tarifas y comisiones. Crear o editar en una sede actualiza el catálogo
-          completo; cambiar la sede activa en el encabezado no muestra otro conjunto de registros.
+          {multiSede ? (
+            <>
+              <span className="font-medium text-slate-800">Catálogo del CDA</span> aplica a todas las
+              sedes. Si una sede necesita precio distinto, usa la pestaña de esa sede (override).
+              Sin override, cobra el catálogo.
+            </>
+          ) : (
+            <>
+              <span className="font-medium text-slate-800">Alcance por CDA:</span> el listado es el
+              catálogo único del NIT. Con una sola sede no hay tarifas distintas por local.
+            </>
+          )}
         </p>
+        {multiSede && (
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setAlcance('catalogo')}
+              className={`btn-chip px-3 py-1.5 text-sm ${
+                alcance === 'catalogo'
+                  ? 'bg-primary-600 text-white border-primary-600 shadow-sm'
+                  : 'text-slate-700'
+              }`}
+            >
+              Catálogo del CDA
+            </button>
+            <button
+              type="button"
+              onClick={() => setAlcance('sede')}
+              className={`btn-chip px-3 py-1.5 text-sm ${
+                alcance === 'sede'
+                  ? 'bg-primary-600 text-white border-primary-600 shadow-sm'
+                  : 'text-slate-700'
+              }`}
+            >
+              Esta sede ({sedeActivaNombre})
+            </button>
+          </div>
+        )}
       </section>
 
       {/* Navegación */}
@@ -101,9 +146,11 @@ export default function TarifasPage() {
           setMostrarModalCrear={setMostrarModalCrear}
           tarifaEditar={tarifaEditar}
           setTarifaEditar={setTarifaEditar}
+          sucursalId={sucursalFiltro}
+          puedeEscribir={alcance === 'sede' || puedeCatalogo}
         />
       ) : (
-        <ComisionesSOAT />
+        <ComisionesSOAT sucursalId={sucursalFiltro} puedeEscribir={alcance === 'sede' || puedeCatalogo} />
       )}
     </Layout>
   );
@@ -117,6 +164,8 @@ function TarifasRTM({
   setMostrarModalCrear,
   tarifaEditar,
   setTarifaEditar,
+  sucursalId,
+  puedeEscribir,
 }: {
   anoSeleccionado: number;
   setAnoSeleccionado: (ano: number) => void;
@@ -124,11 +173,13 @@ function TarifasRTM({
   setMostrarModalCrear: (show: boolean) => void;
   tarifaEditar: Tarifa | null;
   setTarifaEditar: (tarifa: Tarifa | null) => void;
+  sucursalId?: string;
+  puedeEscribir: boolean;
 }) {
   // Obtener todas las tarifas
   const { data: todasTarifas, isLoading } = useQuery({
-    queryKey: ['tarifas-todas'],
-    queryFn: tarifasApi.listar,
+    queryKey: ['tarifas-todas', sucursalId || 'catalogo'],
+    queryFn: () => tarifasApi.listar(sucursalId),
   });
 
   // Filtrar por año seleccionado
@@ -173,6 +224,7 @@ function TarifasRTM({
           </select>
         </div>
 
+        {puedeEscribir && (
         <button
           onClick={() => setMostrarModalCrear(true)}
           className="btn-corporate-primary px-4 inline-flex items-center gap-2"
@@ -180,6 +232,7 @@ function TarifasRTM({
           <Plus className="w-5 h-5" />
           Nueva Tarifa
         </button>
+        )}
       </div>
 
       {/* Tabla de Tarifas */}
@@ -194,6 +247,7 @@ function TarifasRTM({
           <p className="text-slate-600 mb-4">
             Crea la primera tarifa para este año
           </p>
+          {puedeEscribir && (
           <button
             onClick={() => setMostrarModalCrear(true)}
             className="btn-pos btn-primary inline-flex items-center gap-2"
@@ -201,6 +255,7 @@ function TarifasRTM({
             <Plus className="w-5 h-5" />
             Crear Tarifa
           </button>
+          )}
         </div>
       ) : (
         <div className="section-card p-5 sm:p-6">
@@ -286,6 +341,7 @@ function TarifasRTM({
                       </span>
                     </td>
                     <td className="pl-3 text-center">
+                      {puedeEscribir ? (
                       <button
                         onClick={() => setTarifaEditar(tarifa)}
                         className="btn-chip border-primary-300 bg-primary-50 text-primary-700 hover:bg-primary-100 px-3 py-1 inline-flex items-center gap-1"
@@ -293,6 +349,7 @@ function TarifasRTM({
                         <Edit className="w-4 h-4" />
                         Editar
                       </button>
+                      ) : null}
                     </td>
                   </tr>
                   );
@@ -308,6 +365,7 @@ function TarifasRTM({
         <ModalTarifa
           onClose={() => setMostrarModalCrear(false)}
           anoInicial={anoSeleccionado}
+          sucursalId={sucursalId}
         />
       )}
 
@@ -322,7 +380,15 @@ function TarifasRTM({
 }
 
 // Modal para crear tarifa
-function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial: number }) {
+function ModalTarifa({
+  onClose,
+  anoInicial,
+  sucursalId,
+}: {
+  onClose: () => void;
+  anoInicial: number;
+  sucursalId?: string;
+}) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const [formError, setFormError] = useState('');
@@ -403,6 +469,7 @@ function ModalTarifa({ onClose, anoInicial }: { onClose: () => void; anoInicial:
       valor_terceros_sicov: formData.valor_terceros_sicov,
       valor_terceros_bancarizacion: formData.valor_terceros_bancarizacion,
       valor_terceros_ansv: formData.valor_terceros_ansv,
+      sucursal_id: sucursalId || null,
     });
   };
 
@@ -932,14 +999,20 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
 }
 
 // Componente de Comisiones SOAT
-function ComisionesSOAT() {
+function ComisionesSOAT({
+  sucursalId,
+  puedeEscribir,
+}: {
+  sucursalId?: string;
+  puedeEscribir: boolean;
+}) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const [comisionEditar, setComisionEditar] = useState<any>(null);
   
   const { data: comisiones, isLoading } = useQuery({
-    queryKey: ['comisiones-soat'],
-    queryFn: tarifasApi.obtenerComisionesSOAT,
+    queryKey: ['comisiones-soat', sucursalId || 'catalogo'],
+    queryFn: () => tarifasApi.obtenerComisionesSOAT(sucursalId),
   });
 
   const eliminarMutation = useMutation({
@@ -979,6 +1052,7 @@ function ComisionesSOAT() {
               Configura cuánto recibes por cada SOAT vendido según el tipo de vehículo
             </p>
           </div>
+          {puedeEscribir ? (
           <button
             onClick={() => setComisionEditar({ id: null })}
             className="btn-corporate-primary px-4 inline-flex items-center gap-2"
@@ -986,6 +1060,7 @@ function ComisionesSOAT() {
             <Plus className="w-5 h-5" />
             Nueva Comisión
           </button>
+          ) : null}
         </div>
 
       {!comisiones || comisiones.length === 0 ? (
@@ -1076,7 +1151,8 @@ function ComisionesSOAT() {
       {comisionEditar && (
         <ModalEditarComisionSOAT 
           comision={comisionEditar} 
-          onClose={() => setComisionEditar(null)} 
+          onClose={() => setComisionEditar(null)}
+          sucursalId={sucursalId}
         />
       )}
     </div>
@@ -1084,7 +1160,15 @@ function ComisionesSOAT() {
 }
 
 // Modal para crear/editar comisión SOAT
-function ModalEditarComisionSOAT({ comision, onClose }: { comision: any; onClose: () => void }) {
+function ModalEditarComisionSOAT({
+  comision,
+  onClose,
+  sucursalId,
+}: {
+  comision: any;
+  onClose: () => void;
+  sucursalId?: string;
+}) {
   const queryClient = useQueryClient();
   const { showToast } = useToast();
   const esNuevo = !comision.id;
@@ -1127,7 +1211,7 @@ function ModalEditarComisionSOAT({ comision, onClose }: { comision: any; onClose
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    mutation.mutate(formData);
+    mutation.mutate({ ...formData, sucursal_id: sucursalId || null });
   };
 
   const IconoVehiculo = formData.tipo_vehiculo === 'moto' ? Bike : Car;

@@ -32,6 +32,7 @@ export default function AgendarPublico() {
   const [logoError, setLogoError] = useState(false);
   const [fecha, setFecha] = useState(todayIso);
   const [hora, setHora] = useState('');
+  const [sedeId, setSedeId] = useState('');
   const [feedback, setFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
   const [submitIntent, setSubmitIntent] = useState(false);
   const [form, setForm] = useState({
@@ -65,20 +66,30 @@ export default function AgendarPublico() {
     },
   });
 
-  const availabilityQuery = useQuery({
-    queryKey: ['appointment-availability', tenantSlug, fecha],
+  const sedesQuery = useQuery({
+    queryKey: ['public-appointment-sedes', tenantSlug],
     enabled: Boolean(tenantSlug),
-    queryFn: () => appointmentsApi.getPublicAvailability(tenantSlug as string, fecha),
+    queryFn: () => appointmentsApi.getPublicSedes(tenantSlug as string),
+  });
+  const sedes = sedesQuery.data || [];
+  const multiSede = sedes.length > 1;
+  const sedeEfectiva = multiSede ? sedeId : sedes[0]?.id || '';
+
+  const availabilityQuery = useQuery({
+    queryKey: ['appointment-availability', tenantSlug, fecha, sedeEfectiva],
+    enabled: Boolean(tenantSlug) && sedesQuery.isSuccess && (!multiSede || Boolean(sedeEfectiva)),
+    queryFn: () => appointmentsApi.getPublicAvailability(tenantSlug as string, fecha, sedeEfectiva || undefined),
   });
 
   const estimatedRtmQuery = useQuery({
-    queryKey: ['public-appointment-estimated-rtm', tenantSlug, form.tipo_vehiculo, form.ano_modelo],
-    enabled: canEstimate,
+    queryKey: ['public-appointment-estimated-rtm', tenantSlug, form.tipo_vehiculo, form.ano_modelo, sedeEfectiva],
+    enabled: canEstimate && sedesQuery.isSuccess && (!multiSede || Boolean(sedeEfectiva)),
     queryFn: () =>
       appointmentsApi.getPublicEstimatedRtm(
         tenantSlug as string,
         anoModeloNumber,
-        form.tipo_vehiculo
+        form.tipo_vehiculo,
+        sedeEfectiva || undefined
       ),
   });
 
@@ -96,6 +107,7 @@ export default function AgendarPublico() {
         notes: form.notes,
         fecha,
         hora,
+        sucursal_id: sedeEfectiva || undefined,
       }),
     onSuccess: () => {
       setFeedback({ type: 'success', message: 'Tu cita fue agendada correctamente.' });
@@ -125,8 +137,15 @@ export default function AgendarPublico() {
   const logoSrc = useMemo(() => resolvePublicLogoUrl(brand?.logo_url), [brand?.logo_url]);
 
   const canSubmit = useMemo(() => {
-    return Boolean(tenantSlug && hora && form.cliente_nombre.trim() && form.placa.trim() && form.cliente_email.trim());
-  }, [tenantSlug, hora, form.cliente_nombre, form.placa, form.cliente_email]);
+    return Boolean(
+      tenantSlug &&
+        hora &&
+        form.cliente_nombre.trim() &&
+        form.placa.trim() &&
+        form.cliente_email.trim() &&
+        (!multiSede || sedeEfectiva)
+    );
+  }, [tenantSlug, hora, form.cliente_nombre, form.placa, form.cliente_email, multiSede, sedeEfectiva]);
   const citaSeleccionadaResumen = useMemo(() => {
     if (!fecha || !hora) return null;
     const [yyyy, mm, dd] = fecha.split('-');
@@ -169,6 +188,30 @@ export default function AgendarPublico() {
               <label className="block text-xs font-medium text-slate-500 mb-1">Fecha</label>
               <input type="date" className="input-corporate" value={fecha} min={todayIso} onChange={(e) => setFecha(e.target.value)} />
             </div>
+
+            {multiSede && (
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">
+                  Sede <span className="text-red-500">*</span>
+                </label>
+                <select
+                  className="input-corporate"
+                  value={sedeId}
+                  onChange={(e) => {
+                    setSedeId(e.target.value);
+                    setHora('');
+                  }}
+                >
+                  <option value="">Selecciona una sede</option>
+                  {sedes.map((sede) => (
+                    <option key={sede.id} value={sede.id}>
+                      {sede.nombre}
+                      {sede.es_principal ? ' (principal)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
 
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-2">Horarios disponibles</label>

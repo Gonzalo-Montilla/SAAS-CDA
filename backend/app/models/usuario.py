@@ -1,7 +1,7 @@
 """
 Modelo de Usuario
 """
-from sqlalchemy import Column, String, Boolean, DateTime, Enum as SQLEnum, ForeignKey
+from sqlalchemy import Column, String, Boolean, DateTime, Enum as SQLEnum, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from datetime import datetime, timezone
@@ -13,6 +13,7 @@ from app.db.database import Base
 
 class RolEnum(str, enum.Enum):
     """Roles de usuario"""
+    GERENTE = "gerente"
     ADMINISTRADOR = "administrador"
     OFICIAL_CUMPLIMIENTO = "oficial_cumplimiento"
     CAJERO = "cajero"
@@ -42,7 +43,26 @@ class Usuario(Base):
     # Relaciones
     tenant = relationship("Tenant", back_populates="usuarios")
     sucursal = relationship("Sucursal", foreign_keys=[sucursal_id])
+    sucursales_asignadas = relationship(
+        "UsuarioSucursal",
+        back_populates="usuario",
+        cascade="all, delete-orphan",
+    )
     reset_tokens = relationship("PasswordResetToken", back_populates="usuario", cascade="all, delete-orphan")
     
     def __repr__(self):
         return f"<Usuario {self.email} - {self.rol}>"
+
+
+class UsuarioSucursal(Base):
+    """Sedes en las que un usuario puede operar (cajero, recepción, admin de sede)."""
+    __tablename__ = "usuario_sucursales"
+    __table_args__ = (UniqueConstraint("usuario_id", "sucursal_id", name="ux_usuario_sucursal"),)
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id", ondelete="CASCADE"), nullable=False, index=True)
+    sucursal_id = Column(UUID(as_uuid=True), ForeignKey("sucursales.id", ondelete="CASCADE"), nullable=False, index=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+    usuario = relationship("Usuario", back_populates="sucursales_asignadas")
+    sucursal = relationship("Sucursal")

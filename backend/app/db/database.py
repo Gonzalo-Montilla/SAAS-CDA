@@ -312,6 +312,7 @@ def ensure_tenant_domain_schema(db):
             "ALTER TABLE vehiculos_proceso ADD COLUMN IF NOT EXISTS cliente_tipo_documento VARCHAR(10) NOT NULL DEFAULT 'CC'"
         )
     )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_vehiculos_proceso_cliente_documento ON vehiculos_proceso(cliente_documento)"))
     db.execute(text("UPDATE vehiculos_proceso SET reinspeccion_intento = COALESCE(reinspeccion_intento, 1)"))
     db.execute(text("UPDATE vehiculos_proceso SET reinspeccion_exenta = COALESCE(reinspeccion_exenta, FALSE)"))
     # NO hacer backfill de kilometraje desde recepcion_formato_extra_json aquí:
@@ -326,6 +327,39 @@ def ensure_tenant_domain_schema(db):
             """
         )
     )
+    db.execute(
+        text(
+            """
+            UPDATE vehiculos_proceso v
+            SET sucursal_id = s.id
+            FROM sucursales s
+            WHERE v.sucursal_id IS NULL
+              AND s.tenant_id = v.tenant_id
+              AND s.es_principal IS TRUE
+            """
+        )
+    )
+    from sqlalchemy.exc import DBAPIError
+
+    try:
+        nested_ux = db.begin_nested()
+        db.execute(
+            text(
+                """
+                CREATE UNIQUE INDEX IF NOT EXISTS ux_vehiculos_proceso_sede_placa_en_cola
+                ON vehiculos_proceso (tenant_id, sucursal_id, placa)
+                WHERE estado::text IN ('REGISTRADO', 'registrado', 'PAGADO', 'pagado')
+                  AND sucursal_id IS NOT NULL
+                """
+            )
+        )
+        nested_ux.commit()
+    except DBAPIError:
+        nested_ux.rollback()
+    db.execute(text("ALTER TABLE tarifas ADD COLUMN IF NOT EXISTS sucursal_id UUID"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_tarifas_sucursal_id ON tarifas(sucursal_id)"))
+    db.execute(text("ALTER TABLE comisiones_soat ADD COLUMN IF NOT EXISTS sucursal_id UUID"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_comisiones_soat_sucursal_id ON comisiones_soat(sucursal_id)"))
     db.execute(text("ALTER TABLE tarifas ADD COLUMN IF NOT EXISTS tenant_id UUID"))
     db.execute(
         text(
@@ -699,11 +733,85 @@ def ensure_usuario_roles_schema(db):
         # Compatibilidad histórica: algunos entornos quedaron con valores en minúscula
         # por ALTER manual. SQLAlchemy persiste usando nombres del Enum (mayúsculas),
         # así que garantizamos ambos labels para evitar DataError al insertar usuarios.
+        db.execute(text(f"ALTER TYPE {enum_type_name} ADD VALUE IF NOT EXISTS 'GERENTE'"))
+        db.execute(text(f"ALTER TYPE {enum_type_name} ADD VALUE IF NOT EXISTS 'gerente'"))
         db.execute(text(f"ALTER TYPE {enum_type_name} ADD VALUE IF NOT EXISTS 'COMERCIAL'"))
         db.execute(text(f"ALTER TYPE {enum_type_name} ADD VALUE IF NOT EXISTS 'OFICIAL_CUMPLIMIENTO'"))
         db.execute(text(f"ALTER TYPE {enum_type_name} ADD VALUE IF NOT EXISTS 'comercial'"))
         db.execute(text(f"ALTER TYPE {enum_type_name} ADD VALUE IF NOT EXISTS 'oficial_cumplimiento'"))
 
+
+def ensure_usuario_sucursales_schema(db):
+    """Lista de sedes por usuario + dueños actuales (administrador) → gerente."""
+    import uuid as uuid_lib
+
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS usuario_sucursales (
+                id UUID PRIMARY KEY,
+                usuario_id UUID NOT NULL REFERENCES usuarios(id) ON DELETE CASCADE,
+                sucursal_id UUID NOT NULL REFERENCES sucursales(id) ON DELETE CASCADE,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            "CREATE UNIQUE INDEX IF NOT EXISTS ux_usuario_sucursal ON usuario_sucursales (usuario_id, sucursal_id)"
+        )
+    )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_usuario_sucursales_usuario_id ON usuario_sucursales (usuario_id)"))
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_usuario_sucursales_sucursal_id ON usuario_sucursales (sucursal_id)"))
+    pending = db.execute(
+        text(
+            """
+            SELECT u.id, u.sucursal_id
+            FROM usuarios u
+            WHERE u.sucursal_id IS NOT NULL
+              AND NOT EXISTS (
+                    SELECT 1 FROM usuario_sucursales us
+                    WHERE us.usuario_id = u.id AND us.sucursal_id = u.sucursal_id
+              )
+            """
+        )
+    ).fetchall()
+    for uid, sid in pending:
+        db.execute(
+            text(
+                """
+                INSERT INTO usuario_sucursales (id, usuario_id, sucursal_id, created_at)
+                VALUES (:id, :uid, :sid, NOW())
+                """
+            ),
+            {"id": str(uuid_lib.uuid4()), "uid": uid, "sid": sid},
+        )
+    from sqlalchemy.exc import DBAPIError
+
+    for label in ("GERENTE", "gerente"):
+        try:
+            nested = db.begin_nested()
+            db.execute(
+                text(
+                    """
+                    UPDATE usuarios u
+                    SET rol = :nuevo
+                    WHERE lower(u.rol::text) = 'administrador'
+                      AND NOT EXISTS (
+                        SELECT 1
+                        FROM usuarios g
+                        WHERE g.tenant_id = u.tenant_id
+                          AND lower(g.rol::text) IN ('gerente', 'GERENTE')
+                      )
+                    """
+                ),
+                {"nuevo": label},
+            )
+            nested.commit()
+            break
+        except DBAPIError:
+            nested.rollback()
 
 def ensure_appointments_schema(db):
     """
@@ -724,6 +832,34 @@ def ensure_appointments_schema(db):
     db.execute(text("CREATE INDEX IF NOT EXISTS ix_appointments_reminder_scheduled_at ON appointments(reminder_scheduled_at)"))
     db.execute(text("CREATE INDEX IF NOT EXISTS ix_appointments_reminder_status ON appointments(reminder_status)"))
     db.execute(text("CREATE INDEX IF NOT EXISTS ix_appointments_cliente_documento ON appointments(cliente_documento)"))
+    db.execute(text("ALTER TABLE IF EXISTS appointments ADD COLUMN IF NOT EXISTS sucursal_id UUID"))
+    db.execute(
+        text(
+            """
+            UPDATE appointments a
+            SET sucursal_id = s.id
+            FROM sucursales s
+            WHERE a.sucursal_id IS NULL
+              AND s.tenant_id = a.tenant_id
+              AND s.es_principal IS TRUE
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            UPDATE appointments a
+            SET sucursal_id = sub.id
+            FROM (
+                SELECT DISTINCT ON (tenant_id) id, tenant_id
+                FROM sucursales
+                ORDER BY tenant_id, es_principal DESC, created_at ASC NULLS LAST
+            ) sub
+            WHERE a.sucursal_id IS NULL AND a.tenant_id = sub.tenant_id
+            """
+        )
+    )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_appointments_sucursal_id ON appointments(sucursal_id)"))
 
 
 def ensure_rtm_reminders_schema(db):
@@ -2939,7 +3075,7 @@ def init_db():
     """
     Inicializar base de datos: crear tablas y datos iniciales
     """
-    from app.models.usuario import Usuario
+    from app.models.usuario import Usuario, UsuarioSucursal, RolEnum
     from app.models.tenant import Tenant
     from app.models.tenant_billing_checkout import TenantBillingCheckoutSession  # noqa: F401 — FK desde facturas_electronicas
     from app.models.tarifa import Tarifa, ComisionSOAT
@@ -3011,9 +3147,11 @@ def init_db():
         ensure_onboarding_security_schema(db)
         ensure_support_schema(db)
         ensure_usuario_roles_schema(db)
+        db.commit()
         ensure_appointments_schema(db)
         ensure_rtm_reminders_schema(db)
         ensure_sucursales_schema(db)
+        ensure_usuario_sucursales_schema(db)
         ensure_tesoreria_anulacion_y_enum(db)
         ensure_movimiento_caja_anulacion_schema(db)
         ensure_movimiento_tesoreria_beneficiario_columns(db)
@@ -3068,21 +3206,28 @@ def init_db():
         admin_exists = db.query(Usuario).filter(Usuario.email == "admin@cdasoft.com").first()
         
         if not admin_exists:
-            print("[INIT] Creando usuario administrador inicial...")
-            
-            # Crear usuario administrador
+            print("[INIT] Creando usuario gerente inicial...")
+            sede_home = (
+                db.query(Sucursal)
+                .filter(Sucursal.tenant_id == default_tenant.id)
+                .order_by(Sucursal.es_principal.desc())
+                .first()
+            )
             admin = Usuario(
                 tenant_id=default_tenant.id,
+                sucursal_id=sede_home.id if sede_home else None,
                 email="admin@cdasoft.com",
                 hashed_password=get_password_hash("admin123"),
                 nombre_completo="Administrador CDA",
-                rol="administrador",
+                rol=RolEnum.GERENTE,
                 activo=True
             )
             db.add(admin)
             db.flush()
+            if sede_home:
+                db.add(UsuarioSucursal(usuario_id=admin.id, sucursal_id=sede_home.id))
             
-            print("[OK] Usuario administrador creado")
+            print("[OK] Usuario gerente creado")
             print("   Email: admin@cdasoft.com")
             print("   Password: admin123")
             

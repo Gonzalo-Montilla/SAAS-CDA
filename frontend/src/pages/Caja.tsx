@@ -12,6 +12,7 @@ import { proveedoresCatalogoApi } from '../api/proveedoresCatalogo';
 import ProveedorCatalogoPicker from '../components/ProveedorCatalogoPicker';
 import { RetencionEstimadaMotorInline } from '../components/RetencionEstimadaMotorCallout';
 import { useAuth } from '../contexts/AuthContext';
+import { isGerenteOrAdmin } from '../utils/roles';
 import { useBrand } from '../contexts/BrandContext';
 import { useToast } from '../contexts/ToastContext';
 import { formatCurrency } from '../utils/formatNumber';
@@ -318,7 +319,7 @@ export default function CajaPage() {
   const [mostrarCobrosHoySinCaja, setMostrarCobrosHoySinCaja] = useState(false);
   const [mostrarCobrosRecientesSinCaja, setMostrarCobrosRecientesSinCaja] = useState(false);
   const rolActual = user && 'rol' in user ? String((user as { rol?: string }).rol || '').toLowerCase() : '';
-  const esAdmin = rolActual === 'administrador';
+  const esAdmin = isGerenteOrAdmin(rolActual);
 
   // Obtener caja activa
   const { data: cajaActiva, isLoading: loadingCaja, error: errorCaja } = useQuery({
@@ -4509,7 +4510,7 @@ function VehiculosCobradosHoy({
   const [fechaHasta, setFechaHasta] = useState('');
   const [pagina, setPagina] = useState(1);
   const rolActual = user && 'rol' in user ? String((user as { rol?: string }).rol || '').toLowerCase() : '';
-  const puedeCorregirFactura = rolActual === 'administrador';
+  const puedeCorregirFactura = isGerenteOrAdmin(rolActual);
   const permiteCambioMetodo = permitirCambioMetodo ?? (modo === 'hoy');
   const PAGE_SIZE = 24;
 
@@ -5451,7 +5452,7 @@ function ModalVentaSOAT({ onClose, onSuccess }: { onClose: () => void, onSuccess
         placa: vehiculoCreado.placa,
         tipoVehiculo: formData.tipo_vehiculo,
         valorSoatComercial: parseFloat(formData.valor_soat_comercial),
-        comisionCobrada: comisionSOAT,
+        comisionCobrada: Number(vehiculoCreado.comision_soat) || 0,
         clienteNombre: vehiculoCreado.cliente_nombre,
         clienteDocumento: vehiculoCreado.cliente_documento,
         fecha: new Date(),

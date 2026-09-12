@@ -41,7 +41,9 @@ import { cajasApi } from '../api/cajas';
 import { tesoreriaApi } from '../api/tesoreria';
 import { downloadXlsx } from '../utils/downloadXlsx';
 import { formatCOP } from '../utils/formatNumber';
+import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
+import type { Usuario } from '../types';
 
 type ContadorTab =
   | 'panel'
@@ -61,6 +63,7 @@ type ContadorTab =
 
 type ContadorZona = 'operacion' | 'cierre' | 'maestros';
 type ExogenaPaso = 1 | 2 | 3 | 4;
+type ContadorSedeScope = 'activa' | 'todas' | 'sucursal';
 
 const ICONO_POR_CATEGORIA: Record<string, LucideIcon> = {
   Cartera: Wallet,
@@ -158,6 +161,12 @@ export default function Contador() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const { showToast } = useToast();
+  const { user } = useAuth();
+  const tenantUser = user && 'tenant_id' in user ? (user as Usuario) : null;
+  const puedeElegirSedeReporte =
+    !!tenantUser && (tenantUser.rol === 'gerente' || tenantUser.rol === 'contador');
+  const [reporteSedeScope, setReporteSedeScope] = useState<ContadorSedeScope>('activa');
+  const [reporteSedeId, setReporteSedeId] = useState('');
   const [activeTab, setActiveTab] = useState<ContadorTab>('panel');
   const [exogenaPaso, setExogenaPaso] = useState<ExogenaPaso>(1);
   const [periodoDesde, setPeriodoDesde] = useState(firstDayOfMonthLocalDate());
@@ -458,6 +467,28 @@ export default function Contador() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );
+
+  const sedeOpts = useMemo(() => {
+    if (!puedeElegirSedeReporte) return {};
+    if (reporteSedeScope === 'todas') return { consolidarTodas: true as const };
+    if (reporteSedeScope === 'sucursal' && reporteSedeId.trim()) {
+      return { sucursalId: reporteSedeId.trim() };
+    }
+    return {};
+  }, [puedeElegirSedeReporte, reporteSedeScope, reporteSedeId]);
+
+  const sedeAlcanceLabel = useMemo(() => {
+    if (!puedeElegirSedeReporte) return null;
+    if (reporteSedeScope === 'todas') return 'Todas las sedes';
+    if (reporteSedeScope === 'sucursal' && reporteSedeId) {
+      return (
+        (tenantUser?.sucursales || []).find((s) => s.id === reporteSedeId)?.nombre ||
+        'Sede seleccionada'
+      );
+    }
+    return 'Sede activa (selector)';
+  }, [puedeElegirSedeReporte, reporteSedeScope, reporteSedeId, tenantUser?.sucursales]);
+
   const configQuery = useQuery({
     queryKey: ['exogena-config', anio],
     queryFn: () => exogenaApi.getConfig(anio),
@@ -469,15 +500,16 @@ export default function Contador() {
   });
 
   const cxcQuery = useQuery({
-    queryKey: ['reportes-cxc-general-cliente', aplicadoCorte],
-    queryFn: () => reportesApi.getCxcGeneralCliente({ fechaCorte: aplicadoCorte, limit: 500 }),
+    queryKey: ['reportes-cxc-general-cliente', aplicadoCorte, sedeOpts],
+    queryFn: () =>
+      reportesApi.getCxcGeneralCliente({ fechaCorte: aplicadoCorte, limit: 500, ...sedeOpts }),
     staleTime: 60000,
     refetchInterval: 120000,
     enabled: activeTab === 'cxc' && !!aplicadoCorte,
   });
   const cxpQuery = useQuery({
-    queryKey: ['reportes-cxp-general-proveedor'],
-    queryFn: () => reportesApi.getCxpGeneralProveedor({ limit: 500 }),
+    queryKey: ['reportes-cxp-general-proveedor', sedeOpts],
+    queryFn: () => reportesApi.getCxpGeneralProveedor({ limit: 500, ...sedeOpts }),
     staleTime: 60000,
     refetchInterval: 120000,
     enabled: activeTab === 'cxp',
@@ -489,6 +521,7 @@ export default function Contador() {
       gastosHasta,
       gastosOrigen,
       gastosIncluirDevoluciones,
+      sedeOpts,
     ],
     queryFn: () =>
       reportesApi.getGastosPeriodo({
@@ -497,6 +530,7 @@ export default function Contador() {
         origen: gastosOrigen === 'todos' ? undefined : gastosOrigen,
         incluirDevoluciones: gastosIncluirDevoluciones,
         limit: 2000,
+        ...sedeOpts,
       }),
     staleTime: 60000,
     refetchInterval: 120000,
@@ -514,109 +548,134 @@ export default function Contador() {
     enabled: activeTab === 'obligaciones' || activeTab === 'panel' || activeTab === 'estado_situacion',
   });
   const cierreQuery = useQuery({
-    queryKey: ['reportes-cierre-periodo', aplicadoDesde, aplicadoHasta],
+    queryKey: ['reportes-cierre-periodo', aplicadoDesde, aplicadoHasta, sedeOpts],
     queryFn: () =>
       reportesApi.getCierrePeriodoResumen({
         fechaInicio: aplicadoDesde,
         fechaFin: aplicadoHasta,
+        ...sedeOpts,
       }),
     staleTime: 60000,
     enabled: activeTab === 'panel' && !!aplicadoDesde && !!aplicadoHasta,
   });
   const cxcDetalleQuery = useQuery({
-    queryKey: ['reportes-cxc-detalle', cxcDetalleDoc, cxcDetalleNombre, aplicadoCorte],
+    queryKey: ['reportes-cxc-detalle', cxcDetalleDoc, cxcDetalleNombre, aplicadoCorte, sedeOpts],
     queryFn: () =>
       reportesApi.getCxcClienteDetalle({
         clienteDocumento: cxcDetalleDoc || '',
         clienteNombre: cxcDetalleNombre || undefined,
         fechaCorte: aplicadoCorte,
         limit: 200,
+        ...sedeOpts,
       }),
     enabled: !!cxcDetalleDoc && !!aplicadoCorte,
   });
   const ventasVendedorQuery = useQuery({
-    queryKey: ['reportes-ventas-por-vendedor', ventasVendedorDesde, ventasVendedorHasta],
+    queryKey: ['reportes-ventas-por-vendedor', ventasVendedorDesde, ventasVendedorHasta, sedeOpts],
     queryFn: () =>
       reportesApi.getVentasPorVendedor({
         fechaInicio: ventasVendedorDesde,
         fechaFin: ventasVendedorHasta,
         limit: 500,
+        ...sedeOpts,
       }),
     staleTime: 60000,
     refetchInterval: 120000,
     enabled: activeTab === 'ventas_vendedor' && !!ventasVendedorDesde && !!ventasVendedorHasta,
   });
   const ventasSucursalQuery = useQuery({
-    queryKey: ['reportes-ventas-por-sucursal', ventasSucursalDesde, ventasSucursalHasta],
+    queryKey: ['reportes-ventas-por-sucursal', ventasSucursalDesde, ventasSucursalHasta, sedeOpts],
     queryFn: () =>
       reportesApi.getVentasPorSucursal({
         fechaInicio: ventasSucursalDesde,
         fechaFin: ventasSucursalHasta,
         limit: 300,
+        ...sedeOpts,
       }),
     staleTime: 60000,
     refetchInterval: 120000,
     enabled: activeTab === 'ventas_sucursal' && !!ventasSucursalDesde && !!ventasSucursalHasta,
   });
   const estadoResultadoQuery = useQuery({
-    queryKey: ['reportes-estado-resultado-gerencial', estadoResultadoDesde, estadoResultadoHasta],
+    queryKey: [
+      'reportes-estado-resultado-gerencial',
+      estadoResultadoDesde,
+      estadoResultadoHasta,
+      sedeOpts,
+    ],
     queryFn: () =>
       reportesApi.getEstadoResultadoGerencial({
         fechaInicio: estadoResultadoDesde,
         fechaFin: estadoResultadoHasta,
+        ...sedeOpts,
       }),
     staleTime: 60000,
     refetchInterval: 120000,
     enabled: activeTab === 'estado_resultado' && !!estadoResultadoDesde && !!estadoResultadoHasta,
   });
   const estadoFlujoQuery = useQuery({
-    queryKey: ['reportes-estado-flujo-efectivo-gerencial', estadoFlujoDesde, estadoFlujoHasta],
+    queryKey: [
+      'reportes-estado-flujo-efectivo-gerencial',
+      estadoFlujoDesde,
+      estadoFlujoHasta,
+      sedeOpts,
+    ],
     queryFn: () =>
       reportesApi.getEstadoFlujoEfectivoGerencial({
         fechaInicio: estadoFlujoDesde,
         fechaFin: estadoFlujoHasta,
+        ...sedeOpts,
       }),
     staleTime: 60000,
     refetchInterval: 120000,
     enabled: activeTab === 'estado_flujo' && !!estadoFlujoDesde && !!estadoFlujoHasta,
   });
   const estadoPatrimonioQuery = useQuery({
-    queryKey: ['reportes-estado-cambios-patrimonio-gerencial', estadoPatrimonioDesde, estadoPatrimonioHasta],
+    queryKey: [
+      'reportes-estado-cambios-patrimonio-gerencial',
+      estadoPatrimonioDesde,
+      estadoPatrimonioHasta,
+      sedeOpts,
+    ],
     queryFn: () =>
       reportesApi.getEstadoCambiosPatrimonioGerencial({
         fechaInicio: estadoPatrimonioDesde,
         fechaFin: estadoPatrimonioHasta,
+        ...sedeOpts,
       }),
     staleTime: 60000,
     refetchInterval: 120000,
     enabled: activeTab === 'estado_patrimonio' && !!estadoPatrimonioDesde && !!estadoPatrimonioHasta,
   });
   const estadoSituacionQuery = useQuery({
-    queryKey: ['reportes-estado-situacion-gerencial', estadoSituacionCorte],
+    queryKey: ['reportes-estado-situacion-gerencial', estadoSituacionCorte, sedeOpts],
     queryFn: () =>
       reportesApi.getEstadoSituacionGerencial({
         fechaCorte: estadoSituacionCorte,
+        ...sedeOpts,
       }),
     staleTime: 60000,
     refetchInterval: 120000,
     enabled: activeTab === 'estado_situacion' && !!estadoSituacionCorte,
   });
   const balancePruebaQuery = useQuery({
-    queryKey: ['reportes-balance-prueba-gerencial', balancePruebaCorte],
+    queryKey: ['reportes-balance-prueba-gerencial', balancePruebaCorte, sedeOpts],
     queryFn: () =>
       reportesApi.getBalancePruebaGerencial({
         fechaCorte: balancePruebaCorte,
+        ...sedeOpts,
       }),
     staleTime: 60000,
     refetchInterval: 120000,
     enabled: activeTab === 'balance_prueba' && !!balancePruebaCorte,
   });
   const balanceTerceroQuery = useQuery({
-    queryKey: ['reportes-balance-prueba-tercero-gerencial', balanceTerceroCorte],
+    queryKey: ['reportes-balance-prueba-tercero-gerencial', balanceTerceroCorte, sedeOpts],
     queryFn: () =>
       reportesApi.getBalancePruebaTerceroGerencial({
         fechaCorte: balanceTerceroCorte,
         limit: 5000,
+        ...sedeOpts,
       }),
     staleTime: 60000,
     refetchInterval: 120000,
@@ -1761,6 +1820,37 @@ export default function Contador() {
                   onChange={(e) => setFechaCorte(e.target.value)}
                 />
               </label>
+              {puedeElegirSedeReporte && (
+                <label className="flex flex-col gap-0.5">
+                  <span className="text-[10px] uppercase tracking-wide text-slate-500">Alcance</span>
+                  <select
+                    className="input-corporate text-sm min-w-[200px]"
+                    value={
+                      reporteSedeScope === 'sucursal' && reporteSedeId
+                        ? `s:${reporteSedeId}`
+                        : reporteSedeScope
+                    }
+                    onChange={(e) => {
+                      const v = e.target.value;
+                      if (v === 'activa' || v === 'todas') {
+                        setReporteSedeScope(v);
+                        setReporteSedeId('');
+                      } else if (v.startsWith('s:')) {
+                        setReporteSedeScope('sucursal');
+                        setReporteSedeId(v.slice(2));
+                      }
+                    }}
+                  >
+                    <option value="activa">Sede activa (selector)</option>
+                    <option value="todas">Todas las sedes</option>
+                    {(tenantUser?.sucursales || []).map((s) => (
+                      <option key={s.id} value={`s:${s.id}`}>
+                        {s.nombre}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
               <button type="button" className="btn-corporate-primary px-3 text-sm" onClick={aplicarPeriodoGlobal}>
                 Aplicar fechas
               </button>
@@ -1769,6 +1859,10 @@ export default function Contador() {
           <p className="text-xs text-slate-600">
             Periodo aplicado: {formatFechaCorta(aplicadoDesde)} → {formatFechaCorta(aplicadoHasta)} · Corte:{' '}
             {formatFechaCorta(aplicadoCorte)}
+            {sedeAlcanceLabel ? ` · Alcance: ${sedeAlcanceLabel}` : ''}
+            {puedeElegirSedeReporte
+              ? '. El alcance aplica de inmediato y no cambia la sede del encabezado.'
+              : ''}
           </p>
 
           <div className="flex flex-wrap gap-2">
@@ -2268,7 +2362,10 @@ export default function Contador() {
               Icon: Receipt,
               titulo: 'Obligaciones / facturas de compra',
               detalle:
-                'CxP formal (crédito) — en estudio. Para el caso “ya pagué y luego llega la factura del almacén”, adjunte la factura al egreso en Tesorería; el contador la ve en Gastos.',
+                'CxP formal (crédito) — en estudio. Para el caso “ya pagué y luego llega la factura del almacén”, adjunte la factura al egreso en Tesorería; el contador la ve en Gastos.' +
+                (puedeElegirSedeReporte
+                  ? ' Este listado es de todo el CDA (NIT); no filtra por el alcance de sede de arriba.'
+                  : ''),
               fechas: { tipo: 'cartera' },
               actions: (
                 <>
@@ -3896,6 +3993,9 @@ export default function Contador() {
                     <h3 className="text-lg font-semibold text-slate-900">Exógena 1001 / 1007</h3>
                     <p className="text-sm text-slate-600 mt-0.5">
                       Configurar → validar → corregir terceros → exportar.
+                      {puedeElegirSedeReporte
+                        ? ' La exógena es del NIT completo; no cambia con el alcance de sede.'
+                        : ''}
                     </p>
                   </div>
                 </div>

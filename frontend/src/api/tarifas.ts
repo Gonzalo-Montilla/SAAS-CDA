@@ -6,23 +6,44 @@ interface TarifasPorAnoResponse {
   tarifas: Tarifa[];
 }
 
+function sucursalParams(sucursalId?: string | null) {
+  return sucursalId ? { sucursal_id: sucursalId } : {};
+}
+
 export const tarifasApi = {
   // Obtener tarifas vigentes
-  obtenerVigentes: async (): Promise<Tarifa[]> => {
-    const response = await apiClient.get<Tarifa[]>('/tarifas/vigentes');
+  obtenerVigentes: async (sucursalId?: string | null): Promise<Tarifa[]> => {
+    const response = await apiClient.get<Tarifa[]>('/tarifas/vigentes', {
+      params: sucursalParams(sucursalId),
+    });
     return response.data;
   },
 
   // Obtener tarifas de un año específico
-  obtenerPorAno: async (ano: number): Promise<TarifasPorAnoResponse> => {
-    const response = await apiClient.get<TarifasPorAnoResponse>(`/tarifas/por-ano/${ano}`);
+  obtenerPorAno: async (ano: number, sucursalId?: string | null): Promise<TarifasPorAnoResponse> => {
+    const response = await apiClient.get<TarifasPorAnoResponse>(`/tarifas/por-ano/${ano}`, {
+      params: sucursalParams(sucursalId),
+    });
     return response.data;
   },
 
   // Obtener comisiones SOAT vigentes
-  obtenerComisionesSOAT: async (): Promise<ComisionSOAT[]> => {
-    const response = await apiClient.get<ComisionSOAT[]>('/tarifas/comisiones-soat');
+  obtenerComisionesSOAT: async (sucursalId?: string | null): Promise<ComisionSOAT[]> => {
+    const response = await apiClient.get<ComisionSOAT[]>('/tarifas/comisiones-soat', {
+      params: sucursalParams(sucursalId),
+    });
     return response.data;
+  },
+
+  /** Catálogo + override de la sede activa (igual que cobra el backend). */
+  obtenerComisionesSOATResueltas: async (sucursalId?: string | null): Promise<ComisionSOAT[]> => {
+    const catalogo = await tarifasApi.obtenerComisionesSOAT();
+    if (!sucursalId) return catalogo;
+    const override = await tarifasApi.obtenerComisionesSOAT(sucursalId);
+    if (!override.length) return catalogo;
+    const byTipo = new Map(catalogo.map((c) => [c.tipo_vehiculo, c]));
+    for (const row of override) byTipo.set(row.tipo_vehiculo, row);
+    return Array.from(byTipo.values());
   },
 
   // Crear nueva tarifa (solo admin)
@@ -38,8 +59,10 @@ export const tarifasApi = {
   },
 
   // Listar todas las tarifas (solo admin)
-  listar: async (): Promise<Tarifa[]> => {
-    const response = await apiClient.get<Tarifa[]>('/tarifas/');
+  listar: async (sucursalId?: string | null): Promise<Tarifa[]> => {
+    const response = await apiClient.get<Tarifa[]>('/tarifas/', {
+      params: sucursalParams(sucursalId),
+    });
     return response.data;
   },
 

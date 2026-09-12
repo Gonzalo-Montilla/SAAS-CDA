@@ -14,7 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.api.v1.endpoints.vehiculos import REINSPECCION_VENTANA_DIAS, _build_reinspeccion_context_for_origen
 from app.core.config import settings
-from app.core.deps import get_current_user, get_db
+from app.core.deps import get_active_sucursal_id, get_current_user, get_db
 from app.models.audit_log import AuditAction, AuditLog
 from app.models.quality import QualitySurveyInvite, QualitySurveyResponse
 from app.models.rtm_reminder import RTMRenewalReminder
@@ -44,7 +44,7 @@ def _now_naive() -> datetime:
 
 
 def _calidad_puede_elegir_sede(user: Usuario) -> bool:
-    return user.rol in (RolEnum.ADMINISTRADOR, RolEnum.CONTADOR)
+    return user.rol in (RolEnum.GERENTE, RolEnum.CONTADOR)
 
 
 def _parse_calidad_sucursal_id_param(raw: str | None) -> uuid.UUID | None:
@@ -56,8 +56,14 @@ def _parse_calidad_sucursal_id_param(raw: str | None) -> uuid.UUID | None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="sucursal_id inválido") from None
 
 
-def _apply_calidad_sede_filter(query, db: Session, user: Usuario, sucursal_uuid: uuid.UUID | None):
-    """Admin/contador: todo el tenant o una sede elegida. Resto: solo su sede (sin ver otras ni legado sin sede)."""
+def _apply_calidad_sede_filter(
+    query,
+    db: Session,
+    user: Usuario,
+    sucursal_uuid: uuid.UUID | None,
+    active_sucursal_id: uuid.UUID | None,
+):
+    """Gerente/contador: todo el tenant o una sede elegida. Operadores: sede del JWT."""
     if _calidad_puede_elegir_sede(user):
         if sucursal_uuid is not None:
             sede = (
@@ -69,21 +75,23 @@ def _apply_calidad_sede_filter(query, db: Session, user: Usuario, sucursal_uuid:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Sede no encontrada")
             return query.filter(QualitySurveyInvite.sucursal_id == sucursal_uuid)
         return query
-    if user.sucursal_id is None:
-        # Sin sede asignada: no listar nada (evita ver tenant completo ni legado ambiguo).
+    if active_sucursal_id is None:
         return query.filter(false())
-    return query.filter(QualitySurveyInvite.sucursal_id == user.sucursal_id)
+    return query.filter(QualitySurveyInvite.sucursal_id == active_sucursal_id)
 
 
-def _calidad_invite_visible_for_user(invite: QualitySurveyInvite, user: Usuario) -> bool:
+def _calidad_invite_visible_for_user(
+    invite: QualitySurveyInvite,
+    user: Usuario,
+    active_sucursal_id: uuid.UUID | None,
+) -> bool:
     if _calidad_puede_elegir_sede(user):
         return True
     if invite.sucursal_id is None:
-        # Legado sin sede: solo quien puede ver todo el tenant.
         return False
-    if user.sucursal_id is None:
+    if active_sucursal_id is None:
         return False
-    return invite.sucursal_id == user.sucursal_id
+    return invite.sucursal_id == active_sucursal_id
 
 
 class QualitySummaryResponse(BaseModel):
@@ -614,7 +622,7 @@ def _to_rtm_item(
 
 
 def _require_logo_calidad_admin(user: Usuario) -> None:
-    if user.rol != RolEnum.ADMINISTRADOR:
+    if user.rol not in (RolEnum.GERENTE, RolEnum.ADMINISTRADOR):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Solo administradores pueden actualizar el logo de Calidad.",
@@ -712,9 +720,10 @@ def process_pending_quality_invites(
 
 @router.get("/summary", response_model=QualitySummaryResponse)
 def get_quality_summary(
-    sucursal_id: str | None = Query(default=None, description="Filtrar por sede (administrador/contador)"),
+    sucursal_id: str | None = Query(default=None, description="Filtrar por sede (gerente/contador)"),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: uuid.UUID = Depends(get_active_sucursal_id),
 ):
     process_due_quality_invites(db, tenant_id=current_user.tenant_id, limit=100)
 
@@ -725,7 +734,7 @@ def get_quality_summary(
         .filter(QualitySurveyInvite.tenant_id == current_user.tenant_id)
         .order_by(QualitySurveyInvite.created_at.desc())
     )
-    q_inv = _apply_calidad_sede_filter(q_inv, db, current_user, sid)
+    q_inv = _apply_calidad_sede_filter(q_inv, db, current_user, sid, active_sucursal_id)
     invites = q_inv.all()
     invite_ids = [invite.id for invite in invites]
     responses = (
@@ -787,7 +796,7 @@ def _response_canal(
 
 @router.get("/satisfaction", response_model=QualitySatisfactionListResponse)
 def get_quality_satisfaction(
-    sucursal_id: str | None = Query(default=None, description="Filtrar por sede (administrador/contador)"),
+    sucursal_id: str | None = Query(default=None, description="Filtrar por sede (gerente/contador)"),
     days_window: int | None = Query(
         default=30,
         ge=1,
@@ -801,6 +810,7 @@ def get_quality_satisfaction(
     limit: int = Query(default=25, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: uuid.UUID = Depends(get_active_sucursal_id),
 ):
     """
     Vista gerencial de satisfacción: KPIs, dimensiones y lista priorizable de riesgos.
@@ -812,7 +822,7 @@ def get_quality_satisfaction(
         QualitySurveyInvite.tenant_id == current_user.tenant_id,
         QualitySurveyInvite.status == "responded",
     )
-    q_inv = _apply_calidad_sede_filter(q_inv, db, current_user, sid)
+    q_inv = _apply_calidad_sede_filter(q_inv, db, current_user, sid, active_sucursal_id)
     invites = q_inv.all()
     invite_by_id = {inv.id: inv for inv in invites}
     invite_ids = list(invite_by_id.keys())
@@ -964,7 +974,7 @@ def get_quality_satisfaction(
 @router.get("/invites", response_model=QualityInviteListResponse)
 def list_quality_invites(
     status_filter: str | None = None,
-    sucursal_id: str | None = Query(default=None, description="Filtrar por sede (administrador/contador)"),
+    sucursal_id: str | None = Query(default=None, description="Filtrar por sede (gerente/contador)"),
     search: str | None = Query(
         default=None,
         description="Buscar en cliente, placa, correo, celular o sede",
@@ -974,13 +984,14 @@ def list_quality_invites(
     limit: int = Query(default=25, ge=1, le=100),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: uuid.UUID = Depends(get_active_sucursal_id),
 ):
     process_due_quality_invites(db, tenant_id=current_user.tenant_id, limit=100)
 
     sid = _parse_calidad_sucursal_id_param(sucursal_id) if _calidad_puede_elegir_sede(current_user) else None
 
     query = db.query(QualitySurveyInvite).filter(QualitySurveyInvite.tenant_id == current_user.tenant_id)
-    query = _apply_calidad_sede_filter(query, db, current_user, sid)
+    query = _apply_calidad_sede_filter(query, db, current_user, sid, active_sucursal_id)
     if status_filter:
         query = query.filter(QualitySurveyInvite.status == status_filter.strip().lower())
     q_term = (search or "").strip()
@@ -1053,6 +1064,7 @@ def get_quality_invite_detail(
     invite_id: str,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: uuid.UUID = Depends(get_active_sucursal_id),
 ):
     invite = (
         db.query(QualitySurveyInvite)
@@ -1062,7 +1074,7 @@ def get_quality_invite_detail(
     if not invite:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitación no encontrada")
 
-    if not _calidad_invite_visible_for_user(invite, current_user):
+    if not _calidad_invite_visible_for_user(invite, current_user, active_sucursal_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitación no encontrada")
 
     response = db.query(QualitySurveyResponse).filter(QualitySurveyResponse.invite_id == invite.id).first()
@@ -1162,6 +1174,7 @@ def submit_in_person_quality_survey(
     payload: QualityPublicSurveySubmitRequest,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: uuid.UUID = Depends(get_active_sucursal_id),
 ):
     """Registra la encuesta en el CDA; anula el envío automático por correo si aún no se había enviado."""
     try:
@@ -1177,7 +1190,7 @@ def submit_in_person_quality_survey(
     if not invite:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitación no encontrada")
 
-    if not _calidad_invite_visible_for_user(invite, current_user):
+    if not _calidad_invite_visible_for_user(invite, current_user, active_sucursal_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitación no encontrada")
 
     now = _now_naive()
@@ -1211,6 +1224,7 @@ def mark_certificate_delivered(
     payload: MarkCertificateDeliveredRequest,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: uuid.UUID = Depends(get_active_sucursal_id),
 ):
     try:
         invite_uuid = uuid.UUID(invite_id)
@@ -1224,7 +1238,7 @@ def mark_certificate_delivered(
     )
     if not invite:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitación no encontrada")
-    if not _calidad_invite_visible_for_user(invite, current_user):
+    if not _calidad_invite_visible_for_user(invite, current_user, active_sucursal_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitación no encontrada")
     if not invite.vehiculo_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invitación sin vehículo asociado")
@@ -1349,8 +1363,9 @@ def corregir_cierre_resultado(
     request: Request,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: uuid.UUID = Depends(get_active_sucursal_id),
 ):
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in (RolEnum.GERENTE, RolEnum.ADMINISTRADOR):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Solo administradores pueden corregir el resultado de inspección.",
@@ -1368,7 +1383,7 @@ def corregir_cierre_resultado(
     )
     if not invite:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitación no encontrada")
-    if not _calidad_invite_visible_for_user(invite, current_user):
+    if not _calidad_invite_visible_for_user(invite, current_user, active_sucursal_id):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Invitación no encontrada")
     if not invite.vehiculo_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invitación sin vehículo asociado")

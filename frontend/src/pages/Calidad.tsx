@@ -28,6 +28,7 @@ import Layout from '../components/Layout';
 import { qualityApi } from '../api/quality';
 import type { QualityInviteItem, QualitySatisfactionItem, RTMReminderItem, Usuario } from '../types';
 import { useAuth } from '../contexts/AuthContext';
+import { isGerente, isGerenteOrAdmin } from '../utils/roles';
 import type {
   QualitySurveySubmitPayload,
   MarkCertificateDeliveredPayload,
@@ -168,9 +169,9 @@ export default function Calidad() {
   const { user, refreshTenantUser } = useAuth();
   const tenantUser = user && 'tenant_id' in user ? (user as Usuario) : null;
   const puedeElegirSedeCalidad =
-    !!tenantUser && (tenantUser.rol === 'administrador' || tenantUser.rol === 'contador');
-  const puedeGestionarLogoCalidad = !!tenantUser && tenantUser.rol === 'administrador';
-  const puedeCorregirCierreInspeccion = !!tenantUser && tenantUser.rol === 'administrador';
+    !!tenantUser && (isGerente(tenantUser.rol) || tenantUser.rol === 'contador');
+  const puedeGestionarLogoCalidad = !!tenantUser && isGerenteOrAdmin(tenantUser.rol);
+  const puedeCorregirCierreInspeccion = !!tenantUser && isGerenteOrAdmin(tenantUser.rol);
   const [activeTab, setActiveTab] = useState<'encuestas' | 'satisfaccion' | 'vencimientos' | 'logo_calidad'>('encuestas');
   const [statusFilter, setStatusFilter] = useState<string>('todos');
   const [calidadSedeScope, setCalidadSedeScope] = useState<'todas' | 'sucursal'>('todas');

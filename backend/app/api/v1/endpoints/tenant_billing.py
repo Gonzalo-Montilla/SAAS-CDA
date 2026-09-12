@@ -14,7 +14,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.core.deps import get_current_user, get_db, require_role
+from app.core.deps import get_current_user, get_db, get_gerente
 from app.integrations.saas_factus_billing import try_emit_saas_billing_electronic_invoice
 from app.integrations.wompi import (
     WompiError,
@@ -232,7 +232,7 @@ def quote_tenant_plan(
 def init_tenant_checkout(
     body: TenantQuoteRequest,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(require_role(["administrador"])),
+    current_user: Usuario = Depends(get_gerente),
 ):
     if body.plan_code.strip().lower() not in plan_codes_for_public_checkout():
         raise HTTPException(status_code=400, detail="Plan de pago inválido")
@@ -459,7 +459,7 @@ def confirm_checkout_return(
 def complete_checkout_mock(
     session_id: UUID = Query(..., description="ID de sesión devuelto por init-payment"),
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(require_role(["administrador"])),
+    current_user: Usuario = Depends(get_gerente),
 ):
     """Solo desarrollo: marca pago aprobado sin ePayco."""
     if not settings.PAYMENT_DEV_MOCK_ENABLE or str(settings.ENVIRONMENT).lower() == "production":
@@ -537,7 +537,7 @@ def get_latest_saas_billing_factus_status(
 def retry_saas_billing_factus_emission(
     session_id: UUID,
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(require_role(["administrador"])),
+    current_user: Usuario = Depends(get_gerente),
 ):
     """
     Reintenta emisión a Factus (PROMETHEUS) para un pago ya confirmado, p. ej. si falló la DIAN

@@ -109,7 +109,7 @@ export default function TesoreriaPage() {
 function Dashboard() {
   const { user } = useAuth();
   const [consolidarTodas, setConsolidarTodas] = useState(false);
-  const showConsolidar = user?.rol === 'administrador';
+  const showConsolidar = user?.rol === 'gerente' || user?.rol === 'contador';
   const scopeParams = showConsolidar && consolidarTodas ? { consolidar_todas: true } : {};
 
   const { data: saldo, isLoading: loadingSaldo } = useQuery({
@@ -1403,7 +1403,7 @@ function Historial() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [consolidarTodas, setConsolidarTodas] = useState(false);
-  const showConsolidar = user?.rol === 'administrador';
+  const showConsolidar = user?.rol === 'gerente' || user?.rol === 'contador';
   const scopeParams = showConsolidar && consolidarTodas ? { consolidar_todas: true } : {};
 
   const [filtros, setFiltros] = useState({

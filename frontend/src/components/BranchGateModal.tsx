@@ -5,25 +5,24 @@ import SedePickerModal from './SedePickerModal';
 const PREF_KEY = 'preferred_sucursal_id';
 
 /**
- * Modal bloqueante: si hay más de una sede y aún no hay sede preferida en el navegador,
- * obliga a elegir sede para que caja y operación queden acotadas a una sucursal.
+ * Modal bloqueante: más de una sede permitida y sin preferencia válida.
  */
 export default function BranchGateModal() {
   const { user, loading, authScope, canSwitchSucursal, switchSucursal } = useAuth();
+
+  const sedes: SucursalBasica[] =
+    user && 'sucursales' in user ? ((user as Usuario).sucursales || []) as SucursalBasica[] : [];
+  const pref = typeof window !== 'undefined' ? window.localStorage.getItem(PREF_KEY) : null;
+  const prefOk = Boolean(pref && sedes.some((s) => s.id === pref));
 
   const gateOpen = Boolean(
     !loading &&
       authScope === 'tenant' &&
       canSwitchSucursal &&
       user &&
-      'sucursales' in user &&
-      Array.isArray((user as Usuario).sucursales) &&
-      (user as Usuario).sucursales!.length > 1 &&
-      !localStorage.getItem(PREF_KEY),
+      sedes.length > 1 &&
+      !prefOk,
   );
-
-  const sedes: SucursalBasica[] =
-    user && 'sucursales' in user ? ((user as Usuario).sucursales || []) as SucursalBasica[] : [];
 
   return (
     <SedePickerModal

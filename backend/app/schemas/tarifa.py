@@ -16,6 +16,7 @@ class TarifaCreate(BaseModel):
     tipo_vehiculo: str = Field(pattern="^(moto|liviano_particular|liviano_publico|pesado_particular|pesado_publico|pruebas_auditoria)$")
     antiguedad_min: int = Field(ge=0)
     antiguedad_max: Optional[int] = None
+    sucursal_id: Optional[UUID] = None
     valor_rtm: Decimal = Field(ge=0)
     valor_terceros_runt: Decimal = Field(ge=0)
     valor_terceros_sicov: Decimal = Field(ge=0)
@@ -56,6 +57,7 @@ class TarifaResponse(BaseModel):
     vigencia_inicio: date
     vigencia_fin: date
     tipo_vehiculo: str
+    sucursal_id: Optional[UUID] = None
     antiguedad_min: int
     antiguedad_max: Optional[int]
     valor_rtm: Decimal
@@ -80,6 +82,7 @@ class TarifasPorAno(BaseModel):
 class ComisionSOATCreate(BaseModel):
     """Crear comisión SOAT"""
     tipo_vehiculo: str = Field(pattern="^(moto|carro)$")
+    sucursal_id: Optional[UUID] = None
     valor_comision: Decimal = Field(gt=0)
     vigencia_inicio: date
     vigencia_fin: Optional[date] = None
@@ -98,6 +101,7 @@ class ComisionSOATResponse(BaseModel):
     """Respuesta de comisión SOAT"""
     id: UUID
     tipo_vehiculo: str
+    sucursal_id: Optional[UUID] = None
     valor_comision: Decimal
     vigencia_inicio: date
     vigencia_fin: Optional[date]

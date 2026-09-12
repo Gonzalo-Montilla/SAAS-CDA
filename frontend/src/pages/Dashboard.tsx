@@ -7,6 +7,7 @@ import BranchGateModal from '../components/BranchGateModal';
 import AccessRestrictedModal from '../components/AccessRestrictedModal';
 import apiClient from '../api/client';
 import type { Usuario } from '../types';
+import { isGerente, isGerenteOrAdmin } from '../utils/roles';
 import {
   ClipboardList,
   Wallet,
@@ -45,9 +46,9 @@ export default function Dashboard() {
   const exogenaEnabled = Boolean(tenantUser?.tenant_exogena_enabled);
   const sarlaftEnabled = Boolean(tenantUser?.tenant_sarlaft_enabled);
   const canOpenSarlaft =
-    tenantUser?.rol === 'administrador' || tenantUser?.rol === 'oficial_cumplimiento';
+    tenantUser?.rol === 'oficial_cumplimiento' || isGerenteOrAdmin(tenantUser?.rol);
   const canAccessAdminFinanceModules =
-    tenantUser?.rol === 'administrador' || tenantUser?.rol === 'contador';
+    tenantUser?.rol === 'contador' || isGerenteOrAdmin(tenantUser?.rol);
 
   useEffect(() => {
     const navState = location.state as { nominaLocked?: boolean; exogenaLocked?: boolean; sarlaftLocked?: boolean } | null;
@@ -68,7 +69,7 @@ export default function Dashboard() {
   }, [location.pathname, location.state, navigate]);
 
   const showSedesWizard =
-    tenantUser?.rol === 'administrador' &&
+    isGerente(tenantUser?.rol) &&
     tenantUser.sucursales?.length === 1 &&
     tenantUser.sucursales[0].nombre === 'Sede principal' &&
     !localStorage.getItem(WIZARD_KEY);
@@ -228,7 +229,7 @@ export default function Dashboard() {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           
           {/* Módulo Recepción */}
-          {(user?.rol === 'recepcionista' || user?.rol === 'administrador') && (
+          {(user?.rol === 'recepcionista' || isGerenteOrAdmin(user?.rol)) && (
             <button
               onClick={() => navigate('/recepcion')}
               className="card-pos text-left group animate-fade-in"
@@ -243,7 +244,7 @@ export default function Dashboard() {
             </button>
           )}
 
-          {(user?.rol === 'recepcionista' || user?.rol === 'administrador' || user?.rol === 'comercial') && (
+          {(user?.rol === 'recepcionista' || isGerenteOrAdmin(user?.rol) || user?.rol === 'comercial') && (
             <button
               onClick={() => navigate('/agendamiento')}
               className="card-pos text-left group animate-fade-in animate-delay-100"
@@ -259,7 +260,7 @@ export default function Dashboard() {
           )}
 
           {/* Módulo Caja */}
-          {(user?.rol === 'cajero' || user?.rol === 'administrador') && (
+          {(user?.rol === 'cajero' || isGerenteOrAdmin(user?.rol)) && (
             <button
               onClick={() => navigate('/caja')}
               className="card-pos text-left group animate-fade-in animate-delay-100"
@@ -370,7 +371,7 @@ export default function Dashboard() {
             </>
           )}
 
-          {user?.rol === 'administrador' && (
+          {isGerenteOrAdmin(user?.rol) && (
             <button
               onClick={() => navigate('/organizacion')}
               className="card-pos text-left group animate-fade-in animate-delay-100"
@@ -385,7 +386,7 @@ export default function Dashboard() {
             </button>
           )}
 
-          {(user?.rol === 'administrador' || user?.rol === 'contador' || user?.rol === 'comercial') && (
+          {(isGerenteOrAdmin(user?.rol) || user?.rol === 'contador' || user?.rol === 'comercial') && (
             <button
               onClick={() => navigate('/calidad')}
               className="card-pos text-left group animate-fade-in animate-delay-200"
@@ -468,6 +469,7 @@ export default function Dashboard() {
               <p className="text-xl font-bold text-blue-900 capitalize">{user?.rol}</p>
             </div>
           </div>
+          {isGerente(user?.rol) && (
           <button
             type="button"
             onClick={() => navigate('/suscripcion')}
@@ -484,6 +486,7 @@ export default function Dashboard() {
               </p>
             </div>
           </button>
+          )}
         </div>
       </main>
 

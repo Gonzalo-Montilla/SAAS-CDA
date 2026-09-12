@@ -16,7 +16,7 @@ from app.core.config import settings
 from app.core.deps import get_db
 from app.core.security import get_password_hash
 from app.models.tenant import Tenant
-from app.models.usuario import Usuario, RolEnum
+from app.models.usuario import Usuario, RolEnum, UsuarioSucursal
 from app.models.sucursal import Sucursal
 from app.schemas.onboarding import (
     OnboardingSendCodeRequest,
@@ -542,10 +542,12 @@ def register_tenant_self_service(
         email=normalized_email,
         hashed_password=get_password_hash(admin_password),
         nombre_completo=nombre_representante_legal_o_administrador.strip(),
-        rol=RolEnum.ADMINISTRADOR,
+        rol=RolEnum.GERENTE,
         activo=True,
     )
     db.add(admin)
+    db.flush()
+    db.add(UsuarioSucursal(usuario_id=admin.id, sucursal_id=sede_principal.id))
     db.commit()
 
     register_attempt(

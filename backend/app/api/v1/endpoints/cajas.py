@@ -18,7 +18,11 @@ from app.core.deps import (
     get_active_sucursal_id,
 )
 from app.core.timezone_utils import zoneinfo_from_name
-from app.core.sucursal_scope import get_principal_sucursal_id, comprobante_egreso_scope_sid
+from app.core.sucursal_scope import (
+    comprobante_egreso_scope_sid,
+    es_gerente_o_admin,
+    get_principal_sucursal_id,
+)
 from app.models.usuario import Usuario, RolEnum
 from app.models.caja import Caja, MovimientoCaja, TurnoEnum, EstadoCaja, TipoMovimiento, DesgloseEfectivoCierre
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo
@@ -532,7 +536,7 @@ def descargar_comprobante_egreso_movimiento_caja(
     PDF del comprobante de egreso de caja (gasto, devolución, ajuste).
     Contador/administrador: alcance como reportes. Cajero: solo movimientos de sus propias cajas.
     """
-    if current_user.rol not in (RolEnum.CONTADOR, RolEnum.ADMINISTRADOR, RolEnum.CAJERO):
+    if current_user.rol not in (RolEnum.CONTADOR, RolEnum.ADMINISTRADOR, RolEnum.GERENTE, RolEnum.CAJERO):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No autorizado para descargar este comprobante.",
@@ -555,7 +559,7 @@ def descargar_comprobante_egreso_movimiento_caja(
         )
     )
 
-    if current_user.rol in (RolEnum.CONTADOR, RolEnum.ADMINISTRADOR):
+    if current_user.rol in (RolEnum.CONTADOR, RolEnum.ADMINISTRADOR, RolEnum.GERENTE):
         scope_sid = comprobante_egreso_scope_sid(
             db,
             current_user,
@@ -713,7 +717,7 @@ def listar_movimientos(
     """
     Listar movimientos de la caja activa
     """
-    if current_user.rol not in (RolEnum.ADMINISTRADOR, RolEnum.CONTADOR, RolEnum.CAJERO):
+    if current_user.rol not in (RolEnum.ADMINISTRADOR, RolEnum.GERENTE, RolEnum.CONTADOR, RolEnum.CAJERO):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No autorizado para consultar movimientos de caja.",
@@ -894,7 +898,7 @@ def obtener_historial_cajas(
         ),
     )
 
-    if current_user.rol != RolEnum.ADMINISTRADOR:
+    if current_user.rol not in (RolEnum.ADMINISTRADOR, RolEnum.GERENTE):
         query = query.filter(Caja.usuario_id == current_user.id)
 
     usa_rango_cierre = fecha_cierre_desde is not None or fecha_cierre_hasta is not None
@@ -971,7 +975,7 @@ def obtener_detalle_caja(
         )
     
     # Verificar permisos
-    if current_user.rol != "administrador" and caja.usuario_id != current_user.id:
+    if not es_gerente_o_admin(current_user) and caja.usuario_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permiso para ver esta caja"
@@ -1068,7 +1072,7 @@ def descargar_comprobante_cierre(
         )
     
     # Verificar permisos
-    if current_user.rol != "administrador" and caja.usuario_id != current_user.id:
+    if not es_gerente_o_admin(current_user) and caja.usuario_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permiso para ver este comprobante"

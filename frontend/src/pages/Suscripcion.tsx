@@ -13,6 +13,7 @@ import {
   type TenantPlanItem,
 } from '../api/tenantBilling';
 import { useAuth } from '../contexts/AuthContext';
+import { isGerente } from '../utils/roles';
 import { useBrand } from '../contexts/BrandContext';
 import type { Usuario } from '../types';
 
@@ -324,7 +325,7 @@ export default function Suscripcion() {
     return () => window.clearTimeout(timer);
   }, [quote?.total, quote?.subtotal, quote?.iva, quote?.sedes_totales, quote?.chargeable_additional_branches]);
 
-  const isAdmin = u?.rol === 'administrador';
+  const isAdmin = isGerente(u?.rol);
   const canRetrySaasFe = isAdmin && Boolean(saasFe?.session_id) && (saasFe?.saas_fe_status || '') !== 'ok';
 
   const retrySaasFe = async () => {

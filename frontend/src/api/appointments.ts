@@ -13,6 +13,7 @@ export interface AppointmentCreatePayload {
   fecha: string;
   hora: string;
   notes?: string;
+  sucursal_id?: string;
 }
 
 export interface AppointmentEstimatedRtm {
@@ -99,9 +100,27 @@ export const appointmentsApi = {
     return response.data;
   },
 
-  getPublicAvailability: async (tenantSlug: string, fecha: string): Promise<AppointmentSlot[]> => {
+  getPublicSedes: async (
+    tenantSlug: string
+  ): Promise<Array<{ id: string; nombre: string; es_principal: boolean }>> => {
     const response = await fetch(
-      `${API_URL}/appointments/public/${encodeURIComponent(tenantSlug)}/availability?fecha=${encodeURIComponent(fecha)}`,
+      `${API_URL}/appointments/public/${encodeURIComponent(tenantSlug)}/sedes`
+    );
+    if (!response.ok) {
+      throw new Error('No fue posible cargar las sedes');
+    }
+    return response.json();
+  },
+
+  getPublicAvailability: async (
+    tenantSlug: string,
+    fecha: string,
+    sucursalId?: string | null
+  ): Promise<AppointmentSlot[]> => {
+    const qs = new URLSearchParams({ fecha });
+    if (sucursalId) qs.set('sucursal_id', sucursalId);
+    const response = await fetch(
+      `${API_URL}/appointments/public/${encodeURIComponent(tenantSlug)}/availability?${qs.toString()}`,
     );
     if (!response.ok) {
       throw new Error('No fue posible cargar disponibilidad');
@@ -125,12 +144,16 @@ export const appointmentsApi = {
   getPublicEstimatedRtm: async (
     tenantSlug: string,
     anoModelo: number,
-    tipoVehiculo: string
+    tipoVehiculo: string,
+    sucursalId?: string | null
   ): Promise<AppointmentEstimatedRtm> => {
+    const qs = new URLSearchParams({
+      ano_modelo: String(anoModelo),
+      tipo_vehiculo: tipoVehiculo,
+    });
+    if (sucursalId) qs.set('sucursal_id', sucursalId);
     const response = await fetch(
-      `${API_URL}/appointments/public/${encodeURIComponent(tenantSlug)}/estimated-rtm?ano_modelo=${encodeURIComponent(
-        String(anoModelo)
-      )}&tipo_vehiculo=${encodeURIComponent(tipoVehiculo)}`
+      `${API_URL}/appointments/public/${encodeURIComponent(tenantSlug)}/estimated-rtm?${qs.toString()}`
     );
     const data = await response.json();
     if (!response.ok) {

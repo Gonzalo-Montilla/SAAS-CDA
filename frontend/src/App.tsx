@@ -9,6 +9,7 @@ import TenantBillingOverlays from './components/TenantBillingOverlays';
 import type { AuthScope } from './types';
 
 type TenantRole =
+  | 'gerente'
   | 'administrador'
   | 'oficial_cumplimiento'
   | 'cajero'
@@ -152,7 +153,7 @@ function App() {
             <Route
               path="/recepcion"
               element={
-                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador', 'recepcionista']}>
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['gerente', 'administrador', 'recepcionista']}>
                   <Recepcion />
                 </ProtectedRoute>
               }
@@ -168,7 +169,7 @@ function App() {
             <Route
               path="/tarifas"
               element={
-                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador', 'contador']}>
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['gerente', 'administrador', 'contador']}>
                   <Tarifas />
                 </ProtectedRoute>
               }
@@ -176,7 +177,7 @@ function App() {
             <Route
               path="/proveedores-catalogo"
               element={
-                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador', 'contador']}>
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['gerente', 'administrador', 'contador']}>
                   <ProveedoresCatalogo />
                 </ProtectedRoute>
               }
@@ -184,7 +185,7 @@ function App() {
             <Route
               path="/tesoreria"
               element={
-                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador', 'contador']}>
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['gerente', 'administrador', 'contador']}>
                   <Tesoreria />
                 </ProtectedRoute>
               }
@@ -192,7 +193,7 @@ function App() {
             <Route
               path="/reportes"
               element={
-                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador', 'contador']}>
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['gerente', 'administrador', 'contador']}>
                   <Reportes />
                 </ProtectedRoute>
               }
@@ -201,7 +202,7 @@ function App() {
             <Route
               path="/organizacion"
               element={
-                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador']}>
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['gerente', 'administrador']}>
                   <Organizacion />
                 </ProtectedRoute>
               }
@@ -209,7 +210,7 @@ function App() {
             <Route
               path="/agendamiento"
               element={
-                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador', 'recepcionista', 'comercial']}>
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['gerente', 'administrador', 'recepcionista', 'comercial']}>
                   <Agendamiento />
                 </ProtectedRoute>
               }
@@ -225,7 +226,7 @@ function App() {
             <Route
               path="/suscripcion"
               element={
-                <ProtectedRoute requiredScope="tenant">
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['gerente']}>
                   <Suscripcion />
                 </ProtectedRoute>
               }
@@ -243,7 +244,7 @@ function App() {
               element={
                 <ProtectedRoute
                   requiredScope="tenant"
-                  requiredTenantRoles={['administrador', 'oficial_cumplimiento']}
+                  requiredTenantRoles={['gerente', 'administrador', 'oficial_cumplimiento']}
                   requireSarlaftEnabled
                 >
                   <Sarlaft />
@@ -255,7 +256,7 @@ function App() {
               element={
                 <ProtectedRoute
                   requiredScope="tenant"
-                  requiredTenantRoles={['administrador', 'contador']}
+                  requiredTenantRoles={['gerente', 'administrador', 'contador']}
                   requireNominaEnabled
                 >
                   <Nomina />
@@ -267,7 +268,7 @@ function App() {
               element={
                 <ProtectedRoute
                   requiredScope="tenant"
-                  requiredTenantRoles={['administrador', 'contador']}
+                  requiredTenantRoles={['gerente', 'administrador', 'contador']}
                   requireExogenaEnabled
                 >
                   <Contador />
@@ -277,7 +278,7 @@ function App() {
             <Route
               path="/calidad"
               element={
-                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['administrador', 'contador', 'comercial']}>
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['gerente', 'administrador', 'contador', 'comercial']}>
                   <Calidad />
                 </ProtectedRoute>
               }

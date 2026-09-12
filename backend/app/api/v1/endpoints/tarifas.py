@@ -1,15 +1,17 @@
 """
 Endpoints de Tarifas
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import and_
 from datetime import date
 from decimal import Decimal
 from typing import List, Optional
+from uuid import UUID
 
 from app.core.deps import get_db, get_current_user, get_contador_or_admin
-from app.models.usuario import Usuario
+from app.core.sucursal_scope import assert_sucursal_in_tenant, assert_user_may_operate_sucursal
+from app.models.usuario import Usuario, RolEnum
 from app.models.tarifa import Tarifa, ComisionSOAT
 from app.schemas.tarifa import (
     TarifaCreate,
@@ -22,6 +24,32 @@ from app.schemas.tarifa import (
 )
 
 router = APIRouter()
+
+
+def _assert_puede_escribir_precio(db: Session, user: Usuario, sucursal_id: Optional[UUID]) -> None:
+    if sucursal_id is None:
+        if user.rol not in (RolEnum.GERENTE, RolEnum.CONTADOR):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Solo gerente o contador pueden editar el catálogo de tarifas del CDA.",
+            )
+        return
+    assert_sucursal_in_tenant(db, sucursal_id, user.tenant_id)
+    if user.rol in (RolEnum.GERENTE, RolEnum.CONTADOR):
+        return
+    assert_user_may_operate_sucursal(db, user, sucursal_id)
+
+
+def _filtro_sucursal_tarifa(query, sucursal_id: Optional[UUID]):
+    if sucursal_id is None:
+        return query.filter(Tarifa.sucursal_id.is_(None))
+    return query.filter(Tarifa.sucursal_id == sucursal_id)
+
+
+def _filtro_sucursal_soat(query, sucursal_id: Optional[UUID]):
+    if sucursal_id is None:
+        return query.filter(ComisionSOAT.sucursal_id.is_(None))
+    return query.filter(ComisionSOAT.sucursal_id == sucursal_id)
 
 
 def _suma_terceros_desglose(
@@ -45,21 +73,23 @@ def _dates_overlap(start_a: date, end_a: date, start_b: date, end_b: date) -> bo
 
 @router.get("/vigentes", response_model=List[TarifaResponse])
 def obtener_tarifas_vigentes(
+    sucursal_id: Optional[UUID] = Query(default=None),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
     """
-    Obtener tarifas vigentes hoy
+    Catálogo del CDA (sucursal_id vacío) u overrides de una sede.
     """
     hoy = date.today()
-    tarifas = db.query(Tarifa).filter(
+    q = db.query(Tarifa).filter(
         and_(
             Tarifa.activa == True,
             Tarifa.tenant_id == current_user.tenant_id,
             Tarifa.vigencia_inicio <= hoy,
             Tarifa.vigencia_fin >= hoy
         )
-    ).order_by(Tarifa.tipo_vehiculo, Tarifa.antiguedad_min).all()
+    )
+    tarifas = _filtro_sucursal_tarifa(q, sucursal_id).order_by(Tarifa.tipo_vehiculo, Tarifa.antiguedad_min).all()
     
     return tarifas
 
@@ -67,16 +97,18 @@ def obtener_tarifas_vigentes(
 @router.get("/por-ano/{ano}", response_model=TarifasPorAno)
 def obtener_tarifas_por_ano(
     ano: int,
+    sucursal_id: Optional[UUID] = Query(default=None),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
     """
-    Obtener tarifas de un año específico
+    Tarifas de un año: catálogo del CDA o overrides de sede.
     """
-    tarifas = db.query(Tarifa).filter(
+    q = db.query(Tarifa).filter(
         Tarifa.ano_vigencia == ano,
         Tarifa.tenant_id == current_user.tenant_id
-    ).order_by(Tarifa.tipo_vehiculo, Tarifa.antiguedad_min).all()
+    )
+    tarifas = _filtro_sucursal_tarifa(q, sucursal_id).order_by(Tarifa.tipo_vehiculo, Tarifa.antiguedad_min).all()
     
     return TarifasPorAno(
         ano=ano,
@@ -115,18 +147,19 @@ def crear_tarifa(
             detail="La suma de RUNT + SICOV + Bancarización + ANSV (terceros) debe ser mayor a cero.",
         )
     valor_total = tarifa_data.valor_rtm + valor_terceros
+    _assert_puede_escribir_precio(db, admin, tarifa_data.sucursal_id)
 
-    """
-    Crear nueva tarifa (solo administrador)
-    """
-    # Verificar conflictos de vigencia + antigüedad en el mismo tenant/tipo/año.
-    candidatas = db.query(Tarifa).filter(
-        and_(
-            Tarifa.ano_vigencia == tarifa_data.ano_vigencia,
-            Tarifa.tenant_id == admin.tenant_id,
-            Tarifa.tipo_vehiculo == tarifa_data.tipo_vehiculo,
-            Tarifa.activa == True
-        )
+    # Verificar conflictos de vigencia + antigüedad en el mismo tenant/tipo/año/sede.
+    candidatas = _filtro_sucursal_tarifa(
+        db.query(Tarifa).filter(
+            and_(
+                Tarifa.ano_vigencia == tarifa_data.ano_vigencia,
+                Tarifa.tenant_id == admin.tenant_id,
+                Tarifa.tipo_vehiculo == tarifa_data.tipo_vehiculo,
+                Tarifa.activa == True
+            )
+        ),
+        tarifa_data.sucursal_id,
     ).all()
 
     conflicto = next(
@@ -160,6 +193,7 @@ def crear_tarifa(
     
     nueva_tarifa = Tarifa(
         tenant_id=admin.tenant_id,
+        sucursal_id=tarifa_data.sucursal_id,
         ano_vigencia=tarifa_data.ano_vigencia,
         vigencia_inicio=tarifa_data.vigencia_inicio,
         vigencia_fin=tarifa_data.vigencia_fin,
@@ -204,19 +238,23 @@ def actualizar_tarifa(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Tarifa no encontrada"
         )
+    _assert_puede_escribir_precio(db, admin, tarifa.sucursal_id)
 
     # Si se reactiva una tarifa, validamos que no colisione con otra tarifa activa
     # del mismo tenant/tipo/año en rango de fechas + antigüedad.
     activar_solicitado = tarifa_data.activa is True and tarifa.activa is False
     if activar_solicitado:
-        candidatas = db.query(Tarifa).filter(
-            and_(
-                Tarifa.tenant_id == admin.tenant_id,
-                Tarifa.id != tarifa.id,
-                Tarifa.ano_vigencia == tarifa.ano_vigencia,
-                Tarifa.tipo_vehiculo == tarifa.tipo_vehiculo,
-                Tarifa.activa == True,
-            )
+        candidatas = _filtro_sucursal_tarifa(
+            db.query(Tarifa).filter(
+                and_(
+                    Tarifa.tenant_id == admin.tenant_id,
+                    Tarifa.id != tarifa.id,
+                    Tarifa.ano_vigencia == tarifa.ano_vigencia,
+                    Tarifa.tipo_vehiculo == tarifa.tipo_vehiculo,
+                    Tarifa.activa == True,
+                )
+            ),
+            tarifa.sucursal_id,
         ).all()
 
         conflicto = next(
@@ -313,21 +351,23 @@ def actualizar_tarifa(
 
 @router.get("/comisiones-soat", response_model=List[ComisionSOATResponse])
 def obtener_comisiones_soat(
+    sucursal_id: Optional[UUID] = Query(default=None),
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user)
 ):
     """
-    Obtener comisiones SOAT vigentes
+    Comisiones SOAT del catálogo CDA o de una sede.
     """
     hoy = date.today()
-    comisiones = db.query(ComisionSOAT).filter(
+    q = db.query(ComisionSOAT).filter(
         and_(
             ComisionSOAT.activa == True,
             ComisionSOAT.tenant_id == current_user.tenant_id,
             ComisionSOAT.vigencia_inicio <= hoy,
             (ComisionSOAT.vigencia_fin >= hoy) | (ComisionSOAT.vigencia_fin == None)
         )
-    ).all()
+    )
+    comisiones = _filtro_sucursal_soat(q, sucursal_id).all()
     
     return comisiones
 
@@ -341,8 +381,10 @@ def crear_comision_soat(
     """
     Crear nueva comisión SOAT (solo administrador)
     """
+    _assert_puede_escribir_precio(db, admin, comision_data.sucursal_id)
     nueva_comision = ComisionSOAT(
         tenant_id=admin.tenant_id,
+        sucursal_id=comision_data.sucursal_id,
         tipo_vehiculo=comision_data.tipo_vehiculo,
         valor_comision=comision_data.valor_comision,
         vigencia_inicio=comision_data.vigencia_inicio,
@@ -378,6 +420,7 @@ def actualizar_comision_soat(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Comisión no encontrada"
         )
+    _assert_puede_escribir_precio(db, admin, comision.sucursal_id)
     
     # Actualizar campos
     if comision_data.tipo_vehiculo is not None:
@@ -416,6 +459,7 @@ def eliminar_comision_soat(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Comisión no encontrada"
         )
+    _assert_puede_escribir_precio(db, admin, comision.sucursal_id)
     
     db.delete(comision)
     db.commit()
@@ -425,15 +469,15 @@ def eliminar_comision_soat(
 
 @router.get("/", response_model=List[TarifaResponse])
 def listar_todas_tarifas(
+    sucursal_id: Optional[UUID] = Query(default=None),
     db: Session = Depends(get_db),
     admin: Usuario = Depends(get_contador_or_admin)
 ):
     """
-    Listar todas las tarifas (solo administrador)
+    Listar tarifas (catálogo CDA por defecto; sucursal_id = overrides de esa sede).
     """
-    tarifas = db.query(Tarifa).filter(
-        Tarifa.tenant_id == admin.tenant_id
-    ).order_by(
+    q = db.query(Tarifa).filter(Tarifa.tenant_id == admin.tenant_id)
+    tarifas = _filtro_sucursal_tarifa(q, sucursal_id).order_by(
         Tarifa.ano_vigencia.desc(),
         Tarifa.tipo_vehiculo,
         Tarifa.antiguedad_min

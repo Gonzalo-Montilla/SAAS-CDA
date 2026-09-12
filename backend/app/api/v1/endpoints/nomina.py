@@ -15,6 +15,7 @@ from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_admin, get_db, require_nomina_enabled_for_tenant
+from app.core.sucursal_scope import assert_sucursal_in_tenant
 from app.models.nomina import (
     EstadoPeriodoNomina,
     NominaCentroCosto,
@@ -137,6 +138,9 @@ def crear_empleado_nomina(
         )
         if not cc:
             raise HTTPException(status_code=400, detail="Centro de costo inválido para este tenant.")
+
+    if payload.sucursal_id:
+        assert_sucursal_in_tenant(db, payload.sucursal_id, current_user.tenant_id)
 
     exists = (
         db.query(NominaEmpleado)
@@ -269,6 +273,9 @@ def crear_centro_costo_nomina(
     )
     if exists:
         raise HTTPException(status_code=400, detail="Ya existe un centro de costo con ese código en este tenant.")
+
+    if payload.sucursal_id:
+        assert_sucursal_in_tenant(db, payload.sucursal_id, current_user.tenant_id)
 
     centro = NominaCentroCosto(
         tenant_id=current_user.tenant_id,
@@ -481,6 +488,7 @@ def listar_novedades_nomina(
     if empleado_id:
         query = query.filter(NominaNovedad.empleado_id == empleado_id)
     if sucursal_id:
+        assert_sucursal_in_tenant(db, sucursal_id, current_user.tenant_id)
         query = query.filter(NominaEmpleado.sucursal_id == sucursal_id)
     if centro_costo_id:
         query = query.filter(NominaEmpleado.centro_costo_id == centro_costo_id)
@@ -703,6 +711,7 @@ def listar_liquidaciones_periodo(
     if empleado_id:
         query = query.filter(NominaLiquidacion.empleado_id == empleado_id)
     if sucursal_id:
+        assert_sucursal_in_tenant(db, sucursal_id, current_user.tenant_id)
         query = query.filter(NominaEmpleado.sucursal_id == sucursal_id)
     if centro_costo_id:
         query = query.filter(

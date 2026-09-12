@@ -96,7 +96,7 @@ export default function Agendamiento() {
   );
 
   const query = useQuery({
-    queryKey: ['appointments', fecha, statusFilter],
+    queryKey: ['appointments', fecha, statusFilter, user?.active_sucursal_id],
     queryFn: () => appointmentsApi.listByDate(fecha, statusFilter || undefined),
   });
 
@@ -109,7 +109,7 @@ export default function Agendamiento() {
   });
 
   const estimatedRtmQuery = useQuery({
-    queryKey: ['internal-appointment-estimated-rtm', form.tipo_vehiculo, anoModelo],
+    queryKey: ['internal-appointment-estimated-rtm', form.tipo_vehiculo, anoModelo, user?.active_sucursal_id],
     enabled: canEstimate,
     queryFn: () => appointmentsApi.getInternalEstimatedRtm(anoModeloNumber, form.tipo_vehiculo),
   });
@@ -312,6 +312,11 @@ export default function Agendamiento() {
               </p>
               <p className="module-hero-subtitle">
                 Gestiona citas creadas por link público y por el equipo comercial/recepción.
+                {user?.sucursales && user.sucursales.length > 1
+                  ? ` Mostrando la sede ${
+                      user.sucursales.find((s) => s.id === user.active_sucursal_id)?.nombre || 'activa'
+                    }.`
+                  : ''}
               </p>
             </div>
             <button

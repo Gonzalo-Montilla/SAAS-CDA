@@ -15,6 +15,7 @@ from fastapi.responses import HTMLResponse, Response
 from sqlalchemy.orm import Session
 
 from app.core.deps import get_db, get_current_user, require_sarlaft_enabled_for_tenant
+from app.core.sucursal_scope import assert_sucursal_in_tenant
 from app.core.config import settings
 from app.integrations.opensanctions import OpenSanctionsError, open_sanctions_match
 from app.models.sarlaft_case import SarlaftCase
@@ -81,7 +82,7 @@ def _ensure_profile(db: Session, tenant_id: UUID) -> SarlaftProfile:
 
 
 def _assert_sarlaft_editor(current_user: Usuario) -> None:
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para configurar SARLAFT.",
@@ -743,7 +744,7 @@ def screening_opensanctions(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para ejecutar screening SARLAFT.",
@@ -854,7 +855,7 @@ def create_sarlaft_manual_check(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para registrar consultas manuales SARLAFT.",
@@ -988,7 +989,7 @@ def create_sarlaft_manual_check(
 def download_sarlaft_batch_template_csv(
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para descargar plantilla de lote SARLAFT.",
@@ -1013,7 +1014,7 @@ def create_sarlaft_batch_job(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para ejecutar lotes SARLAFT.",
@@ -1075,13 +1076,14 @@ def list_sarlaft_batch_jobs(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para listar lotes SARLAFT.",
         )
     q = db.query(SarlaftBatchJob).filter(SarlaftBatchJob.tenant_id == current_user.tenant_id)
     if sede_id:
+        assert_sucursal_in_tenant(db, sede_id, current_user.tenant_id)
         q = q.join(Usuario, Usuario.id == SarlaftBatchJob.created_by_user_id).filter(Usuario.sucursal_id == sede_id)
     rows = q.order_by(SarlaftBatchJob.created_at.desc()).limit(limit).all()
     return [_batch_job_response(r) for r in rows]
@@ -1095,7 +1097,7 @@ def list_sarlaft_batch_job_rows(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para consultar detalle de lote SARLAFT.",
@@ -1108,6 +1110,7 @@ def list_sarlaft_batch_job_rows(
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lote SARLAFT no encontrado.")
     if sede_id:
+        assert_sucursal_in_tenant(db, sede_id, current_user.tenant_id)
         job_creator = (
             db.query(Usuario)
             .filter(
@@ -1138,7 +1141,7 @@ def download_sarlaft_batch_job_rows_csv(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para exportar lote SARLAFT.",
@@ -1151,6 +1154,7 @@ def download_sarlaft_batch_job_rows_csv(
     if not job:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lote SARLAFT no encontrado.")
     if sede_id:
+        assert_sucursal_in_tenant(db, sede_id, current_user.tenant_id)
         job_creator = (
             db.query(Usuario)
             .filter(
@@ -1230,7 +1234,7 @@ def process_pending_intercda_signals(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para procesar la cola inter-CDA.",
@@ -1254,7 +1258,7 @@ def download_sarlaft_manual_check_certificate(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para emitir certificados SARLAFT.",
@@ -1418,13 +1422,14 @@ def list_sarlaft_manual_checks(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para listar consultas manuales SARLAFT.",
         )
     q = db.query(SarlaftManualCheck).filter(SarlaftManualCheck.tenant_id == current_user.tenant_id)
     if sede_id:
+        assert_sucursal_in_tenant(db, sede_id, current_user.tenant_id)
         q = q.join(Usuario, Usuario.id == SarlaftManualCheck.created_by_user_id).filter(Usuario.sucursal_id == sede_id)
     q = q.order_by(SarlaftManualCheck.created_at.desc())
     if subject_type:
@@ -1525,7 +1530,7 @@ def list_sarlaft_cases(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para listar casos SARLAFT.",
@@ -1540,6 +1545,7 @@ def list_sarlaft_cases(
     if status_filter:
         q = q.filter(SarlaftCase.status == status_filter.strip().lower())
     if sede_id:
+        assert_sucursal_in_tenant(db, sede_id, current_user.tenant_id)
         q = q.filter(SarlaftCase.sede_id == sede_id)
     rows = q.limit(limit).all()
     case_ids = [r.id for r in rows]
@@ -1594,7 +1600,7 @@ def list_sarlaft_internal_alerts(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para listar alertas internas SARLAFT.",
@@ -1664,6 +1670,7 @@ def list_sarlaft_internal_alerts(
                     .first()
                 )
         if sede_id:
+            assert_sucursal_in_tenant(db, sede_id, current_user.tenant_id)
             matches_sede = bool(case and case.sede_id == sede_id)
             if not matches_sede:
                 if source_origin == "manual":
@@ -1777,7 +1784,7 @@ def get_sarlaft_subject_expediente(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para consultar expedientes SARLAFT.",
@@ -1811,6 +1818,7 @@ def get_sarlaft_subject_expediente(
             .order_by(SarlaftCase.created_at.desc())
         )
         if sede_id:
+            assert_sucursal_in_tenant(db, sede_id, current_user.tenant_id)
             cases_q = cases_q.filter(SarlaftCase.sede_id == sede_id)
         cases = cases_q.all()
     filtered_case_ids = {c.id for c in cases}
@@ -1826,6 +1834,7 @@ def get_sarlaft_subject_expediente(
     if doc_type_norm:
         manual_q = manual_q.filter(SarlaftManualCheck.doc_type == doc_type_norm)
     if sede_id:
+        assert_sucursal_in_tenant(db, sede_id, current_user.tenant_id)
         manual_q = manual_q.join(Usuario, Usuario.id == SarlaftManualCheck.created_by_user_id).filter(Usuario.sucursal_id == sede_id)
     manual_checks = manual_q.order_by(SarlaftManualCheck.created_at.desc()).all()
     manual_check_ids = {m.id for m in manual_checks}
@@ -2028,7 +2037,7 @@ def decide_sarlaft_internal_alert(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para decidir alertas SARLAFT.",
@@ -2142,7 +2151,7 @@ def create_case_from_internal_alert(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para crear caso desde alerta interna.",
@@ -2291,11 +2300,14 @@ def create_sarlaft_case(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para crear casos SARLAFT.",
         )
+
+    if payload.sede_id:
+        assert_sucursal_in_tenant(db, payload.sede_id, current_user.tenant_id)
 
     operacion_ref = (payload.operacion_ref or "").strip()
     if not operacion_ref:
@@ -2369,7 +2381,7 @@ def get_sarlaft_case(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para consultar casos SARLAFT.",
@@ -2399,7 +2411,7 @@ def list_sarlaft_sirel_queue(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para listar bandeja SIREL.",
@@ -2414,6 +2426,7 @@ def list_sarlaft_sirel_queue(
         .order_by(SarlaftCase.created_at.desc())
     )
     if sede_id:
+        assert_sucursal_in_tenant(db, sede_id, current_user.tenant_id)
         rows_q = rows_q.filter(SarlaftCase.sede_id == sede_id)
     rows = rows_q.limit(limit).all()
     if not rows:
@@ -2519,7 +2532,7 @@ def mark_sarlaft_sirel_reported(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para marcar reporte SIREL.",
@@ -2668,7 +2681,7 @@ def download_sarlaft_pre_ros_txt(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para descargar pre-ROS.",
@@ -2716,7 +2729,7 @@ def download_sarlaft_expediente_template_txt(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para descargar plantilla de expediente.",
@@ -2813,7 +2826,7 @@ def download_sarlaft_expediente_template_pdf(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if current_user.rol not in {RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
+    if current_user.rol not in {RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.OFICIAL_CUMPLIMIENTO}:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="No tienes permisos para descargar plantilla de expediente.",

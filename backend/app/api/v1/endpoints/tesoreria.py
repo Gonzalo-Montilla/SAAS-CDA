@@ -46,9 +46,20 @@ from app.services.dse_retencion_motor_calculo import (
 router = APIRouter()
 
 
-def _tesoreria_sucursal_scope(consolidar_todas: bool, active_sucursal_id: UUID) -> Optional[UUID]:
-    """None = todas las sedes (consolidado tenant)."""
-    return None if consolidar_todas else active_sucursal_id
+def _tesoreria_sucursal_scope(
+    current_user: Usuario,
+    consolidar_todas: bool,
+    active_sucursal_id: UUID,
+) -> Optional[UUID]:
+    """None = todas las sedes (solo gerente o contador)."""
+    if consolidar_todas:
+        if current_user.rol not in (RolEnum.GERENTE, RolEnum.CONTADOR):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Solo gerente o contador pueden consolidar todas las sedes.",
+            )
+        return None
+    return active_sucursal_id
 
 
 def _filter_movimientos_tesoreria(
@@ -410,7 +421,7 @@ def listar_movimientos(
     """
     Listar movimientos de tesorería con filtros (solo administrador)
     """
-    scope_sid = _tesoreria_sucursal_scope(consolidar_todas, active_sucursal_id)
+    scope_sid = _tesoreria_sucursal_scope(current_user, consolidar_todas, active_sucursal_id)
     query = _filter_movimientos_tesoreria(
         db.query(MovimientoTesoreria),
         current_user.tenant_id,
@@ -469,7 +480,7 @@ def obtener_movimiento(
     """
     Obtener detalle de un movimiento específico
     """
-    scope_sid = _tesoreria_sucursal_scope(consolidar_todas, active_sucursal_id)
+    scope_sid = _tesoreria_sucursal_scope(current_user, consolidar_todas, active_sucursal_id)
     q = _filter_movimientos_tesoreria(
         db.query(MovimientoTesoreria),
         current_user.tenant_id,
@@ -499,7 +510,7 @@ def anular_movimiento(
     """
     Anula un movimiento: deja de afectar saldo y desglose de efectivo (no borra el registro).
     """
-    scope_sid = _tesoreria_sucursal_scope(consolidar_todas, active_sucursal_id)
+    scope_sid = _tesoreria_sucursal_scope(current_user, consolidar_todas, active_sucursal_id)
     q = _filter_movimientos_tesoreria(
         db.query(MovimientoTesoreria),
         current_user.tenant_id,
@@ -536,7 +547,7 @@ def obtener_saldo_actual(
     """
     Obtener saldo actual de la caja fuerte
     """
-    scope_sid = _tesoreria_sucursal_scope(consolidar_todas, active_sucursal_id)
+    scope_sid = _tesoreria_sucursal_scope(current_user, consolidar_todas, active_sucursal_id)
     q = _filter_movimientos_tesoreria(
         db.query(func.sum(MovimientoTesoreria.monto)),
         current_user.tenant_id,
@@ -572,7 +583,7 @@ def obtener_resumen(
     fecha_desde_dt = datetime.combine(fecha_desde, datetime.min.time())
     fecha_hasta_dt = datetime.combine(fecha_hasta, datetime.max.time())
 
-    scope_sid = _tesoreria_sucursal_scope(consolidar_todas, active_sucursal_id)
+    scope_sid = _tesoreria_sucursal_scope(current_user, consolidar_todas, active_sucursal_id)
 
     movimientos = (
         _filter_movimientos_tesoreria(
@@ -662,7 +673,7 @@ def obtener_desglose_saldo(
     """
     Obtener desglose del saldo actual por método de pago
     """
-    scope_sid = _tesoreria_sucursal_scope(consolidar_todas, active_sucursal_id)
+    scope_sid = _tesoreria_sucursal_scope(current_user, consolidar_todas, active_sucursal_id)
     resultados = (
         _filter_movimientos_tesoreria(
             db.query(
@@ -702,7 +713,7 @@ def obtener_desglose_efectivo(
     """
     Obtener desglose de billetes y monedas del efectivo actual en caja
     """
-    scope_sid = _tesoreria_sucursal_scope(consolidar_todas, active_sucursal_id)
+    scope_sid = _tesoreria_sucursal_scope(current_user, consolidar_todas, active_sucursal_id)
     movimientos_efectivo = (
         _filter_movimientos_tesoreria(
             db.query(MovimientoTesoreria),
@@ -779,7 +790,7 @@ def obtener_estadisticas(
     fecha_desde_dt = datetime.combine(fecha_desde, datetime.min.time())
     fecha_hasta_dt = datetime.combine(fecha_hasta, datetime.max.time())
 
-    scope_sid = _tesoreria_sucursal_scope(consolidar_todas, active_sucursal_id)
+    scope_sid = _tesoreria_sucursal_scope(current_user, consolidar_todas, active_sucursal_id)
     movimientos = (
         _filter_movimientos_tesoreria(
             db.query(MovimientoTesoreria),

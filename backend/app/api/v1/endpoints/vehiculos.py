@@ -28,7 +28,10 @@ from app.core.deps import (
     get_recepcionista_or_admin,
     get_active_sucursal_id,
 )
+from app.core.sucursal_scope import es_gerente_o_admin
 from app.models.usuario import Usuario
+from app.models.tarifa import Tarifa, ComisionSOAT
+from app.services.tarifas_resolver import resolver_comision_soat, resolver_tarifa_vigente
 from app.models.tenant import Tenant
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo, MetodoPago
 from app.models.factus import TenantFactusSettings, FacturaElectronica, FacturaCorreccion
@@ -1600,6 +1603,8 @@ def obtener_historial_cliente_sugerencia(
     row = _buscar_por_documento(solo_sucursal=True)
     if row:
         return _row_to_response(row, "documento_sucursal")
+    if not es_gerente_o_admin(current_user):
+        return HistorialClienteSugerenciaResponse(encontrado=False)
     row = _buscar_por_placa(solo_sucursal=False)
     if row:
         return _row_to_response(row, "placa_tenant")
@@ -2276,37 +2281,24 @@ def mapear_tipo_vehiculo_a_comision(tipo_vehiculo: str) -> str:
         return "carro"
 
 
-def calcular_tarifa_por_antiguedad(ano_modelo: int, tipo_vehiculo: str, tenant_id, db: Session) -> Tarifa:
-    """Calcular tarifa según antigüedad y tipo de vehículo"""
-    ano_actual = datetime.now().year
-    antiguedad = ano_actual - ano_modelo
-
-    hoy = date.today()
-
-    def _buscar(ant: int) -> Tarifa | None:
-        return (
-            db.query(Tarifa)
-            .filter(
-                and_(
-                    Tarifa.activa == True,
-                    Tarifa.tenant_id == tenant_id,
-                    Tarifa.tipo_vehiculo == tipo_vehiculo,
-                    Tarifa.vigencia_inicio <= hoy,
-                    Tarifa.vigencia_fin >= hoy,
-                    Tarifa.antiguedad_min <= ant,
-                    (Tarifa.antiguedad_max >= ant) | (Tarifa.antiguedad_max == None),
-                )
-            )
-            .order_by(Tarifa.antiguedad_min.desc(), Tarifa.created_at.desc())
-            .first()
-        )
-
-    tarifa = _buscar(antiguedad)
-    # Rangos suelen empezar en "1 año"; año modelo = año calendario → antigüedad 0 y no cae en ningún tramo.
-    if tarifa is None and antiguedad == 0:
-        tarifa = _buscar(1)
-
+def calcular_tarifa_por_antiguedad(
+    ano_modelo: int,
+    tipo_vehiculo: str,
+    tenant_id,
+    db: Session,
+    sucursal_id=None,
+) -> Tarifa:
+    """Calcular tarifa según antigüedad y tipo; override de sede si existe."""
+    tarifa = resolver_tarifa_vigente(
+        db,
+        tenant_id=tenant_id,
+        tipo_vehiculo=tipo_vehiculo,
+        ano_modelo=ano_modelo,
+        sucursal_id=sucursal_id,
+    )
     if not tarifa:
+        ano_actual = datetime.now().year
+        antiguedad = ano_actual - ano_modelo
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=(
@@ -2314,7 +2306,6 @@ def calcular_tarifa_por_antiguedad(ano_modelo: int, tipo_vehiculo: str, tenant_i
                 f"(antigüedad {antiguedad} años). Revise tarifas en administración."
             ),
         )
-
     return tarifa
 
 
@@ -2346,6 +2337,7 @@ def _calcular_snapshot_iva_servicio(
                 vehiculo.tipo_vehiculo,
                 tenant_id,
                 db,
+                sucursal_id=getattr(vehiculo, "sucursal_id", None),
             )
             suma_t = Decimal(str(t_row.valor_rtm or 0)) + Decimal(str(t_row.valor_terceros or 0))
             if abs(suma_t - monto_servicio) <= Decimal("1"):
@@ -2425,6 +2417,7 @@ def registrar_vehiculo(
         and_(
             VehiculoProceso.placa == placa_upper,
             VehiculoProceso.tenant_id == current_user.tenant_id,
+            VehiculoProceso.sucursal_id == active_sucursal_id,
             VehiculoProceso.estado.in_([EstadoVehiculo.REGISTRADO, EstadoVehiculo.PAGADO])
         )
     ).first()
@@ -2535,15 +2528,12 @@ def registrar_vehiculo(
         # SOAT puede aplicar o no en preventiva
         if vehiculo_data.tiene_soat:
             hoy = date.today()
-            comision = db.query(ComisionSOAT).filter(
-                and_(
-                    ComisionSOAT.tipo_vehiculo == "carro",  # Por defecto carro para preventiva
-                    ComisionSOAT.tenant_id == current_user.tenant_id,
-                    ComisionSOAT.activa == True,
-                    ComisionSOAT.vigencia_inicio <= hoy,
-                    (ComisionSOAT.vigencia_fin >= hoy) | (ComisionSOAT.vigencia_fin == None)
-                )
-            ).first()
+            comision = resolver_comision_soat(
+                db,
+                tenant_id=current_user.tenant_id,
+                tipo_vehiculo="carro",
+                sucursal_id=active_sucursal_id,
+            )
             
             if comision:
                 comision_soat = comision.valor_comision
@@ -2554,7 +2544,8 @@ def registrar_vehiculo(
             vehiculo_data.ano_modelo,
             vehiculo_data.tipo_vehiculo,
             current_user.tenant_id,
-            db
+            db,
+            sucursal_id=active_sucursal_id,
         )
         valor_rtm = tarifa.valor_total
         
@@ -2564,15 +2555,12 @@ def registrar_vehiculo(
             hoy = date.today()
             tipo_comision = mapear_tipo_vehiculo_a_comision(vehiculo_data.tipo_vehiculo)
             
-            comision = db.query(ComisionSOAT).filter(
-                and_(
-                    ComisionSOAT.tipo_vehiculo == tipo_comision,
-                    ComisionSOAT.tenant_id == current_user.tenant_id,
-                    ComisionSOAT.activa == True,
-                    ComisionSOAT.vigencia_inicio <= hoy,
-                    (ComisionSOAT.vigencia_fin >= hoy) | (ComisionSOAT.vigencia_fin == None)
-                )
-            ).first()
+            comision = resolver_comision_soat(
+                db,
+                tenant_id=current_user.tenant_id,
+                tipo_vehiculo=tipo_comision,
+                sucursal_id=active_sucursal_id,
+            )
             
             if comision:
                 comision_soat = comision.valor_comision
@@ -2721,6 +2709,7 @@ def editar_vehiculo(
                 VehiculoProceso.placa == placa_upper,
                 VehiculoProceso.id != vehiculo_id,
                 VehiculoProceso.tenant_id == current_user.tenant_id,
+                VehiculoProceso.sucursal_id == active_sucursal_id,
                 VehiculoProceso.estado.in_([EstadoVehiculo.REGISTRADO, EstadoVehiculo.PAGADO])
             )
         ).first()
@@ -2797,15 +2786,12 @@ def editar_vehiculo(
         # SOAT puede aplicar o no en preventiva
         if vehiculo_data.tiene_soat:
             hoy = date.today()
-            comision = db.query(ComisionSOAT).filter(
-                and_(
-                    ComisionSOAT.tipo_vehiculo == "carro",
-                    ComisionSOAT.tenant_id == current_user.tenant_id,
-                    ComisionSOAT.activa == True,
-                    ComisionSOAT.vigencia_inicio <= hoy,
-                    (ComisionSOAT.vigencia_fin >= hoy) | (ComisionSOAT.vigencia_fin == None)
-                )
-            ).first()
+            comision = resolver_comision_soat(
+                db,
+                tenant_id=current_user.tenant_id,
+                tipo_vehiculo="carro",
+                sucursal_id=active_sucursal_id,
+            )
             
             if comision:
                 comision_soat = comision.valor_comision
@@ -2818,7 +2804,8 @@ def editar_vehiculo(
             vehiculo_data.ano_modelo,
             vehiculo_data.tipo_vehiculo,
             current_user.tenant_id,
-            db
+            db,
+            sucursal_id=active_sucursal_id,
         )
         valor_rtm = tarifa.valor_total
         
@@ -2828,15 +2815,12 @@ def editar_vehiculo(
             hoy = date.today()
             tipo_comision = mapear_tipo_vehiculo_a_comision(vehiculo_data.tipo_vehiculo)
             
-            comision = db.query(ComisionSOAT).filter(
-                and_(
-                    ComisionSOAT.tipo_vehiculo == tipo_comision,
-                    ComisionSOAT.tenant_id == current_user.tenant_id,
-                    ComisionSOAT.activa == True,
-                    ComisionSOAT.vigencia_inicio <= hoy,
-                    (ComisionSOAT.vigencia_fin >= hoy) | (ComisionSOAT.vigencia_fin == None)
-                )
-            ).first()
+            comision = resolver_comision_soat(
+                db,
+                tenant_id=current_user.tenant_id,
+                tipo_vehiculo=tipo_comision,
+                sucursal_id=active_sucursal_id,
+            )
             
             if comision:
                 comision_soat = comision.valor_comision
@@ -3215,15 +3199,12 @@ def cobrar_vehiculo(
             comision_soat = Decimal(0)
             if cobro_data.tiene_soat:
                 hoy = date.today()
-                comision = db.query(ComisionSOAT).filter(
-                    and_(
-                        ComisionSOAT.tipo_vehiculo == "carro",
-                        ComisionSOAT.tenant_id == current_user.tenant_id,
-                        ComisionSOAT.activa == True,
-                        ComisionSOAT.vigencia_inicio <= hoy,
-                        (ComisionSOAT.vigencia_fin >= hoy) | (ComisionSOAT.vigencia_fin == None)
-                    )
-                ).first()
+                comision = resolver_comision_soat(
+                    db,
+                    tenant_id=current_user.tenant_id,
+                    tipo_vehiculo="carro",
+                    sucursal_id=active_sucursal_id,
+                )
                 
                 if comision:
                     comision_soat = comision.valor_comision
@@ -3239,15 +3220,12 @@ def cobrar_vehiculo(
                 hoy = date.today()
                 tipo_comision = mapear_tipo_vehiculo_a_comision(vehiculo.tipo_vehiculo)
                 
-                comision = db.query(ComisionSOAT).filter(
-                    and_(
-                        ComisionSOAT.tipo_vehiculo == tipo_comision,
-                        ComisionSOAT.tenant_id == current_user.tenant_id,
-                        ComisionSOAT.activa == True,
-                        ComisionSOAT.vigencia_inicio <= hoy,
-                        (ComisionSOAT.vigencia_fin >= hoy) | (ComisionSOAT.vigencia_fin == None)
-                    )
-                ).first()
+                comision = resolver_comision_soat(
+                    db,
+                    tenant_id=current_user.tenant_id,
+                    tipo_vehiculo=tipo_comision,
+                    sucursal_id=active_sucursal_id,
+                )
                 
                 if comision:
                     comision_soat = comision.valor_comision
@@ -3315,6 +3293,7 @@ def cobrar_vehiculo(
                         vehiculo.tipo_vehiculo,
                         current_user.tenant_id,
                         db,
+                        sucursal_id=getattr(vehiculo, "sucursal_id", None) or active_sucursal_id,
                     )
                     suma_t = Decimal(t_row.valor_rtm) + Decimal(t_row.valor_terceros)
                     if abs(suma_t - Decimal(vehiculo.valor_rtm)) <= Decimal("1"):
@@ -3601,11 +3580,10 @@ def corregir_factura_emitida(
     current_user: Usuario = Depends(get_current_user),
     active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
-    rol_actual = current_user.rol.value if hasattr(current_user.rol, "value") else str(current_user.rol)
-    if rol_actual != "administrador":
+    if not es_gerente_o_admin(current_user):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Solo administradores pueden corregir facturas emitidas.",
+            detail="Solo gerentes o administradores pueden corregir facturas emitidas.",
         )
 
     motivo = (payload.motivo or "").strip().lower()
@@ -4113,15 +4091,12 @@ def venta_solo_soat(
     
     # Obtener comisión SOAT desde la base de datos
     hoy = date.today()
-    comision = db.query(ComisionSOAT).filter(
-        and_(
-            ComisionSOAT.tipo_vehiculo == venta_data.tipo_vehiculo,
-            ComisionSOAT.tenant_id == current_user.tenant_id,
-            ComisionSOAT.activa == True,
-            ComisionSOAT.vigencia_inicio <= hoy,
-            (ComisionSOAT.vigencia_fin >= hoy) | (ComisionSOAT.vigencia_fin == None)
-        )
-    ).first()
+    comision = resolver_comision_soat(
+        db,
+        tenant_id=current_user.tenant_id,
+        tipo_vehiculo=venta_data.tipo_vehiculo,
+        sucursal_id=active_sucursal_id,
+    )
     
     if not comision:
         raise HTTPException(
@@ -4226,7 +4201,6 @@ def _listar_cobrados_en_rango(
     hasta_utc: datetime,
     response_limit: int = MAX_COBRADOS_HOY_RESPONSE,
 ) -> List[VehiculoCobradoHoyResponse]:
-    current_role = current_user.rol.value if hasattr(current_user.rol, "value") else str(current_user.rol)
     base_query = _filtro_vehiculo_sede(
         db.query(VehiculoProceso),
         current_user.tenant_id,
@@ -4254,7 +4228,7 @@ def _listar_cobrados_en_rango(
         )
     )
 
-    if current_role == "administrador":
+    if es_gerente_o_admin(current_user):
         vehiculos = (
             base_query
             .order_by(VehiculoProceso.fecha_pago.desc())
@@ -4522,8 +4496,7 @@ def cambiar_metodo_pago(
             detail="La caja ya está cerrada. No se puede modificar el método de pago",
         )
 
-    current_role = current_user.rol.value if hasattr(current_user.rol, "value") else str(current_user.rol)
-    if current_role != "administrador" and caja.usuario_id != current_user.id:
+    if not es_gerente_o_admin(current_user) and caja.usuario_id != current_user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Solo el cajero propietario de la caja puede cambiar el método de pago de este cobro",
@@ -4654,7 +4627,8 @@ def calcular_tarifa(
     ano_modelo: int,
     tipo_vehiculo: str = 'moto',  # Por defecto moto para retrocompatibilidad
     db: Session = Depends(get_db),
-    current_user: Usuario = Depends(get_current_user)
+    current_user: Usuario = Depends(get_current_user),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
     Calcular tarifa para un vehículo según su año de modelo y tipo
@@ -4667,7 +4641,9 @@ def calcular_tarifa(
             descripcion_antiguedad="Pruebas de auditoría (sin cobro)",
         )
 
-    tarifa = calcular_tarifa_por_antiguedad(ano_modelo, tipo_vehiculo, current_user.tenant_id, db)
+    tarifa = calcular_tarifa_por_antiguedad(
+        ano_modelo, tipo_vehiculo, current_user.tenant_id, db, sucursal_id=active_sucursal_id
+    )
     ano_actual = datetime.now().year
     antiguedad = ano_actual - ano_modelo
     

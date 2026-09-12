@@ -15,6 +15,7 @@ import {
 import { useAuth } from '../contexts/AuthContext';
 import { useToast } from '../contexts/ToastContext';
 import type { SucursalAdminRow, Usuario } from '../types';
+import { isGerente } from '../utils/roles';
 import UsuariosPage from './Usuarios';
 
 type TabKey = 'sedes' | 'usuarios';
@@ -209,7 +210,8 @@ export default function OrganizacionPage() {
   }, [factusSettings]);
 
   const countSedes = sedesLista?.length ?? sedesActuales;
-  const puedeCrearMas = limitePlan == null || countSedes < limitePlan;
+  const esGerenteMarca = isGerente(tenantUser?.rol);
+  const puedeCrearMas = esGerenteMarca && (limitePlan == null || countSedes < limitePlan);
 
   const [modalCrear, setModalCrear] = useState(false);
   const [editando, setEditando] = useState<SucursalAdminRow | null>(null);
@@ -407,6 +409,8 @@ export default function OrganizacionPage() {
         {tab === 'sedes' && (
           <div className="card-pos space-y-4">
             <FactusMultiSedeGuide variant="cda_app" />
+            {esGerenteMarca && (
+              <>
             <div className="rounded-xl border border-slate-200 bg-slate-50/80 p-4 space-y-3">
               <div>
                 <h3 className="text-sm font-bold text-slate-900">Factura electrónica — datos de la matriz</h3>
@@ -590,6 +594,8 @@ export default function OrganizacionPage() {
                 )}
               </div>
             </div>
+              </>
+            )}
 
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-slate-600 text-sm">
@@ -597,6 +603,7 @@ export default function OrganizacionPage() {
                 <span className="italic text-slate-500"> Hereda matriz</span> en dirección o municipio indica que al
                 facturar se usan los datos de matriz de arriba.
               </p>
+              {esGerenteMarca && (
               <button
                 type="button"
                 disabled={!puedeCrearMas}
@@ -619,9 +626,10 @@ export default function OrganizacionPage() {
                 <Plus className="w-5 h-5" />
                 Nueva sede
               </button>
+              )}
             </div>
 
-            {!puedeCrearMas && limitePlan != null && (
+            {esGerenteMarca && !puedeCrearMas && limitePlan != null && (
               <p className="text-sm text-amber-800 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3">
                 Llegaste al máximo de sedes de tu plan ({limitePlan}). Para agregar más, amplía tu plan o contacta
                 soporte.
@@ -711,7 +719,7 @@ export default function OrganizacionPage() {
                             <span className="inline-flex items-center gap-1 text-amber-700 font-medium">
                               <Star className="w-4 h-4 fill-amber-400 text-amber-500" /> Sí
                             </span>
-                          ) : (
+                          ) : esGerenteMarca ? (
                             <button
                               type="button"
                               className="text-primary-600 hover:underline text-xs font-semibold"
@@ -720,6 +728,8 @@ export default function OrganizacionPage() {
                             >
                               Marcar principal
                             </button>
+                          ) : (
+                            <span className="text-slate-400">—</span>
                           )}
                         </td>
                         <td className="px-4 py-3 text-right">
@@ -987,6 +997,7 @@ export default function OrganizacionPage() {
               />
               <span className="text-sm text-slate-700">Activa</span>
             </label>
+            {esGerenteMarca && (
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
@@ -995,6 +1006,7 @@ export default function OrganizacionPage() {
               />
               <span className="text-sm text-slate-700">Sede principal</span>
             </label>
+            )}
             {form.es_principal ? (
               <p className="text-xs text-slate-600 bg-slate-50 border border-slate-100 rounded-lg px-3 py-2">
                 <strong>Sede principal:</strong> borra dirección y municipio si quieres alinear todo con «datos de la

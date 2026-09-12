@@ -15,6 +15,7 @@ import type {
   SucursalBasica,
 } from '../types';
 import { useAuth } from '../contexts/AuthContext';
+import { isGerenteOrAdmin } from '../utils/roles';
 
 function money(v: number): string {
   return new Intl.NumberFormat('es-CO', {
@@ -39,7 +40,7 @@ const SARLAFT_SECCIONES: { id: SarlaftSeccion; label: string; hint: string }[] =
 
 export default function Sarlaft() {
   const { user } = useAuth();
-  const canManageSarlaft = user?.rol === 'administrador' || user?.rol === 'oficial_cumplimiento';
+  const canManageSarlaft = isGerenteOrAdmin(user?.rol) || user?.rol === 'oficial_cumplimiento';
   const actionableAlertsStorageKey = useMemo(
     () => `sarlaft-only-actionable-alerts:${user?.id || user?.email || 'anon'}`,
     [user?.id, user?.email]

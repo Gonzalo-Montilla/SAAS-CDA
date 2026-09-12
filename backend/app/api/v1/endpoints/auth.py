@@ -27,7 +27,9 @@ from app.core.sucursal_scope import (
     resolve_refresh_sucursal_id,
     roles_con_sede_elegible,
     sucursal_belongs_to_tenant,
+    sucursales_visibles_query,
     tenant_token_claims,
+    user_may_operate_sucursal,
 )
 from app.models.usuario import Usuario
 from app.models.tenant import Tenant
@@ -173,7 +175,7 @@ async def login(
     raw_suc = raw_form.get("sucursal_id")
     if user.rol in roles_con_sede_elegible():
         parsed = parse_optional_sucursal_uuid(raw_suc)
-        if parsed and sucursal_belongs_to_tenant(db, parsed, user.tenant_id):
+        if parsed and user_may_operate_sucursal(db, user, parsed):
             sid = parsed
 
     return _issue_tokens(db, user, sid)
@@ -246,14 +248,18 @@ def switch_sucursal(
     current_user: Usuario = Depends(get_current_user),
 ):
     """
-    Cambiar sede activa (JWT). Disponible para todos los roles del tenant (caja, recepción, etc.).
+    Cambiar sede activa (JWT). Solo sedes permitidas para el usuario.
     """
     if current_user.rol not in roles_con_sede_elegible():
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="Tu rol no permite fijar la sede activa",
         )
-    assert_sucursal_in_tenant(db, body.sucursal_id, current_user.tenant_id)
+    if not user_may_operate_sucursal(db, current_user, body.sucursal_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="No tienes permiso para operar en esa sede.",
+        )
     return _issue_tokens(db, current_user, body.sucursal_id)
 
 
@@ -286,8 +292,7 @@ def get_current_user_info(
         payload = {}
     active_sid = resolve_active_sucursal_id(db, current_user, payload)
     sedes = (
-        db.query(Sucursal)
-        .filter(Sucursal.tenant_id == current_user.tenant_id, Sucursal.activa.is_(True))
+        sucursales_visibles_query(db, current_user, solo_activas=True)
         .order_by(Sucursal.es_principal.desc(), Sucursal.nombre.asc())
         .all()
     )

@@ -16,6 +16,7 @@ class Appointment(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id"), nullable=False, index=True)
+    sucursal_id = Column(UUID(as_uuid=True), ForeignKey("sucursales.id"), nullable=True, index=True)
     cliente_nombre = Column(String(200), nullable=False)
     cliente_tipo_documento = Column(String(10), nullable=True)
     cliente_documento = Column(String(50), nullable=True)
