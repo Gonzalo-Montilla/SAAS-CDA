@@ -1,6 +1,7 @@
 """
 Utilidad para envío de emails
 """
+import base64
 import html
 import re
 import smtplib
@@ -11,6 +12,8 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from app.core.config import settings
 
+import httpx
+
 
 def _ascii_attachment_filename(nombre: str) -> str:
     """Nombre de archivo seguro para Content-Disposition (evita rechazos SMTP/clientes)."""
@@ -19,37 +22,87 @@ def _ascii_attachment_filename(nombre: str) -> str:
     return (base or "adjunto")[:180]
 
 
+def _usa_resend() -> bool:
+    return bool((getattr(settings, "RESEND_API_KEY", None) or "").strip())
+
+
+def _email_from_header() -> str:
+    addr = (getattr(settings, "EMAIL_FROM", None) or settings.SMTP_USER or "").strip()
+    name = (getattr(settings, "EMAIL_FROM_NAME", None) or "CDASOFT").strip()
+    if not addr:
+        return name or "CDASOFT"
+    if name:
+        return f"{name} <{addr}>"
+    return addr
+
+
+def _enviar_via_resend(
+    destinatario: str,
+    asunto: str,
+    cuerpo_html: str,
+    adjuntos: list[tuple[str, bytes, str]] | None = None,
+) -> bool:
+    api_key = (settings.RESEND_API_KEY or "").strip()
+    payload: dict = {
+        "from": _email_from_header(),
+        "to": [destinatario],
+        "subject": asunto,
+        "html": cuerpo_html,
+    }
+    if adjuntos:
+        files = []
+        for nombre, contenido, _mime in adjuntos:
+            if not contenido:
+                continue
+            files.append(
+                {
+                    "filename": _ascii_attachment_filename(nombre),
+                    "content": base64.b64encode(contenido).decode("ascii"),
+                }
+            )
+        if files:
+            payload["attachments"] = files
+    try:
+        with httpx.Client(timeout=30.0) as client:
+            resp = client.post(
+                "https://api.resend.com/emails",
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+        if resp.status_code >= 400:
+            print(f"Error Resend ({resp.status_code}): {resp.text[:500]}")
+            return False
+        return True
+    except Exception as e:
+        print(f"Error al enviar email (Resend): {e}")
+        return False
+
+
 def enviar_email(destinatario: str, asunto: str, cuerpo_html: str) -> bool:
     """
-    Enviar email usando Gmail SMTP
-    
-    Args:
-        destinatario: Email del destinatario
-        asunto: Asunto del email
-        cuerpo_html: Contenido HTML del email
-    
-    Returns:
-        True si se envió correctamente, False en caso contrario
+    Enviar email. Producción: Resend si hay RESEND_API_KEY; si no, SMTP (p. ej. Gmail local).
     """
+    if _usa_resend():
+        return _enviar_via_resend(destinatario, asunto, cuerpo_html)
     try:
-        # Crear mensaje
         mensaje = MIMEMultipart("alternative")
         mensaje["From"] = settings.SMTP_USER
         mensaje["To"] = destinatario
         mensaje["Subject"] = asunto
-        
-        # Agregar contenido HTML
+
         parte_html = MIMEText(cuerpo_html, "html", "utf-8")
         mensaje.attach(parte_html)
-        
-        # Conectar al servidor SMTP de Gmail
+
         with smtplib.SMTP(settings.SMTP_HOST, settings.SMTP_PORT) as server:
-            server.starttls()  # Seguridad TLS
+            server.starttls()
             server.login(settings.SMTP_USER, settings.SMTP_PASSWORD)
             server.send_message(mensaje)
-        
+
         return True
-    
+
     except Exception as e:
         print(f"Error al enviar email: {e}")
         return False
@@ -65,6 +118,8 @@ def enviar_email_con_adjuntos(
     Enviar email HTML con archivos adjuntos.
     Cada adjunto: (nombre_archivo, contenido_bytes, mime_type).
     """
+    if _usa_resend():
+        return _enviar_via_resend(destinatario, asunto, cuerpo_html, adjuntos=adjuntos)
     try:
         mensaje = MIMEMultipart("mixed")
         mensaje["From"] = settings.SMTP_USER

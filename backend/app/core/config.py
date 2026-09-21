@@ -306,11 +306,14 @@ class Settings(BaseSettings):
     DEFAULT_PAGE_SIZE: int = 50
     MAX_PAGE_SIZE: int = 100
     
-    # Configuración SMTP para envío de emails
+    # Configuración SMTP (local / respaldo). Producción: Resend si hay RESEND_API_KEY.
     SMTP_HOST: str = Field(default="smtp.gmail.com", env="SMTP_HOST")
     SMTP_PORT: int = Field(default=587, env="SMTP_PORT")
-    SMTP_USER: str = Field(default="", env="SMTP_USER")  # Email de Gmail
-    SMTP_PASSWORD: str = Field(default="", env="SMTP_PASSWORD")  # Contraseña de aplicación
+    SMTP_USER: str = Field(default="", env="SMTP_USER")
+    SMTP_PASSWORD: str = Field(default="", env="SMTP_PASSWORD")
+    RESEND_API_KEY: str = Field(default="", env="RESEND_API_KEY")
+    EMAIL_FROM: str = Field(default="", env="EMAIL_FROM")
+    EMAIL_FROM_NAME: str = Field(default="CDASOFT", env="EMAIL_FROM_NAME")
     FRONTEND_URL: str = Field(default="http://localhost:5173", env="FRONTEND_URL")
     
     class Config:
