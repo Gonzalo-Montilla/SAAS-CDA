@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from dateutil.relativedelta import relativedelta
 from zoneinfo import ZoneInfo
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -15,6 +16,11 @@ from app.utils.email import (
     enviar_email,
     generar_email_recordatorio_control_preventivo,
     generar_email_recordatorio_proxima_rtm,
+)
+from app.services.whatsapp_tenant import (
+    enlace_agendar_publico,
+    enviar_aviso_preventiva,
+    enviar_aviso_rtm,
 )
 
 REMINDER_MONTHS_AFTER_PAYMENT = 12
@@ -192,7 +198,10 @@ def process_due_rtm_renewal_reminders(db: Session, *, tenant_id=None, limit: int
     now = utcnow_naive()
     query = db.query(RTMRenewalReminder).filter(
         RTMRenewalReminder.status.in_(STATUSES_PROCESSABLE),
-        RTMRenewalReminder.cliente_email.isnot(None),
+        or_(
+            RTMRenewalReminder.cliente_email.isnot(None),
+            RTMRenewalReminder.cliente_celular.isnot(None),
+        ),
         RTMRenewalReminder.sent_at.is_(None),
         RTMRenewalReminder.scheduled_send_at <= now,
     )
@@ -220,7 +229,8 @@ def process_due_rtm_renewal_reminders(db: Session, *, tenant_id=None, limit: int
             if tenant_slug
             else None
         )
-        if _is_preventiva(reminder.tipo_vehiculo):
+        es_preventiva = _is_preventiva(reminder.tipo_vehiculo)
+        if es_preventiva:
             html = generar_email_recordatorio_control_preventivo(
                 nombre_cda=nombre_cda,
                 nombre_cliente=reminder.cliente_nombre,
@@ -240,24 +250,46 @@ def process_due_rtm_renewal_reminders(db: Session, *, tenant_id=None, limit: int
                 agendamiento_url=agendamiento_url,
             )
             subject = f"{nombre_cda} - Recordatorio de próxima RTM"
+        email_sent = False
+        email_error = None
+        if reminder.cliente_email:
+            try:
+                email_sent = bool(enviar_email(reminder.cliente_email, subject, html))
+                if not email_sent:
+                    email_error = "No fue posible enviar email con proveedor SMTP"
+            except Exception as exc:
+                email_error = str(exc)[:1000]
+        wa_sent = False
         try:
-            sent = enviar_email(reminder.cliente_email, subject, html)
-            if sent:
-                reminder.status = "sent"
-                reminder.sent_at = now
-                reminder.last_management_at = now
-                reminder.last_management_channel = "email_auto"
-                reminder.management_count = int(reminder.management_count or 0) + 1
-                if (reminder.commercial_status or "pendiente") == "pendiente":
-                    reminder.commercial_status = "contactado"
-                reminder.send_error = None
-                sent_count += 1
+            wa_kwargs = dict(
+                db=db,
+                tenant_id=reminder.tenant_id,
+                celular=reminder.cliente_celular,
+                nombre_cliente=reminder.cliente_nombre or "Cliente",
+                nombre_cda=nombre_cda,
+                placa=reminder.placa or "",
+                fecha_sugerida=_format_fecha_es(reminder.next_due_at),
+                agendar_url=enlace_agendar_publico(tenant_slug),
+            )
+            if es_preventiva:
+                wa_sent = bool(enviar_aviso_preventiva(**wa_kwargs))
             else:
-                reminder.status = "failed"
-                reminder.send_error = "No fue posible enviar email con proveedor SMTP"
+                wa_sent = bool(enviar_aviso_rtm(**wa_kwargs))
         except Exception as exc:
+            print(f"Error WhatsApp recordatorio {reminder.id}: {exc}")
+        if email_sent or wa_sent:
+            reminder.status = "sent"
+            reminder.sent_at = now
+            reminder.last_management_at = now
+            reminder.last_management_channel = "whatsapp_auto" if wa_sent and not email_sent else "email_auto"
+            reminder.management_count = int(reminder.management_count or 0) + 1
+            if (reminder.commercial_status or "pendiente") == "pendiente":
+                reminder.commercial_status = "contactado"
+            reminder.send_error = None if email_sent else ("Enviado por WhatsApp; el correo no salió" if wa_sent else None)
+            sent_count += 1
+        else:
             reminder.status = "failed"
-            reminder.send_error = str(exc)[:1000]
+            reminder.send_error = email_error or "No fue posible enviar correo ni WhatsApp"
         reminder.updated_at = now
 
     db.commit()

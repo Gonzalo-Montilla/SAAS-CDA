@@ -953,8 +953,8 @@ function VehiculosPendientes({
       .then((result) => {
         // Solo avisar cuando hay problema de envío o no existe email.
         if (!result.sent) {
-          if (!result.has_email) {
-            console.info(`Sin correo para notificación de caja: ${vehiculo.placa}`);
+          if (!result.has_email && !result.has_phone) {
+            console.info(`Sin correo ni celular para notificación de caja: ${vehiculo.placa}`);
             return;
           }
           showToast(

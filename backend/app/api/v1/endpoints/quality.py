@@ -30,10 +30,19 @@ from app.utils.rtm_reminders import (
 )
 from app.utils.email import (
     enviar_email,
+    generar_email_aprobacion_inspeccion_cliente,
     generar_email_recordatorio_control_preventivo,
     generar_email_recordatorio_proxima_rtm,
     generar_email_rechazo_reinspeccion_cliente,
 )
+from app.services.whatsapp_tenant import (
+    enlace_agendar_publico,
+    enviar_aviso_aprobacion,
+    enviar_aviso_preventiva,
+    enviar_aviso_reinspeccion,
+    enviar_aviso_rtm,
+)
+from app.utils.nombres import formatear_nombre_comercial
 from app.utils.tenant_logo import normalize_external_logo_url, save_tenant_logo_upload
 
 router = APIRouter()
@@ -41,6 +50,88 @@ router = APIRouter()
 
 def _now_naive() -> datetime:
     return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _nombre_cda(tenant: Tenant | None) -> str:
+    if tenant and tenant.nombre_comercial:
+        return formatear_nombre_comercial(tenant.nombre_comercial, "CDASOFT")
+    if tenant and tenant.nombre:
+        return formatear_nombre_comercial(tenant.nombre, "CDASOFT")
+    return "CDASOFT"
+
+
+def _enviar_whatsapp_reinspeccion(db: Session, tenant: Tenant | None, vehiculo: VehiculoProceso) -> None:
+    try:
+        enviar_aviso_reinspeccion(
+            db,
+            tenant_id=vehiculo.tenant_id,
+            celular=vehiculo.cliente_telefono,
+            nombre_cliente=vehiculo.cliente_nombre or "Cliente",
+            nombre_cda=_nombre_cda(tenant),
+            placa=vehiculo.placa or "",
+        )
+    except Exception as exc:
+        print(f"[WARN] No se pudo enviar WhatsApp de reinspección: {exc}")
+
+
+def _enviar_whatsapp_aprobacion(db: Session, tenant: Tenant | None, vehiculo: VehiculoProceso) -> None:
+    try:
+        enviar_aviso_aprobacion(
+            db,
+            tenant_id=vehiculo.tenant_id,
+            celular=vehiculo.cliente_telefono,
+            nombre_cliente=vehiculo.cliente_nombre or "Cliente",
+            nombre_cda=_nombre_cda(tenant),
+            placa=vehiculo.placa or "",
+        )
+    except Exception as exc:
+        print(f"[WARN] No se pudo enviar WhatsApp de aprobación: {exc}")
+
+
+def _notificar_resultado_inspeccion_cliente(
+    db: Session,
+    *,
+    tenant: Tenant | None,
+    vehiculo: VehiculoProceso,
+    resultado: Literal["aprobado", "rechazado"],
+    observacion: str = "",
+    asunto_rechazo: str | None = None,
+) -> None:
+    nombre_cda = _nombre_cda(tenant)
+    cliente_email = (vehiculo.cliente_email or "").strip().lower()
+    if resultado == "aprobado":
+        if cliente_email:
+            try:
+                asunto = f"¡Felicitaciones! {vehiculo.placa} aprobó la inspección - {nombre_cda}"
+                cuerpo_html = generar_email_aprobacion_inspeccion_cliente(
+                    nombre_cda=nombre_cda,
+                    nombre_cliente=vehiculo.cliente_nombre or "Cliente",
+                    placa=vehiculo.placa or "",
+                )
+                sent = enviar_email(cliente_email, asunto, cuerpo_html)
+                if not sent:
+                    print("[WARN] Correo de aprobación no enviado (SMTP retornó false).")
+            except Exception as email_exc:
+                print(f"[WARN] No se pudo enviar correo de aprobación: {email_exc}")
+        _enviar_whatsapp_aprobacion(db, tenant, vehiculo)
+        return
+    if cliente_email:
+        try:
+            asunto = asunto_rechazo or f"Resultado de inspección RTM - {vehiculo.placa} - {nombre_cda}"
+            cuerpo_html = generar_email_rechazo_reinspeccion_cliente(
+                nombre_cda=nombre_cda,
+                nombre_cliente=vehiculo.cliente_nombre or "Cliente",
+                placa=vehiculo.placa or "",
+                observacion_rechazo=observacion or "",
+                correo_contacto_cda=(tenant.correo_electronico if tenant else None),
+                telefono_contacto_cda=(tenant.celular if tenant else None),
+            )
+            sent = enviar_email(cliente_email, asunto, cuerpo_html)
+            if not sent:
+                print("[WARN] Correo de rechazo/reinspección no enviado (SMTP retornó false).")
+        except Exception as email_exc:
+            print(f"[WARN] No se pudo enviar correo de rechazo/reinspección: {email_exc}")
+    _enviar_whatsapp_reinspeccion(db, tenant, vehiculo)
 
 
 def _calidad_puede_elegir_sede(user: Usuario) -> bool:
@@ -1313,30 +1404,14 @@ def mark_certificate_delivered(
     db.commit()
     db.refresh(vehiculo)
 
-    if resultado == "rechazado":
-        cliente_email = (vehiculo.cliente_email or "").strip().lower()
-        if cliente_email:
-            try:
-                tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
-                nombre_cda = (
-                    tenant.nombre_comercial
-                    if tenant and tenant.nombre_comercial
-                    else (tenant.nombre if tenant else "CDASOFT")
-                )
-                asunto = f"Resultado de inspección RTM - {vehiculo.placa} - {nombre_cda}"
-                cuerpo_html = generar_email_rechazo_reinspeccion_cliente(
-                    nombre_cda=nombre_cda,
-                    nombre_cliente=vehiculo.cliente_nombre or "Cliente",
-                    placa=vehiculo.placa or "",
-                    observacion_rechazo=observacion or "",
-                    correo_contacto_cda=(tenant.correo_electronico if tenant else None),
-                    telefono_contacto_cda=(tenant.celular if tenant else None),
-                )
-                sent = enviar_email(cliente_email, asunto, cuerpo_html)
-                if not sent:
-                    print("[WARN] Correo de rechazo/reinspección no enviado (SMTP retornó false).")
-            except Exception as email_exc:
-                print(f"[WARN] No se pudo enviar correo de rechazo/reinspección: {email_exc}")
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    _notificar_resultado_inspeccion_cliente(
+        db,
+        tenant=tenant,
+        vehiculo=vehiculo,
+        resultado=resultado,
+        observacion=observacion or "",
+    )
 
     return MarkCertificateDeliveredResponse(
         success=True,
@@ -1497,27 +1572,15 @@ def corregir_cierre_resultado(
     db.commit()
     db.refresh(vehiculo)
 
-    cliente_email = (vehiculo.cliente_email or "").strip().lower()
-    if resultado_nuevo == "rechazado" and cliente_email:
-        try:
-            tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
-            nombre_cda = (
-                tenant.nombre_comercial
-                if tenant and tenant.nombre_comercial
-                else (tenant.nombre if tenant else "CDASOFT")
-            )
-            asunto = f"Corrección resultado RTM - {vehiculo.placa} - {nombre_cda}"
-            cuerpo_html = generar_email_rechazo_reinspeccion_cliente(
-                nombre_cda=nombre_cda,
-                nombre_cliente=vehiculo.cliente_nombre or "Cliente",
-                placa=vehiculo.placa or "",
-                observacion_rechazo=motivo,
-                correo_contacto_cda=(tenant.correo_electronico if tenant else None),
-                telefono_contacto_cda=(tenant.celular if tenant else None),
-            )
-            enviar_email(cliente_email, asunto, cuerpo_html)
-        except Exception as email_exc:
-            print(f"[WARN] No se pudo enviar correo tras corrección de inspección: {email_exc}")
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    _notificar_resultado_inspeccion_cliente(
+        db,
+        tenant=tenant,
+        vehiculo=vehiculo,
+        resultado=resultado_nuevo,
+        observacion=motivo,
+        asunto_rechazo=f"Corrección resultado RTM - {vehiculo.placa} - {_nombre_cda(tenant)}",
+    )
 
     if resultado_nuevo == "rechazado" and synced_pending:
         message = (
@@ -1678,8 +1741,8 @@ def send_rtm_reminder_now(
     )
     if not reminder:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recordatorio no encontrado")
-    if not reminder.cliente_email:
-        return RTMReminderManualSendResponse(sent=False, message="El cliente no tiene correo registrado.")
+    if not reminder.cliente_email and not reminder.cliente_celular:
+        return RTMReminderManualSendResponse(sent=False, message="El cliente no tiene correo ni celular registrado.")
 
     tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
     nombre_cda = (
@@ -1714,19 +1777,40 @@ def send_rtm_reminder_now(
             agendamiento_url=agendamiento_url,
         )
         subject = f"{nombre_cda} - Recordatorio de próxima RTM"
-    sent = enviar_email(reminder.cliente_email, subject, html)
+    email_sent = False
+    if reminder.cliente_email:
+        email_sent = bool(enviar_email(reminder.cliente_email, subject, html))
+    wa_sent = False
+    try:
+        wa_kwargs = dict(
+            db=db,
+            tenant_id=reminder.tenant_id,
+            celular=reminder.cliente_celular,
+            nombre_cliente=reminder.cliente_nombre or "Cliente",
+            nombre_cda=nombre_cda,
+            placa=reminder.placa or "",
+            fecha_sugerida=_format_fecha_es(reminder.next_due_at),
+            agendar_url=enlace_agendar_publico(tenant_slug),
+        )
+        if (reminder.tipo_vehiculo or "").strip().lower() == "preventiva":
+            wa_sent = bool(enviar_aviso_preventiva(**wa_kwargs))
+        else:
+            wa_sent = bool(enviar_aviso_rtm(**wa_kwargs))
+    except Exception as exc:
+        print(f"[WARN] No se pudo enviar WhatsApp de recordatorio: {exc}")
+    sent = email_sent or wa_sent
     now = _now_naive()
     reminder.updated_at = now
     if sent:
         reminder.last_manual_sent_at = now
         reminder.last_management_at = now
-        reminder.last_management_channel = "email_manual"
+        reminder.last_management_channel = "whatsapp_manual" if wa_sent and not email_sent else "email_manual"
         reminder.management_count = int(reminder.management_count or 0) + 1
         if (reminder.commercial_status or "pendiente") == "pendiente":
             reminder.commercial_status = "contactado"
         reminder.send_error = None
     else:
-        reminder.send_error = "No fue posible enviar email manual"
+        reminder.send_error = "No fue posible enviar email ni WhatsApp"
     db.commit()
     return RTMReminderManualSendResponse(
         sent=bool(sent),

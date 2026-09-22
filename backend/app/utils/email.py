@@ -11,6 +11,7 @@ from email.mime.base import MIMEBase
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from app.core.config import settings
+from app.utils.nombres import formatear_nombre_comercial, formatear_nombre_persona
 
 import httpx
 
@@ -256,6 +257,14 @@ def _render_email_corporativo(title: str, body_html: str, label: str = "CDASOFT"
     """
 
 
+def _display_cliente(nombre_cliente: str | None) -> str:
+    return formatear_nombre_persona(nombre_cliente, "Cliente")
+
+
+def _display_cda(nombre_cda: str | None) -> str:
+    return formatear_nombre_comercial(nombre_cda, "CDASOFT")
+
+
 def _email_cta_button(href: str, text: str) -> str:
     """Botón CTA en HTML para correos (tabla + estilos inline; mejor soporte en clientes de correo)."""
     href_esc = html.escape(href, quote=True)
@@ -425,7 +434,7 @@ def generar_email_bienvenida_recepcion_cliente(
     correo_contacto_cda: str | None = None,
 ) -> str:
     """Email de bienvenida para cliente al registrar su vehículo en recepción (incluye aviso Ley 1581)."""
-    safe_cda = html.escape(nombre_cda or "")
+    safe_cda = html.escape(_display_cda(nombre_cda))
     safe_placa = html.escape(placa_vehiculo or "")
     contacto = (correo_contacto_cda or "").strip()
     if contacto:
@@ -499,6 +508,8 @@ def generar_email_llamado_caja_cliente(
     nombre_cliente: str,
 ) -> str:
     """Email para invitar al cliente a pasar a caja antes de finalizar revisión."""
+    nombre_cda = _display_cda(nombre_cda)
+    nombre_cliente = _display_cliente(nombre_cliente)
     body_html = f"""
     <p>Estimado/a <strong>{nombre_cliente}</strong>,</p>
     <div class="highlight">
@@ -528,6 +539,8 @@ def generar_email_recibo_pago_cliente(
     factura_pdf_adjunto: bool = False,
 ) -> str:
     """Email para enviar recibo de pago al cliente luego del cobro en caja. Opcionalmente factura DIAN/Factus."""
+    nombre_cda = _display_cda(nombre_cda)
+    nombre_cliente = _display_cliente(nombre_cliente)
     recibo_txt = "Adjunto encontrarás el recibo de tu pago"
     if factura_pdf_adjunto:
         recibo_txt = "Adjunto encontrarás el recibo de tu pago y la factura electrónica de venta (DIAN)"
@@ -578,6 +591,7 @@ def generar_email_recibo_pago_saas(
     fecha_pago: str,
     proximo_cobro: str,
 ) -> str:
+    nombre_cda = _display_cda(nombre_cda)
     body_html = f"""
     <p>Hemos registrado tu pago para <strong>{nombre_cda}</strong>.</p>
     <div class="highlight">
@@ -601,6 +615,8 @@ def generar_email_encuesta_calidad_cliente(
     survey_link: str,
 ) -> str:
     """Email de invitación a encuesta de calidad post-servicio."""
+    nombre_cda = _display_cda(nombre_cda)
+    nombre_cliente = _display_cliente(nombre_cliente)
     body_html = f"""
     <p>Estimado/a <strong>{nombre_cliente}</strong>,</p>
     <p>
@@ -643,14 +659,23 @@ def generar_email_confirmacion_cita(
     valor_aproximado: str | None = None,
     google_calendar_url: str | None = None,
     ics_download_url: str | None = None,
+    sede_nombre: str | None = None,
 ) -> str:
     """Email de confirmación de agendamiento."""
+    nombre_cda = _display_cda(nombre_cda)
+    nombre_cliente = _display_cliente(nombre_cliente)
+    sede_html = (
+        f'<p style="margin:0 0 6px 0;">🏢 <strong>Sede:</strong> {html.escape(sede_nombre)}</p>'
+        if sede_nombre
+        else ""
+    )
     body_html = f"""
     <p>Hola <strong>{nombre_cliente}</strong>,</p>
     <p>¡Qué bien que ya tienes tu cita con nosotros! Queremos dejarte toda la información para que llegues sin preocupaciones:</p>
     <div class="highlight">
         <p style="margin:0 0 6px 0;">📌 <strong>Día:</strong> {fecha_legible}</p>
         <p style="margin:0 0 6px 0;">⏰ <strong>Hora:</strong> {hora_legible}</p>
+        {sede_html}
         <p style="margin:0 0 6px 0;">📍 <strong>Placa:</strong> {placa}</p>
         <p style="margin:0 0 6px 0;">🔧 <strong>Servicio:</strong> {tipo_servicio}</p>
         {f'<p style="margin:0;">💰 <strong>Valor aprox.:</strong> {valor_aproximado}</p>' if valor_aproximado else ''}
@@ -700,14 +725,23 @@ def generar_email_recordatorio_cita(
     tipo_servicio: str,
     google_calendar_url: str | None = None,
     ics_download_url: str | None = None,
+    sede_nombre: str | None = None,
 ) -> str:
     """Email de recordatorio de cita próxima."""
+    nombre_cda = _display_cda(nombre_cda)
+    nombre_cliente = _display_cliente(nombre_cliente)
+    sede_html = (
+        f'<p style="margin:0 0 6px 0;">🏢 <strong>Sede:</strong> {html.escape(sede_nombre)}</p>'
+        if sede_nombre
+        else ""
+    )
     body_html = f"""
     <p>Hola <strong>{nombre_cliente}</strong>,</p>
     <p>Te recordamos que tu cita en <strong>{nombre_cda}</strong> está próxima:</p>
     <div class="highlight">
         <p style="margin:0 0 6px 0;">📌 <strong>Día:</strong> {fecha_legible}</p>
         <p style="margin:0 0 6px 0;">⏰ <strong>Hora:</strong> {hora_legible}</p>
+        {sede_html}
         <p style="margin:0 0 6px 0;">📍 <strong>Placa:</strong> {placa}</p>
         <p style="margin:0;">🔧 <strong>Servicio:</strong> {tipo_servicio}</p>
     </div>
@@ -752,6 +786,8 @@ def generar_email_recordatorio_proxima_rtm(
     agendamiento_url: str | None = None,
 ) -> str:
     """Recordatorio de próxima RTM (renovación anual)."""
+    nombre_cda = _display_cda(nombre_cda)
+    nombre_cliente = _display_cliente(nombre_cliente)
     body_html = f"""
     <p>Hola <strong>{nombre_cliente}</strong>,</p>
     <p>¿Ya revisaste la vigencia de tu revisión técnico-mecánica? La que hiciste con nosotros se está por vencer, y queremos recordártelo a tiempo para que no te pille desprevenido.</p>
@@ -797,6 +833,8 @@ def generar_email_recordatorio_control_preventivo(
     agendamiento_url: str | None = None,
 ) -> str:
     """Recordatorio de control preventivo cuatrimestral."""
+    nombre_cda = _display_cda(nombre_cda)
+    nombre_cliente = _display_cliente(nombre_cliente)
     body_html = f"""
     <p>Hola <strong>{nombre_cliente}</strong>,</p>
     <p>
@@ -839,6 +877,40 @@ def generar_email_recordatorio_control_preventivo(
     )
 
 
+def generar_email_aprobacion_inspeccion_cliente(
+    nombre_cda: str,
+    nombre_cliente: str,
+    placa: str,
+) -> str:
+    """Email al aprobar la inspección. Texto genérico: no mezcla RTM y preventiva."""
+    safe_cda = html.escape(_display_cda(nombre_cda))
+    safe_cliente = html.escape(_display_cliente(nombre_cliente))
+    safe_placa = html.escape((placa or "").strip().upper())
+
+    body_html = f"""
+    <p>Hola <strong>{safe_cliente}</strong>,</p>
+    <p>Recibe un cordial saludo de <strong>{safe_cda}</strong>.</p>
+    <p>
+        Tenemos una muy buena noticia: el vehículo de placa <strong>{safe_placa}</strong>
+        <strong>aprobó</strong> la inspección.
+    </p>
+    <div class="highlight">
+        ¡Felicitaciones! Nos alegra mucho poder compartir este resultado con usted.
+        Gracias por confiar en nuestro trabajo.
+    </div>
+    <p>Fue un gusto atenderle. Lo esperamos de nuevo cuando nos necesite.</p>
+    <p class="muted">
+        Un saludo cordial,<br />
+        <strong>Equipo {safe_cda}</strong>
+    </p>
+    """
+    return _render_email_corporativo(
+        title=f"¡Felicitaciones! {safe_placa} aprobó la inspección",
+        body_html=body_html,
+        label=f"Calidad - {safe_cda}",
+    )
+
+
 def generar_email_rechazo_reinspeccion_cliente(
     nombre_cda: str,
     nombre_cliente: str,
@@ -849,8 +921,8 @@ def generar_email_rechazo_reinspeccion_cliente(
     telefono_contacto_cda: str | None = None,
 ) -> str:
     """Email para notificar rechazo y ventana de reinspección sin costo."""
-    safe_cda = html.escape((nombre_cda or "").strip() or "CDASOFT")
-    safe_cliente = html.escape((nombre_cliente or "").strip() or "Cliente")
+    safe_cda = html.escape(_display_cda(nombre_cda))
+    safe_cliente = html.escape(_display_cliente(nombre_cliente))
     safe_placa = html.escape((placa or "").strip().upper())
     safe_obs = html.escape((observacion_rechazo or "").strip() or "Sin observación adicional registrada.")
     safe_correo = html.escape((correo_contacto_cda or "").strip())

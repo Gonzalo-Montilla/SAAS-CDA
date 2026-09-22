@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Building2, Users, Plus, Pencil, Star, CheckCircle2, XCircle, ListOrdered, Loader2 } from 'lucide-react';
+import { Building2, Users, Plus, Pencil, Star, CheckCircle2, XCircle, ListOrdered, Loader2, MessageCircle } from 'lucide-react';
 import Layout from '../components/Layout';
 import FactusMunicipalitySearchField from '../components/FactusMunicipalitySearchField';
 import FactusMultiSedeGuide from '../components/FactusMultiSedeGuide';
+import OrganizacionWhatsApp from './OrganizacionWhatsApp';
 import apiClient from '../api/client';
 import { configApi } from '../api/config';
 import {
@@ -18,10 +19,11 @@ import type { SucursalAdminRow, Usuario } from '../types';
 import { isGerente } from '../utils/roles';
 import UsuariosPage from './Usuarios';
 
-type TabKey = 'sedes' | 'usuarios';
+type TabKey = 'sedes' | 'usuarios' | 'whatsapp';
 
 function tabFromSearch(tabParam: string | null): TabKey {
   if (tabParam === 'usuarios') return 'usuarios';
+  if (tabParam === 'whatsapp') return 'whatsapp';
   return 'sedes';
 }
 
@@ -32,6 +34,7 @@ export default function OrganizacionPage() {
   const { showToast } = useToast();
   const tenantUser = user && 'tenant_id' in user ? (user as Usuario) : null;
   const queryClient = useQueryClient();
+  const esGerenteMarca = isGerente(tenantUser?.rol);
 
   const setTab = (next: TabKey) => {
     if (next === 'sedes') {
@@ -40,6 +43,12 @@ export default function OrganizacionPage() {
       setSearchParams({ tab: next }, { replace: true });
     }
   };
+
+  useEffect(() => {
+    if (tab === 'whatsapp' && tenantUser && !esGerenteMarca) {
+      setSearchParams({}, { replace: true });
+    }
+  }, [tab, tenantUser, esGerenteMarca, setSearchParams]);
 
   const limitePlan = tenantUser?.tenant_sedes_totales ?? null;
   const sedesActuales = tenantUser?.sucursales?.length ?? 0;
@@ -210,7 +219,6 @@ export default function OrganizacionPage() {
   }, [factusSettings]);
 
   const countSedes = sedesLista?.length ?? sedesActuales;
-  const esGerenteMarca = isGerente(tenantUser?.rol);
   const puedeCrearMas = esGerenteMarca && (limitePlan == null || countSedes < limitePlan);
 
   const [modalCrear, setModalCrear] = useState(false);
@@ -365,7 +373,8 @@ export default function OrganizacionPage() {
     return `Plan: hasta ${limitePlan} sede${limitePlan === 1 ? '' : 's'} · Configuradas: ${countSedes}`;
   }, [limitePlan, countSedes]);
 
-  const layoutTitle = tab === 'sedes' ? 'Sedes' : 'Usuarios';
+  const layoutTitle =
+    tab === 'sedes' ? 'Sedes' : tab === 'usuarios' ? 'Usuarios' : 'WhatsApp';
 
   return (
     <Layout title={layoutTitle}>
@@ -376,7 +385,11 @@ export default function OrganizacionPage() {
               <Building2 className="w-8 h-8 text-primary-600" />
               Organización
             </h2>
-            <p className="text-slate-600 mt-1">Sedes y usuarios de tu CDA.</p>
+            <p className="text-slate-600 mt-1">
+              {esGerenteMarca
+                ? 'Sedes, usuarios y el WhatsApp Business de todo el CDA. Un solo número para todas las sedes.'
+                : 'Sedes y usuarios de tu CDA.'}
+            </p>
             {hintPlan && <p className="text-sm text-primary-700 font-medium mt-2">{hintPlan}</p>}
           </div>
         </div>
@@ -403,6 +416,18 @@ export default function OrganizacionPage() {
               <Users className="w-4 h-4" />
               Usuarios
             </button>
+            {esGerenteMarca && (
+              <button
+                type="button"
+                onClick={() => setTab('whatsapp')}
+                className={`px-4 py-2 rounded-lg text-sm font-semibold transition flex items-center gap-2 ${
+                  tab === 'whatsapp' ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-700 hover:bg-slate-100'
+                }`}
+              >
+                <MessageCircle className="w-4 h-4" />
+                WhatsApp
+              </button>
+            )}
           </div>
         </section>
 
@@ -767,6 +792,7 @@ export default function OrganizacionPage() {
         )}
 
         {tab === 'usuarios' && <UsuariosPage embedded />}
+        {tab === 'whatsapp' && esGerenteMarca && <OrganizacionWhatsApp />}
       </div>
 
       {modalCrear && (

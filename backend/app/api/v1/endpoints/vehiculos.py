@@ -84,6 +84,11 @@ from app.utils.rtm_reminders import schedule_rtm_renewal_reminder_for_vehicle
 from app.utils.comprobantes import generar_recibo_pago_vehiculo_pdf
 from app.utils.habeas_autorizacion_pdf import generar_habeas_autorizacion_pdf
 from app.utils.recepcion_formato_extra_pdf import generar_recepcion_formato_extra_pdf
+from app.services.whatsapp_tenant import (
+    enviar_aviso_bienvenida,
+    enviar_aviso_caja,
+    enviar_aviso_recibo,
+)
 
 
 def _try_download_factura_pdf_desde_url_publica(url: str, max_bytes: int = 8 * 1024 * 1024) -> bytes | None:
@@ -2607,15 +2612,15 @@ def registrar_vehiculo(
     db.commit()
     db.refresh(nuevo_vehiculo)
 
-    # Notificación opcional por email al cliente (no bloquea el flujo de recepción).
+    # Notificación opcional al cliente (correo y/o WhatsApp; no bloquea recepción).
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    nombre_cda = (
+        tenant.nombre_comercial
+        if tenant and tenant.nombre_comercial
+        else (tenant.nombre if tenant else "CDASOFT")
+    )
     if cliente_email_normalizado:
         try:
-            tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
-            nombre_cda = (
-                tenant.nombre_comercial
-                if tenant and tenant.nombre_comercial
-                else (tenant.nombre if tenant else "CDASOFT")
-            )
             asunto = f"Bienvenido a {nombre_cda}"
             correo_cda = (
                 (tenant.correo_electronico or "").strip()
@@ -2666,7 +2671,18 @@ def registrar_vehiculo(
             )
         except Exception as e:
             print(f"[WARN] No se pudo enviar email de recepción al cliente: {e}")
-    
+    try:
+        enviar_aviso_bienvenida(
+            db,
+            tenant_id=current_user.tenant_id,
+            celular=nuevo_vehiculo.cliente_telefono,
+            nombre_cliente=nuevo_vehiculo.cliente_nombre or "Cliente",
+            nombre_cda=nombre_cda,
+            placa=placa_upper,
+        )
+    except Exception as e:
+        print(f"[WARN] No se pudo enviar WhatsApp de recepción: {e}")
+
     return nuevo_vehiculo
 
 
@@ -2945,15 +2961,19 @@ def notificar_paso_caja(
         return {
             "sent": False,
             "has_email": bool(vehiculo.cliente_email),
+            "has_phone": bool((vehiculo.cliente_telefono or "").strip()),
             "message": "El vehículo ya no está en estado pendiente de cobro.",
         }
 
     cliente_email = (vehiculo.cliente_email or "").strip().lower()
-    if not cliente_email:
+    has_email = bool(cliente_email)
+    has_phone = bool((vehiculo.cliente_telefono or "").strip())
+    if not has_email and not has_phone:
         return {
             "sent": False,
             "has_email": False,
-            "message": "El cliente no tiene correo electrónico registrado.",
+            "has_phone": False,
+            "message": "El cliente no tiene correo ni celular registrado.",
         }
 
     tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
@@ -2963,17 +2983,41 @@ def notificar_paso_caja(
         else (tenant.nombre if tenant else "CDASOFT")
     )
 
-    asunto = f"{nombre_cda} - Te invitamos a pasar a caja"
-    cuerpo_html = generar_email_llamado_caja_cliente(
-        nombre_cda=nombre_cda,
-        nombre_cliente=vehiculo.cliente_nombre,
-    )
-    sent = enviar_email(cliente_email, asunto, cuerpo_html)
+    email_sent = False
+    if has_email:
+        asunto = f"{nombre_cda} - Te invitamos a pasar a caja"
+        cuerpo_html = generar_email_llamado_caja_cliente(
+            nombre_cda=nombre_cda,
+            nombre_cliente=vehiculo.cliente_nombre,
+        )
+        email_sent = bool(enviar_email(cliente_email, asunto, cuerpo_html))
 
+    wa_sent = False
+    try:
+        wa_sent = bool(
+            enviar_aviso_caja(
+                db,
+                tenant_id=current_user.tenant_id,
+                celular=vehiculo.cliente_telefono,
+                nombre_cliente=vehiculo.cliente_nombre or "Cliente",
+                nombre_cda=nombre_cda,
+            )
+        )
+    except Exception as e:
+        print(f"[WARN] No se pudo enviar WhatsApp de caja: {e}")
+
+    sent = email_sent or wa_sent
+    if sent:
+        msg = "Notificación enviada al cliente."
+    elif has_email or has_phone:
+        msg = "No fue posible enviar la notificación."
+    else:
+        msg = "El cliente no tiene correo ni celular registrado."
     return {
-        "sent": bool(sent),
-        "has_email": True,
-        "message": "Notificación enviada al cliente." if sent else "No fue posible enviar la notificación.",
+        "sent": sent,
+        "has_email": has_email,
+        "has_phone": has_phone,
+        "message": msg,
     }
 
 
@@ -2995,11 +3039,14 @@ async def enviar_recibo_pago_email(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Vehículo no encontrado")
 
     cliente_email = (vehiculo.cliente_email or "").strip().lower()
-    if not cliente_email:
+    has_email = bool(cliente_email)
+    has_phone = bool((vehiculo.cliente_telefono or "").strip())
+    if not has_email and not has_phone:
         return {
             "sent": False,
             "has_email": False,
-            "message": "El cliente no tiene correo electrónico registrado.",
+            "has_phone": False,
+            "message": "El cliente no tiene correo ni celular registrado.",
         }
 
     content = await receipt_file.read()
@@ -3047,18 +3094,44 @@ async def enviar_recibo_pago_email(
     if factura_url or factura_pdf_adjunto:
         asunto = f"Recibo y factura electrónica - {nombre_cda} - {vehiculo.placa}"
 
-    sent = enviar_email_con_adjuntos(
-        destinatario=cliente_email,
-        asunto=asunto,
-        cuerpo_html=email_html,
-        adjuntos=adjuntos,
-    )
+    email_sent = False
+    if has_email:
+        email_sent = bool(
+            enviar_email_con_adjuntos(
+                destinatario=cliente_email,
+                asunto=asunto,
+                cuerpo_html=email_html,
+                adjuntos=adjuntos,
+            )
+        )
+    wa_sent = False
+    try:
+        wa_sent = bool(
+            enviar_aviso_recibo(
+                db,
+                tenant_id=current_user.tenant_id,
+                celular=vehiculo.cliente_telefono,
+                nombre_cliente=vehiculo.cliente_nombre or "Cliente",
+                nombre_cda=nombre_cda,
+                placa=vehiculo.placa or "",
+                factura_url=factura_url,
+            )
+        )
+    except Exception as e:
+        print(f"[WARN] No se pudo enviar WhatsApp de recibo: {e}")
+
+    sent = email_sent or wa_sent
+    if sent:
+        msg = "Recibo enviado al cliente."
+    else:
+        msg = "No fue posible enviar el recibo por correo ni WhatsApp."
     return {
-        "sent": bool(sent),
-        "has_email": True,
+        "sent": sent,
+        "has_email": has_email,
+        "has_phone": has_phone,
         "factura_incluida": bool(factura_url or factura_pdf_adjunto),
         "factura_adjunto_pdf": factura_pdf_adjunto,
-        "message": "Recibo enviado al cliente." if sent else "No fue posible enviar el recibo por correo.",
+        "message": msg,
     }
 
 

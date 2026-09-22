@@ -10,7 +10,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from pydantic import BaseModel, Field, EmailStr, TypeAdapter, field_validator
-from sqlalchemy import and_, func
+from sqlalchemy import and_, func, or_
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
@@ -21,11 +21,13 @@ from app.models.sucursal import Sucursal
 from app.models.tenant import Tenant
 from app.models.usuario import Usuario
 from app.services.tarifas_resolver import resolver_tarifa_vigente
+from app.services.whatsapp_tenant import enviar_aviso_cita, enviar_aviso_cita_recordatorio
 from app.utils.email import (
     enviar_email,
     generar_email_confirmacion_cita,
     generar_email_recordatorio_cita,
 )
+from app.utils.nombres import etiqueta_cda_con_sede, formatear_nombre_comercial
 
 router = APIRouter()
 
@@ -289,6 +291,35 @@ def _resolve_public_sucursal_id(db: Session, tenant_id, sucursal_id: Optional[UU
     )
 
 
+def _lugar_cita(db: Session, tenant: Tenant, appointment: Appointment) -> tuple[str, str, str | None]:
+    """Marca para el correo, etiqueta CDA·sede para WhatsApp, línea de sede si hay varias."""
+    marca_raw = (
+        (tenant.nombre_comercial if tenant and tenant.nombre_comercial else None)
+        or (tenant.nombre if tenant else None)
+        or "CDA"
+    )
+    sedes = _list_sedes_activas(db, tenant.id)
+    sucursal = None
+    if getattr(appointment, "sucursal_id", None):
+        sucursal = next((s for s in sedes if s.id == appointment.sucursal_id), None)
+        if sucursal is None:
+            sucursal = db.query(Sucursal).filter(Sucursal.id == appointment.sucursal_id).first()
+    nombre_sede = sucursal.nombre if sucursal else None
+    etiqueta = etiqueta_cda_con_sede(
+        marca_raw,
+        nombre_sede,
+        sedes_activas=len(sedes),
+        fallback="CDA",
+    )
+    sede_linea = None
+    if len(sedes) > 1 and sucursal:
+        sede_linea = formatear_nombre_comercial(sucursal.nombre, sucursal.nombre)
+        ciudad = (sucursal.ciudad or "").strip()
+        if ciudad:
+            sede_linea = f"{sede_linea} ({formatear_nombre_comercial(ciudad, ciudad)})"
+    return formatear_nombre_comercial(marca_raw, "CDA"), etiqueta, sede_linea
+
+
 def _format_fecha_es(target_date: date) -> str:
     return f"{target_date.day} de {MONTHS_ES[target_date.month - 1]} de {target_date.year}"
 
@@ -488,87 +519,118 @@ def _send_appointment_email_notification(
     ano_modelo: str | None = None,
 ) -> None:
     try:
-        if not cliente_email:
-            return
         fecha_legible = _format_fecha_es(scheduled_at.date())
         hora_legible = scheduled_at.strftime("%H:%M")
-        nombre_cda = tenant.nombre_comercial if tenant and tenant.nombre_comercial else tenant.nombre
-        tipo_servicio = _humanize_service(tipo_vehiculo)
-        google_calendar_url = _build_google_calendar_url(
-            nombre_cda=nombre_cda,
-            placa=placa,
-            tipo_servicio=tipo_servicio,
-            scheduled_at=scheduled_at,
-        )
-        ics_download_url = _build_ics_download_url(appointment.public_token)
-        valor_aproximado = None
-        raw_ano = (ano_modelo or "").strip()
-        if raw_ano:
+        marca, etiqueta, sede_linea = _lugar_cita(db, tenant, appointment)
+        if cliente_email:
+            tipo_servicio = _humanize_service(tipo_vehiculo)
+            google_calendar_url = _build_google_calendar_url(
+                nombre_cda=etiqueta,
+                placa=placa,
+                tipo_servicio=tipo_servicio,
+                scheduled_at=scheduled_at,
+            )
+            ics_download_url = _build_ics_download_url(appointment.public_token)
+            valor_aproximado = None
+            raw_ano = (ano_modelo or "").strip()
+            if raw_ano:
+                try:
+                    estimated = _estimate_tarifa_for_tenant(
+                        db,
+                        tenant_id=tenant.id,
+                        ano_modelo=int(raw_ano),
+                        tipo_vehiculo=tipo_vehiculo,
+                        sucursal_id=getattr(appointment, "sucursal_id", None),
+                    )
+                    if estimated.disponible and estimated.valor_total is not None:
+                        valor_aproximado = _format_cop_amount(estimated.valor_total)
+                except Exception:
+                    valor_aproximado = None
+            html = generar_email_confirmacion_cita(
+                nombre_cda=marca,
+                nombre_cliente=cliente_nombre,
+                fecha_legible=fecha_legible,
+                hora_legible=hora_legible,
+                placa=placa,
+                tipo_servicio=tipo_servicio,
+                valor_aproximado=valor_aproximado,
+                google_calendar_url=google_calendar_url,
+                ics_download_url=ics_download_url,
+                sede_nombre=sede_linea,
+            )
+            asunto = f"{marca} - Confirmación de cita"
             try:
-                estimated = _estimate_tarifa_for_tenant(
-                    db,
-                    tenant_id=tenant.id,
-                    ano_modelo=int(raw_ano),
-                    tipo_vehiculo=tipo_vehiculo,
-                    sucursal_id=getattr(appointment, "sucursal_id", None),
-                )
-                if estimated.disponible and estimated.valor_total is not None:
-                    valor_aproximado = _format_cop_amount(estimated.valor_total)
+                enviar_email(cliente_email, asunto, html)
             except Exception:
-                # El email no debe bloquearse por errores de cálculo informativo.
-                valor_aproximado = None
-        html = generar_email_confirmacion_cita(
-            nombre_cda=nombre_cda,
-            nombre_cliente=cliente_nombre,
-            fecha_legible=fecha_legible,
-            hora_legible=hora_legible,
-            placa=placa,
-            tipo_servicio=tipo_servicio,
-            valor_aproximado=valor_aproximado,
-            google_calendar_url=google_calendar_url,
-            ics_download_url=ics_download_url,
-        )
-        asunto = f"{nombre_cda} - Confirmación de cita"
+                pass
         try:
-            enviar_email(cliente_email, asunto, html)
-        except Exception:
-            # No bloquear agendamiento por fallas SMTP.
-            pass
-    except Exception:
-        # Regla crítica: nunca bloquear creación de cita por generación de correo.
-        pass
+            enviar_aviso_cita(
+                db,
+                tenant_id=tenant.id,
+                celular=appointment.cliente_celular,
+                nombre_cliente=cliente_nombre,
+                nombre_cda=etiqueta,
+                fecha=fecha_legible,
+                hora=hora_legible,
+                placa=placa,
+            )
+        except Exception as exc:
+            print(f"[WARN] No se pudo enviar WhatsApp de cita: {exc}")
+    except Exception as exc:
+        print(f"[WARN] Falló la notificación de cita: {exc}")
 
 
 def _send_appointment_reminder_notification(
+    db: Session,
     tenant: Tenant,
     *,
     appointment: Appointment,
 ) -> bool:
-    if not appointment.cliente_email:
-        return False
+    marca, etiqueta, sede_linea = _lugar_cita(db, tenant, appointment)
+    fecha_legible = _format_fecha_es(appointment.scheduled_at.date())
+    hora_legible = appointment.scheduled_at.strftime("%H:%M")
+    email_ok = False
+    if appointment.cliente_email:
+        tipo_servicio = _humanize_service(appointment.tipo_vehiculo)
+        google_calendar_url = _build_google_calendar_url(
+            nombre_cda=etiqueta,
+            placa=appointment.placa,
+            tipo_servicio=tipo_servicio,
+            scheduled_at=appointment.scheduled_at,
+        )
+        ics_download_url = _build_ics_download_url(appointment.public_token)
 
-    nombre_cda = tenant.nombre_comercial if tenant and tenant.nombre_comercial else tenant.nombre
-    tipo_servicio = _humanize_service(appointment.tipo_vehiculo)
-    google_calendar_url = _build_google_calendar_url(
-        nombre_cda=nombre_cda,
-        placa=appointment.placa,
-        tipo_servicio=tipo_servicio,
-        scheduled_at=appointment.scheduled_at,
-    )
-    ics_download_url = _build_ics_download_url(appointment.public_token)
-
-    html = generar_email_recordatorio_cita(
-        nombre_cda=nombre_cda,
-        nombre_cliente=appointment.cliente_nombre,
-        fecha_legible=_format_fecha_es(appointment.scheduled_at.date()),
-        hora_legible=appointment.scheduled_at.strftime("%H:%M"),
-        placa=appointment.placa,
-        tipo_servicio=tipo_servicio,
-        google_calendar_url=google_calendar_url,
-        ics_download_url=ics_download_url,
-    )
-    asunto = f"{nombre_cda} - Recordatorio de cita"
-    return enviar_email(appointment.cliente_email, asunto, html)
+        html = generar_email_recordatorio_cita(
+            nombre_cda=marca,
+            nombre_cliente=appointment.cliente_nombre,
+            fecha_legible=fecha_legible,
+            hora_legible=hora_legible,
+            placa=appointment.placa,
+            tipo_servicio=tipo_servicio,
+            google_calendar_url=google_calendar_url,
+            ics_download_url=ics_download_url,
+            sede_nombre=sede_linea,
+        )
+        asunto = f"{marca} - Recordatorio de cita"
+        email_ok = bool(enviar_email(appointment.cliente_email, asunto, html))
+    wa_ok = False
+    try:
+        wa_ok = bool(
+            enviar_aviso_cita_recordatorio(
+                db,
+                tenant_id=tenant.id,
+                celular=appointment.cliente_celular,
+                nombre_cliente=appointment.cliente_nombre or "Cliente",
+                nombre_cda=etiqueta,
+                fecha=fecha_legible,
+                hora=hora_legible,
+                placa=appointment.placa or "",
+            )
+        )
+    except Exception as exc:
+        print(f"[WARN] No se pudo enviar WhatsApp de recordatorio de cita: {exc}")
+        wa_ok = False
+    return bool(email_ok or wa_ok)
 
 
 def process_due_appointment_reminders(
@@ -580,7 +642,7 @@ def process_due_appointment_reminders(
     now = _now_colombia_naive()
     query = db.query(Appointment).filter(
         Appointment.status.in_(ACTIVE_STATUSES),
-        Appointment.cliente_email.isnot(None),
+        or_(Appointment.cliente_email.isnot(None), Appointment.cliente_celular.isnot(None)),
         Appointment.reminder_sent_at.is_(None),
         Appointment.reminder_scheduled_at.isnot(None),
         Appointment.reminder_scheduled_at <= now,
@@ -605,7 +667,7 @@ def process_due_appointment_reminders(
             appt.reminder_status = "failed"
             continue
         try:
-            ok = _send_appointment_reminder_notification(tenant, appointment=appt)
+            ok = _send_appointment_reminder_notification(db, tenant, appointment=appt)
             if ok:
                 appt.reminder_sent_at = now
                 appt.reminder_status = "sent"
@@ -916,9 +978,9 @@ def download_public_calendar_event(token: str, db: Session = Depends(get_db)):
     if not tenant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado")
 
-    nombre_cda = tenant.nombre_comercial if tenant.nombre_comercial else tenant.nombre
+    _marca, etiqueta, _sede_linea = _lugar_cita(db, tenant, appointment)
     tipo_servicio = _humanize_service(appointment.tipo_vehiculo)
-    ics = _build_ics_content(appointment=appointment, nombre_cda=nombre_cda, tipo_servicio=tipo_servicio)
+    ics = _build_ics_content(appointment=appointment, nombre_cda=etiqueta, tipo_servicio=tipo_servicio)
     file_hash = hashlib.md5(str(appointment.id).encode("utf-8")).hexdigest()[:10]
     filename = f"cita-{file_hash}.ics"
     return Response(

@@ -1542,6 +1542,102 @@ def ensure_factus_schema(db):
     )
 
 
+def ensure_whatsapp_schema(db):
+    """WhatsApp Business por tenant (credenciales cifradas + traza de envíos)."""
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS tenant_whatsapp_settings (
+                tenant_id UUID PRIMARY KEY REFERENCES tenants(id) ON DELETE CASCADE,
+                proveedor VARCHAR(20) NOT NULL DEFAULT 'cloud_api',
+                habilitado BOOLEAN NOT NULL DEFAULT FALSE,
+                phone_number_id VARCHAR(40),
+                waba_id VARCHAR(40),
+                access_token_encrypted TEXT,
+                dialog360_api_key_encrypted TEXT,
+                display_phone_e164 VARCHAR(20),
+                avisos_calidad BOOLEAN NOT NULL DEFAULT FALSE,
+                plantilla_calidad VARCHAR(120),
+                plantilla_calidad_lang VARCHAR(10) NOT NULL DEFAULT 'es',
+                avisos_operativos BOOLEAN NOT NULL DEFAULT TRUE,
+                plantilla_bienvenida VARCHAR(120),
+                plantilla_caja VARCHAR(120),
+                plantilla_recibo VARCHAR(120),
+                avisos_citas BOOLEAN NOT NULL DEFAULT TRUE,
+                plantilla_cita VARCHAR(120),
+                plantilla_cita_recordatorio VARCHAR(120),
+                avisos_vencimientos BOOLEAN NOT NULL DEFAULT TRUE,
+                plantilla_rtm VARCHAR(120),
+                plantilla_preventiva VARCHAR(120),
+                plantilla_reinspeccion VARCHAR(120),
+                plantilla_aprobacion VARCHAR(120),
+                last_error TEXT,
+                last_ok_at TIMESTAMP WITHOUT TIME ZONE,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS tenant_whatsapp_envios (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                destino_e164 VARCHAR(20) NOT NULL,
+                evento VARCHAR(40) NOT NULL,
+                plantilla VARCHAR(120),
+                estado VARCHAR(20) NOT NULL,
+                proveedor_message_id VARCHAR(80),
+                error TEXT,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    )
+    db.execute(text("CREATE INDEX IF NOT EXISTS ix_tenant_whatsapp_envios_tenant ON tenant_whatsapp_envios(tenant_id)"))
+    db.execute(
+        text(
+            "ALTER TABLE tenant_whatsapp_settings "
+            "ADD COLUMN IF NOT EXISTS avisos_operativos BOOLEAN NOT NULL DEFAULT TRUE"
+        )
+    )
+    db.execute(
+        text("ALTER TABLE tenant_whatsapp_settings ADD COLUMN IF NOT EXISTS plantilla_bienvenida VARCHAR(120)")
+    )
+    db.execute(text("ALTER TABLE tenant_whatsapp_settings ADD COLUMN IF NOT EXISTS plantilla_caja VARCHAR(120)"))
+    db.execute(text("ALTER TABLE tenant_whatsapp_settings ADD COLUMN IF NOT EXISTS plantilla_recibo VARCHAR(120)"))
+    db.execute(
+        text(
+            "ALTER TABLE tenant_whatsapp_settings "
+            "ADD COLUMN IF NOT EXISTS avisos_citas BOOLEAN NOT NULL DEFAULT TRUE"
+        )
+    )
+    db.execute(text("ALTER TABLE tenant_whatsapp_settings ADD COLUMN IF NOT EXISTS plantilla_cita VARCHAR(120)"))
+    db.execute(
+        text(
+            "ALTER TABLE tenant_whatsapp_settings ADD COLUMN IF NOT EXISTS plantilla_cita_recordatorio VARCHAR(120)"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE tenant_whatsapp_settings "
+            "ADD COLUMN IF NOT EXISTS avisos_vencimientos BOOLEAN NOT NULL DEFAULT TRUE"
+        )
+    )
+    db.execute(text("ALTER TABLE tenant_whatsapp_settings ADD COLUMN IF NOT EXISTS plantilla_rtm VARCHAR(120)"))
+    db.execute(
+        text("ALTER TABLE tenant_whatsapp_settings ADD COLUMN IF NOT EXISTS plantilla_preventiva VARCHAR(120)")
+    )
+    db.execute(
+        text("ALTER TABLE tenant_whatsapp_settings ADD COLUMN IF NOT EXISTS plantilla_reinspeccion VARCHAR(120)")
+    )
+    db.execute(
+        text("ALTER TABLE tenant_whatsapp_settings ADD COLUMN IF NOT EXISTS plantilla_aprobacion VARCHAR(120)")
+    )
+
+
 def ensure_quality_survey_responses_schema(db):
     """
     Migra quality_survey_responses del esquema de 5 preguntas al de 9 dimensiones.
@@ -3089,6 +3185,7 @@ def init_db():
     from app.models.sucursal import Sucursal  # noqa: F401 — register model
     from app.models.tesoreria import MovimientoTesoreria, DesgloseEfectivoTesoreria, ConfiguracionTesoreria  # noqa: F401
     from app.models.factus import TenantFactusSettings, FacturaElectronica  # noqa: F401 — register model
+    from app.models.whatsapp import TenantWhatsAppSettings, TenantWhatsAppEnvio  # noqa: F401
     from app.models.documento_tenant import TenantDocumento  # noqa: F401 — register model
     from app.models.documento_auditoria import TenantDocumentoAuditoria  # noqa: F401 — register model
     from app.models.proveedor_catalogo import ProveedorCatalogo  # noqa: F401 — register model
@@ -3160,6 +3257,7 @@ def init_db():
         ensure_proveedores_catalogo_schema(db)
         ensure_facturacion_ubicacion_schema(db)
         ensure_factus_schema(db)
+        ensure_whatsapp_schema(db)
         ensure_quality_survey_responses_schema(db)
         ensure_quality_survey_invites_sucursal_schema(db)
         ensure_tenant_documentos_schema(db)

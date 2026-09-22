@@ -25,12 +25,14 @@ interface VehiculosPendientesResponse {
 interface NotificacionPasoCajaResponse {
   sent: boolean;
   has_email: boolean;
+  has_phone?: boolean;
   message: string;
 }
 
 interface EnvioReciboResponse {
   sent: boolean;
   has_email: boolean;
+  has_phone?: boolean;
   message: string;
   /** Incluye enlace y/o adjunto de factura electrónica (Factus/DIAN) si existía registro. */
   factura_incluida?: boolean;
