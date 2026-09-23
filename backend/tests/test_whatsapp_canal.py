@@ -318,6 +318,8 @@ def test_asistente_clasifica_sin_inventar_precio():
     assert clasificar_intencion("buenos días") == INTENT_SALUDO
     assert clasificar_intencion("una pregunta") == INTENT_SALUDO
     assert clasificar_intencion("Hola, qué documentos llevo") == INTENT_DOCUMENTOS
+    assert clasificar_intencion("que docuementos necesitan") == INTENT_DOCUMENTOS
+    assert clasificar_intencion("requisitos?") == INTENT_DOCUMENTOS
     assert clasificar_intencion("moto 2018") == INTENT_HUMANO
     assert clasificar_intencion("moto 2018", last_intent=INTENT_PRECIO) == INTENT_PRECIO
     assert clasificar_intencion("esto es un reclamo, me cobraron de más") == INTENT_HUMANO
@@ -364,6 +366,18 @@ def test_grok_descarta_si_inventa_precio_o_cambia_url():
     assert _respeta_hechos("La moto le sale a $50.000", base) is False
     assert _respeta_hechos("Agende en https://otra.co/x", base) is False
     assert _respeta_hechos("Le cobramos $200.000 extra", "Un asesor le responde") is False
+    docs_base = (
+        "Para la revisión en CDA Demo lo obligatorio es la licencia de tránsito "
+        "(tarjeta de propiedad) y el vehículo limpio."
+    )
+    assert _respeta_hechos(
+        "En CDA Demo lleve la tarjeta de propiedad y el vehículo limpio.",
+        docs_base,
+    )
+    assert _respeta_hechos(
+        "Un asesor de CDA Demo le contactará para informarles sobre los documentos.",
+        docs_base,
+    ) is False
 
 
 def test_asistente_usa_grok_si_devuelve_frase(monkeypatch):

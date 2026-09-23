@@ -15,7 +15,9 @@ _SYSTEM = (
     "Solo reescribes los HECHOS. No inventes precios, horarios, documentos, sedes ni enlaces. "
     "Si un dato no está en los hechos, no lo agregues. "
     "Máximo 4 frases. Sin menús numerados. Sin decir que eres IA, bot o Grok. "
-    "Si hay un enlace en los hechos, déjalo tal cual."
+    "Si hay un enlace en los hechos, déjalo tal cual. "
+    "Si los hechos ya tienen la respuesta (documentos, precio, sede), dila; "
+    "no pases a un asesor ni digas que no tienes el dato."
 )
 
 
@@ -87,6 +89,19 @@ def _respeta_hechos(texto_grok: str, texto_base: str) -> bool:
     base = (texto_base or "").strip()
     if len(grok) < 12:
         return False
+    grok_l = grok.lower()
+    base_l = base.lower()
+    if "asesor" not in base_l:
+        if any(
+            p in grok_l
+            for p in ("asesor", "escalar", "dato seguro", "contactará", "le contactar", "no cuento con")
+        ):
+            return False
+    if "propiedad" in base_l or "tarjeta" in base_l:
+        if "propiedad" not in grok_l and "tarjeta" not in grok_l:
+            return False
+        if "limpio" in base_l and "limpio" not in grok_l:
+            return False
     for url in _urls(base):
         if url not in grok:
             return False

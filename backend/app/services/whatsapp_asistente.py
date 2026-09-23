@@ -53,12 +53,19 @@ _RECLAMO = (
 _DOCS = (
     "documento",
     "documentos",
+    "docuementos",
+    "ducumentos",
     "qué debo llevar",
     "que debo llevar",
     "qué llevo",
     "que llevo",
     "qué traer",
     "que traer",
+    "qué piden",
+    "que piden",
+    "requisito",
+    "requisitos",
+    "papeles",
     "soat",
     "tarjeta de propiedad",
     "licencia de tránsito",
@@ -168,7 +175,7 @@ def clasificar_intencion(texto: str, last_intent: str | None = None) -> str:
         return INTENT_ACK
     if any(k in t for k in _RECLAMO):
         return INTENT_HUMANO
-    if any(k in t for k in _DOCS):
+    if any(k in t for k in _DOCS) or re.search(r"docu\w*ment", t):
         return INTENT_DOCUMENTOS
     if any(k in t for k in _PRECIO):
         return INTENT_PRECIO
@@ -465,9 +472,8 @@ def _hechos_y_base(db: Session, tenant: Tenant, texto: str, intencion: str) -> t
             f"Si invita a agendar, el enlace tal cual: {url}"
         )
         return hechos, base
-        return hechos, base
     base = _texto_humano(nombre)
-    hechos = f"- CDA: {nombre}\n- No hay dato seguro. Escalar a un asesor humano del CDA."
+    hechos = f"- CDA: {nombre}\n- Un asesor del CDA continúa en este chat. No inventes documentos ni precios."
     return hechos, base
 
 
@@ -476,6 +482,8 @@ def _armar_respuesta(db: Session, tenant: Tenant, texto: str, intencion: str) ->
 
     nombre = _cda(tenant.nombre_comercial or tenant.nombre)
     hechos, base = _hechos_y_base(db, tenant, texto, intencion)
+    if intencion == INTENT_HUMANO:
+        return base
     grok = redactar_whatsapp(
         nombre_cda=nombre,
         mensaje_cliente=texto,
