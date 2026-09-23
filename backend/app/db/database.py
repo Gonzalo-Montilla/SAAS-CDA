@@ -881,6 +881,7 @@ def ensure_rtm_reminders_schema(db):
                 last_paid_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
                 next_due_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
                 scheduled_send_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
+                auto_steps_sent VARCHAR(80),
                 status VARCHAR(20) NOT NULL DEFAULT 'pending',
                 commercial_status VARCHAR(30) NOT NULL DEFAULT 'pendiente',
                 commercial_notes TEXT,
@@ -915,6 +916,7 @@ def ensure_rtm_reminders_schema(db):
     db.execute(text("UPDATE rtm_renewal_reminders SET management_count = COALESCE(management_count, 0)"))
     db.execute(text("CREATE INDEX IF NOT EXISTS ix_rtm_reminders_commercial_status ON rtm_renewal_reminders(commercial_status)"))
     db.execute(text("CREATE INDEX IF NOT EXISTS ix_rtm_reminders_next_contact_at ON rtm_renewal_reminders(next_contact_at)"))
+    db.execute(text("ALTER TABLE IF EXISTS rtm_renewal_reminders ADD COLUMN IF NOT EXISTS auto_steps_sent VARCHAR(80)"))
 
 
 def ensure_sucursales_schema(db):

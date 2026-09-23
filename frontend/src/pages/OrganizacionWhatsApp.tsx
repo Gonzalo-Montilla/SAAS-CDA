@@ -28,7 +28,9 @@ const AVISO_OPTIONS: { value: WhatsAppEventoPrueba; label: string }[] = [
   { value: 'cita', label: 'Cita confirmada' },
   { value: 'cita_recordatorio', label: 'Recordatorio cita' },
   { value: 'rtm', label: 'RTM anual' },
+  { value: 'rtm_vencida', label: 'RTM vencida' },
   { value: 'preventiva', label: 'Preventiva' },
+  { value: 'preventiva_vencida', label: 'Preventiva vencida' },
   { value: 'calidad', label: 'Encuesta calidad' },
 ];
 
@@ -392,7 +394,11 @@ export default function OrganizacionWhatsApp() {
             />
             <span>
               <span className="font-semibold">Vencimientos</span>
-              <span className="block text-xs text-slate-500">RTM anual y preventiva van por separado, nunca mezcladas</span>
+              <span className="block text-xs text-slate-500">
+                RTM: WhatsApp a 30 días, 2 días y vencido+1. Preventiva: 7, 2 y vencido+1. Nunca se mezclan.
+                El correo de RTM también sale a 15 y 8 días. Las plantillas vencidas hay que crearlas en 360dialog
+                (Utility, español): cdasoft_rtm_vencida y cdasoft_preventiva_vencida.
+              </span>
             </span>
           </label>
           <label className="flex items-start gap-2 text-sm text-slate-800 rounded-lg border border-slate-100 px-3 py-2">

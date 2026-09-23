@@ -784,18 +784,38 @@ def generar_email_recordatorio_proxima_rtm(
     tipo_servicio: str,
     fecha_sugerida: str,
     agendamiento_url: str | None = None,
+    etapa: str = "proximo",
 ) -> str:
-    """Recordatorio de próxima RTM (renovación anual)."""
+    """Recordatorio de próxima RTM (renovación anual). No mezcla preventiva."""
     nombre_cda = _display_cda(nombre_cda)
     nombre_cliente = _display_cliente(nombre_cliente)
-    body_html = f"""
+    vencida = (etapa or "proximo").strip().lower() == "vencido"
+    if vencida:
+        intro_html = f"""
+    <p>Hola <strong>{nombre_cliente}</strong>,</p>
+    <p>La revisión técnico-mecánica de tu vehículo ya venció y queremos ayudarte a ponerla al día.</p>
+    <p>Te invitamos a volver a <strong>{nombre_cda}</strong> para realizar tu nueva revisión. Agendar es súper fácil:</p>
+        """
+        fecha_label = "Fecha de vencimiento"
+        title = f"RTM vencida - {nombre_cda}"
+        label = f"RTM vencida - {nombre_cda}"
+        cierre = "Si ya la hiciste, puedes ignorar este mensaje. Si no, te esperamos para dejarla en regla."
+    else:
+        intro_html = f"""
     <p>Hola <strong>{nombre_cliente}</strong>,</p>
     <p>¿Ya revisaste la vigencia de tu revisión técnico-mecánica? La que hiciste con nosotros se está por vencer, y queremos recordártelo a tiempo para que no te pille desprevenido.</p>
     <p>Te invitamos a volver a <strong>{nombre_cda}</strong> para realizar tu nueva revisión. Agendar es súper fácil:</p>
+        """
+        fecha_label = "Fecha sugerida"
+        title = f"Recordatorio de próxima RTM - {nombre_cda}"
+        label = f"Renovación RTM - {nombre_cda}"
+        cierre = "Sigue disfrutando de nuestra sala de espera, atención rápida y todo el respaldo que ya conoces. ¡Nos encantaría volver a verte!"
+    body_html = f"""
+    {intro_html}
     <div class="highlight">
         <p style="margin:0 0 6px 0;">📍 <strong>Placa:</strong> {placa}</p>
         <p style="margin:0 0 6px 0;">🔧 <strong>Servicio:</strong> {tipo_servicio}</p>
-        <p style="margin:0;"><strong>Fecha sugerida:</strong> {fecha_sugerida}</p>
+        <p style="margin:0;"><strong>{fecha_label}:</strong> {fecha_sugerida}</p>
     </div>
     {(
         f'''
@@ -810,7 +830,7 @@ def generar_email_recordatorio_proxima_rtm(
         if agendamiento_url
         else ''
     )}
-    <p>Sigue disfrutando de nuestra sala de espera, atención rápida y todo el respaldo que ya conoces. ¡Nos encantaría volver a verte!</p>
+    <p>{cierre}</p>
     <p><strong>¡Que tengas un excelente día!</strong></p>
     <p class="muted">
         Saludos,<br />
@@ -818,9 +838,9 @@ def generar_email_recordatorio_proxima_rtm(
     </p>
     """
     return _render_email_corporativo(
-        title=f"Recordatorio de próxima RTM - {nombre_cda}",
+        title=title,
         body_html=body_html,
-        label=f"Renovación RTM - {nombre_cda}",
+        label=label,
     )
 
 
@@ -831,11 +851,30 @@ def generar_email_recordatorio_control_preventivo(
     tipo_servicio: str,
     fecha_sugerida: str,
     agendamiento_url: str | None = None,
+    etapa: str = "proximo",
 ) -> str:
-    """Recordatorio de control preventivo cuatrimestral."""
+    """Recordatorio de control preventivo cuatrimestral. No mezcla RTM anual."""
     nombre_cda = _display_cda(nombre_cda)
     nombre_cliente = _display_cliente(nombre_cliente)
-    body_html = f"""
+    vencida = (etapa or "proximo").strip().lower() == "vencido"
+    if vencida:
+        intro_html = f"""
+    <p>Hola <strong>{nombre_cliente}</strong>,</p>
+    <p>
+        En <strong>{nombre_cda}</strong> te recordamos que ya debió realizarse la
+        <strong>revisión preventiva</strong> de tu vehículo.
+    </p>
+    <p>
+        Una preventiva a tiempo ayuda a detectar novedades antes de que se vuelvan problemas mayores.
+        Programa tu visita con nosotros:
+    </p>
+        """
+        fecha_label = "Fecha prevista"
+        title = f"Control preventivo vencido - {nombre_cda}"
+        label = f"Preventiva vencida - {nombre_cda}"
+        cierre = "Si ya la hiciste, puedes ignorar este mensaje. Si no, te esperamos pronto."
+    else:
+        intro_html = f"""
     <p>Hola <strong>{nombre_cliente}</strong>,</p>
     <p>
         En <strong>{nombre_cda}</strong> te estamos esperando para que realices tu
@@ -846,10 +885,17 @@ def generar_email_recordatorio_control_preventivo(
         te ayuda a detectar novedades antes de que se vuelvan problemas mayores.
     </p>
     <p>Programa tu visita y ven a hacer tu revisión preventiva con nosotros:</p>
+        """
+        fecha_label = "Fecha sugerida"
+        title = f"Recordatorio de control preventivo - {nombre_cda}"
+        label = f"Control preventivo - {nombre_cda}"
+        cierre = "Gracias por confiar en nosotros. ¡Te esperamos pronto!"
+    body_html = f"""
+    {intro_html}
     <div class="highlight">
         <p style="margin:0 0 6px 0;">📍 <strong>Placa:</strong> {placa}</p>
         <p style="margin:0 0 6px 0;">🔧 <strong>Servicio:</strong> {tipo_servicio}</p>
-        <p style="margin:0;"><strong>Fecha sugerida:</strong> {fecha_sugerida}</p>
+        <p style="margin:0;"><strong>{fecha_label}:</strong> {fecha_sugerida}</p>
     </div>
     {(
         f'''
@@ -864,16 +910,16 @@ def generar_email_recordatorio_control_preventivo(
         if agendamiento_url
         else ''
     )}
-    <p>Gracias por confiar en nosotros. ¡Te esperamos pronto!</p>
+    <p>{cierre}</p>
     <p class="muted">
         Saludos,<br />
         El equipo de {nombre_cda}
     </p>
     """
     return _render_email_corporativo(
-        title=f"Recordatorio de control preventivo - {nombre_cda}",
+        title=title,
         body_html=body_html,
-        label=f"Control preventivo - {nombre_cda}",
+        label=label,
     )
 
 

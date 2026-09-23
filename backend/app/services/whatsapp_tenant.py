@@ -36,6 +36,8 @@ PLANTILLA_CITA_DEFAULT = "cdasoft_cita_ok"
 PLANTILLA_CITA_RECORDATORIO_DEFAULT = "cdasoft_cita_recordatorio"
 PLANTILLA_RTM_DEFAULT = "cdasoft_rtm"
 PLANTILLA_PREVENTIVA_DEFAULT = "cdasoft_preventiva"
+PLANTILLA_RTM_VENCIDA_DEFAULT = "cdasoft_rtm_vencida"
+PLANTILLA_PREVENTIVA_VENCIDA_DEFAULT = "cdasoft_preventiva_vencida"
 PLANTILLA_REINSPECCION_DEFAULT = "cdasoft_reinspeccion"
 PLANTILLA_APROBACION_DEFAULT = "cdasoft_aprobado"
 
@@ -570,16 +572,22 @@ def enviar_aviso_rtm(
     placa: str,
     fecha_sugerida: str,
     agendar_url: str | None,
+    vencida: bool = False,
 ) -> bool:
     row = db.query(TenantWhatsAppSettings).filter(TenantWhatsAppSettings.tenant_id == tenant_id).first()
     if row is None:
         return False
-    plantilla = _plantilla_o_default(getattr(row, "plantilla_rtm", None), PLANTILLA_RTM_DEFAULT)
+    if vencida:
+        plantilla = PLANTILLA_RTM_VENCIDA_DEFAULT
+        evento = "rtm_vencida"
+    else:
+        plantilla = _plantilla_o_default(getattr(row, "plantilla_rtm", None), PLANTILLA_RTM_DEFAULT)
+        evento = "rtm"
     return _enviar_operativo(
         db,
         tenant_id=tenant_id,
         celular=celular,
-        evento="rtm",
+        evento=evento,
         plantilla=plantilla,
         body_params=[
             _persona(nombre_cliente),
@@ -602,16 +610,22 @@ def enviar_aviso_preventiva(
     placa: str,
     fecha_sugerida: str,
     agendar_url: str | None,
+    vencida: bool = False,
 ) -> bool:
     row = db.query(TenantWhatsAppSettings).filter(TenantWhatsAppSettings.tenant_id == tenant_id).first()
     if row is None:
         return False
-    plantilla = _plantilla_o_default(getattr(row, "plantilla_preventiva", None), PLANTILLA_PREVENTIVA_DEFAULT)
+    if vencida:
+        plantilla = PLANTILLA_PREVENTIVA_VENCIDA_DEFAULT
+        evento = "preventiva_vencida"
+    else:
+        plantilla = _plantilla_o_default(getattr(row, "plantilla_preventiva", None), PLANTILLA_PREVENTIVA_DEFAULT)
+        evento = "preventiva"
     return _enviar_operativo(
         db,
         tenant_id=tenant_id,
         celular=celular,
-        evento="preventiva",
+        evento=evento,
         plantilla=plantilla,
         body_params=[
             _persona(nombre_cliente),
@@ -711,7 +725,9 @@ def enviar_prueba_calidad(
         "cita": listo_para_citas,
         "cita_recordatorio": listo_para_citas,
         "rtm": listo_para_vencimientos,
+        "rtm_vencida": listo_para_vencimientos,
         "preventiva": listo_para_vencimientos,
+        "preventiva_vencida": listo_para_vencimientos,
     }
     listo_fn = listo_map.get(evento or "calidad", listo_para_operativo)
     if not listo_fn(row):
@@ -785,6 +801,17 @@ def enviar_prueba_calidad(
             fecha_sugerida="15 de noviembre de 2026",
             agendar_url=agendar,
         ),
+        "rtm_vencida": lambda: enviar_aviso_rtm(
+            db,
+            tenant_id=tenant_id,
+            celular=destino,
+            nombre_cliente="Prueba",
+            nombre_cda=nombre_cda,
+            placa="ABC123",
+            fecha_sugerida="15 de noviembre de 2026",
+            agendar_url=agendar,
+            vencida=True,
+        ),
         "preventiva": lambda: enviar_aviso_preventiva(
             db,
             tenant_id=tenant_id,
@@ -794,6 +821,17 @@ def enviar_prueba_calidad(
             placa="ABC123",
             fecha_sugerida="15 de noviembre de 2026",
             agendar_url=agendar,
+        ),
+        "preventiva_vencida": lambda: enviar_aviso_preventiva(
+            db,
+            tenant_id=tenant_id,
+            celular=destino,
+            nombre_cliente="Prueba",
+            nombre_cda=nombre_cda,
+            placa="ABC123",
+            fecha_sugerida="15 de noviembre de 2026",
+            agendar_url=agendar,
+            vencida=True,
         ),
         "reinspeccion": lambda: enviar_aviso_reinspeccion(
             db,

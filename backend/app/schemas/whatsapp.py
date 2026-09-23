@@ -84,7 +84,9 @@ WhatsAppEventoPrueba = Literal[
     "cita",
     "cita_recordatorio",
     "rtm",
+    "rtm_vencida",
     "preventiva",
+    "preventiva_vencida",
     "reinspeccion",
     "aprobado",
 ]

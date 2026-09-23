@@ -24,6 +24,7 @@ class RTMRenewalReminder(Base):
     last_paid_at = Column(DateTime, nullable=False, index=True)
     next_due_at = Column(DateTime, nullable=False, index=True)
     scheduled_send_at = Column(DateTime, nullable=False, index=True)
+    auto_steps_sent = Column(String(80), nullable=True)
     status = Column(String(20), nullable=False, default="pending", index=True)
     commercial_status = Column(String(30), nullable=False, default="pendiente", index=True)
     commercial_notes = Column(Text, nullable=True)

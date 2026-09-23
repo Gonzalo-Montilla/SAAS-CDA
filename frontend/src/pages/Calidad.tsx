@@ -1411,11 +1411,18 @@ export default function Calidad() {
             </section>
 
             <section className="section-card p-6">
-              <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
-                <p className="text-sm font-semibold text-slate-800 flex items-center gap-2">
-                  <CalendarCheck2 className="w-4 h-4 text-violet-600" />
-                  Gestión comercial de vencimientos
-                </p>
+              <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
+                <div className="min-w-[16rem] flex-1">
+                  <p className="text-sm font-semibold text-slate-800 flex items-center gap-2">
+                    <CalendarCheck2 className="w-4 h-4 text-violet-600" />
+                    Gestión comercial de vencimientos
+                  </p>
+                  <p className="text-xs text-slate-500 mt-1">
+                    Esta lista (30 / 15 / 8) es para llamar o escribir a mano. El automático es aparte:
+                    correo RTM a 30, 15, 8, 2 días y vencido+1; WhatsApp solo 30, 2 y vencido+1.
+                    Preventiva: 7, 2 y vencido+1. Si el cliente ya está agendado o descartado, no se vuelve a mandar.
+                  </p>
+                </div>
                 <button
                   type="button"
                   onClick={() => processRTMMutation.mutate()}
@@ -1582,11 +1589,14 @@ export default function Calidad() {
                             <button
                               type="button"
                               onClick={() => sendRTMNowMutation.mutate(row.id)}
-                              disabled={!hasValidRtmEmail(row.cliente_email) || sendingRtmEmailId === row.id}
+                              disabled={
+                                (!hasValidRtmEmail(row.cliente_email) && !normalizeWhatsAppCo(row.cliente_celular))
+                                || sendingRtmEmailId === row.id
+                              }
                               title={
-                                hasValidRtmEmail(row.cliente_email)
-                                  ? 'Enviar recordatorio por correo'
-                                  : 'Sin correo registrado'
+                                hasValidRtmEmail(row.cliente_email) || normalizeWhatsAppCo(row.cliente_celular)
+                                  ? 'Enviar recordatorio ahora'
+                                  : 'Sin correo ni celular válido'
                               }
                               className="btn-chip px-2 py-1 rounded-md text-xs font-semibold inline-flex items-center gap-1 disabled:opacity-60"
                             >

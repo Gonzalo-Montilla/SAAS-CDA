@@ -146,6 +146,40 @@ PACK: list[PlantillaPack] = [
         ),
     },
     {
+        "evento": "rtm_vencida",
+        "nombre": "cdasoft_rtm_vencida",
+        "grupo": "vencimientos",
+        "variables": 5,
+        "ejemplos": [
+            "Juan",
+            "CDA Quitamelsueño",
+            "ABC123",
+            "15 de noviembre de 2026",
+            "https://www.cdasoft.com.co/agendar/ejemplo",
+        ],
+        "cuerpo": (
+            "Hola {{1}}, en {{2}} la revisión técnico-mecánica de la placa {{3}} ya venció "
+            "({{4}}). Agende aquí: {{5}}. Gracias."
+        ),
+    },
+    {
+        "evento": "preventiva_vencida",
+        "nombre": "cdasoft_preventiva_vencida",
+        "grupo": "vencimientos",
+        "variables": 5,
+        "ejemplos": [
+            "Juan",
+            "CDA Quitamelsueño",
+            "ABC123",
+            "15 de noviembre de 2026",
+            "https://www.cdasoft.com.co/agendar/ejemplo",
+        ],
+        "cuerpo": (
+            "Hola {{1}}, en {{2}} la revisión preventiva de la placa {{3}} ya debió realizarse "
+            "({{4}}). Agende aquí: {{5}}. Gracias."
+        ),
+    },
+    {
         "evento": "calidad",
         "nombre": "encuesta_calidad",
         "grupo": "calidad",

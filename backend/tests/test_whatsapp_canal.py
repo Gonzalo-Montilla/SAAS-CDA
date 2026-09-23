@@ -90,14 +90,16 @@ def test_enlace_whatsapp_no_usa_localhost():
 
 def test_paquete_cliente_tiene_plantillas_unicas():
     nombres = [item["nombre"] for item in PACK]
-    assert len(nombres) == 11
-    assert len(set(nombres)) == 11
+    assert len(nombres) == 13
+    assert len(set(nombres)) == 13
     assert "cdasoft_recibo_fe" in nombres
     assert "cdasoft_aprobado" in nombres
     visita = [item["nombre"] for item in PACK if item["grupo"] == "visita"]
     assert visita.index("cdasoft_aprobado") < visita.index("cdasoft_reinspeccion")
     assert "cdasoft_rtm" in nombres
     assert "cdasoft_preventiva" in nombres
+    assert "cdasoft_rtm_vencida" in nombres
+    assert "cdasoft_preventiva_vencida" in nombres
 
 
 def test_email_aprobacion_usa_plantilla_corporativa_sin_mezclar_tramites():

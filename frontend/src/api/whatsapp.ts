@@ -76,7 +76,9 @@ export type WhatsAppEventoPrueba =
   | 'cita'
   | 'cita_recordatorio'
   | 'rtm'
+  | 'rtm_vencida'
   | 'preventiva'
+  | 'preventiva_vencida'
   | 'reinspeccion'
   | 'aprobado';
 
