@@ -296,6 +296,7 @@ def test_asistente_clasifica_sin_inventar_precio():
         INTENT_HUMANO,
         INTENT_PAGO,
         INTENT_PRECIO,
+        INTENT_LUGAR,
         INTENT_CIERRE,
         INTENT_ACK,
         INTENT_SALUDO,
@@ -320,6 +321,9 @@ def test_asistente_clasifica_sin_inventar_precio():
     assert clasificar_intencion("Hola, qué documentos llevo") == INTENT_DOCUMENTOS
     assert clasificar_intencion("que docuementos necesitan") == INTENT_DOCUMENTOS
     assert clasificar_intencion("requisitos?") == INTENT_DOCUMENTOS
+    assert clasificar_intencion("presio de la rtm") == INTENT_PRECIO
+    assert clasificar_intencion("ajendar porfa") == INTENT_AGENDAR
+    assert clasificar_intencion("ubikados") == INTENT_LUGAR
     assert clasificar_intencion("moto 2018") == INTENT_HUMANO
     assert clasificar_intencion("moto 2018", last_intent=INTENT_PRECIO) == INTENT_PRECIO
     assert clasificar_intencion("esto es un reclamo, me cobraron de más") == INTENT_HUMANO

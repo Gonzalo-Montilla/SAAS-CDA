@@ -166,6 +166,61 @@ def _texto_cierre_norm(texto: str) -> str:
     return " ".join(t.split())
 
 
+def _levenshtein(a: str, b: str) -> int:
+    if a == b:
+        return 0
+    if not a or not b:
+        return max(len(a), len(b))
+    if abs(len(a) - len(b)) > 2:
+        return 99
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(
+                min(
+                    cur[j - 1] + 1,
+                    prev[j] + 1,
+                    prev[j - 1] + (0 if ca == cb else 1),
+                )
+            )
+        prev = cur
+    return prev[-1]
+
+
+def _token_cerca(token: str, objetivos: tuple[str, ...], max_d: int = 2) -> bool:
+    if len(token) < 5:
+        return False
+    for obj in objetivos:
+        if abs(len(token) - len(obj)) > max_d:
+            continue
+        if _levenshtein(token, obj) <= max_d:
+            return True
+    return False
+
+
+_FUZZY_DOCS = ("documento", "documentos", "requisito", "requisitos", "papeles")
+_FUZZY_PRECIO = ("precio", "precios", "tarifa", "tarifas", "cuesta")
+_FUZZY_PAGO = ("pagar", "efectivo", "transferencia", "billetera")
+_FUZZY_AGENDAR = ("agendar", "agendamiento", "reservar")
+_FUZZY_LUGAR = ("ubicados", "ubicacion", "direccion", "horario", "horarios")
+
+
+def _intencion_por_typo(texto: str) -> str | None:
+    tokens = re.findall(r"[a-záéíóúñü]{5,}", texto or "")
+    if any(_token_cerca(tok, _FUZZY_DOCS) for tok in tokens):
+        return INTENT_DOCUMENTOS
+    if any(_token_cerca(tok, _FUZZY_PRECIO) for tok in tokens):
+        return INTENT_PRECIO
+    if any(_token_cerca(tok, _FUZZY_PAGO) for tok in tokens):
+        return INTENT_PAGO
+    if any(_token_cerca(tok, _FUZZY_AGENDAR) for tok in tokens):
+        return INTENT_AGENDAR
+    if any(_token_cerca(tok, _FUZZY_LUGAR) for tok in tokens):
+        return INTENT_LUGAR
+    return None
+
+
 def clasificar_intencion(texto: str, last_intent: str | None = None) -> str:
     t = (texto or "").strip().lower()
     if not t:
@@ -185,6 +240,9 @@ def clasificar_intencion(texto: str, last_intent: str | None = None) -> str:
         return INTENT_AGENDAR
     if any(k in t for k in _LUGAR):
         return INTENT_LUGAR
+    por_typo = _intencion_por_typo(t)
+    if por_typo:
+        return por_typo
     if last_intent == INTENT_PRECIO:
         tipo, ano = extraer_tipo_y_ano(t)
         if tipo or ano:
