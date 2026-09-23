@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import uuid
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, String, Text, UniqueConstraint
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.db.database import Base
@@ -40,6 +40,7 @@ class TenantWhatsAppSettings(Base):
     plantilla_preventiva = Column(String(120), nullable=True)
     plantilla_reinspeccion = Column(String(120), nullable=True)
     plantilla_aprobacion = Column(String(120), nullable=True)
+    asistente_habilitado = Column(Boolean, nullable=False, default=False)
 
     last_error = Column(Text, nullable=True)
     last_ok_at = Column(DateTime, nullable=True)
@@ -64,4 +65,44 @@ class TenantWhatsAppEnvio(Base):
     estado = Column(String(20), nullable=False)
     proveedor_message_id = Column(String(80), nullable=True)
     error = Column(Text, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+
+
+class TenantWhatsAppConversacion(Base):
+    """Un hilo por cliente y CDA. No cruza tenants."""
+
+    __tablename__ = "tenant_whatsapp_conversaciones"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "cliente_e164", name="uq_wa_conversacion_tenant_cliente"),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    cliente_e164 = Column(String(20), nullable=False)
+    estado = Column(String(20), nullable=False, default="abierta")
+    last_intent = Column(String(40), nullable=True)
+    last_inbound_at = Column(DateTime, nullable=True)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)
+    updated_at = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
+class TenantWhatsAppMensaje(Base):
+    __tablename__ = "tenant_whatsapp_mensajes"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    conversacion_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("tenant_whatsapp_conversaciones.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    tenant_id = Column(UUID(as_uuid=True), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True)
+    direccion = Column(String(10), nullable=False)
+    texto = Column(Text, nullable=False)
+    intencion = Column(String(40), nullable=True)
+    proveedor_message_id = Column(String(80), nullable=True, unique=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), nullable=False)

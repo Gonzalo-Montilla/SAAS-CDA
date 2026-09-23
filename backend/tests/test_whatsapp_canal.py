@@ -83,6 +83,9 @@ def test_enlace_whatsapp_no_usa_localhost():
         "https://www.cdasoft.com.co/calidad/encuesta/abc123"
     )
     assert _enlace_publico_whatsapp("https://www.cdasoft.com.co/calidad/encuesta/xyz").endswith("/xyz")
+    assert _enlace_publico_whatsapp("http://localhost:5173/agendar/putumayo") == (
+        "https://www.cdasoft.com.co/agendar/putumayo"
+    )
 
 
 def test_paquete_cliente_tiene_plantillas_unicas():
@@ -284,3 +287,139 @@ def test_whatsapp_recibo_formatea_nombre_en_mayusculas(monkeypatch):
     assert calls[0]["body_params"][0] == "Luz Adriana Guerrero Paz"
     assert calls[0]["body_params"][1] == "CDA Quitamelsueño"
     assert calls[0]["body_params"][2] == "QQG41A"
+
+
+def test_asistente_clasifica_sin_inventar_precio():
+    from app.services.whatsapp_asistente import (
+        INTENT_AGENDAR,
+        INTENT_DOCUMENTOS,
+        INTENT_HUMANO,
+        INTENT_PAGO,
+        INTENT_PRECIO,
+        INTENT_CIERRE,
+        INTENT_ACK,
+        INTENT_SALUDO,
+        clasificar_intencion,
+        extraer_mensajes_inbound,
+        extraer_tipo_y_ano,
+    )
+
+    assert clasificar_intencion("qué documentos debo llevar") == INTENT_DOCUMENTOS
+    assert clasificar_intencion("quiero agendar una cita") == INTENT_AGENDAR
+    assert clasificar_intencion("cuánto vale la moto") == INTENT_PRECIO
+    assert clasificar_intencion("cómo puedo pagar") == INTENT_PAGO
+    assert clasificar_intencion("gracias") == INTENT_CIERRE
+    assert clasificar_intencion("de acuerdo") == INTENT_CIERRE
+    assert clasificar_intencion("vale") == INTENT_ACK
+    assert clasificar_intencion("ok") == INTENT_ACK
+    assert clasificar_intencion("reciben tarjeta débito o nequi") == INTENT_PAGO
+    assert clasificar_intencion("tarjeta de propiedad") == INTENT_DOCUMENTOS
+    assert clasificar_intencion("hola") == INTENT_SALUDO
+    assert clasificar_intencion("buenos días") == INTENT_SALUDO
+    assert clasificar_intencion("una pregunta") == INTENT_SALUDO
+    assert clasificar_intencion("Hola, qué documentos llevo") == INTENT_DOCUMENTOS
+    assert clasificar_intencion("moto 2018") == INTENT_HUMANO
+    assert clasificar_intencion("moto 2018", last_intent=INTENT_PRECIO) == INTENT_PRECIO
+    assert clasificar_intencion("esto es un reclamo, me cobraron de más") == INTENT_HUMANO
+    assert extraer_tipo_y_ano("cuánto vale la moto 2018") == ("moto", 2018)
+    payload = {
+        "entry": [
+            {
+                "changes": [
+                    {
+                        "value": {
+                            "metadata": {"phone_number_id": "123", "display_phone_number": "573126127992"},
+                            "messages": [
+                                {
+                                    "id": "wamid.abc",
+                                    "from": "573001234567",
+                                    "type": "text",
+                                    "text": {"body": "Hola, qué documentos llevo"},
+                                }
+                            ],
+                        }
+                    }
+                ]
+            }
+        ]
+    }
+    msgs = extraer_mensajes_inbound(payload)
+    assert len(msgs) == 1
+    assert msgs[0].from_e164 == "573001234567"
+    assert "documentos" in msgs[0].texto.lower()
+
+
+def test_grok_descarta_si_inventa_precio_o_cambia_url():
+    from app.integrations.xai_client import _respeta_hechos
+
+    base = (
+        "En CDA Putumayo, para moto 2018 el valor estimado de RTM es $181.596. "
+        "Agende aquí: https://www.cdasoft.com.co/agendar/putumayo"
+    )
+    ok = (
+        "En CDA Putumayo la moto 2018 queda en $181.596. "
+        "Puede agendar aquí: https://www.cdasoft.com.co/agendar/putumayo"
+    )
+    assert _respeta_hechos(ok, base) is True
+    assert _respeta_hechos("La moto le sale a $50.000", base) is False
+    assert _respeta_hechos("Agende en https://otra.co/x", base) is False
+    assert _respeta_hechos("Le cobramos $200.000 extra", "Un asesor le responde") is False
+
+
+def test_asistente_usa_grok_si_devuelve_frase(monkeypatch):
+    from types import SimpleNamespace
+    from app.services import whatsapp_asistente as wa
+
+    monkeypatch.setattr(
+        "app.integrations.xai_client.redactar_whatsapp",
+        lambda **kw: "En CDA Demo traiga la tarjeta de propiedad y el vehículo limpio.",
+    )
+    tenant = SimpleNamespace(nombre_comercial="CDA Demo", nombre="CDA Demo", slug="demo", id="t")
+    out = wa._armar_respuesta(None, tenant, "qué documentos llevo", wa.INTENT_DOCUMENTOS)
+    assert out.startswith("En CDA Demo")
+
+
+def test_asistente_cae_a_texto_fijo_si_grok_no_esta(monkeypatch):
+    from types import SimpleNamespace
+    from app.services import whatsapp_asistente as wa
+
+    monkeypatch.setattr("app.integrations.xai_client.redactar_whatsapp", lambda **kw: None)
+    tenant = SimpleNamespace(nombre_comercial="CDA Demo", nombre="CDA Demo", slug="demo", id="t")
+    out = wa._armar_respuesta(None, tenant, "qué documentos llevo", wa.INTENT_DOCUMENTOS)
+    low = out.lower()
+    assert "tarjeta de propiedad" in low
+    assert "limpio" in low
+    assert "soat" in low and "no es obligatorio" in low
+    assert "documentos del servicio" not in low
+    assert "CDA Demo" in out
+
+
+def test_asistente_pago_y_precio_disclaimer(monkeypatch):
+    from types import SimpleNamespace
+    from app.services import whatsapp_asistente as wa
+
+    monkeypatch.setattr("app.integrations.xai_client.redactar_whatsapp", lambda **kw: None)
+    tenant = SimpleNamespace(nombre_comercial="CDA Demo", nombre="CDA Demo", slug="demo", id="t")
+    pago = wa._armar_respuesta(None, tenant, "cómo puedo pagar", wa.INTENT_PAGO)
+    low_pago = pago.lower()
+    assert "efectivo" in low_pago
+    assert "débito" in low_pago or "debito" in low_pago
+    assert "crédito" in low_pago or "credito" in low_pago
+    assert "billetera" in low_pago
+    assert "nequi" not in low_pago
+    precio = wa._texto_precio(None, tenant, "cuánto vale la rtm", "https://www.cdasoft.com.co/agendar/demo")
+    low_p = precio.lower()
+    assert "tipo" in low_p
+    assert "año" in low_p
+    assert "aproximado" in low_p
+    assert "caja" in low_p
+    assert "cilindr" not in low_p
+    saludo = wa._armar_respuesta(None, tenant, "hola", wa.INTENT_SALUDO)
+    low_s = saludo.lower()
+    assert "gracias por escribir" in low_s
+    assert "cda demo" in low_s
+    cierre = wa._armar_respuesta(None, tenant, "de acuerdo", wa.INTENT_CIERRE)
+    low_c = cierre.lower()
+    assert "preferir" in low_c
+    assert "agendar" in low_c
+    assert "https://www.cdasoft.com.co/agendar/demo" in cierre

@@ -6,6 +6,7 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
+from app.core.config import settings
 from app.core.factus_crypto import decrypt_secret, encrypt_secret
 from app.integrations.whatsapp_client import (
     WhatsAppApiResult,
@@ -130,10 +131,14 @@ def row_to_out(row: TenantWhatsAppSettings) -> WhatsAppSettingsOut:
         plantilla_preventiva=(getattr(row, "plantilla_preventiva", None) or "").strip() or None,
         plantilla_reinspeccion=(getattr(row, "plantilla_reinspeccion", None) or "").strip() or None,
         plantilla_aprobacion=(getattr(row, "plantilla_aprobacion", None) or "").strip() or None,
+        asistente_habilitado=bool(getattr(row, "asistente_habilitado", False)),
         listo_para_enviar=listo_para_calidad(row)
         or listo_para_operativo(row)
         or listo_para_citas(row)
         or listo_para_vencimientos(row),
+        webhook_url=(
+            f"{settings.BACKEND_PUBLIC_BASE_URL.rstrip('/')}/api/v1/whatsapp/webhook/{row.tenant_id}"
+        ),
         last_error=row.last_error,
         last_ok_at=row.last_ok_at,
     )
@@ -187,6 +192,7 @@ def apply_settings_update(db: Session, row: TenantWhatsAppSettings, body: WhatsA
         aprobacion = aprobacion or PLANTILLA_APROBACION_DEFAULT
     row.plantilla_reinspeccion = reinspeccion
     row.plantilla_aprobacion = aprobacion
+    row.asistente_habilitado = bool(getattr(body, "asistente_habilitado", False))
     if body.access_token:
         row.access_token_encrypted = encrypt_secret(body.access_token.strip())
     if body.dialog360_api_key:
@@ -313,15 +319,16 @@ def enviar_plantilla_utilidad(
 
 def _enlace_publico_whatsapp(survey_link: str) -> str:
     """Meta rechaza localhost/http en variables de plantilla; el celular tampoco abre ese host."""
+    from urllib.parse import urlparse
+
     link = (survey_link or "").strip()
     if not link:
-        return "https://www.cdasoft.com.co/calidad"
+        return "https://www.cdasoft.com.co"
     low = link.lower()
     if "localhost" in low or "127.0.0.1" in low:
-        token = link.rstrip("/").rsplit("/", 1)[-1]
-        if token:
-            return f"https://www.cdasoft.com.co/calidad/encuesta/{token}"
-        return "https://www.cdasoft.com.co/calidad"
+        parsed = urlparse(link if "://" in link else f"http://{link}")
+        path = parsed.path or ""
+        return f"https://www.cdasoft.com.co{path}"
     if link.startswith("http://"):
         return "https://" + link[len("http://") :]
     return link

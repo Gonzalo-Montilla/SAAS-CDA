@@ -57,6 +57,17 @@ def build_template_payload(
     }
 
 
+def build_text_payload(to_e164: str, cuerpo: str) -> dict:
+    texto = (cuerpo or "").strip()[:4096]
+    return {
+        "messaging_product": "whatsapp",
+        "recipient_type": "individual",
+        "to": to_e164,
+        "type": "text",
+        "text": {"body": texto or "Gracias por escribirnos."},
+    }
+
+
 def enviar_plantilla_cloud_api(
     *,
     phone_number_id: str,

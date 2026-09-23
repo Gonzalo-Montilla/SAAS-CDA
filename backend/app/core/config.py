@@ -315,6 +315,10 @@ class Settings(BaseSettings):
     EMAIL_FROM: str = Field(default="", env="EMAIL_FROM")
     EMAIL_FROM_NAME: str = Field(default="CDASOFT", env="EMAIL_FROM_NAME")
     FRONTEND_URL: str = Field(default="http://localhost:5173", env="FRONTEND_URL")
+    # Grok (xAI): una API para todos los CDA. Cada llamada lleva solo el contexto de ese NIT.
+    XAI_API_KEY: str = Field(default="", env="XAI_API_KEY")
+    XAI_MODEL: str = Field(default="grok-4.3", env="XAI_MODEL")
+    XAI_TIMEOUT_SECONDS: float = Field(default=20.0, ge=5.0, le=60.0, env="XAI_TIMEOUT_SECONDS")
     
     class Config:
         env_file = ".env"

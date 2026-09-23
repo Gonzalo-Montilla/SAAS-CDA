@@ -3,8 +3,9 @@ WhatsApp Business del CDA. El gerente pega las credenciales de su API (como Fact
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
+from uuid import UUID
 
 from app.core.deps import get_db, get_gerente
 from app.models.usuario import Usuario
@@ -16,6 +17,7 @@ from app.schemas.whatsapp import (
     WhatsAppTestSendIn,
     WhatsAppTestSendResult,
 )
+from app.services.whatsapp_asistente import procesar_inbound
 from app.services.whatsapp_pack import PACK
 from app.services.whatsapp_tenant import (
     apply_settings_update,
@@ -85,3 +87,20 @@ def post_whatsapp_test_send(
     return enviar_prueba_calidad(
         db, tenant_id=current_user.tenant_id, celular=body.celular, evento=body.evento
     )
+
+
+@router.post("/webhook")
+@router.post("/webhook/{tenant_id}")
+async def post_whatsapp_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+    tenant_id: UUID | None = None,
+):
+    """360dialog / Meta entregan aquí el mensaje del cliente. Sin JWT."""
+    try:
+        payload = await request.json()
+    except Exception:
+        payload = {}
+    if not isinstance(payload, dict):
+        payload = {}
+    return procesar_inbound(db, payload, tenant_id=tenant_id)

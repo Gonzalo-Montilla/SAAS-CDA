@@ -35,7 +35,9 @@ class WhatsAppSettingsOut(BaseModel):
     plantilla_preventiva: Optional[str] = None
     plantilla_reinspeccion: Optional[str] = None
     plantilla_aprobacion: Optional[str] = None
+    asistente_habilitado: bool = False
     listo_para_enviar: bool
+    webhook_url: Optional[str] = None
     last_error: Optional[str] = None
     last_ok_at: Optional[datetime] = None
 
@@ -63,6 +65,7 @@ class WhatsAppSettingsUpdate(BaseModel):
     plantilla_preventiva: Optional[str] = None
     plantilla_reinspeccion: Optional[str] = None
     plantilla_aprobacion: Optional[str] = None
+    asistente_habilitado: bool = False
 
 
 class WhatsAppTestConnectionResult(BaseModel):

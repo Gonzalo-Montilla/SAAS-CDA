@@ -27,7 +27,9 @@ export interface WhatsAppSettings {
   plantilla_preventiva: string | null;
   plantilla_reinspeccion: string | null;
   plantilla_aprobacion: string | null;
+  asistente_habilitado: boolean;
   listo_para_enviar: boolean;
+  webhook_url: string | null;
   last_error: string | null;
   last_ok_at: string | null;
 }
@@ -55,6 +57,7 @@ export interface WhatsAppSettingsUpdatePayload {
   plantilla_preventiva?: string | null;
   plantilla_reinspeccion?: string | null;
   plantilla_aprobacion?: string | null;
+  asistente_habilitado?: boolean;
 }
 
 export interface WhatsAppTestConnectionResult {

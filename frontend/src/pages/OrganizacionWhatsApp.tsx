@@ -89,6 +89,7 @@ export default function OrganizacionWhatsApp() {
   const [dialogKey, setDialogKey] = useState('');
   const [displayPhone, setDisplayPhone] = useState('');
   const [avisosCalidad, setAvisosCalidad] = useState(false);
+  const [asistenteHabilitado, setAsistenteHabilitado] = useState(false);
   const [plantillaCalidad, setPlantillaCalidad] = useState('encuesta_calidad');
   const [plantillaLang, setPlantillaLang] = useState('es');
   const [avisosOperativos, setAvisosOperativos] = useState(true);
@@ -118,6 +119,7 @@ export default function OrganizacionWhatsApp() {
     setWabaId(data.waba_id || '');
     setDisplayPhone(data.display_phone_e164 || '');
     setAvisosCalidad(data.avisos_calidad);
+    setAsistenteHabilitado(Boolean(data.asistente_habilitado));
     setPlantillaCalidad(data.plantilla_calidad || 'encuesta_calidad');
     setPlantillaLang(data.plantilla_calidad_lang || 'es');
     setAvisosOperativos(data.avisos_operativos !== false);
@@ -222,6 +224,7 @@ export default function OrganizacionWhatsApp() {
       plantilla_preventiva: plantillaPreventiva.trim() || null,
       plantilla_reinspeccion: plantillaReinspeccion.trim() || null,
       plantilla_aprobacion: plantillaAprobacion.trim() || null,
+      asistente_habilitado: asistenteHabilitado,
     });
   };
 
@@ -404,7 +407,38 @@ export default function OrganizacionWhatsApp() {
               <span className="block text-xs text-slate-500">Tres horas después del cobro. Meta la trata como Marketing</span>
             </span>
           </label>
+          <label className="flex items-start gap-2 text-sm text-slate-800 rounded-lg border border-slate-100 px-3 py-2">
+            <input
+              className="mt-0.5"
+              type="checkbox"
+              checked={asistenteHabilitado}
+              onChange={(e) => setAsistenteHabilitado(e.target.checked)}
+            />
+            <span>
+              <span className="font-semibold">Asistente de entrada</span>
+              <span className="block text-xs text-slate-500">
+                Si el cliente escribe (precio, documentos, agendar, medios de pago), responde CDASoft con datos
+                reales. Apagado por defecto. No es un bot de menú.
+              </span>
+            </span>
+          </label>
         </div>
+        {asistenteHabilitado && data?.webhook_url ? (
+          <div className="mt-3 rounded-lg border border-slate-100 bg-slate-50 px-3 py-2">
+            <p className="text-xs font-semibold text-slate-700">Webhook para 360dialog</p>
+            <p className="text-xs text-slate-500 mt-0.5">
+              En 360dialog, URL de webhook de este CDA. Sin esto el asistente no recibe el mensaje.
+            </p>
+            <p className="mt-1 text-xs font-mono break-all text-slate-800">{data.webhook_url}</p>
+            <button
+              type="button"
+              className="mt-2 text-xs font-semibold text-primary-700 hover:underline"
+              onClick={() => navigator.clipboard.writeText(data.webhook_url || '')}
+            >
+              Copiar URL
+            </button>
+          </div>
+        ) : null}
       </section>
 
       <div className="flex flex-wrap gap-2">

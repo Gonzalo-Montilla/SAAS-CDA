@@ -1636,6 +1636,60 @@ def ensure_whatsapp_schema(db):
     db.execute(
         text("ALTER TABLE tenant_whatsapp_settings ADD COLUMN IF NOT EXISTS plantilla_aprobacion VARCHAR(120)")
     )
+    db.execute(
+        text(
+            "ALTER TABLE tenant_whatsapp_settings "
+            "ADD COLUMN IF NOT EXISTS asistente_habilitado BOOLEAN NOT NULL DEFAULT FALSE"
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS tenant_whatsapp_conversaciones (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                cliente_e164 VARCHAR(20) NOT NULL,
+                estado VARCHAR(20) NOT NULL DEFAULT 'abierta',
+                last_intent VARCHAR(40),
+                last_inbound_at TIMESTAMP WITHOUT TIME ZONE,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                updated_at TIMESTAMP WITHOUT TIME ZONE,
+                UNIQUE (tenant_id, cliente_e164)
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_wa_conversaciones_tenant "
+            "ON tenant_whatsapp_conversaciones(tenant_id)"
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS tenant_whatsapp_mensajes (
+                id UUID PRIMARY KEY,
+                conversacion_id UUID NOT NULL REFERENCES tenant_whatsapp_conversaciones(id) ON DELETE CASCADE,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                direccion VARCHAR(10) NOT NULL,
+                texto TEXT NOT NULL,
+                intencion VARCHAR(40),
+                proveedor_message_id VARCHAR(80) UNIQUE,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_wa_mensajes_conversacion "
+            "ON tenant_whatsapp_mensajes(conversacion_id)"
+        )
+    )
+    db.execute(
+        text("CREATE INDEX IF NOT EXISTS ix_wa_mensajes_tenant ON tenant_whatsapp_mensajes(tenant_id)")
+    )
 
 
 def ensure_quality_survey_responses_schema(db):
@@ -3185,7 +3239,12 @@ def init_db():
     from app.models.sucursal import Sucursal  # noqa: F401 — register model
     from app.models.tesoreria import MovimientoTesoreria, DesgloseEfectivoTesoreria, ConfiguracionTesoreria  # noqa: F401
     from app.models.factus import TenantFactusSettings, FacturaElectronica  # noqa: F401 — register model
-    from app.models.whatsapp import TenantWhatsAppSettings, TenantWhatsAppEnvio  # noqa: F401
+    from app.models.whatsapp import (  # noqa: F401
+        TenantWhatsAppConversacion,
+        TenantWhatsAppEnvio,
+        TenantWhatsAppMensaje,
+        TenantWhatsAppSettings,
+    )
     from app.models.documento_tenant import TenantDocumento  # noqa: F401 — register model
     from app.models.documento_auditoria import TenantDocumentoAuditoria  # noqa: F401 — register model
     from app.models.proveedor_catalogo import ProveedorCatalogo  # noqa: F401 — register model
