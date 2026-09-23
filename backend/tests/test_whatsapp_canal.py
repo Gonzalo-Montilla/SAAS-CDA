@@ -311,6 +311,10 @@ def test_asistente_clasifica_sin_inventar_precio():
     assert clasificar_intencion("cómo puedo pagar") == INTENT_PAGO
     assert clasificar_intencion("gracias") == INTENT_CIERRE
     assert clasificar_intencion("de acuerdo") == INTENT_CIERRE
+    assert clasificar_intencion("a bueno gracias") == INTENT_CIERRE
+    assert clasificar_intencion("ah listo") == INTENT_CIERRE
+    assert clasificar_intencion("de una") == INTENT_CIERRE
+    assert clasificar_intencion("se agradece") == INTENT_CIERRE
     assert clasificar_intencion("vale") == INTENT_ACK
     assert clasificar_intencion("ok") == INTENT_ACK
     assert clasificar_intencion("reciben tarjeta débito o nequi") == INTENT_PAGO

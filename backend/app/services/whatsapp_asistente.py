@@ -137,7 +137,6 @@ _ACK = {
     "vale",
     "dale",
     "bueno",
-    "de una",
     "sí",
     "si",
     "no",
@@ -148,7 +147,36 @@ _CIERRE_FRASES = {
     "listo",
     "perfecto",
     "ok gracias",
+    "a bueno",
+    "ah bueno",
+    "ah listo",
+    "ah ok",
+    "ah vale",
+    "ya listo",
+    "ya está",
+    "ya esta",
+    "ya quedó",
+    "ya quedo",
+    "de una",
+    "sale",
+    "sale pues",
+    "listo pues",
+    "bueno ya",
+    "eso es todo",
+    "eso era",
+    "ya entendí",
+    "ya entendi",
+    "quedo claro",
+    "quedó claro",
+    "okis",
+    "weno",
 }
+_CIERRE_MARCAS = (
+    "gracias",
+    "agradezco",
+    "se agradece",
+    "mil gracias",
+)
 
 
 @dataclass
@@ -221,6 +249,34 @@ def _intencion_por_typo(texto: str) -> str | None:
     return None
 
 
+def _es_cierre_coloquial(norm: str) -> bool:
+    if not norm:
+        return False
+    if norm in _CIERRE_FRASES:
+        return True
+    if any(m in norm for m in _CIERRE_MARCAS):
+        if any(
+            p in norm
+            for p in (
+                "cuánto",
+                "cuanto",
+                "dónde",
+                "donde",
+                "horario",
+                "requisito",
+                "precio",
+                "agend",
+                "qué documento",
+                "que documento",
+                "qué debo",
+                "que debo",
+            )
+        ):
+            return False
+        return True
+    return False
+
+
 def clasificar_intencion(texto: str, last_intent: str | None = None) -> str:
     t = (texto or "").strip().lower()
     if not t:
@@ -230,6 +286,8 @@ def clasificar_intencion(texto: str, last_intent: str | None = None) -> str:
         return INTENT_ACK
     if any(k in t for k in _RECLAMO):
         return INTENT_HUMANO
+    if _es_cierre_coloquial(norm):
+        return INTENT_CIERRE
     if any(k in t for k in _DOCS) or re.search(r"docu\w*ment", t):
         return INTENT_DOCUMENTOS
     if any(k in t for k in _PRECIO):
@@ -247,8 +305,6 @@ def clasificar_intencion(texto: str, last_intent: str | None = None) -> str:
         tipo, ano = extraer_tipo_y_ano(t)
         if tipo or ano:
             return INTENT_PRECIO
-    if norm in _CIERRE_FRASES or "gracias" in norm:
-        return INTENT_CIERRE
     if any(k in t for k in _SALUDO):
         return INTENT_SALUDO
     return INTENT_HUMANO
