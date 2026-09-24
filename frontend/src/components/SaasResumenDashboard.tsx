@@ -4,6 +4,7 @@ import {
   LifeBuoy,
   Wallet,
   ArrowRight,
+  Sparkles,
 } from 'lucide-react';
 import {
   Bar,
@@ -22,6 +23,7 @@ import type {
   SaaSSupportTicketItem,
   SaaSTenantSummary,
 } from '../types';
+import type { GrokMetricasSummary, WhatsappEnviosSummary } from '../api/grokMetricas';
 
 const COBRO_CHART: Array<{ key: string; name: string; color: string }> = [
   { key: 'al_dia', name: 'Al día', color: '#059669' },
@@ -32,6 +34,94 @@ const COBRO_CHART: Array<{ key: string; name: string; color: string }> = [
   { key: 'bloqueado', name: 'Bloqueado', color: '#e11d48' },
   { key: 'sin_fecha', name: 'Sin fecha', color: '#64748b' },
 ];
+
+const WA_CHART_COLORS = ['#0284c7', '#7c3aed', '#059669', '#d97706', '#6366f1', '#0f766e'];
+
+export function grokCostoChartFromSummary(summary?: GrokMetricasSummary) {
+  return (summary?.by_origen || [])
+    .map((row) => ({
+      key: row.origen,
+      name: row.origen === 'whatsapp' ? 'WhatsApp' : 'Foto',
+      value: Number(row.costo_estimado_cop || 0),
+      usos: Number(row.usos || 0),
+      color: row.origen === 'whatsapp' ? '#0284c7' : '#7c3aed',
+    }))
+    .filter((row) => row.usos > 0 || row.value > 0);
+}
+
+export function waEventoChartFromSummary(summary?: WhatsappEnviosSummary) {
+  return (summary?.by_evento || [])
+    .filter((row) => Number(row.enviados_ok || 0) > 0)
+    .slice(0, 6)
+    .map((row, index) => ({
+      key: row.evento,
+      name: row.label === 'Asistente (respuesta)' ? 'Asistente' : row.label,
+      value: Number(row.enviados_ok || 0),
+      color: WA_CHART_COLORS[index % WA_CHART_COLORS.length],
+    }));
+}
+
+export function SaasMetricBarChart({
+  data,
+  emptyText,
+  loading = false,
+  loadingText = 'Cargando…',
+  yCompact = false,
+  yWidth = 28,
+  tooltipFormatter,
+}: {
+  data: Array<{ key: string; name: string; value: number; color: string; usos?: number }>;
+  emptyText: string;
+  loading?: boolean;
+  loadingText?: string;
+  yCompact?: boolean;
+  yWidth?: number;
+  tooltipFormatter?: (value: number, payload: { usos?: number }) => [string, string];
+}) {
+  if (loading) {
+    return <p className="text-sm text-slate-500">{loadingText}</p>;
+  }
+  if (data.length === 0) {
+    return <p className="text-sm text-slate-500">{emptyText}</p>;
+  }
+  return (
+    <div className="h-56">
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart data={data} margin={{ top: 8, right: 8, left: 0, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" vertical={false} />
+          <XAxis dataKey="name" tick={{ fontSize: 11 }} interval={0} />
+          <YAxis
+            allowDecimals={false}
+            tick={{ fontSize: 11 }}
+            width={yWidth}
+            tickFormatter={
+              yCompact
+                ? (value) =>
+                    new Intl.NumberFormat('es-CO', { notation: 'compact', maximumFractionDigits: 1 }).format(
+                      Number(value || 0),
+                    )
+                : undefined
+            }
+          />
+          <Tooltip
+            formatter={(value, _name, item) => {
+              const payload = (item?.payload || {}) as { usos?: number };
+              if (tooltipFormatter) {
+                return tooltipFormatter(Number(value ?? 0), payload);
+              }
+              return [`${Number(value ?? 0)}`, ''];
+            }}
+          />
+          <Bar dataKey="value" radius={[6, 6, 0, 0]}>
+            {data.map((item) => (
+              <Cell key={item.key} fill={item.color} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
 
 function isSlaOverdue(ticket: Pick<SaaSSupportTicketItem, 'sla_due_at' | 'status'>): boolean {
   if (!ticket.sla_due_at) return false;
@@ -58,6 +148,14 @@ type SaasResumenDashboardProps = {
   supportStatusLabel: (status: string) => string;
   supportPriorityBadgeClass: (priority: string) => string;
   lastPaymentSourceLabel: (source?: string | null) => string;
+  grokSummary?: GrokMetricasSummary;
+  grokLoading: boolean;
+  grokError: boolean;
+  whatsappSummary?: WhatsappEnviosSummary;
+  whatsappLoading: boolean;
+  whatsappError: boolean;
+  formatUsd: (value: number) => string;
+  onOpenGrokMetricas: () => void;
   onOpenFacturacion: () => void;
   onOpenSoporte: () => void;
   onOpenTenants: () => void;
@@ -83,6 +181,14 @@ export function SaasResumenDashboard({
   supportStatusLabel,
   supportPriorityBadgeClass,
   lastPaymentSourceLabel,
+  grokSummary,
+  grokLoading,
+  grokError,
+  whatsappSummary,
+  whatsappLoading,
+  whatsappError,
+  formatUsd,
+  onOpenGrokMetricas,
   onOpenFacturacion,
   onOpenSoporte,
   onOpenTenants,
@@ -105,6 +211,10 @@ export function SaasResumenDashboard({
   const attentionTickets = support?.attention_tickets || [];
   const slaVencidos = support?.sla_vencidos ?? 0;
   const sinAsignar = support?.sin_asignar ?? 0;
+  const grokCostoChart = grokCostoChartFromSummary(grokSummary);
+  const waEventoChart = waEventoChartFromSummary(whatsappSummary);
+  const grokBusy = grokLoading;
+  const waBusy = whatsappLoading;
 
   return (
     <div className="space-y-4">
@@ -149,6 +259,77 @@ export function SaasResumenDashboard({
           <p className="kpi-label">Usuarios SaaS</p>
           <p className="kpi-value">{usersCount == null ? '—' : usersCount}</p>
           <p className="mt-1 text-xs text-slate-500">Equipo interno</p>
+        </div>
+      </div>
+
+      <div className="section-card p-5">
+        <BackofficeSectionHeading
+          className="mb-3"
+          icon={Sparkles}
+          title="Consumo CDASoft · 30 días"
+          description="Lo que pagamos en Grok y cuántos WhatsApp salieron. Meta lo paga el CDA."
+          right={
+            <button type="button" className="btn-chip py-1 text-[11px]" onClick={onOpenGrokMetricas}>
+              Ver detalle
+              <ArrowRight className="ml-1 h-3 w-3" />
+            </button>
+          }
+        />
+        {(grokError || whatsappError) && (
+          <p className="mb-3 text-sm text-red-600">No fue posible cargar parte del consumo.</p>
+        )}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <button type="button" className="kpi-card text-left" onClick={onOpenGrokMetricas}>
+            <p className="kpi-label">Costo Grok</p>
+            <p className="kpi-value">
+              {grokBusy ? '…' : formatCurrency(grokSummary?.costo_estimado_total_cop ?? 0)}
+            </p>
+            <p className="mt-1 text-xs text-slate-500">
+              {grokBusy ? 'Estimado xAI' : formatUsd(grokSummary?.costo_estimado_total_usd ?? 0)}
+            </p>
+          </button>
+          <button type="button" className="kpi-card text-left" onClick={onOpenGrokMetricas}>
+            <p className="kpi-label">Fotos de tarjeta</p>
+            <p className="kpi-value">{grokBusy ? '…' : grokSummary?.total_fotos ?? 0}</p>
+            <p className="mt-1 text-xs text-slate-500">
+              {grokSummary?.whatsapp_count ?? 0} redacciones WhatsApp
+            </p>
+          </button>
+          <button type="button" className="kpi-card text-left" onClick={onOpenGrokMetricas}>
+            <p className="kpi-label">WhatsApp enviados</p>
+            <p className="kpi-value">{waBusy ? '…' : whatsappSummary?.total_enviados ?? 0}</p>
+            <p className="mt-1 text-xs text-slate-500">
+              {whatsappSummary?.enviados_ok ?? 0} plantillas · {whatsappSummary?.asistente ?? 0} asistente
+              {(whatsappSummary?.fallidos ?? 0) > 0 ? ` · ${whatsappSummary?.fallidos} fallidos` : ''}
+            </p>
+          </button>
+        </div>
+        <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <div>
+            <p className="mb-2 text-xs font-semibold text-slate-600">Costo Grok por origen</p>
+            <SaasMetricBarChart
+              data={grokCostoChart}
+              loading={grokBusy}
+              loadingText="Cargando Grok…"
+              emptyText="Aún no hay consumo Grok para graficar."
+              yCompact
+              yWidth={52}
+              tooltipFormatter={(value, payload) => {
+                const usos = Number(payload.usos || 0);
+                return [`${formatCurrency(value)} · ${usos} uso${usos === 1 ? '' : 's'}`, 'Costo'];
+              }}
+            />
+          </div>
+          <div>
+            <p className="mb-2 text-xs font-semibold text-slate-600">WhatsApp enviados por tipo</p>
+            <SaasMetricBarChart
+              data={waEventoChart}
+              loading={waBusy}
+              loadingText="Cargando WhatsApp…"
+              emptyText="Aún no hay WhatsApp enviados para graficar."
+              tooltipFormatter={(value) => [`${value} enviado(s)`, 'Volumen']}
+            />
+          </div>
         </div>
       </div>
 

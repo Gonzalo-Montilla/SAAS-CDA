@@ -591,19 +591,93 @@ def _hechos_y_base(db: Session, tenant: Tenant, texto: str, intencion: str) -> t
     return hechos, base
 
 
+def _frase_y_uso(raw) -> tuple[str | None, dict]:
+    if isinstance(raw, tuple) and raw:
+        frase = raw[0] if isinstance(raw[0], str) else None
+        uso = raw[1] if len(raw) > 1 and isinstance(raw[1], dict) else {}
+        return frase, uso
+    if isinstance(raw, str) and raw.strip():
+        return raw, {}
+    return None, {}
+
+
+def _registrar_metrica_grok_whatsapp(
+    db: Session | None,
+    tenant: Tenant,
+    *,
+    status: str,
+    encontrado: bool,
+    billed: bool,
+    uso: dict | None,
+    error: str | None = None,
+) -> None:
+    if db is None or getattr(tenant, "id", None) is None:
+        return
+    try:
+        from app.services.grok_tarjeta_metricas import guardar_metrica_grok_tarjeta
+
+        guardar_metrica_grok_tarjeta(
+            db,
+            tenant_id=tenant.id,
+            sucursal_id=None,
+            usuario_id=None,
+            status=status,
+            encontrado=encontrado,
+            billed=billed,
+            origen="whatsapp",
+            modelo=(uso or {}).get("modelo"),
+            prompt_tokens=int((uso or {}).get("prompt_tokens") or 0),
+            completion_tokens=int((uso or {}).get("completion_tokens") or 0),
+            error_detail=error,
+        )
+    except Exception:
+        try:
+            db.rollback()
+        except Exception:
+            pass
+
+
 def _armar_respuesta(db: Session, tenant: Tenant, texto: str, intencion: str) -> str:
-    from app.integrations.xai_client import redactar_whatsapp
+    from app.integrations.xai_client import grok_disponible, redactar_whatsapp
 
     nombre = _cda(tenant.nombre_comercial or tenant.nombre)
     hechos, base = _hechos_y_base(db, tenant, texto, intencion)
     if intencion == INTENT_HUMANO:
         return base
-    grok = redactar_whatsapp(
-        nombre_cda=nombre,
-        mensaje_cliente=texto,
-        hechos=hechos,
-        texto_base=base,
+    grok, uso = _frase_y_uso(
+        redactar_whatsapp(
+            nombre_cda=nombre,
+            mensaje_cliente=texto,
+            hechos=hechos,
+            texto_base=base,
+        )
     )
+    tokens = int((uso or {}).get("prompt_tokens") or 0) + int((uso or {}).get("completion_tokens") or 0)
+    if grok_disponible():
+        if grok:
+            _registrar_metrica_grok_whatsapp(
+                db, tenant, status="success", encontrado=True, billed=True, uso=uso
+            )
+        elif tokens > 0:
+            _registrar_metrica_grok_whatsapp(
+                db,
+                tenant,
+                status="empty",
+                encontrado=False,
+                billed=True,
+                uso=uso,
+                error="Grok no devolvió una frase usable.",
+            )
+        else:
+            _registrar_metrica_grok_whatsapp(
+                db,
+                tenant,
+                status="error",
+                encontrado=False,
+                billed=False,
+                uso=uso,
+                error="Grok no devolvió una frase usable.",
+            )
     return grok or base
 
 

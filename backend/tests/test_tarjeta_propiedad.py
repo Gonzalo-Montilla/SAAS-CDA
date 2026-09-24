@@ -125,3 +125,57 @@ def test_rutas_leer_tarjeta_y_consulta_runt():
     assert "placaapi" not in src.lower()
     assert "coresoft" not in src.lower()
     assert "from app.integrations.verifik" not in src
+
+
+def test_estimar_costo_grok_tokens_y_sin_cobro():
+    from decimal import Decimal
+
+    from app.services.grok_tarjeta_metricas import estimar_costo_grok
+
+    _cop, usd, fx = estimar_costo_grok(prompt_tokens=1_000_000, completion_tokens=0, billed=True)
+    assert usd == Decimal("1.250000")
+    assert fx > 0
+    cop0, usd0, _ = estimar_costo_grok(prompt_tokens=100, billed=False)
+    assert usd0 == Decimal("0.000000")
+    assert cop0 == Decimal("0.00")
+    _cop_fb, usd_fb, _ = estimar_costo_grok(prompt_tokens=0, completion_tokens=0, billed=True)
+    assert usd_fb > 0
+    _cop_wa, usd_wa, _ = estimar_costo_grok(
+        prompt_tokens=0, completion_tokens=0, billed=True, origen="whatsapp"
+    )
+    assert usd_wa > 0
+    assert usd_wa < usd_fb
+
+
+def test_uso_tokens_desde_respuesta_xai():
+    from app.integrations.xai_client import _uso_respuesta
+
+    uso = _uso_respuesta({"usage": {"prompt_tokens": 2100, "completion_tokens": 180}}, "grok-4.3")
+    assert uso["prompt_tokens"] == 2100
+    assert uso["completion_tokens"] == 180
+    assert uso["modelo"] == "grok-4.3"
+
+
+def test_ruta_summary_grok_metricas():
+    from app.api.v1.endpoints import grok_metricas as grok_ep
+
+    rutas = []
+    for route in grok_ep.router.routes:
+        methods = getattr(route, "methods", None) or set()
+        path = getattr(route, "path", "")
+        rutas.append((path, methods))
+    assert any(path.endswith("/summary") and "GET" in methods for path, methods in rutas)
+    assert any(path.endswith("/whatsapp-envios") and "GET" in methods for path, methods in rutas)
+
+
+def test_frase_y_uso_acepta_tupla_o_texto():
+    from app.services.whatsapp_asistente import _frase_y_uso
+
+    frase, uso = _frase_y_uso(("hola", {"prompt_tokens": 9, "completion_tokens": 2}))
+    assert frase == "hola"
+    assert uso["prompt_tokens"] == 9
+    texto, vacio = _frase_y_uso("solo texto")
+    assert texto == "solo texto"
+    assert vacio == {}
+    none_f, _ = _frase_y_uso(None)
+    assert none_f is None

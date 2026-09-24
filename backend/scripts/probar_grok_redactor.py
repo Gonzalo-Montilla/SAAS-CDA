@@ -37,7 +37,7 @@ def main() -> int:
     print("CDASoft (hechos / texto base):")
     print(base)
     print("---")
-    frase = redactar_whatsapp(
+    frase, _uso = redactar_whatsapp(
         nombre_cda=nombre,
         mensaje_cliente=cliente,
         hechos=hechos,

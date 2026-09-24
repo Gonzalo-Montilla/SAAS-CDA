@@ -320,6 +320,11 @@ class Settings(BaseSettings):
     XAI_MODEL: str = Field(default="grok-4.3", env="XAI_MODEL")
     XAI_VISION_MODEL: str = Field(default="", env="XAI_VISION_MODEL")
     XAI_TIMEOUT_SECONDS: float = Field(default=20.0, ge=5.0, le=60.0, env="XAI_TIMEOUT_SECONDS")
+    # Tarifas xAI grok-4.3 (USD / millón de tokens) para estimar costo de foto de tarjeta.
+    XAI_INPUT_USD_PER_MILLION: float = Field(default=1.25, ge=0.0, env="XAI_INPUT_USD_PER_MILLION")
+    XAI_OUTPUT_USD_PER_MILLION: float = Field(default=2.50, ge=0.0, env="XAI_OUTPUT_USD_PER_MILLION")
+    XAI_TARJETA_FALLBACK_USD: float = Field(default=0.008, ge=0.0, env="XAI_TARJETA_FALLBACK_USD")
+    XAI_WHATSAPP_FALLBACK_USD: float = Field(default=0.0004, ge=0.0, env="XAI_WHATSAPP_FALLBACK_USD")
     
     class Config:
         env_file = ".env"

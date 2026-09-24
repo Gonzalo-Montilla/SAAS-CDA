@@ -49,13 +49,30 @@ def grok_disponible() -> bool:
     return bool((getattr(settings, "XAI_API_KEY", None) or "").strip())
 
 
-def leer_licencia_transito(image_bytes: bytes, mime: str = "image/jpeg") -> dict | None:
-    """Llama a Grok con la imagen. No guarda el archivo. None si no hay key o falla la API."""
+def _uso_respuesta(data: dict | None, modelo: str) -> dict:
+    usage = (data or {}).get("usage") if isinstance(data, dict) else None
+    usage = usage if isinstance(usage, dict) else {}
+    prompt = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
+    completion = usage.get("completion_tokens") or usage.get("output_tokens") or 0
+    try:
+        prompt_n = max(int(prompt), 0)
+    except (TypeError, ValueError):
+        prompt_n = 0
+    try:
+        completion_n = max(int(completion), 0)
+    except (TypeError, ValueError):
+        completion_n = 0
+    return {"prompt_tokens": prompt_n, "completion_tokens": completion_n, "modelo": modelo}
+
+
+def leer_licencia_transito(image_bytes: bytes, mime: str = "image/jpeg") -> tuple[dict | None, dict]:
+    """Llama a Grok con la imagen. No guarda el archivo. (lectura, uso_tokens)."""
     api_key = (getattr(settings, "XAI_API_KEY", None) or "").strip()
-    if not api_key or not image_bytes:
-        return None
     modelo = (getattr(settings, "XAI_VISION_MODEL", None) or getattr(settings, "XAI_MODEL", None) or "grok-4.3")
     modelo = str(modelo).strip() or "grok-4.3"
+    uso = _uso_respuesta(None, modelo)
+    if not api_key or not image_bytes:
+        return None, uso
     timeout = float(getattr(settings, "XAI_TIMEOUT_SECONDS", 20.0) or 20.0)
     timeout = max(timeout, 40.0)
     mime_ok = mime if mime in {"image/jpeg", "image/png", "image/webp"} else "image/jpeg"
@@ -88,21 +105,25 @@ def leer_licencia_transito(image_bytes: bytes, mime: str = "image/jpeg") -> dict
             )
     except Exception as exc:
         print(f"[WARN] Grok tarjeta: {exc}")
-        return None
+        return None, uso
+    try:
+        raw_json = resp.json()
+    except Exception:
+        raw_json = None
+    uso = _uso_respuesta(raw_json if isinstance(raw_json, dict) else None, modelo)
     if resp.status_code >= 400:
         print(f"[WARN] Grok tarjeta HTTP {resp.status_code}: {(resp.text or '')[:400]}")
-        return None
+        return None, uso
     try:
-        data = resp.json()
-        content = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "")
+        content = (((raw_json or {}).get("choices") or [{}])[0].get("message") or {}).get("content") or ""
         if isinstance(content, list):
             content = "".join(
                 str(part.get("text") or "") if isinstance(part, dict) else str(part) for part in content
             )
         parsed = extraer_json(str(content))
     except Exception:
-        return None
-    return normalizar_lectura(parsed)
+        return None, uso
+    return normalizar_lectura(parsed), uso
 
 
 def redactar_whatsapp(
@@ -111,12 +132,13 @@ def redactar_whatsapp(
     mensaje_cliente: str,
     hechos: str,
     texto_base: str,
-) -> str | None:
-    """Devuelve la frase de Grok o None si no hay key / falla / se sale de los hechos."""
+) -> tuple[str | None, dict]:
+    """Devuelve (frase, uso_tokens). Frase None si no hay key / falla / se sale de los hechos."""
     api_key = (getattr(settings, "XAI_API_KEY", None) or "").strip()
-    if not api_key:
-        return None
     modelo = (getattr(settings, "XAI_MODEL", None) or "grok-4.3").strip() or "grok-4.3"
+    uso = _uso_respuesta(None, modelo)
+    if not api_key:
+        return None, uso
     timeout = float(getattr(settings, "XAI_TIMEOUT_SECONDS", 20.0) or 20.0)
     user = (
         f"CDA: {nombre_cda}\n"
@@ -145,23 +167,28 @@ def redactar_whatsapp(
                 json=payload,
             )
     except Exception:
-        return None
+        return None, uso
+    try:
+        raw_json = resp.json()
+    except Exception:
+        raw_json = None
+    uso = _uso_respuesta(raw_json if isinstance(raw_json, dict) else None, modelo)
     if resp.status_code >= 400:
         print(f"[WARN] Grok HTTP {resp.status_code}: {(resp.text or '')[:300]}")
-        return None
+        return None, uso
     try:
-        data = resp.json()
+        data = raw_json if isinstance(raw_json, dict) else {}
         choices = data.get("choices") or []
         if not choices:
-            return None
+            return None, uso
         content = ((choices[0].get("message") or {}).get("content") or "").strip()
     except Exception:
-        return None
+        return None, uso
     if not content:
-        return None
+        return None, uso
     if not _respeta_hechos(content, texto_base):
-        return None
-    return content[:4096]
+        return None, uso
+    return content[:4096], uso
 
 
 def _respeta_hechos(texto_grok: str, texto_base: str) -> bool:

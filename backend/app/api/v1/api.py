@@ -27,6 +27,7 @@ from app.api.v1.endpoints import (
     dse_retencion_motor,
     nomina,
     runt_metricas,
+    grok_metricas,
     sarlaft,
     exogena,
     obligaciones,
@@ -64,5 +65,6 @@ api_router.include_router(nomina.router, prefix="/nomina", tags=["nomina"])
 api_router.include_router(sarlaft.router, prefix="/sarlaft", tags=["sarlaft"])
 api_router.include_router(sarlaft.public_router, prefix="/sarlaft", tags=["sarlaft-public"])
 api_router.include_router(runt_metricas.router, prefix="/runt-metricas", tags=["runt-metricas"])
+api_router.include_router(grok_metricas.router, prefix="/grok-metricas", tags=["grok-metricas"])
 api_router.include_router(exogena.router, prefix="/exogena", tags=["exogena"])
 api_router.include_router(obligaciones.router, prefix="/obligaciones", tags=["obligaciones"])

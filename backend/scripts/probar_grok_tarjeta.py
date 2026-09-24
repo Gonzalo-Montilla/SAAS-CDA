@@ -36,11 +36,11 @@ def main(argv: list[str]) -> int:
         print("Falta XAI_API_KEY en backend/.env. No se llama a Grok.")
         return 1
     print(f"Leyendo {path.name} ({mime}, {len(data)} bytes)...")
-    resultado = leer_licencia_transito(data, mime)
+    resultado, uso = leer_licencia_transito(data, mime)
     if not resultado:
         print("Grok no devolvió JSON usable.")
         return 2
-    print(json.dumps(resultado, ensure_ascii=False, indent=2))
+    print(json.dumps({"lectura": resultado, "uso": uso}, ensure_ascii=False, indent=2))
     return 0 if resultado.get("encontrado") else 3
 
 

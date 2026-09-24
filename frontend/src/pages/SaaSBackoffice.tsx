@@ -15,6 +15,8 @@ import {
   LifeBuoy,
   Star,
   Pencil,
+  Sparkles,
+  MessageCircle,
   Link2,
   CreditCard,
   UserPlus,
@@ -24,7 +26,7 @@ import {
   Download,
 } from 'lucide-react';
 import { BackofficeSectionHeading } from '../components/BackofficeSectionHeading';
-import { SaasResumenDashboard, isSlaOverdue } from '../components/SaasResumenDashboard';
+import { SaasResumenDashboard, isSlaOverdue, SaasMetricBarChart, grokCostoChartFromSummary, waEventoChartFromSummary } from '../components/SaasResumenDashboard';
 import FactusMunicipalitySearchField from '../components/FactusMunicipalitySearchField';
 import { useAuth } from '../contexts/AuthContext';
 import { apiClient } from '../api/client';
@@ -33,6 +35,7 @@ import { Fragment, useEffect, useRef, useState } from 'react';
 import { formatCurrency } from '../utils/formatNumber';
 import { formatDateShort, formatDateTimeShort } from '../utils/formatDate';
 import { runtMetricasApi, type RuntMetricasSummary } from '../api/runtMetricas';
+import { grokMetricasApi } from '../api/grokMetricas';
 import type {
   SaaSAuditLogListResponse,
   SaaSBillingPlanItem,
@@ -74,6 +77,7 @@ type BackofficeModule =
   | 'resumen'
   | 'tenants'
   | 'runt_metricas'
+  | 'grok_metricas'
   | 'opensanctions_metricas'
   | 'facturacion'
   | 'soporte'
@@ -85,6 +89,7 @@ type TenantProfileSection = 'brandAccess' | 'documentos' | 'sedes' | 'factus' | 
 type CheckoutSessionsViewTab = 'all' | 'pending' | 'paid' | 'fe_issue';
 const OPENSANCTIONS_CUSTOM_WINDOW = -1;
 const RUNT_CUSTOM_WINDOW = -1;
+const GROK_CUSTOM_WINDOW = -1;
 const BOGOTA_TIME_ZONE = 'America/Bogota';
 const BOGOTA_UTC_OFFSET_HOURS = -5;
 
@@ -158,6 +163,14 @@ export default function SaaSBackoffice() {
     return shiftYmd(today, -29);
   });
   const [runtDateTo, setRuntDateTo] = useState<string>(() => toBogotaYmd(new Date()));
+  const [grokMetricasDays, setGrokMetricasDays] = useState<number>(30);
+  const [grokMetricasTenantId, setGrokMetricasTenantId] = useState<string>('');
+  const [grokDateFrom, setGrokDateFrom] = useState<string>(() => {
+    const today = toBogotaYmd(new Date());
+    return shiftYmd(today, -29);
+  });
+  const [grokDateTo, setGrokDateTo] = useState<string>(() => toBogotaYmd(new Date()));
+  const [grokOrigenFilter, setGrokOrigenFilter] = useState<string>('');
   const [opensanctionsDays, setOpensanctionsDays] = useState<number>(30);
   const [opensanctionsDateFrom, setOpensanctionsDateFrom] = useState<string>(() => {
     const today = toBogotaYmd(new Date());
@@ -547,6 +560,76 @@ export default function SaaSBackoffice() {
     },
     enabled: activeModule === 'runt_metricas' && !runtCustomRangeInvalid,
     refetchInterval: activeModule === 'runt_metricas' ? 30000 : false,
+  });
+
+  const grokCustomRangeInvalid =
+    grokMetricasDays === GROK_CUSTOM_WINDOW && (!grokDateFrom || !grokDateTo || grokDateFrom > grokDateTo);
+
+  const grokMetricasQuery = useQuery({
+    queryKey: [
+      'saas-grok-metricas-summary',
+      grokMetricasDays,
+      grokMetricasTenantId,
+      grokDateFrom,
+      grokDateTo,
+      grokOrigenFilter,
+    ],
+    queryFn: async () => {
+      if (grokMetricasDays === GROK_CUSTOM_WINDOW) {
+        return grokMetricasApi.getSummary(
+          30,
+          grokMetricasTenantId || undefined,
+          {
+            fromDateIso: bogotaDayStartUtcIso(grokDateFrom),
+            toDateIso: bogotaDayEndUtcIso(grokDateTo),
+          },
+          grokOrigenFilter || undefined
+        );
+      }
+      return grokMetricasApi.getSummary(
+        grokMetricasDays,
+        grokMetricasTenantId || undefined,
+        undefined,
+        grokOrigenFilter || undefined
+      );
+    },
+    enabled: activeModule === 'grok_metricas' && !grokCustomRangeInvalid,
+    refetchInterval: activeModule === 'grok_metricas' ? 30000 : false,
+  });
+
+  const whatsappEnviosQuery = useQuery({
+    queryKey: [
+      'saas-whatsapp-envios-summary',
+      grokMetricasDays,
+      grokMetricasTenantId,
+      grokDateFrom,
+      grokDateTo,
+    ],
+    queryFn: async () => {
+      if (grokMetricasDays === GROK_CUSTOM_WINDOW) {
+        return grokMetricasApi.getWhatsappEnvios(30, grokMetricasTenantId || undefined, {
+          fromDateIso: bogotaDayStartUtcIso(grokDateFrom),
+          toDateIso: bogotaDayEndUtcIso(grokDateTo),
+        });
+      }
+      return grokMetricasApi.getWhatsappEnvios(grokMetricasDays, grokMetricasTenantId || undefined);
+    },
+    enabled: activeModule === 'grok_metricas' && !grokCustomRangeInvalid,
+    refetchInterval: activeModule === 'grok_metricas' ? 30000 : false,
+  });
+
+  const grokResumenQuery = useQuery({
+    queryKey: ['saas-grok-metricas-resumen-30'],
+    queryFn: () => grokMetricasApi.getSummary(30),
+    enabled: activeModule === 'resumen',
+    refetchInterval: activeModule === 'resumen' ? 60000 : false,
+  });
+
+  const whatsappResumenQuery = useQuery({
+    queryKey: ['saas-whatsapp-envios-resumen-30'],
+    queryFn: () => grokMetricasApi.getWhatsappEnvios(30),
+    enabled: activeModule === 'resumen',
+    refetchInterval: activeModule === 'resumen' ? 60000 : false,
   });
 
   const usersQuery = useQuery({
@@ -1425,6 +1508,14 @@ export default function SaaSBackoffice() {
           supportStatusLabel={supportStatusLabel}
           supportPriorityBadgeClass={supportPriorityBadgeClass}
           lastPaymentSourceLabel={lastPaymentSourceLabel}
+          grokSummary={grokResumenQuery.data}
+          grokLoading={grokResumenQuery.isLoading}
+          grokError={grokResumenQuery.isError}
+          whatsappSummary={whatsappResumenQuery.data}
+          whatsappLoading={whatsappResumenQuery.isLoading}
+          whatsappError={whatsappResumenQuery.isError}
+          formatUsd={formatUsd}
+          onOpenGrokMetricas={() => setActiveModule('grok_metricas')}
           onOpenFacturacion={() => setActiveModule('facturacion')}
           onOpenSoporte={() => setActiveModule('soporte')}
           onOpenTenants={() => setActiveModule('tenants')}
@@ -1747,6 +1838,424 @@ export default function SaaSBackoffice() {
                             </tr>
                             );
                           })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    if (activeModule === 'grok_metricas') {
+      return (
+        <div className="space-y-6">
+          <div className="section-card p-6">
+            <BackofficeSectionHeading
+              className="mb-4"
+              icon={Sparkles}
+              title="Métricas Grok (pago CDASoft)"
+              description="Costo estimado xAI: foto de tarjeta y redacciones del asistente WhatsApp. Abajo, cuántos WhatsApp se enviaron (volumen; Meta lo paga el CDA)."
+            />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
+              <label className="text-sm text-slate-700">
+                Ventana
+                <select
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  value={grokMetricasDays}
+                  onChange={(e) => setGrokMetricasDays(Number(e.target.value))}
+                >
+                  <option value={0}>Hoy (desde 00:00 Colombia)</option>
+                  <option value={1}>1 día (últimas 24h)</option>
+                  <option value={7}>7 días calendario</option>
+                  <option value={30}>30 días calendario</option>
+                  <option value={90}>90 días calendario</option>
+                  <option value={GROK_CUSTOM_WINDOW}>Rango personalizado</option>
+                </select>
+              </label>
+              <label className="text-sm text-slate-700">
+                Origen Grok
+                <select
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  value={grokOrigenFilter}
+                  onChange={(e) => setGrokOrigenFilter(e.target.value)}
+                >
+                  <option value="">Todos (foto + WhatsApp)</option>
+                  <option value="tarjeta">Foto de tarjeta</option>
+                  <option value="whatsapp">WhatsApp asistente</option>
+                </select>
+              </label>
+              <label className="text-sm text-slate-700">
+                Tenant (opcional)
+                <select
+                  className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                  value={grokMetricasTenantId}
+                  onChange={(e) => setGrokMetricasTenantId(e.target.value)}
+                >
+                  <option value="">Todos los tenants</option>
+                  {(tenantsQuery.data || []).map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.nombre_comercial} (/{t.slug})
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+            {grokMetricasDays === GROK_CUSTOM_WINDOW && (
+              <div className="mb-4 grid grid-cols-1 gap-3 md:grid-cols-2">
+                <label className="text-sm text-slate-700">
+                  Desde (fecha local Colombia)
+                  <input
+                    type="date"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    value={grokDateFrom}
+                    onChange={(e) => setGrokDateFrom(e.target.value)}
+                  />
+                </label>
+                <label className="text-sm text-slate-700">
+                  Hasta (fecha local Colombia)
+                  <input
+                    type="date"
+                    className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
+                    value={grokDateTo}
+                    onChange={(e) => setGrokDateTo(e.target.value)}
+                  />
+                </label>
+              </div>
+            )}
+            {grokCustomRangeInvalid && (
+              <p className="mb-3 text-sm text-amber-700">
+                Define un rango válido: la fecha inicial debe ser menor o igual a la final.
+              </p>
+            )}
+
+            {grokMetricasQuery.isLoading && <LoadingBlock lines={4} />}
+            {grokMetricasQuery.isError && (
+              <p className="text-sm text-red-600">No fue posible cargar métricas Grok del backoffice.</p>
+            )}
+            {grokMetricasQuery.data && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                  <div className={`rounded-lg border px-3 py-2 text-xs ${
+                    grokMetricasQuery.data.total_usos === 0
+                      ? 'border-slate-200 bg-slate-50 text-slate-700'
+                      : grokMetricasQuery.data.leidas_pct < 70
+                        ? 'border-amber-200 bg-amber-50 text-amber-800'
+                        : 'border-emerald-200 bg-emerald-50 text-emerald-800'
+                  }`}>
+                    <p className="font-semibold">Usos útiles</p>
+                    <p>
+                      {grokMetricasQuery.data.total_usos === 0
+                        ? 'Sin llamadas Grok en el periodo'
+                        : grokMetricasQuery.data.leidas_pct < 70
+                          ? `Alerta: solo ${grokMetricasQuery.data.leidas_pct}% con éxito (meta sugerida >= 70%)`
+                          : `OK: ${grokMetricasQuery.data.leidas_pct}% con éxito`}
+                    </p>
+                  </div>
+                  <div className={`rounded-lg border px-3 py-2 text-xs ${
+                    grokMetricasQuery.data.error_count > 0
+                      ? 'border-red-200 bg-red-50 text-red-800'
+                      : 'border-slate-200 bg-slate-50 text-slate-700'
+                  }`}>
+                    <p className="font-semibold">Errores de API</p>
+                    <p>
+                      {grokMetricasQuery.data.error_count > 0
+                        ? `${grokMetricasQuery.data.error_count} fallos (sin cobro estimado)`
+                        : 'Sin fallos de Grok en el periodo'}
+                    </p>
+                  </div>
+                  <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-800">
+                    <p className="font-semibold">Pago CDASoft</p>
+                    <p>xAI factura a CDASoft. Foto y redacción WhatsApp. Independiente de Verifik y de Meta.</p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+                  <div className="kpi-card">
+                    <p className="kpi-label">Usos Grok</p>
+                    <p className="kpi-value">{grokMetricasQuery.data.total_usos}</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">Fotos tarjeta</p>
+                    <p className="kpi-value">{grokMetricasQuery.data.total_fotos}</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">Redacciones WA</p>
+                    <p className="kpi-value">{grokMetricasQuery.data.whatsapp_count}</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">Éxito</p>
+                    <p className="kpi-value text-emerald-700">{grokMetricasQuery.data.leidas_count}</p>
+                    <p className="text-xs text-slate-500">{grokMetricasQuery.data.leidas_pct}%</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">Errores</p>
+                    <p className="kpi-value text-red-700">{grokMetricasQuery.data.error_count}</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">Costo estimado</p>
+                    <p className="kpi-value">{formatCurrency(grokMetricasQuery.data.costo_estimado_total_cop)}</p>
+                    <p className="text-xs text-slate-500">{formatUsd(grokMetricasQuery.data.costo_estimado_total_usd)}</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">Costo promedio</p>
+                    <p className="kpi-value">{formatCurrency(grokMetricasQuery.data.costo_promedio_cop)}</p>
+                    <p className="text-xs text-slate-500">{formatUsd(grokMetricasQuery.data.costo_promedio_usd)} / cobrada</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">TRM promedio</p>
+                    <p className="kpi-value">{formatCurrency(grokMetricasQuery.data.fx_rate_avg_usd_cop)}</p>
+                    <p className="text-xs text-slate-500">USD/COP aplicada</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">Tokens entrada</p>
+                    <p className="kpi-value">{grokMetricasQuery.data.prompt_tokens.toLocaleString('es-CO')}</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">Tokens salida</p>
+                    <p className="kpi-value">{grokMetricasQuery.data.completion_tokens.toLocaleString('es-CO')}</p>
+                  </div>
+                </div>
+                {grokMetricasQuery.data.from_date && grokMetricasQuery.data.to_date && (
+                  <p className="text-xs text-slate-500">
+                    Periodo Colombia: {new Date(grokMetricasQuery.data.from_date).toLocaleString('es-CO', { timeZone: BOGOTA_TIME_ZONE })} —{' '}
+                    {new Date(grokMetricasQuery.data.to_date).toLocaleString('es-CO', { timeZone: BOGOTA_TIME_ZONE })}
+                    {grokMetricasQuery.data.generated_at
+                      ? ` · Actualizado ${new Date(grokMetricasQuery.data.generated_at).toLocaleTimeString('es-CO', { timeZone: BOGOTA_TIME_ZONE })}`
+                      : ''}
+                  </p>
+                )}
+                {grokMetricasQuery.data.nota && (
+                  <p className="text-xs text-slate-500">{grokMetricasQuery.data.nota}</p>
+                )}
+
+                <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+                  <div>
+                    <p className="mb-2 text-xs font-semibold text-slate-600">Costo Grok por origen</p>
+                    <SaasMetricBarChart
+                      data={grokCostoChartFromSummary(grokMetricasQuery.data)}
+                      emptyText="Sin consumo Grok en el período."
+                      yCompact
+                      yWidth={52}
+                      tooltipFormatter={(value, payload) => {
+                        const usos = Number(payload.usos || 0);
+                        return [`${formatCurrency(value)} · ${usos} uso${usos === 1 ? '' : 's'}`, 'Costo'];
+                      }}
+                    />
+                  </div>
+                  <div>
+                    <p className="mb-2 text-xs font-semibold text-slate-600">WhatsApp enviados por tipo</p>
+                    <SaasMetricBarChart
+                      data={waEventoChartFromSummary(whatsappEnviosQuery.data)}
+                      loading={whatsappEnviosQuery.isLoading}
+                      loadingText="Cargando volumen…"
+                      emptyText="Sin WhatsApp enviados en el período."
+                      tooltipFormatter={(value) => [`${value} enviado(s)`, 'Volumen']}
+                    />
+                  </div>
+                </div>
+
+                <div className="section-card p-4 border border-slate-200">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-slate-800">Por origen (Grok)</p>
+                    <span className="text-xs text-slate-500">Foto vs redacción WhatsApp · mismo periodo</span>
+                  </div>
+                  <div className="table-shell">
+                    <table className="table-enterprise">
+                      <thead>
+                        <tr>
+                          <th>Origen</th>
+                          <th>Usos</th>
+                          <th>Éxito</th>
+                          <th>Vacío</th>
+                          <th>Errores</th>
+                          <th>Costo estimado (COP / USD)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {(grokMetricasQuery.data.by_origen || []).length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="text-slate-500">
+                              Sin llamadas Grok en el período.
+                            </td>
+                          </tr>
+                        ) : (
+                          grokMetricasQuery.data.by_origen.map((row) => (
+                            <tr key={row.origen}>
+                              <td className="font-semibold text-slate-900">
+                                {row.origen === 'whatsapp' ? 'WhatsApp asistente' : 'Foto de tarjeta'}
+                              </td>
+                              <td>{row.usos}</td>
+                              <td className="text-emerald-700">{row.exito}</td>
+                              <td className={row.vacios > 0 ? 'font-semibold text-amber-700' : 'text-slate-500'}>
+                                {row.vacios}
+                              </td>
+                              <td className={row.errores > 0 ? 'font-semibold text-red-700' : 'text-slate-500'}>
+                                {row.errores}
+                              </td>
+                              <td>
+                                {formatCurrency(row.costo_estimado_cop)}
+                                <span className="block text-xs text-slate-500">{formatUsd(row.costo_estimado_usd)}</span>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+                <div className="section-card p-4 border border-slate-200">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <p className="text-sm font-semibold text-slate-800">Por tenant</p>
+                    <span className="text-xs text-slate-500">Usos Grok y costo estimado CDASoft</span>
+                  </div>
+                  <div className="table-shell">
+                    <table className="table-enterprise">
+                      <thead>
+                        <tr>
+                          <th>Tenant</th>
+                          <th>Fotos</th>
+                          <th>WhatsApp Grok</th>
+                          <th>Éxito</th>
+                          <th>Errores</th>
+                          <th>Costo estimado (COP / USD)</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {grokMetricasQuery.data.by_tenant.length === 0 ? (
+                          <tr>
+                            <td colSpan={6} className="text-slate-500">
+                              Sin datos en el período seleccionado.
+                            </td>
+                          </tr>
+                        ) : (
+                          grokMetricasQuery.data.by_tenant.map((row) => (
+                            <tr key={row.tenant_slug}>
+                              <td className="font-semibold text-slate-900">
+                                {row.tenant_nombre} <span className="text-xs text-slate-500">/{row.tenant_slug}</span>
+                              </td>
+                              <td>{row.fotos}</td>
+                              <td>{row.whatsapp}</td>
+                              <td className="text-emerald-700">{row.leidas}</td>
+                              <td className={row.errores > 0 ? 'font-semibold text-red-700' : 'text-slate-500'}>
+                                {row.errores}
+                              </td>
+                              <td>
+                                {formatCurrency(row.costo_estimado_cop)}
+                                <span className="block text-xs text-slate-500">{formatUsd(row.costo_estimado_usd)}</span>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="section-card p-6">
+            <BackofficeSectionHeading
+              className="mb-4"
+              icon={MessageCircle}
+              title="WhatsApp enviados (volumen)"
+              description="Plantillas del CDA + respuestas del asistente. No es costo Meta ni Grok; es cuántos mensajes salieron."
+            />
+            {whatsappEnviosQuery.isLoading && <LoadingBlock lines={3} />}
+            {whatsappEnviosQuery.isError && (
+              <p className="text-sm text-red-600">No fue posible cargar el volumen de WhatsApp.</p>
+            )}
+            {whatsappEnviosQuery.data && (
+              <div className="space-y-4">
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
+                  <div className="kpi-card">
+                    <p className="kpi-label">Enviados</p>
+                    <p className="kpi-value">{whatsappEnviosQuery.data.total_enviados}</p>
+                    <p className="text-xs text-slate-500">plantillas ok + asistente</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">Plantillas ok</p>
+                    <p className="kpi-value text-emerald-700">{whatsappEnviosQuery.data.enviados_ok}</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">Asistente</p>
+                    <p className="kpi-value">{whatsappEnviosQuery.data.asistente}</p>
+                  </div>
+                  <div className="kpi-card">
+                    <p className="kpi-label">Fallidos</p>
+                    <p className="kpi-value text-red-700">{whatsappEnviosQuery.data.fallidos}</p>
+                  </div>
+                </div>
+                {whatsappEnviosQuery.data.nota && (
+                  <p className="text-xs text-slate-500">{whatsappEnviosQuery.data.nota}</p>
+                )}
+                <div className="section-card p-4 border border-slate-200">
+                  <p className="mb-2 text-sm font-semibold text-slate-800">Por tipo de aviso</p>
+                  <div className="table-shell">
+                    <table className="table-enterprise">
+                      <thead>
+                        <tr>
+                          <th>Evento</th>
+                          <th>Enviados</th>
+                          <th>Fallidos</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {whatsappEnviosQuery.data.by_evento.length === 0 ? (
+                          <tr>
+                            <td colSpan={3} className="text-slate-500">Sin envíos en el período.</td>
+                          </tr>
+                        ) : (
+                          whatsappEnviosQuery.data.by_evento.map((row) => (
+                            <tr key={row.evento}>
+                              <td className="font-semibold text-slate-900">{row.label}</td>
+                              <td>{row.enviados_ok}</td>
+                              <td className={row.fallidos > 0 ? 'font-semibold text-red-700' : 'text-slate-500'}>
+                                {row.fallidos}
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+                <div className="section-card p-4 border border-slate-200">
+                  <p className="mb-2 text-sm font-semibold text-slate-800">Por tenant</p>
+                  <div className="table-shell">
+                    <table className="table-enterprise">
+                      <thead>
+                        <tr>
+                          <th>Tenant</th>
+                          <th>Total enviados</th>
+                          <th>Plantillas ok</th>
+                          <th>Asistente</th>
+                          <th>Fallidos</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {whatsappEnviosQuery.data.by_tenant.length === 0 ? (
+                          <tr>
+                            <td colSpan={5} className="text-slate-500">Sin envíos en el período.</td>
+                          </tr>
+                        ) : (
+                          whatsappEnviosQuery.data.by_tenant.map((row) => (
+                            <tr key={row.tenant_slug}>
+                              <td className="font-semibold text-slate-900">
+                                {row.tenant_nombre} <span className="text-xs text-slate-500">/{row.tenant_slug}</span>
+                              </td>
+                              <td>{row.total_enviados}</td>
+                              <td>{row.enviados_ok}</td>
+                              <td>{row.asistente}</td>
+                              <td className={row.fallidos > 0 ? 'font-semibold text-red-700' : 'text-slate-500'}>
+                                {row.fallidos}
+                              </td>
+                            </tr>
+                          ))
                         )}
                       </tbody>
                     </table>
@@ -3417,6 +3926,14 @@ export default function SaaSBackoffice() {
       icon: Activity,
       color: 'text-fuchsia-600',
       count: runtMetricasQuery.data?.total_consultas,
+    },
+    {
+      id: 'grok_metricas',
+      title: 'Métricas Grok',
+      subtitle: 'xAI y WhatsApp enviados',
+      icon: Sparkles,
+      color: 'text-violet-600',
+      count: grokMetricasQuery.data?.total_usos,
     },
     {
       id: 'opensanctions_metricas',

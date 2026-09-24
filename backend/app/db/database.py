@@ -2070,6 +2070,52 @@ def ensure_runt_metricas_schema(db):
     )
 
 
+def ensure_grok_tarjeta_metricas_schema(db):
+    """Trazabilidad de lecturas Grok de tarjeta (conteo y costo estimado). No guarda la imagen."""
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS grok_tarjeta_lecturas_metricas (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                sucursal_id UUID REFERENCES sucursales(id) ON DELETE SET NULL,
+                usuario_id UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+                origen VARCHAR(20) NOT NULL DEFAULT 'tarjeta',
+                placa_consultada VARCHAR(12),
+                modelo VARCHAR(40) NOT NULL DEFAULT 'grok-4.3',
+                status VARCHAR(20) NOT NULL,
+                encontrado BOOLEAN NOT NULL DEFAULT FALSE,
+                billed BOOLEAN NOT NULL DEFAULT TRUE,
+                prompt_tokens INTEGER NOT NULL DEFAULT 0,
+                completion_tokens INTEGER NOT NULL DEFAULT 0,
+                estimated_cost_cop NUMERIC(14,2) NOT NULL DEFAULT 0,
+                estimated_cost_usd NUMERIC(14,6) NOT NULL DEFAULT 0,
+                fx_rate_usd_cop_applied NUMERIC(14,6) NOT NULL DEFAULT 0,
+                error_detail VARCHAR(500),
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW()
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_grok_tarjeta_metricas_tenant_fecha ON grok_tarjeta_lecturas_metricas(tenant_id, created_at DESC)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_grok_tarjeta_metricas_tenant_status ON grok_tarjeta_lecturas_metricas(tenant_id, status)"
+        )
+    )
+    db.execute(text("ALTER TABLE grok_tarjeta_lecturas_metricas ADD COLUMN IF NOT EXISTS origen VARCHAR(20) NOT NULL DEFAULT 'tarjeta'"))
+    db.execute(text("ALTER TABLE grok_tarjeta_lecturas_metricas ALTER COLUMN usuario_id DROP NOT NULL"))
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_grok_tarjeta_metricas_origen_fecha ON grok_tarjeta_lecturas_metricas(origen, created_at DESC)"
+        )
+    )
+
+
 def ensure_runt_cache_schema(db):
     """
     Cache persistente de respuestas RUNT por tenant para disminuir costo por consultas repetidas.
@@ -3253,6 +3299,7 @@ def init_db():
     from app.models.obligacion_proveedor import ObligacionProveedor, ObligacionProveedorPago  # noqa: F401
     from app.models.dse_retencion_motor import DseRetencionTasaConcepto, DseUvtPorAnio  # noqa: F401
     from app.models.runt_metrica import RuntConsultaMetrica  # noqa: F401
+    from app.models.grok_tarjeta_metrica import GrokTarjetaMetrica  # noqa: F401
     from app.models.runt_cache import RuntConsultaCache  # noqa: F401
     from app.models.sarlaft_profile import SarlaftProfile  # noqa: F401
     from app.models.sarlaft_case import SarlaftCase  # noqa: F401
@@ -3323,6 +3370,7 @@ def init_db():
         ensure_quality_survey_invites_sucursal_schema(db)
         ensure_tenant_documentos_schema(db)
         ensure_runt_metricas_schema(db)
+        ensure_grok_tarjeta_metricas_schema(db)
         ensure_runt_cache_schema(db)
         ensure_iva_provision_schema(db)
         ensure_sarlaft_schema(db)

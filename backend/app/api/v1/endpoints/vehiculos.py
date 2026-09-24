@@ -1524,6 +1524,7 @@ def consultar_runt_por_placa(
 @router.post("/leer-tarjeta", response_model=VehiculoLecturaTarjetaResponse)
 def leer_tarjeta_propiedad(
     file: UploadFile = File(...),
+    db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_recepcionista_or_admin),
     active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
@@ -1532,13 +1533,38 @@ def leer_tarjeta_propiedad(
     No registra el vehículo, no guarda la imagen y no consulta RUNT/Verifik.
     """
     from app.integrations.xai_client import grok_disponible, leer_licencia_transito
+    from app.services.grok_tarjeta_metricas import guardar_metrica_grok_tarjeta
     from app.services.tarjeta_propiedad import (
         MAX_TARJETA_BYTES,
         lectura_vacia,
         sniff_image_mime,
     )
 
-    _ = (current_user, active_sucursal_id)
+    def _registrar(*, status: str, encontrado: bool, billed: bool, resultado: dict | None = None, uso: dict | None = None, error: str | None = None):
+        try:
+            guardar_metrica_grok_tarjeta(
+                db,
+                tenant_id=current_user.tenant_id,
+                sucursal_id=active_sucursal_id,
+                usuario_id=current_user.id,
+                status=status,
+                encontrado=encontrado,
+                billed=billed,
+                origen="tarjeta",
+                placa=(resultado or {}).get("placa_consultada"),
+                modelo=(uso or {}).get("modelo"),
+                prompt_tokens=int((uso or {}).get("prompt_tokens") or 0),
+                completion_tokens=int((uso or {}).get("completion_tokens") or 0),
+                error_detail=error,
+            )
+        except Exception:
+            db.rollback()
+            _log_veh.exception(
+                "No se pudo guardar metrica Grok tarjeta tenant=%s status=%s",
+                current_user.tenant_id,
+                status,
+            )
+
     chunks: list[bytes] = []
     total = 0
     while True:
@@ -1560,15 +1586,36 @@ def leer_tarjeta_propiedad(
             detail="Use una foto JPEG, PNG o WebP de la tarjeta original.",
         )
     if not grok_disponible():
+        _registrar(
+            status="error",
+            encontrado=False,
+            billed=False,
+            error="La lectura de tarjeta no está disponible.",
+        )
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail="La lectura de tarjeta no está disponible. Use consulta RUNT o registre a mano.",
         )
-    resultado = leer_licencia_transito(data, mime)
+    resultado, uso = leer_licencia_transito(data, mime)
     if resultado is None:
-        return VehiculoLecturaTarjetaResponse(
-            **lectura_vacia(motivo="No se pudo leer la tarjeta. Intente otra foto o use RUNT.")
+        vacia = lectura_vacia(motivo="No se pudo leer la tarjeta. Intente otra foto o use RUNT.")
+        _registrar(
+            status="error",
+            encontrado=False,
+            billed=False,
+            resultado=vacia,
+            uso=uso,
+            error="Grok no devolvió una lectura usable.",
         )
+        return VehiculoLecturaTarjetaResponse(**vacia)
+    status_metrica = "success" if resultado.get("encontrado") else "empty"
+    _registrar(
+        status=status_metrica,
+        encontrado=bool(resultado.get("encontrado")),
+        billed=True,
+        resultado=resultado,
+        uso=uso,
+    )
     return VehiculoLecturaTarjetaResponse(**resultado)
 
 
