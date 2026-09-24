@@ -13,6 +13,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import Layout from '../components/Layout';
 import LoadingSpinner from '../components/LoadingSpinner';
 import CapturaFotos from '../components/CapturaFotos';
+import CapturaTarjetaModal from '../components/CapturaTarjetaModal';
 import ErrorBoundary from '../components/ErrorBoundary';
 import FactusMunicipalitySearchField from '../components/FactusMunicipalitySearchField';
 import { useToast } from '../contexts/ToastContext';
@@ -21,7 +22,7 @@ import { isGerenteOrAdmin } from '../utils/roles';
 import { configApi } from '../api/config';
 import { vehiculosApi, type TarifaCalculada } from '../api/vehiculos';
 import { tarifasApi } from '../api/tarifas';
-import type { VehiculoRegistro, VehiculoConsultaRunt, Usuario, ReinspeccionElegibilidad } from '../types';
+import type { VehiculoRegistro, VehiculoConsultaRunt, VehiculoLecturaTarjeta, Usuario, ReinspeccionElegibilidad } from '../types';
 import { formatCOP } from '../utils/formatNumber';
 import { extractApiErrorMessage } from '../utils/apiError';
 
@@ -527,6 +528,10 @@ export default function Recepcion() {
   const [tarifaError, setTarifaError] = useState<string>('');
   const [fotosVehiculo, setFotosVehiculo] = useState<string[]>([]);
   const [runtSugerencia, setRuntSugerencia] = useState<VehiculoConsultaRunt | null>(null);
+  const [tarjetaSugerencia, setTarjetaSugerencia] = useState<VehiculoLecturaTarjeta | null>(null);
+  const [tarjetaAplicada, setTarjetaAplicada] = useState(false);
+  const [mostrarCapturaTarjeta, setMostrarCapturaTarjeta] = useState(false);
+  const tarjetaInputRef = useRef<HTMLInputElement | null>(null);
   const [clienteFactusMunicipalityId, setClienteFactusMunicipalityId] = useState('');
   const [clienteFactusMunicipalityLabel, setClienteFactusMunicipalityLabel] = useState('');
   const [reinspeccionInfo, setReinspeccionInfo] = useState<ReinspeccionElegibilidad | null>(null);
@@ -976,6 +981,8 @@ export default function Recepcion() {
       }),
     onSuccess: (data, variables) => {
       setRuntSugerencia(data);
+      setTarjetaSugerencia(null);
+      setTarjetaAplicada(false);
       const docTypeFromQuery =
         variables.documentType && ['CC', 'CE', 'PA', 'NIT'].includes(variables.documentType)
           ? (variables.documentType as 'CC' | 'CE' | 'PA' | 'NIT')
@@ -1053,6 +1060,44 @@ export default function Recepcion() {
       }
     },
   });
+
+  const leerTarjetaMutation = useMutation({
+    mutationFn: (file: File) => vehiculosApi.leerTarjetaPropiedad(file),
+    onSuccess: (data) => {
+      setTarjetaSugerencia(data);
+      if (!data.encontrado) {
+        showToast(
+          'warning',
+          'No se leyó la tarjeta',
+          (data.observaciones && data.observaciones[0]) ||
+            'Tome otra foto de la original o use consulta RUNT.'
+        );
+        return;
+      }
+      showToast(
+        'success',
+        'Tarjeta leída',
+        `Placa ${data.placa_consultada}. Revise y aplique al formulario. No se consultó RUNT.`
+      );
+    },
+    onError: (error: unknown) => {
+      setTarjetaSugerencia(null);
+      showToast(
+        'error',
+        'No se pudo leer la tarjeta',
+        extractApiErrorMessage(error, 'Intente otra foto o registre a mano.')
+      );
+    },
+  });
+
+  const onSeleccionarFotoTarjeta = (file: File | undefined) => {
+    if (!file || modoEdicion) return;
+    if (file.size > 6 * 1024 * 1024) {
+      showToast('warning', 'Foto muy pesada', 'Use una foto JPEG o PNG de máximo 6 MB.');
+      return;
+    }
+    leerTarjetaMutation.mutate(file);
+  };
 
   // Calcular tarifa cuando cambia el año del modelo o el tipo de vehículo
   useEffect(() => {
@@ -1204,6 +1249,9 @@ export default function Recepcion() {
     setClienteFactusMunicipalityId(defaultClienteFactusMunicipalityId || '');
     setClienteFactusMunicipalityLabel('');
     setRuntSugerencia(null);
+    setTarjetaSugerencia(null);
+    setTarjetaAplicada(false);
+    setMostrarCapturaTarjeta(false);
     setFormatoExtra(createDefaultFormatoExtra());
     setModoNoInspeccion('auto');
     setMostrarFormatoExtra(false);
@@ -1402,6 +1450,8 @@ export default function Recepcion() {
     setVehiculoEditando(null);
     setFotosVehiculo([]);
     setRuntSugerencia(null);
+    setTarjetaSugerencia(null);
+    setTarjetaAplicada(false);
     resetForm();
   };
 
@@ -1453,7 +1503,84 @@ export default function Recepcion() {
       }
       return withTecnicos;
     });
+    setTarjetaSugerencia(null);
+    setTarjetaAplicada(false);
     showToast('success', 'Sugerencias aplicadas', 'Se aplicaron datos sugeridos desde RUNT.');
+  };
+
+  const camposSugeriblesTarjeta = useMemo(() => {
+    if (!tarjetaSugerencia || !tarjetaSugerencia.encontrado) return [];
+    return [
+      { key: 'placa', label: 'Placa', valor: tarjetaSugerencia.placa_consultada },
+      { key: 'titular', label: 'Titular', valor: tarjetaSugerencia.titular_nombre },
+      { key: 'marca', label: 'Marca', valor: tarjetaSugerencia.marca },
+      { key: 'linea', label: 'Línea', valor: tarjetaSugerencia.linea || tarjetaSugerencia.modelo },
+      { key: 'ano', label: 'Año', valor: tarjetaSugerencia.ano_modelo ? String(tarjetaSugerencia.ano_modelo) : null },
+    ].filter((c) => c.valor);
+  }, [tarjetaSugerencia]);
+
+  const aplicarSugerenciaTarjeta = () => {
+    if (!tarjetaSugerencia || !tarjetaSugerencia.encontrado) return;
+    const ok = window.confirm(
+      `Se aplicarán los datos de la tarjeta (placa ${tarjetaSugerencia.placa_consultada}). No se consultará RUNT. ¿Continuar?`
+    );
+    if (!ok) return;
+    const lineaTarjeta = lineaComercialDesdeRunt(tarjetaSugerencia);
+    const anoTarjetaTexto = anoModeloTextoDesdeRunt(tarjetaSugerencia);
+    const anoTarjetaNum = Number(anoTarjetaTexto || 0);
+    const docType =
+      tarjetaSugerencia.document_type && ['CC', 'CE', 'PA', 'NIT'].includes(tarjetaSugerencia.document_type)
+        ? (tarjetaSugerencia.document_type as 'CC' | 'CE' | 'PA' | 'NIT')
+        : 'CC';
+    const docNumber = (tarjetaSugerencia.document_number || '').trim();
+    setRuntSugerencia(null);
+    setTarjetaAplicada(true);
+    setConsultaRunt({
+      document_type: docType,
+      document_number: docNumber,
+    });
+    setFormData((prev) => ({
+      ...prev,
+      placa: tarjetaSugerencia.placa_consultada || prev.placa,
+      marca: tarjetaSugerencia.marca || prev.marca || '',
+      modelo: lineaTarjeta || prev.modelo || '',
+      ano_modelo: anoTarjetaNum >= 1950 ? anoTarjetaNum : prev.ano_modelo,
+      tipo_vehiculo: tarjetaSugerencia.tipo_vehiculo_sugerido || prev.tipo_vehiculo,
+      cliente_nombre: tarjetaSugerencia.titular_nombre
+        ? String(tarjetaSugerencia.titular_nombre).toUpperCase()
+        : prev.cliente_nombre,
+      cliente_tipo_documento: docType,
+      cliente_documento: docNumber || prev.cliente_documento,
+    }));
+    const tipoSugerido = (tarjetaSugerencia.tipo_vehiculo_sugerido || '').trim();
+    setFormatoExtra((prev) => {
+      const withTecnicos: RecepcionFormatoExtra = {
+        ...prev,
+        titular_datos: {
+          ...prev.titular_datos,
+          nombre_apellidos:
+            (tarjetaSugerencia.titular_nombre || prev.titular_datos.nombre_apellidos || '').toUpperCase(),
+          numero_documento: docNumber || prev.titular_datos.numero_documento,
+        },
+        datos_tecnicos: {
+          ...prev.datos_tecnicos,
+          clase_vehiculo: tarjetaSugerencia.clase_vehiculo || prev.datos_tecnicos.clase_vehiculo,
+          marca: tarjetaSugerencia.marca || prev.datos_tecnicos.marca || '',
+          linea: lineaTarjeta || prev.datos_tecnicos.linea,
+          modelo: anoTarjetaTexto || prev.datos_tecnicos.modelo || '',
+          servicio: tarjetaSugerencia.tipo_servicio || prev.datos_tecnicos.servicio,
+          color: tarjetaSugerencia.color || prev.datos_tecnicos.color,
+          cilindraje: tarjetaSugerencia.cilindraje || prev.datos_tecnicos.cilindraje,
+          tipo_combustible: tarjetaSugerencia.tipo_combustible || prev.datos_tecnicos.tipo_combustible,
+          carga_pasajeros: tarjetaSugerencia.capacidad_pasajeros || prev.datos_tecnicos.carga_pasajeros,
+        },
+      };
+      if (tipoSugerido && isTipoVehiculoFisico(tipoSugerido)) {
+        return syncFormatoConTipoFisico(withTecnicos, tipoSugerido);
+      }
+      return withTecnicos;
+    });
+    showToast('success', 'Datos desde tarjeta', 'Revise placa, titular y datos técnicos antes de registrar.');
   };
 
   useEffect(() => {
@@ -1477,6 +1604,14 @@ export default function Recepcion() {
   }, [mostrarFormatoExtra, runtSugerencia]);
 
   const consultarRunt = () => {
+    if (tarjetaAplicada) {
+      showToast(
+        'warning',
+        'Datos desde tarjeta',
+        'Este ingreso ya tiene datos de la tarjeta. No se consulta RUNT. Limpie el formulario si necesita la API.'
+      );
+      return;
+    }
     const placa = (formData.placa || '').trim().toUpperCase();
     if (placa.length < 5) {
       showToast('warning', 'Placa incompleta', 'Ingresa una placa válida antes de consultar.');
@@ -2426,10 +2561,33 @@ export default function Recepcion() {
 
             <div className="mb-6 p-4 border border-slate-200 rounded-lg bg-slate-50 space-y-3">
               <p className="text-sm font-semibold text-slate-800">
-                Datos para consulta RUNT (titular)
+                Identificación del vehículo
+              </p>
+              <input
+                ref={tarjetaInputRef}
+                type="file"
+                accept="image/jpeg,image/png,image/webp,.jpg,.jpeg,.png,.webp"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.currentTarget.files?.[0];
+                  e.currentTarget.value = '';
+                  onSeleccionarFotoTarjeta(file);
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => setMostrarCapturaTarjeta(true)}
+                disabled={modoEdicion || leerTarjetaMutation.isLoading || consultarRuntMutation.isLoading}
+                className="w-full inline-flex items-center justify-center gap-2 px-4 py-3 rounded-xl bg-primary-600 text-white text-sm font-semibold hover:bg-primary-700 disabled:opacity-60 touch-manipulation min-h-11"
+              >
+                <Camera className="w-4 h-4" />
+                {leerTarjetaMutation.isLoading ? 'Leyendo tarjeta...' : 'Foto de la tarjeta (original)'}
+              </button>
+              <p className="text-xs text-slate-500">
+                Tome la foto en vivo de la original (no se guarda). El recuadro ayuda a encajar la tarjeta.
               </p>
               <div className="grid grid-cols-1 md:grid-cols-12 gap-3">
-                <div className="md:col-span-3">
+                <div className="md:col-span-4">
                   <label className="block text-sm font-medium text-slate-700 mb-2">
                     Placa <span className="text-red-600">*</span>
                   </label>
@@ -2440,6 +2598,8 @@ export default function Recepcion() {
                       const nextPlaca = e.target.value.toUpperCase();
                       handleInputChange('placa', nextPlaca);
                       setRuntSugerencia(null);
+                      setTarjetaSugerencia(null);
+                      setTarjetaAplicada(false);
                       setEsReingresoRechazoInicial(false);
                       if ((nextPlaca || '').trim().toUpperCase() !== placaEvaluadaReinspeccion) {
                         setReinspeccionInfo(null);
@@ -2452,7 +2612,7 @@ export default function Recepcion() {
                     maxLength={10}
                   />
                 </div>
-                <div className="md:col-span-3">
+                <div className="md:col-span-4">
                   <label className="block text-sm font-medium text-slate-700 mb-2">
                     Tipo de documento <span className="text-red-600">*</span>
                   </label>
@@ -2477,7 +2637,7 @@ export default function Recepcion() {
                     <option value="NIT">NIT</option>
                   </select>
                 </div>
-                <div className="md:col-span-3">
+                <div className="md:col-span-4">
                   <label className="block text-sm font-medium text-slate-700 mb-2">
                     Número de documento <span className="text-red-600">*</span>
                   </label>
@@ -2498,20 +2658,23 @@ export default function Recepcion() {
                     maxLength={20}
                   />
                 </div>
-                <div className="md:col-span-3 flex items-end">
-                  <button
-                    type="button"
-                    onClick={consultarRunt}
-                    disabled={consultarRuntMutation.isLoading}
-                    className="w-full px-4 py-3 rounded-xl border border-primary-300 text-primary-700 text-sm font-medium bg-white hover:bg-primary-50 disabled:opacity-60 whitespace-nowrap"
-                  >
-                    {consultarRuntMutation.isLoading ? 'Consultando...' : 'Consultar RUNT'}
-                  </button>
-                </div>
               </div>
+              <button
+                type="button"
+                onClick={consultarRunt}
+                disabled={consultarRuntMutation.isLoading || leerTarjetaMutation.isLoading || tarjetaAplicada}
+                className="w-full sm:w-auto px-4 py-3 rounded-xl border border-primary-300 text-primary-700 text-sm font-medium bg-white hover:bg-primary-50 disabled:opacity-60 touch-manipulation min-h-11"
+              >
+                {consultarRuntMutation.isLoading ? 'Consultando...' : 'Consultar RUNT'}
+              </button>
               <p className="text-xs text-slate-500">
-                Consulta por placa para sugerir datos técnicos y autocompletar cliente desde historial.
+                Si no usa la foto: placa + documento y Consultar RUNT.
               </p>
+              {tarjetaAplicada && (
+                <div className="text-xs rounded-lg border border-sky-200 bg-sky-50 p-2 text-sky-900 font-semibold">
+                  Fuente: datos desde tarjeta. Revise y confirme antes de registrar. No se disparó RUNT.
+                </div>
+              )}
               {historialClienteSugerido && (
                 <div className="mt-1 text-xs rounded-lg border border-emerald-200 bg-emerald-50 p-2 text-emerald-800">
                   Datos del cliente autocompletados desde historial para placa {historialClienteSugerido.placa}
@@ -2552,11 +2715,42 @@ export default function Recepcion() {
                   )}
                 </div>
               )}
+              {tarjetaSugerencia && (
+                <div className="mt-2 p-2 rounded-lg border border-sky-200 bg-white text-xs text-slate-700">
+                  <p className="font-semibold mb-1">
+                    {tarjetaSugerencia.encontrado
+                      ? `Sugerencias de tarjeta para ${tarjetaSugerencia.placa_consultada}`
+                      : 'No se leyeron datos de la tarjeta'}
+                  </p>
+                  {tarjetaSugerencia.encontrado && camposSugeriblesTarjeta.length > 0 && (
+                    <>
+                      <p className="mb-2 text-slate-600">
+                        {camposSugeriblesTarjeta
+                          .slice(0, 4)
+                          .map((c) => `${c.label}: ${c.valor}`)
+                          .join(' · ')}
+                      </p>
+                      <p className="mb-2 text-slate-500">
+                        Fuente: datos desde tarjeta. Celular, correo, dirección y kilometraje no vienen en la tarjeta.
+                      </p>
+                      {!tarjetaAplicada && (
+                        <button
+                          type="button"
+                          onClick={aplicarSugerenciaTarjeta}
+                          className="text-primary-700 underline font-semibold"
+                        >
+                          Aplicar al formulario
+                        </button>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
               {runtSugerencia && (
                 <div className="mt-2 p-2 rounded-lg border border-slate-200 bg-white text-xs text-slate-700">
                   <p className="font-semibold mb-1">
                     {runtSugerencia.encontrado
-                      ? `Sugerencias RUNT para ${runtSugerencia.placa_consultada}`
+                      ? `Sugerencias RUNT para ${runtSugerencia.placa_consultada} · Fuente: datos desde RUNT`
                       : `Sin datos RUNT para ${runtSugerencia.placa_consultada}`}
                   </p>
                   {runtSugerencia.encontrado && camposSugeribles.length > 0 && (
@@ -4250,6 +4444,19 @@ export default function Recepcion() {
             </div>
           </div>
         </div>
+      )}
+      {mostrarCapturaTarjeta && !modoEdicion && (
+        <CapturaTarjetaModal
+          onClose={() => setMostrarCapturaTarjeta(false)}
+          onCaptura={(file) => {
+            setMostrarCapturaTarjeta(false);
+            onSeleccionarFotoTarjeta(file);
+          }}
+          onElegirArchivo={() => {
+            setMostrarCapturaTarjeta(false);
+            window.setTimeout(() => tarjetaInputRef.current?.click(), 0);
+          }}
+        />
       )}
     </Layout>
   );

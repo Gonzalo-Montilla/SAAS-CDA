@@ -128,6 +128,7 @@ from app.schemas.vehiculo import (
     TarifaCalculada,
     VentaSOAT,
     VehiculoConsultaRuntResponse,
+    VehiculoLecturaTarjetaResponse,
     ReinspeccionElegibilidadResponse,
 )
 
@@ -1518,6 +1519,57 @@ def consultar_runt_por_placa(
         # cuando el fallo realmente ocurre fuera de CDASOFT.
         status_code = 502 if raw_status_code >= 500 else raw_status_code
         raise HTTPException(status_code=status_code, detail=str(exc)) from exc
+
+
+@router.post("/leer-tarjeta", response_model=VehiculoLecturaTarjetaResponse)
+def leer_tarjeta_propiedad(
+    file: UploadFile = File(...),
+    current_user: Usuario = Depends(get_recepcionista_or_admin),
+    active_sucursal_id: UUID = Depends(get_active_sucursal_id),
+):
+    """
+    Lee una foto de licencia de tránsito (tarjeta de propiedad) y sugiere campos.
+    No registra el vehículo, no guarda la imagen y no consulta RUNT/Verifik.
+    """
+    from app.integrations.xai_client import grok_disponible, leer_licencia_transito
+    from app.services.tarjeta_propiedad import (
+        MAX_TARJETA_BYTES,
+        lectura_vacia,
+        sniff_image_mime,
+    )
+
+    _ = (current_user, active_sucursal_id)
+    chunks: list[bytes] = []
+    total = 0
+    while True:
+        piece = file.file.read(64 * 1024)
+        if not piece:
+            break
+        total += len(piece)
+        if total > MAX_TARJETA_BYTES:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="La foto supera 6 MB. Tome de nuevo la tarjeta, de cerca y nítida.",
+            )
+        chunks.append(piece)
+    data = b"".join(chunks)
+    mime = sniff_image_mime(data)
+    if not mime:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Use una foto JPEG, PNG o WebP de la tarjeta original.",
+        )
+    if not grok_disponible():
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="La lectura de tarjeta no está disponible. Use consulta RUNT o registre a mano.",
+        )
+    resultado = leer_licencia_transito(data, mime)
+    if resultado is None:
+        return VehiculoLecturaTarjetaResponse(
+            **lectura_vacia(motivo="No se pudo leer la tarjeta. Intente otra foto o use RUNT.")
+        )
+    return VehiculoLecturaTarjetaResponse(**resultado)
 
 
 def _filtro_vehiculo_sede(q, tenant_id, sucursal_id: UUID):

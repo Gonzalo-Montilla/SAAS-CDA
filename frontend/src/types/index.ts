@@ -1043,6 +1043,15 @@ export interface VehiculoConsultaRunt {
   observaciones: string[];
 }
 
+export interface VehiculoLecturaTarjeta extends VehiculoConsultaRunt {
+  es_licencia_transito?: boolean;
+  tipo_combustible?: string | null;
+  capacidad_pasajeros?: string | null;
+  numero_motor?: string | null;
+  vin?: string | null;
+  numero_chasis?: string | null;
+}
+
 export interface VehiculoCobro {
   vehiculo_id: string;
   metodo_pago: string;

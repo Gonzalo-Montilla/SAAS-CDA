@@ -318,6 +318,7 @@ class Settings(BaseSettings):
     # Grok (xAI): una API para todos los CDA. Cada llamada lleva solo el contexto de ese NIT.
     XAI_API_KEY: str = Field(default="", env="XAI_API_KEY")
     XAI_MODEL: str = Field(default="grok-4.3", env="XAI_MODEL")
+    XAI_VISION_MODEL: str = Field(default="", env="XAI_VISION_MODEL")
     XAI_TIMEOUT_SECONDS: float = Field(default=20.0, ge=5.0, le=60.0, env="XAI_TIMEOUT_SECONDS")
     
     class Config:

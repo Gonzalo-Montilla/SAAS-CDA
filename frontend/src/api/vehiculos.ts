@@ -1,5 +1,5 @@
 import apiClient from './client';
-import type { Vehiculo, VehiculoRegistro, VehiculoCobro, VehiculoConsultaRunt, ReinspeccionElegibilidad } from '../types';
+import type { Vehiculo, VehiculoRegistro, VehiculoCobro, VehiculoConsultaRunt, VehiculoLecturaTarjeta, ReinspeccionElegibilidad } from '../types';
 
 export interface VentaSOAT {
   placa: string;
@@ -128,6 +128,15 @@ export const vehiculosApi = {
         },
       }
     );
+    return response.data;
+  },
+
+  leerTarjetaPropiedad: async (file: File): Promise<VehiculoLecturaTarjeta> => {
+    const body = new FormData();
+    body.append('file', file);
+    const response = await apiClient.post<VehiculoLecturaTarjeta>('/vehiculos/leer-tarjeta', body, {
+      timeout: 90000,
+    });
     return response.data;
   },
 

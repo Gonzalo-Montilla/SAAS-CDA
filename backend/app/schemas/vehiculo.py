@@ -399,6 +399,37 @@ class VehiculoConsultaRuntResponse(BaseModel):
     proveedor: Optional[str] = None
 
 
+class VehiculoLecturaTarjetaResponse(BaseModel):
+    """Sugerencias desde foto de licencia de tránsito. No registra ni persiste la imagen."""
+
+    encontrado: bool
+    es_licencia_transito: bool = False
+    placa_consultada: str = ""
+    document_type: Optional[str] = None
+    document_number: Optional[str] = None
+    titular_nombre: Optional[str] = None
+    marca: Optional[str] = None
+    linea: Optional[str] = None
+    modelo: Optional[str] = None
+    ano_modelo: Optional[int] = None
+    color: Optional[str] = None
+    clase_vehiculo: Optional[str] = None
+    tipo_servicio: Optional[str] = None
+    tipo_combustible: Optional[str] = None
+    cilindraje: Optional[str] = None
+    capacidad_pasajeros: Optional[str] = None
+    numero_motor: Optional[str] = None
+    vin: Optional[str] = None
+    numero_chasis: Optional[str] = None
+    tipo_vehiculo_sugerido: Optional[str] = None
+    confidence: Optional[str] = None
+    fuente: str = "tarjeta_propiedad"
+    proveedor: Optional[str] = None
+    request_id: Optional[str] = None
+    cached: bool = False
+    observaciones: list[str] = []
+
+
 class ReinspeccionElegibilidadResponse(BaseModel):
     placa: str
     tiene_historial: bool
