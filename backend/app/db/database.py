@@ -1639,6 +1639,12 @@ def ensure_whatsapp_schema(db):
         text("ALTER TABLE tenant_whatsapp_settings ADD COLUMN IF NOT EXISTS plantilla_aprobacion VARCHAR(120)")
     )
     db.execute(
+        text("ALTER TABLE tenant_whatsapp_settings ADD COLUMN IF NOT EXISTS plantilla_campana_inactivos VARCHAR(120)")
+    )
+    db.execute(
+        text("ALTER TABLE tenant_whatsapp_settings ADD COLUMN IF NOT EXISTS plantilla_campana_temporada VARCHAR(120)")
+    )
+    db.execute(
         text(
             "ALTER TABLE tenant_whatsapp_settings "
             "ADD COLUMN IF NOT EXISTS asistente_habilitado BOOLEAN NOT NULL DEFAULT FALSE"
@@ -1691,6 +1697,124 @@ def ensure_whatsapp_schema(db):
     )
     db.execute(
         text("CREATE INDEX IF NOT EXISTS ix_wa_mensajes_tenant ON tenant_whatsapp_mensajes(tenant_id)")
+    )
+
+
+def ensure_campanas_schema(db):
+    """Campañas WhatsApp (Fase D): lote del CDA, no el cron de avisos."""
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS tenant_whatsapp_campanas (
+                id UUID PRIMARY KEY,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                sucursal_id UUID REFERENCES sucursales(id) ON DELETE SET NULL,
+                creada_por UUID REFERENCES usuarios(id) ON DELETE SET NULL,
+                nombre VARCHAR(160) NOT NULL,
+                tipo VARCHAR(30) NOT NULL,
+                etiqueta VARCHAR(120),
+                estado VARCHAR(20) NOT NULL DEFAULT 'borrador',
+                plantilla VARCHAR(120) NOT NULL,
+                categoria_meta VARCHAR(20) NOT NULL DEFAULT 'utility',
+                filtros_json JSONB,
+                texto_propuesto TEXT,
+                email_asunto VARCHAR(180),
+                email_cuerpo TEXT,
+                total_destinatarios INTEGER NOT NULL DEFAULT 0,
+                enviados_ok INTEGER NOT NULL DEFAULT 0,
+                enviados_fail INTEGER NOT NULL DEFAULT 0,
+                error TEXT,
+                created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
+                sent_at TIMESTAMP WITHOUT TIME ZONE,
+                finished_at TIMESTAMP WITHOUT TIME ZONE
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_wa_campanas_tenant ON tenant_whatsapp_campanas(tenant_id)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_wa_campanas_tenant_estado ON tenant_whatsapp_campanas(tenant_id, estado)"
+        )
+    )
+    db.execute(
+        text(
+            """
+            CREATE TABLE IF NOT EXISTS tenant_whatsapp_campana_destinatarios (
+                id UUID PRIMARY KEY,
+                campana_id UUID NOT NULL REFERENCES tenant_whatsapp_campanas(id) ON DELETE CASCADE,
+                tenant_id UUID NOT NULL REFERENCES tenants(id) ON DELETE CASCADE,
+                vehiculo_id UUID REFERENCES vehiculos_proceso(id) ON DELETE SET NULL,
+                destino_e164 VARCHAR(20) NOT NULL,
+                cliente_nombre VARCHAR(200) NOT NULL,
+                placa VARCHAR(12),
+                cliente_email VARCHAR(255),
+                opt_in_tipo VARCHAR(40) NOT NULL,
+                motivo VARCHAR(240) NOT NULL,
+                estado VARCHAR(20) NOT NULL DEFAULT 'pendiente',
+                error TEXT,
+                envio_id UUID REFERENCES tenant_whatsapp_envios(id) ON DELETE SET NULL
+            )
+            """
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_wa_campana_dest_campana "
+            "ON tenant_whatsapp_campana_destinatarios(campana_id)"
+        )
+    )
+    db.execute(
+        text(
+            "CREATE INDEX IF NOT EXISTS ix_wa_campana_dest_tenant "
+            "ON tenant_whatsapp_campana_destinatarios(tenant_id)"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE tenant_whatsapp_campana_destinatarios "
+            "ADD COLUMN IF NOT EXISTS cliente_email VARCHAR(255)"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE tenant_whatsapp_campanas "
+            "ADD COLUMN IF NOT EXISTS email_asunto VARCHAR(180)"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE tenant_whatsapp_campanas "
+            "ADD COLUMN IF NOT EXISTS email_cuerpo TEXT"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE tenant_whatsapp_campana_destinatarios "
+            "ADD COLUMN IF NOT EXISTS estado_whatsapp VARCHAR(20)"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE tenant_whatsapp_campana_destinatarios "
+            "ADD COLUMN IF NOT EXISTS estado_correo VARCHAR(20)"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE tenant_whatsapp_campana_destinatarios "
+            "ADD COLUMN IF NOT EXISTS error_whatsapp TEXT"
+        )
+    )
+    db.execute(
+        text(
+            "ALTER TABLE tenant_whatsapp_campana_destinatarios "
+            "ADD COLUMN IF NOT EXISTS error_correo TEXT"
+        )
     )
 
 
@@ -3293,6 +3417,7 @@ def init_db():
         TenantWhatsAppMensaje,
         TenantWhatsAppSettings,
     )
+    from app.models.campana import CampanaWhatsApp, CampanaWhatsAppDestinatario  # noqa: F401
     from app.models.documento_tenant import TenantDocumento  # noqa: F401 — register model
     from app.models.documento_auditoria import TenantDocumentoAuditoria  # noqa: F401 — register model
     from app.models.proveedor_catalogo import ProveedorCatalogo  # noqa: F401 — register model
@@ -3366,6 +3491,7 @@ def init_db():
         ensure_facturacion_ubicacion_schema(db)
         ensure_factus_schema(db)
         ensure_whatsapp_schema(db)
+        ensure_campanas_schema(db)
         ensure_quality_survey_responses_schema(db)
         ensure_quality_survey_invites_sucursal_schema(db)
         ensure_tenant_documentos_schema(db)

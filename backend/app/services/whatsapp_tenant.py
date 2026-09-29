@@ -11,13 +11,21 @@ from app.core.factus_crypto import decrypt_secret, encrypt_secret
 from app.integrations.whatsapp_client import (
     WhatsAppApiResult,
     build_template_payload,
+    crear_plantilla_cloud_api,
+    crear_plantilla_dialog360,
+    editar_plantilla_cloud_api,
+    editar_plantilla_dialog360,
     enviar_plantilla_cloud_api,
     enviar_plantilla_dialog360,
+    listar_plantillas_cloud_api,
+    listar_plantillas_dialog360,
     probar_cloud_api,
     probar_dialog360,
 )
 from app.models.whatsapp import TenantWhatsAppEnvio, TenantWhatsAppSettings
 from app.schemas.whatsapp import (
+    WhatsAppPlantillaCrearItem,
+    WhatsAppPlantillasCrearOut,
     WhatsAppSettingsOut,
     WhatsAppSettingsUpdate,
     WhatsAppTestConnectionResult,
@@ -61,6 +69,10 @@ def creds_listas(row: TenantWhatsAppSettings) -> bool:
     if proveedor == "dialog360":
         return bool(row.dialog360_api_key_encrypted)
     return bool((row.phone_number_id or "").strip() and row.access_token_encrypted)
+
+
+def listo_para_campana(row: TenantWhatsAppSettings) -> bool:
+    return bool(row.habilitado and creds_listas(row))
 
 
 def listo_para_calidad(row: TenantWhatsAppSettings) -> bool:
@@ -133,6 +145,8 @@ def row_to_out(row: TenantWhatsAppSettings) -> WhatsAppSettingsOut:
         plantilla_preventiva=(getattr(row, "plantilla_preventiva", None) or "").strip() or None,
         plantilla_reinspeccion=(getattr(row, "plantilla_reinspeccion", None) or "").strip() or None,
         plantilla_aprobacion=(getattr(row, "plantilla_aprobacion", None) or "").strip() or None,
+        plantilla_campana_inactivos=(getattr(row, "plantilla_campana_inactivos", None) or "").strip() or None,
+        plantilla_campana_temporada=(getattr(row, "plantilla_campana_temporada", None) or "").strip() or None,
         asistente_habilitado=bool(getattr(row, "asistente_habilitado", False)),
         listo_para_enviar=listo_para_calidad(row)
         or listo_para_operativo(row)
@@ -194,6 +208,8 @@ def apply_settings_update(db: Session, row: TenantWhatsAppSettings, body: WhatsA
         aprobacion = aprobacion or PLANTILLA_APROBACION_DEFAULT
     row.plantilla_reinspeccion = reinspeccion
     row.plantilla_aprobacion = aprobacion
+    row.plantilla_campana_inactivos = (body.plantilla_campana_inactivos or "").strip() or None
+    row.plantilla_campana_temporada = (body.plantilla_campana_temporada or "").strip() or None
     row.asistente_habilitado = bool(getattr(body, "asistente_habilitado", False))
     if body.access_token:
         row.access_token_encrypted = encrypt_secret(body.access_token.strip())
@@ -276,6 +292,7 @@ def enviar_plantilla_utilidad(
     plantilla: str,
     lang: str,
     body_params: list[str],
+    url_button_suffix: str | None = None,
 ) -> bool:
     destino = normalizar_celular_co(destino_raw)
     if not destino:
@@ -287,7 +304,9 @@ def enviar_plantilla_utilidad(
     result = None
     lang_usado = (lang or "es").strip() or "es"
     for codigo in _idiomas_alternos(lang):
-        payload = build_template_payload(destino, nombre, codigo, body_params)
+        payload = build_template_payload(
+            destino, nombre, codigo, body_params, url_button_suffix=url_button_suffix
+        )
         result = _enviar_con_row(row, payload)
         lang_usado = codigo
         if result.ok:
@@ -692,6 +711,61 @@ def enviar_aviso_aprobacion(
     )
 
 
+def enviar_aviso_campana_prueba(
+    db: Session,
+    *,
+    tenant_id: UUID,
+    celular: str | None,
+    nombre_cliente: str,
+    nombre_cda: str,
+    tipo: str,
+    slug: str,
+) -> bool:
+    from app.services.campana_audiencias import plantilla_para_tipo
+
+    row = db.query(TenantWhatsAppSettings).filter(TenantWhatsAppSettings.tenant_id == tenant_id).first()
+    if row is None or not listo_para_campana(row):
+        return False
+    plantilla = plantilla_para_tipo(row, tipo)
+    if tipo == "inactivos":
+        tercero = "ABC123"
+        evento = "campana_inactivos"
+    else:
+        tercero = "Queremos atenderlo de nuevo en nuestro CDA."
+        evento = "campana_jornada"
+    suffix = (slug or "").strip() or None
+    enviado = enviar_plantilla_utilidad(
+        db,
+        tenant_id=tenant_id,
+        destino_raw=celular,
+        evento=evento,
+        plantilla=plantilla,
+        lang=_lang(row),
+        body_params=[
+            _persona(nombre_cliente),
+            _cda(nombre_cda),
+            _nombre_param(tercero, "ABC123"),
+        ],
+        url_button_suffix=suffix,
+    )
+    if not enviado and suffix:
+        enviado = enviar_plantilla_utilidad(
+            db,
+            tenant_id=tenant_id,
+            destino_raw=celular,
+            evento=evento,
+            plantilla=plantilla,
+            lang=_lang(row),
+            body_params=[
+                _persona(nombre_cliente),
+                _cda(nombre_cda),
+                _nombre_param(tercero, "ABC123"),
+            ],
+            url_button_suffix=None,
+        )
+    return enviado
+
+
 def enviar_prueba_calidad(
     db: Session,
     *,
@@ -728,6 +802,8 @@ def enviar_prueba_calidad(
         "rtm_vencida": listo_para_vencimientos,
         "preventiva": listo_para_vencimientos,
         "preventiva_vencida": listo_para_vencimientos,
+        "campana_inactivos": listo_para_campana,
+        "campana_jornada": listo_para_campana,
     }
     listo_fn = listo_map.get(evento or "calidad", listo_para_operativo)
     if not listo_fn(row):
@@ -849,6 +925,24 @@ def enviar_prueba_calidad(
             nombre_cda=nombre_cda,
             placa="ABC123",
         ),
+        "campana_inactivos": lambda: enviar_aviso_campana_prueba(
+            db,
+            tenant_id=tenant_id,
+            celular=destino,
+            nombre_cliente="Prueba",
+            nombre_cda=nombre_cda,
+            tipo="inactivos",
+            slug=slug,
+        ),
+        "campana_jornada": lambda: enviar_aviso_campana_prueba(
+            db,
+            tenant_id=tenant_id,
+            celular=destino,
+            nombre_cliente="Prueba",
+            nombre_cda=nombre_cda,
+            tipo="excel",
+            slug=slug,
+        ),
     }
     ok = bool(senders.get(evento or "calidad", senders["calidad"])())
     db.refresh(row)
@@ -863,3 +957,165 @@ def enviar_prueba_calidad(
         message=(row.last_error or "360dialog rechazó el envío. ¿La plantilla está Approved en Meta?")[:500],
         destino_e164=destino,
     )
+
+
+def _error_plantilla_ya_existe(error: str | None) -> bool:
+    texto = (error or "").lower()
+    return (
+        "already exists" in texto
+        or "ya existe" in texto
+        or "duplicate" in texto
+        or "2388094" in texto
+        or "template name is already in use" in texto
+    )
+
+
+def crear_plantillas_campana(db: Session, tenant_id: UUID) -> WhatsAppPlantillasCrearOut:
+    """Envía a Meta/360dialog las dos plantillas MARKETING de campañas si no existen."""
+    from app.services.whatsapp_pack import (
+        EVENTOS_CAMPANA,
+        payload_crear_plantilla,
+        payload_editar_plantilla,
+        plantilla_por_evento,
+    )
+
+    row = get_or_create_settings_row(db, tenant_id)
+    if not creds_listas(row) or not row.habilitado:
+        return WhatsAppPlantillasCrearOut(
+            ok=False,
+            message="Conecte el WhatsApp del CDA antes de crear plantillas.",
+            items=[],
+        )
+    proveedor = (row.proveedor or "cloud_api").strip()
+    existentes: list[dict] = []
+    editar = None
+    if proveedor == "dialog360":
+        key = decrypt_secret(row.dialog360_api_key_encrypted)
+        if not key:
+            return WhatsAppPlantillasCrearOut(
+                ok=False,
+                message="No se pudo descifrar la API key de 360dialog.",
+                items=[],
+            )
+        existentes, list_result = listar_plantillas_dialog360(api_key=key)
+        crear = lambda payload: crear_plantilla_dialog360(api_key=key, payload=payload)
+        editar = lambda tid, payload: editar_plantilla_dialog360(
+            api_key=key, template_id=tid, payload=payload
+        )
+    else:
+        token = decrypt_secret(row.access_token_encrypted)
+        waba = (row.waba_id or "").strip()
+        if not token or not waba:
+            return WhatsAppPlantillasCrearOut(
+                ok=False,
+                message="Cloud API necesita WABA ID y token para crear plantillas.",
+                items=[],
+            )
+        existentes, list_result = listar_plantillas_cloud_api(waba_id=waba, access_token=token)
+        crear = lambda payload: crear_plantilla_cloud_api(
+            waba_id=waba, access_token=token, payload=payload
+        )
+        editar = lambda tid, payload: editar_plantilla_cloud_api(
+            access_token=token, template_id=tid, payload=payload
+        )
+    por_nombre: dict[str, dict] = {}
+    for item in existentes:
+        nombre = str(item.get("name") or "").strip().lower()
+        if nombre:
+            por_nombre[nombre] = item
+    salidas: list[WhatsAppPlantillaCrearItem] = []
+    for evento in EVENTOS_CAMPANA:
+        pack = plantilla_por_evento(evento)
+        if pack is None:
+            continue
+        nombre = pack["nombre"]
+        previo = por_nombre.get(nombre.lower())
+        estado_previo = str((previo or {}).get("status") or "").upper()
+        template_id = str((previo or {}).get("id") or "").strip()
+        if previo and estado_previo != "APPROVED" and template_id and editar is not None:
+            result = editar(template_id, payload_editar_plantilla(pack))
+            if result.ok:
+                salidas.append(
+                    WhatsAppPlantillaCrearItem(
+                        nombre=nombre,
+                        status="updated",
+                        message="Reenviada a Meta con el texto nuevo. Espere Approved.",
+                    )
+                )
+            else:
+                motivo = str((previo or {}).get("rejected_reason") or "")
+                extra = f" Motivo anterior: {motivo}." if motivo else ""
+                salidas.append(
+                    WhatsAppPlantillaCrearItem(
+                        nombre=nombre,
+                        status="error",
+                        message=((result.error or f"HTTP {result.status_code}") + extra)[:400],
+                    )
+                )
+            continue
+        if previo:
+            estado = str(previo.get("status") or "EXISTS")
+            salidas.append(
+                WhatsAppPlantillaCrearItem(
+                    nombre=nombre,
+                    status="exists",
+                    message=f"Ya está en 360dialog ({estado}).",
+                )
+            )
+            continue
+        result = crear(payload_crear_plantilla(pack))
+        if result.ok:
+            salidas.append(
+                WhatsAppPlantillaCrearItem(
+                    nombre=nombre,
+                    status="created",
+                    message="Enviada a Meta. Espere Approved (minutos u horas).",
+                )
+            )
+            continue
+        if _error_plantilla_ya_existe(result.error):
+            salidas.append(
+                WhatsAppPlantillaCrearItem(
+                    nombre=nombre,
+                    status="exists",
+                    message="Ya existía en Meta.",
+                )
+            )
+            continue
+        salidas.append(
+            WhatsAppPlantillaCrearItem(
+                nombre=nombre,
+                status="error",
+                message=(result.error or f"HTTP {result.status_code}")[:400],
+            )
+        )
+    if not list_result.ok and not salidas:
+        return WhatsAppPlantillasCrearOut(
+            ok=False,
+            message=list_result.error or "No se pudieron listar las plantillas.",
+            items=[],
+        )
+    errores = [x for x in salidas if x.status == "error"]
+    creadas = [x for x in salidas if x.status in {"created", "updated"}]
+    if errores and not creadas:
+        ok = False
+        message = "Meta rechazó las plantillas. Revise el detalle."
+    elif creadas:
+        ok = True
+        message = (
+            "Plantillas enviadas a Meta. Cuando cdasoft_campana_jornada quede Approved, "
+            "Lista Excel ya la usa: Hola (nombre), le escribe (CDA). (su motivo). Pulse Agendar."
+        )
+    else:
+        ok = True
+        message = "Las plantillas de campaña ya estaban en 360dialog."
+    if not row.plantilla_campana_inactivos:
+        row.plantilla_campana_inactivos = "cdasoft_campana_inactivos"
+    jornada_meta = por_nombre.get("cdasoft_campana_jornada")
+    jornada_aprobada = str((jornada_meta or {}).get("status") or "").upper() == "APPROVED"
+    if jornada_aprobada or any(x.nombre == "cdasoft_campana_jornada" and x.status in {"created", "updated"} for x in salidas):
+        row.plantilla_campana_temporada = "cdasoft_campana_jornada"
+    elif not row.plantilla_campana_temporada:
+        row.plantilla_campana_temporada = "cdasoft_campana_jornada"
+    db.commit()
+    return WhatsAppPlantillasCrearOut(ok=ok, message=message, items=salidas)

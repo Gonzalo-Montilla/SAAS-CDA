@@ -15,9 +15,10 @@ const GRUPO_LABEL: Record<string, string> = {
   citas: 'Citas',
   vencimientos: 'Vencimientos',
   calidad: 'Después de la visita',
+  campanas: 'Campañas (marketing)',
 };
 
-const GRUPO_ORDEN = ['visita', 'citas', 'vencimientos', 'calidad'];
+const GRUPO_ORDEN = ['visita', 'citas', 'vencimientos', 'calidad', 'campanas'];
 
 const AVISO_OPTIONS: { value: WhatsAppEventoPrueba; label: string }[] = [
   { value: 'bienvenida', label: 'Recepción' },
@@ -32,6 +33,8 @@ const AVISO_OPTIONS: { value: WhatsAppEventoPrueba; label: string }[] = [
   { value: 'preventiva', label: 'Preventiva' },
   { value: 'preventiva_vencida', label: 'Preventiva vencida' },
   { value: 'calidad', label: 'Encuesta calidad' },
+  { value: 'campana_inactivos', label: 'Campaña inactivos' },
+  { value: 'campana_jornada', label: 'Campaña lista Excel' },
 ];
 
 function fieldClass() {
@@ -42,8 +45,8 @@ function mensajeErrorWhatsApp(raw: string | null | undefined): string {
   const texto = (raw || '').trim();
   if (!texto) return '';
   const low = texto.toLowerCase();
-  if (low.includes('132001') || low.includes('does not exist')) {
-    return 'Meta no encontró esa plantilla. Créela en 360dialog (Utility, español) y espere a que quede Approved.';
+  if (low.includes('132001') || low.includes('does not exist in the translation') || (low.includes('does not exist') && low.includes('template'))) {
+    return 'Meta aún no puede enviar esa plantilla. Si acaba de editarla, queda en Pending: espere Approved otra vez y reintente. No hay que crearla de nuevo.';
   }
   if (low.includes('paused') || low.includes('disabled')) {
     return 'La plantilla está pausada o deshabilitada en Meta. Revísela en 360dialog.';
@@ -59,7 +62,7 @@ function mensajeErrorWhatsApp(raw: string | null | undefined): string {
 }
 
 function textoParaCopiar(item: WhatsAppPackItem): string {
-  const categoria = item.grupo === 'calidad' ? 'Marketing (Meta suele dejarla así)' : 'Utility';
+  const categoria = item.grupo === 'calidad' || item.grupo === 'campanas' ? 'Marketing' : 'Utility';
   return [
     `Nombre: ${item.nombre}`,
     `Categoría: ${categoria}`,
@@ -202,6 +205,22 @@ export default function OrganizacionWhatsApp() {
     },
   });
 
+  const campanaTplMutation = useMutation({
+    mutationFn: whatsappApi.crearPlantillasCampana,
+    onSuccess: (result) => {
+      queryClient.invalidateQueries({ queryKey: ['whatsapp-settings'] });
+      const detalle = (result.items || []).map((item) => `${item.nombre}: ${item.message}`).join(' ');
+      if (result.ok) {
+        showToast('success', 'Plantillas de campaña', detalle || result.message);
+      } else {
+        showToast('error', 'Plantillas de campaña', detalle || result.message);
+      }
+    },
+    onError: () => {
+      showToast('error', 'Plantillas de campaña', 'No se pudieron crear en 360dialog.');
+    },
+  });
+
   const onSave = () => {
     saveMutation.mutate({
       proveedor,
@@ -226,6 +245,8 @@ export default function OrganizacionWhatsApp() {
       plantilla_preventiva: plantillaPreventiva.trim() || null,
       plantilla_reinspeccion: plantillaReinspeccion.trim() || null,
       plantilla_aprobacion: plantillaAprobacion.trim() || null,
+      plantilla_campana_inactivos: data?.plantilla_campana_inactivos || 'cdasoft_campana_inactivos',
+      plantilla_campana_temporada: data?.plantilla_campana_temporada || 'cdasoft_campana_temporada',
       asistente_habilitado: asistenteHabilitado,
     });
   };
@@ -472,10 +493,29 @@ export default function OrganizacionWhatsApp() {
         </summary>
         <div className="px-4 pb-4 space-y-3 border-t border-slate-100">
           <p className="text-xs text-slate-500 pt-3">
-            En cada plantilla use exactamente este nombre, categoría Utility (salvo la encuesta), idioma{' '}
+            En cada plantilla use exactamente este nombre, categoría Utility (salvo encuesta y campañas), idioma{' '}
             <strong>es</strong>, sin botones. Copie, cree, espere Approved. El PDF del recibo sigue por correo. Si el
             CDA no tiene Factus, no necesita la plantilla <span className="font-mono">cdasoft_recibo_fe</span>.
           </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              className="btn-corporate-primary px-4 py-2 text-sm disabled:opacity-60"
+              disabled={campanaTplMutation.isLoading || !(data?.dialog360_api_key_configured || data?.access_token_configured)}
+              onClick={() => {
+                const ok = window.confirm(
+                  'Se van a crear o reenviar en 360dialog las plantillas MARKETING de campañas (inactivos, temporada y jornada, botón Agendar, idioma es). Lista Excel usa cdasoft_campana_jornada: «Hola (nombre), le escribe (CDA). (motivo). Pulse Agendar». Hay que esperar Approved. ¿Continuar?',
+                );
+                if (ok) campanaTplMutation.mutate();
+              }}
+            >
+              {campanaTplMutation.isLoading ? 'Creando en 360dialog…' : 'Crear plantillas de campañas'}
+            </button>
+            <p className="text-xs text-slate-500">
+              Inactivos, temporada y jornada comercial. RTM por vencer ya usa{' '}
+              <span className="font-mono">cdasoft_rtm</span>.
+            </p>
+          </div>
           {packAgrupado.map((grupo) => (
             <div key={grupo.grupo} className="space-y-2">
               <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -524,7 +564,8 @@ export default function OrganizacionWhatsApp() {
         <p className="text-sm font-semibold text-slate-800">4. Enviar una prueba</p>
         <p className="text-xs text-slate-500 mt-0.5 mb-3">
           Use un celular suyo, no el del canal. Recibo / factura prueba el mensaje con enlace; si esa plantilla no
-          existe, se envía el recibo simple.
+          existe, se envía el recibo simple. Campaña inactivos y lista Excel usan las plantillas de Comunicaciones
+          (Marketing, botón Agendar).
         </p>
         <div className="flex flex-wrap items-end gap-2">
           <label className="block text-sm">

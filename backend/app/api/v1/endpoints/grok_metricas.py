@@ -17,7 +17,7 @@ from app.models.whatsapp import TenantWhatsAppEnvio, TenantWhatsAppMensaje
 
 router = APIRouter()
 
-ORIGENES_GROK = {"tarjeta", "whatsapp"}
+ORIGENES_GROK = {"tarjeta", "whatsapp", "campana"}
 EVENTO_LABEL = {
     "bienvenida": "Bienvenida",
     "caja": "Pase a caja",
@@ -33,6 +33,10 @@ EVENTO_LABEL = {
     "aprobado": "Aprobado",
     "calidad": "Encuesta de calidad",
     "asistente": "Asistente (respuesta)",
+    "campana_por_vencer": "Campaña RTM por vencer",
+    "campana_inactivos": "Campaña inactivos",
+    "campana_excel": "Campaña Excel",
+    "campana_temporada": "Campaña temporada",
 }
 
 
@@ -54,7 +58,7 @@ def resumen_metricas_grok_tarjeta(
     from_date: datetime | None = Query(default=None),
     to_date: datetime | None = Query(default=None),
     tenant_id: Optional[UUID] = Query(default=None),
-    origen: Optional[str] = Query(default=None, description="tarjeta | whatsapp; vacío = todos"),
+    origen: Optional[str] = Query(default=None, description="tarjeta | whatsapp | campana; vacío = todos"),
     db: Session = Depends(get_db),
     current_user: SaaSUser = Depends(require_saas_role(["owner", "finanzas", "comercial", "soporte"])),
 ):
@@ -62,7 +66,7 @@ def resumen_metricas_grok_tarjeta(
     start_dt, end_dt, custom_range = _rango(days, from_date, to_date)
     origen_n = (origen or "").strip().lower() or None
     if origen_n and origen_n not in ORIGENES_GROK:
-        raise HTTPException(status_code=400, detail="origen debe ser tarjeta o whatsapp")
+        raise HTTPException(status_code=400, detail="origen debe ser tarjeta, whatsapp o campana")
 
     periodo = [
         GrokTarjetaMetrica.created_at >= start_dt,
@@ -237,7 +241,7 @@ def resumen_metricas_grok_tarjeta(
         "by_origen": by_origen,
         "by_tenant": by_tenant,
         "generated_at": _iso_utc_z(datetime.now(timezone.utc).replace(tzinfo=None)),
-        "nota": "Estimado con tarifas xAI y TRM de CDASoft. No es la factura de xAI ni de Meta.",
+        "nota": "Estimado con tarifas del Asistente CDASoft y TRM. No es la factura del proveedor ni de Meta.",
     }
 
 

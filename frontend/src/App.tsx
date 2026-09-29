@@ -32,6 +32,7 @@ const Nomina = lazy(() => import('./pages/Nomina'));
 const Contador = lazy(() => import('./pages/Contador'));
 const Sarlaft = lazy(() => import('./pages/Sarlaft'));
 const Calidad = lazy(() => import('./pages/Calidad'));
+const Comunicaciones = lazy(() => import('./pages/Comunicaciones'));
 const CalidadEncuesta = lazy(() => import('./pages/CalidadEncuesta'));
 const Agendamiento = lazy(() => import('./pages/Agendamiento'));
 const AgendarPublico = lazy(() => import('./pages/AgendarPublico'));
@@ -280,6 +281,14 @@ function App() {
               element={
                 <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['gerente', 'administrador', 'contador', 'comercial']}>
                   <Calidad />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/comunicaciones"
+              element={
+                <ProtectedRoute requiredScope="tenant" requiredTenantRoles={['gerente', 'administrador', 'comercial']}>
+                  <Comunicaciones />
                 </ProtectedRoute>
               }
             />

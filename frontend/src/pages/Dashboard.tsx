@@ -25,6 +25,7 @@ import {
   BookUser,
   ReceiptText,
   FileSpreadsheet,
+  Megaphone,
 } from 'lucide-react';
 const WIZARD_KEY = 'cdasoft_sedes_wizard_dismissed';
 
@@ -383,6 +384,21 @@ export default function Dashboard() {
               <h3 className="text-xl font-bold text-slate-900 mb-2">Sedes y usuarios</h3>
               <p className="text-slate-600 text-sm">
                 Gestión de sedes y usuarios del CDA
+              </p>
+            </button>
+          )}
+
+          {(isGerenteOrAdmin(user?.rol) || user?.rol === 'comercial') && (
+            <button
+              onClick={() => navigate('/comunicaciones')}
+              className="card-pos text-left group animate-fade-in animate-delay-200"
+            >
+              <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-orange-100 text-orange-600 mb-4 group-hover:bg-orange-600 group-hover:text-white transition-all duration-300">
+                <Megaphone className="w-8 h-8 icon-hover" />
+              </div>
+              <h3 className="text-xl font-bold text-slate-900 mb-2">Comunicaciones</h3>
+              <p className="text-slate-600 text-sm">
+                Campañas por correo y, si el CDA lo tiene, WhatsApp. Vencimientos, inactivos o lista Excel.
               </p>
             </button>
           )}

@@ -11,6 +11,7 @@ from app.core.deps import get_db, get_gerente
 from app.models.usuario import Usuario
 from app.schemas.whatsapp import (
     WhatsAppPackItem,
+    WhatsAppPlantillasCrearOut,
     WhatsAppSettingsOut,
     WhatsAppSettingsUpdate,
     WhatsAppTestConnectionResult,
@@ -21,6 +22,7 @@ from app.services.whatsapp_asistente import procesar_inbound
 from app.services.whatsapp_pack import PACK
 from app.services.whatsapp_tenant import (
     apply_settings_update,
+    crear_plantillas_campana,
     enviar_prueba_calidad,
     get_or_create_settings_row,
     row_to_out,
@@ -87,6 +89,14 @@ def post_whatsapp_test_send(
     return enviar_prueba_calidad(
         db, tenant_id=current_user.tenant_id, celular=body.celular, evento=body.evento
     )
+
+
+@router.post("/plantillas-campana", response_model=WhatsAppPlantillasCrearOut)
+def post_whatsapp_plantillas_campana(
+    db: Session = Depends(get_db),
+    current_user: Usuario = Depends(get_gerente),
+):
+    return crear_plantillas_campana(db, current_user.tenant_id)
 
 
 @router.post("/webhook")

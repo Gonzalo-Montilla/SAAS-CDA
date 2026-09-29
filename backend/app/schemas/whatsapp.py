@@ -35,6 +35,8 @@ class WhatsAppSettingsOut(BaseModel):
     plantilla_preventiva: Optional[str] = None
     plantilla_reinspeccion: Optional[str] = None
     plantilla_aprobacion: Optional[str] = None
+    plantilla_campana_inactivos: Optional[str] = None
+    plantilla_campana_temporada: Optional[str] = None
     asistente_habilitado: bool = False
     listo_para_enviar: bool
     webhook_url: Optional[str] = None
@@ -65,6 +67,8 @@ class WhatsAppSettingsUpdate(BaseModel):
     plantilla_preventiva: Optional[str] = None
     plantilla_reinspeccion: Optional[str] = None
     plantilla_aprobacion: Optional[str] = None
+    plantilla_campana_inactivos: Optional[str] = None
+    plantilla_campana_temporada: Optional[str] = None
     asistente_habilitado: bool = False
 
 
@@ -89,6 +93,8 @@ WhatsAppEventoPrueba = Literal[
     "preventiva_vencida",
     "reinspeccion",
     "aprobado",
+    "campana_inactivos",
+    "campana_jornada",
 ]
 
 
@@ -111,3 +117,15 @@ class WhatsAppPackItem(BaseModel):
     variables: int
     ejemplos: list[str]
     cuerpo: str
+
+
+class WhatsAppPlantillaCrearItem(BaseModel):
+    nombre: str
+    status: str
+    message: str
+
+
+class WhatsAppPlantillasCrearOut(BaseModel):
+    ok: bool
+    message: str
+    items: list[WhatsAppPlantillaCrearItem]

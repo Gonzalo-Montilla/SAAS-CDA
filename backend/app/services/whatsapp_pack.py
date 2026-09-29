@@ -125,7 +125,7 @@ PACK: list[PlantillaPack] = [
         ],
         "cuerpo": (
             "Hola {{1}}, en {{2}} su revisión técnico-mecánica de la placa {{3}} está por vencer. "
-            "Fecha sugerida: {{4}}. Agende aquí: {{5}}. Gracias."
+            "Lo esperamos para renovarla. Fecha sugerida: {{4}}. Agende aquí: {{5}}. Gracias."
         ),
     },
     {
@@ -193,6 +193,50 @@ PACK: list[PlantillaPack] = [
             "Hola {{1}}, en {{2}} queremos conocer su experiencia. Responda aquí: {{3}}. Gracias."
         ),
     },
+    {
+        "evento": "campana_inactivos",
+        "nombre": "cdasoft_campana_inactivos",
+        "grupo": "campanas",
+        "variables": 3,
+        "ejemplos": [
+            "Juan",
+            "CDA Quitamelsueño",
+            "ABC123",
+        ],
+        "cuerpo": (
+            "Hola {{1}}, le escribe {{2}}. Hace tiempo no vemos la placa {{3}} "
+            "y nos encantaría atenderlo de nuevo. Pulse Agendar para reservar su cita."
+        ),
+    },
+    {
+        "evento": "campana_temporada",
+        "nombre": "cdasoft_campana_temporada",
+        "grupo": "campanas",
+        "variables": 3,
+        "ejemplos": [
+            "Juan",
+            "CDA Quitamelsueño",
+            "jornada de revisión",
+        ],
+        "cuerpo": (
+            "Hola {{1}}, en {{2}} lo invitamos a la jornada de revisión técnico-mecánica: {{3}}. "
+            "Pulse Agendar para reservar su cita. Gracias."
+        ),
+    },
+    {
+        "evento": "campana_jornada",
+        "nombre": "cdasoft_campana_jornada",
+        "grupo": "campanas",
+        "variables": 3,
+        "ejemplos": [
+            "Gonzalo Montilla",
+            "CDA Quitamelsueño",
+            "Queremos atenderlo de nuevo en nuestro CDA.",
+        ],
+        "cuerpo": (
+            "Hola {{1}}, le escribe {{2}}. {{3}} Pulse Agendar para reservar su cita."
+        ),
+    },
 ]
 
 
@@ -201,3 +245,55 @@ def plantilla_por_evento(evento: str) -> PlantillaPack | None:
         if item["evento"] == evento:
             return item
     return None
+
+
+EVENTOS_CAMPANA = ("campana_inactivos", "campana_temporada", "campana_jornada")
+FOOTER_MARKETING = "Responda STOP para no recibir más promociones."
+AGENDAR_BOTON_URL = "https://www.cdasoft.com.co/agendar/{{1}}"
+AGENDAR_BOTON_EJEMPLO = "ejemplo"
+
+
+def categoria_meta_pack(grupo: str) -> str:
+    return "MARKETING" if grupo in {"calidad", "campanas"} else "UTILITY"
+
+
+def payload_crear_plantilla(item: PlantillaPack, *, language: str = "es") -> dict:
+    """Cuerpo + ejemplos para POST /message_templates de 360dialog / Graph."""
+    components: list[dict] = [
+        {
+            "type": "BODY",
+            "text": item["cuerpo"],
+            "example": {"body_text": [list(item["ejemplos"])]},
+        }
+    ]
+    if item["grupo"] == "campanas":
+        components.append({"type": "FOOTER", "text": FOOTER_MARKETING})
+        components.append(
+            {
+                "type": "BUTTONS",
+                "buttons": [
+                    {
+                        "type": "URL",
+                        "text": "Agendar",
+                        "url": AGENDAR_BOTON_URL,
+                        "example": [AGENDAR_BOTON_EJEMPLO],
+                    }
+                ],
+            }
+        )
+    return {
+        "name": item["nombre"],
+        "language": language or "es",
+        "category": categoria_meta_pack(item["grupo"]),
+        "parameter_format": "positional",
+        "components": components,
+    }
+
+
+def payload_editar_plantilla(item: PlantillaPack) -> dict:
+    created = payload_crear_plantilla(item)
+    return {
+        "category": created["category"],
+        "parameter_format": created["parameter_format"],
+        "components": created["components"],
+    }

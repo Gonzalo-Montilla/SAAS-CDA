@@ -145,6 +145,10 @@ def test_estimar_costo_grok_tokens_y_sin_cobro():
     )
     assert usd_wa > 0
     assert usd_wa < usd_fb
+    _cop_ca, usd_ca, _ = estimar_costo_grok(
+        prompt_tokens=0, completion_tokens=0, billed=True, origen="campana"
+    )
+    assert usd_ca == usd_wa
 
 
 def test_uso_tokens_desde_respuesta_xai():

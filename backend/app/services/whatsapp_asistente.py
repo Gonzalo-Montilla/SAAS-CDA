@@ -666,7 +666,7 @@ def _armar_respuesta(db: Session, tenant: Tenant, texto: str, intencion: str) ->
                 encontrado=False,
                 billed=True,
                 uso=uso,
-                error="Grok no devolvió una frase usable.",
+                error="El Asistente CDASoft no devolvió una frase usable.",
             )
         else:
             _registrar_metrica_grok_whatsapp(
@@ -676,7 +676,7 @@ def _armar_respuesta(db: Session, tenant: Tenant, texto: str, intencion: str) ->
                 encontrado=False,
                 billed=False,
                 uso=uso,
-                error="Grok no devolvió una frase usable.",
+                error="El Asistente CDASoft no devolvió una frase usable.",
             )
     return grok or base
 

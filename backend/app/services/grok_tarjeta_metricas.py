@@ -29,7 +29,7 @@ def estimar_costo_grok(
         in_rate = Decimal(str(getattr(settings, "XAI_INPUT_USD_PER_MILLION", 1.25) or 1.25)) / Decimal(1_000_000)
         out_rate = Decimal(str(getattr(settings, "XAI_OUTPUT_USD_PER_MILLION", 2.50) or 2.50)) / Decimal(1_000_000)
         usd = prompt_n * in_rate + completion_n * out_rate
-    elif (origen or "tarjeta") == "whatsapp":
+    elif (origen or "tarjeta") in {"whatsapp", "campana"}:
         usd = Decimal(str(getattr(settings, "XAI_WHATSAPP_FALLBACK_USD", 0.0004) or 0.0004))
     else:
         usd = Decimal(str(getattr(settings, "XAI_TARJETA_FALLBACK_USD", 0.008) or 0.008))
@@ -56,7 +56,7 @@ def guardar_metrica_grok_tarjeta(
     error_detail: str | None = None,
 ) -> None:
     origen_n = (origen or "tarjeta").strip().lower() or "tarjeta"
-    if origen_n not in {"tarjeta", "whatsapp"}:
+    if origen_n not in {"tarjeta", "whatsapp", "campana"}:
         origen_n = "tarjeta"
     cop, usd, fx = estimar_costo_grok(
         prompt_tokens=prompt_tokens,

@@ -1605,7 +1605,7 @@ def leer_tarjeta_propiedad(
             billed=False,
             resultado=vacia,
             uso=uso,
-            error="Grok no devolvió una lectura usable.",
+            error="El Asistente CDASoft no devolvió una lectura usable.",
         )
         return VehiculoLecturaTarjetaResponse(**vacia)
     status_metrica = "success" if resultado.get("encontrado") else "empty"

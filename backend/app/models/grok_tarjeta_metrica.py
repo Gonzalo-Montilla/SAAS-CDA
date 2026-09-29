@@ -16,7 +16,7 @@ class GrokTarjetaMetrica(Base):
     sucursal_id = Column(UUID(as_uuid=True), ForeignKey("sucursales.id"), nullable=True, index=True)
     usuario_id = Column(UUID(as_uuid=True), ForeignKey("usuarios.id"), nullable=True, index=True)
 
-    origen = Column(String(20), nullable=False, default="tarjeta", index=True)  # tarjeta | whatsapp
+    origen = Column(String(20), nullable=False, default="tarjeta", index=True)  # tarjeta | whatsapp | campana
     placa_consultada = Column(String(12), nullable=True)
     modelo = Column(String(40), nullable=False, default="grok-4.3")
     status = Column(String(20), nullable=False, index=True)  # success | empty | error

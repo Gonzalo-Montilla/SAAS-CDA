@@ -41,10 +41,10 @@ export function grokCostoChartFromSummary(summary?: GrokMetricasSummary) {
   return (summary?.by_origen || [])
     .map((row) => ({
       key: row.origen,
-      name: row.origen === 'whatsapp' ? 'WhatsApp' : 'Foto',
+      name: row.origen === 'whatsapp' ? 'WhatsApp' : row.origen === 'campana' ? 'Campaña' : 'Foto',
       value: Number(row.costo_estimado_cop || 0),
       usos: Number(row.usos || 0),
-      color: row.origen === 'whatsapp' ? '#0284c7' : '#7c3aed',
+      color: row.origen === 'whatsapp' ? '#0284c7' : row.origen === 'campana' ? '#0f766e' : '#7c3aed',
     }))
     .filter((row) => row.usos > 0 || row.value > 0);
 }
@@ -267,7 +267,7 @@ export function SaasResumenDashboard({
           className="mb-3"
           icon={Sparkles}
           title="Consumo CDASoft · 30 días"
-          description="Lo que pagamos en Grok y cuántos WhatsApp salieron. Meta lo paga el CDA."
+          description="Lo que pagamos en el Asistente CDASoft y cuántos WhatsApp salieron. Meta lo paga el CDA."
           right={
             <button type="button" className="btn-chip py-1 text-[11px]" onClick={onOpenGrokMetricas}>
               Ver detalle
@@ -280,12 +280,12 @@ export function SaasResumenDashboard({
         )}
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           <button type="button" className="kpi-card text-left" onClick={onOpenGrokMetricas}>
-            <p className="kpi-label">Costo Grok</p>
+            <p className="kpi-label">Costo del Asistente</p>
             <p className="kpi-value">
               {grokBusy ? '…' : formatCurrency(grokSummary?.costo_estimado_total_cop ?? 0)}
             </p>
             <p className="mt-1 text-xs text-slate-500">
-              {grokBusy ? 'Estimado xAI' : formatUsd(grokSummary?.costo_estimado_total_usd ?? 0)}
+              {grokBusy ? 'Estimado' : formatUsd(grokSummary?.costo_estimado_total_usd ?? 0)}
             </p>
           </button>
           <button type="button" className="kpi-card text-left" onClick={onOpenGrokMetricas}>
@@ -306,12 +306,12 @@ export function SaasResumenDashboard({
         </div>
         <div className="mt-4 grid grid-cols-1 gap-4 xl:grid-cols-2">
           <div>
-            <p className="mb-2 text-xs font-semibold text-slate-600">Costo Grok por origen</p>
+            <p className="mb-2 text-xs font-semibold text-slate-600">Costo del Asistente por origen</p>
             <SaasMetricBarChart
               data={grokCostoChart}
               loading={grokBusy}
-              loadingText="Cargando Grok…"
-              emptyText="Aún no hay consumo Grok para graficar."
+              loadingText="Cargando consumo…"
+              emptyText="Aún no hay consumo del Asistente para graficar."
               yCompact
               yWidth={52}
               tooltipFormatter={(value, payload) => {

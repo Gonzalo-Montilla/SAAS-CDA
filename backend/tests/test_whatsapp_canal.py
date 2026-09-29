@@ -34,6 +34,21 @@ def test_payload_plantilla_tres_variables():
     assert params[2]["text"].startswith("https://")
 
 
+def test_payload_plantilla_campana_lleva_boton_url():
+    payload = build_template_payload(
+        "573001234567",
+        "cdasoft_campana_temporada",
+        "es",
+        ["Ana", "CDA Putumayo", "jornada del sábado"],
+        url_button_suffix="putumayo",
+    )
+    comps = payload["template"]["components"]
+    assert comps[0]["type"] == "body"
+    assert comps[1]["type"] == "button"
+    assert comps[1]["sub_type"] == "url"
+    assert comps[1]["parameters"][0]["text"] == "putumayo"
+
+
 def test_sin_credenciales_no_esta_listo():
     row = SimpleNamespace(
         habilitado=True,
@@ -88,18 +103,57 @@ def test_enlace_whatsapp_no_usa_localhost():
     )
 
 
+def test_payload_crear_campana_es_marketing_con_ejemplos():
+    from app.services.whatsapp_pack import payload_crear_plantilla, plantilla_por_evento
+
+    pack = plantilla_por_evento("campana_inactivos")
+    assert pack is not None
+    payload = payload_crear_plantilla(pack)
+    assert payload["name"] == "cdasoft_campana_inactivos"
+    assert payload["category"] == "MARKETING"
+    assert payload["language"] == "es"
+    body = payload["components"][0]
+    assert body["type"] == "BODY"
+    assert "{{1}}" in body["text"]
+    assert "le escribe {{2}}" in body["text"]
+    assert "nos encantaría atenderlo de nuevo" in body["text"]
+    assert body["example"]["body_text"][0][2] == "ABC123"
+    assert payload["components"][1]["type"] == "FOOTER"
+    assert payload["components"][2]["type"] == "BUTTONS"
+    assert "https://" not in body["text"].lower()
+
+    temporada = plantilla_por_evento("campana_temporada")
+    assert temporada is not None
+    payload2 = payload_crear_plantilla(temporada)
+    assert payload2["name"] == "cdasoft_campana_temporada"
+    assert payload2["category"] == "MARKETING"
+    assert "{{3}}" in payload2["components"][0]["text"]
+    assert len(payload2["components"][0]["example"]["body_text"][0]) == 3
+    jornada = plantilla_por_evento("campana_jornada")
+    assert jornada is not None
+    payload3 = payload_crear_plantilla(jornada)
+    assert payload3["name"] == "cdasoft_campana_jornada"
+    assert "https://" not in payload3["components"][0]["text"].lower()
+    assert "le escribe {{2}}" in payload3["components"][0]["text"]
+    assert "preparamos {{3}}" not in payload3["components"][0]["text"]
+
+
 def test_paquete_cliente_tiene_plantillas_unicas():
     nombres = [item["nombre"] for item in PACK]
-    assert len(nombres) == 13
-    assert len(set(nombres)) == 13
+    assert len(nombres) == 16
+    assert len(set(nombres)) == 16
     assert "cdasoft_recibo_fe" in nombres
     assert "cdasoft_aprobado" in nombres
     visita = [item["nombre"] for item in PACK if item["grupo"] == "visita"]
     assert visita.index("cdasoft_aprobado") < visita.index("cdasoft_reinspeccion")
+    rtm = next(item for item in PACK if item["nombre"] == "cdasoft_rtm")
+    assert "Lo esperamos para renovarla" in rtm["cuerpo"]
     assert "cdasoft_rtm" in nombres
     assert "cdasoft_preventiva" in nombres
     assert "cdasoft_rtm_vencida" in nombres
     assert "cdasoft_preventiva_vencida" in nombres
+    assert "cdasoft_campana_inactivos" in nombres
+    assert "cdasoft_campana_temporada" in nombres
 
 
 def test_email_aprobacion_usa_plantilla_corporativa_sin_mezclar_tramites():

@@ -166,14 +166,17 @@ def enviar_email_con_adjuntos(
 
 def _render_email_corporativo(title: str, body_html: str, label: str = "CDASOFT") -> str:
     """Plantilla corporativa base para estandarizar estilo de correos."""
+    fuente = "Segoe UI, Arial, Helvetica, sans-serif"
+    title_esc = html.escape(title or "")
     return f"""
     <!DOCTYPE html>
     <html>
     <head>
         <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <style>
             body {{
-                font-family: "Segoe UI", Arial, sans-serif;
+                font-family: {fuente};
                 line-height: 1.6;
                 color: #0f172a;
                 margin: 0;
@@ -225,7 +228,7 @@ def _render_email_corporativo(title: str, body_html: str, label: str = "CDASOFT"
             .button {{
                 display: inline-block;
                 padding: 12px 20px;
-                background-color: #2563eb;
+                background-color: #0f172a;
                 color: white !important;
                 text-decoration: none;
                 border-radius: 8px;
@@ -239,15 +242,21 @@ def _render_email_corporativo(title: str, body_html: str, label: str = "CDASOFT"
                 border-top: 1px solid #e2e8f0;
                 padding-top: 12px;
             }}
+            p {{
+                font-family: {fuente};
+                font-size: 16px;
+                line-height: 1.6;
+                color: #0f172a;
+            }}
         </style>
     </head>
-    <body>
-        <div class="container">
-            <div class="brand-head">{label}</div>
-            <div class="card">
-                <h1 class="title">{title}</h1>
+    <body style="margin:0;padding:0;background:#eef2f7;font-family:{fuente};line-height:1.6;color:#0f172a;">
+        <div class="container" style="max-width:640px;margin:0 auto;padding:24px 16px;font-family:{fuente};">
+            <div class="brand-head" style="background-color:#0f172a;background-image:linear-gradient(135deg,#0f172a,#1e3a8a);color:#e2e8f0;border-radius:12px 12px 0 0;padding:14px 20px;font-size:12px;letter-spacing:0.4px;text-transform:uppercase;font-weight:600;font-family:{fuente};">{label}</div>
+            <div class="card" style="background:#ffffff;border-radius:0 0 12px 12px;padding:28px 24px;border:1px solid #dbe5f1;border-top:0;font-family:{fuente};color:#0f172a;">
+                <h1 class="title" style="font-family:{fuente};font-size:28px;font-weight:700;color:#0f172a;margin:0 0 14px 0;line-height:1.25;">{title_esc}</h1>
                 {body_html}
-                <p class="legal">
+                <p class="legal" style="margin-top:20px;font-size:11px;color:#94a3b8;border-top:1px solid #e2e8f0;padding-top:12px;font-family:{fuente};">
                     Este mensaje fue generado automáticamente por el sistema.
                 </p>
             </div>
@@ -842,6 +851,257 @@ def generar_email_recordatorio_proxima_rtm(
         body_html=body_html,
         label=label,
     )
+
+
+def _motivo_campana_en_oracion(etiqueta: str | None) -> str:
+    """Frase para tejer el motivo (no un tag crudo detrás de dos puntos)."""
+    t = (etiqueta or "").strip() or "nuestra jornada de revisión"
+    low = t.lower()
+    if low.startswith(("la ", "el ", "las ", "los ", "esta ", "este ", "nuestra ", "nuestro ")):
+        return t
+    return f"la {t}"
+
+
+def _bloque_cta_agendar(agendamiento_url: str) -> str:
+    """Mismo botón de tabla/inline que el resto de correos CDASoft (Gmail respeta la fuente)."""
+    href = html.escape(agendamiento_url)
+    cta = _email_cta_button(agendamiento_url, "Agendar tu cita")
+    return f"""
+        {cta}
+        <p class="muted" style="text-align:center;margin-top:8px;font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:14px;color:#475569;">
+            Si el botón no abre, copia este enlace:
+            <span style="word-break:break-all;">{href}</span>
+        </p>
+    """
+
+
+def cuerpo_texto_predeterminado(*, tipo: str, etiqueta: str | None = None) -> tuple[str, str]:
+    """Asunto y cuerpo plano (editables). Placeholders: {{nombre}} {{cda}} {{placa}} {{fecha}}."""
+    tipo_n = (tipo or "").strip().lower()
+    if tipo_n == "por_vencer":
+        return (
+            "{{cda}} - Recordatorio de próxima RTM",
+            "Hola {{nombre}},\n\n"
+            "¿Ya revisó la vigencia de su revisión técnico-mecánica? La que hizo con nosotros "
+            "se está por vencer, y queremos recordárselo a tiempo.\n\n"
+            "Placa: {{placa}}\n"
+            "Fecha sugerida: {{fecha}}\n\n"
+            "Si ya la hizo, puede ignorar este mensaje.",
+        )
+    if tipo_n == "inactivos":
+        return (
+            "{{cda}} - Lo esperamos para su revisión",
+            "Hola {{nombre}},\n\n"
+            "En {{cda}} hace tiempo no vemos la placa {{placa}} y queremos volver a atenderle. "
+            "Una revisión técnico-mecánica a tiempo le evita contratiempos en carretera.\n\n"
+            "Si ya nos visitó o tiene cita, puede ignorar este mensaje.",
+        )
+    motivo = _motivo_campana_en_oracion(etiqueta)
+    return (
+        f"{{{{cda}}}} — Adelante su revisión en {motivo}",
+        "Hola {{nombre}},\n\n"
+        f"Con motivo de {motivo}, en {{{{cda}}}} lo invitamos a adelantar su revisión "
+        "técnico-mecánica. Hacerla ahora le evita filas y deja el vehículo listo para el camino.\n\n"
+        "Si ya tiene cita o acaba de hacérsela, ignore este mensaje.",
+    )
+
+
+def _aplicar_placeholders_campana(
+    texto: str,
+    *,
+    nombre_cda: str,
+    nombre_cliente: str,
+    placa: str | None,
+    fecha: str | None,
+) -> str:
+    return (
+        (texto or "")
+        .replace("{{nombre}}", nombre_cliente)
+        .replace("{{cda}}", nombre_cda)
+        .replace("{{placa}}", (placa or "").strip() or "su vehículo")
+        .replace("{{fecha}}", (fecha or "").strip() or "próximamente")
+    )
+
+
+def generar_email_desde_cuerpo_libre(
+    *,
+    nombre_cda: str,
+    nombre_cliente: str,
+    placa: str | None,
+    agendamiento_url: str,
+    asunto: str,
+    cuerpo_texto: str,
+    fecha: str | None = None,
+) -> tuple[str, str]:
+    """Carta corporativa a partir de un cuerpo plano escrito por el CDA o por el Asistente CDASoft."""
+    cda = _display_cda(nombre_cda)
+    persona = _display_cliente(nombre_cliente)
+    placa_raw = (placa or "").strip()
+    fecha_raw = (fecha or "").replace("RTM vence el ", "").strip()
+    asunto_f = _aplicar_placeholders_campana(
+        (asunto or "").strip() or f"{cda} — Invitación a revisión",
+        nombre_cda=cda,
+        nombre_cliente=persona,
+        placa=placa_raw,
+        fecha=fecha_raw,
+    )
+    filled = _aplicar_placeholders_campana(
+        (cuerpo_texto or "").strip(),
+        nombre_cda=cda,
+        nombre_cliente=persona,
+        placa=placa_raw,
+        fecha=fecha_raw,
+    )
+    if not filled:
+        raise ValueError("El cuerpo del correo está vacío.")
+    bloques = []
+    p_style = (
+        "font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:16px;"
+        "line-height:1.6;color:#0f172a;margin:0 0 14px 0;"
+    )
+    for bloque in filled.split("\n\n"):
+        limpio = html.escape(bloque.strip()).replace("\n", "<br />")
+        if limpio:
+            bloques.append(f'<p style="{p_style}">{limpio}</p>')
+    highlight = ""
+    if placa_raw:
+        highlight = f"""
+    <div class="highlight" style="background:#f8fafc;border:1px solid #e2e8f0;border-left:4px solid #1e3a8a;border-radius:8px;padding:12px 14px;margin:18px 0;color:#1e293b;font-family:Segoe UI,Arial,Helvetica,sans-serif;">
+        <p style="margin:0 0 6px 0;font-family:Segoe UI,Arial,Helvetica,sans-serif;">📍 <strong>Placa:</strong> {html.escape(placa_raw)}</p>
+        <p style="margin:0;font-family:Segoe UI,Arial,Helvetica,sans-serif;">🔧 <strong>Servicio:</strong> Revisión técnico-mecánica</p>
+    </div>
+        """
+    cta = _bloque_cta_agendar(agendamiento_url) if agendamiento_url else ""
+    intro_cta = (
+        ""
+        if "agendar" in filled.lower()
+        else f'<p style="{p_style}">Agendar su cita es sencillo:</p>'
+    )
+    body_html = f"""
+    {"".join(bloques)}
+    {highlight}
+    {intro_cta}
+    {cta}
+    <p class="muted" style="font-family:Segoe UI,Arial,Helvetica,sans-serif;font-size:14px;color:#475569;">
+        Saludos,<br />
+        El equipo de {html.escape(cda)}
+    </p>
+    """
+    return asunto_f[:180], _render_email_corporativo(
+        title=asunto_f[:80],
+        body_html=body_html,
+        label=f"Campaña - {cda}",
+    )
+
+
+def generar_email_campana(
+    *,
+    nombre_cda: str,
+    nombre_cliente: str,
+    placa: str | None,
+    agendamiento_url: str,
+    tipo: str,
+    etiqueta: str | None = None,
+    motivo: str | None = None,
+    asunto_libre: str | None = None,
+    cuerpo_libre: str | None = None,
+) -> tuple[str, str]:
+    """Correo de campaña Comunicaciones. Misma cáscara corporativa que el cron de RTM."""
+    if (cuerpo_libre or "").strip():
+        fecha = (motivo or "").replace("RTM vence el ", "").strip() or None
+        return generar_email_desde_cuerpo_libre(
+            nombre_cda=nombre_cda,
+            nombre_cliente=nombre_cliente,
+            placa=placa,
+            agendamiento_url=agendamiento_url,
+            asunto=asunto_libre or "",
+            cuerpo_texto=cuerpo_libre or "",
+            fecha=fecha,
+        )
+    tipo_n = (tipo or "").strip().lower()
+    if tipo_n == "por_vencer":
+        fecha = html.escape((motivo or "próximamente").replace("RTM vence el ", "").strip() or "próximamente")
+        html_cuerpo = generar_email_recordatorio_proxima_rtm(
+            nombre_cda,
+            nombre_cliente,
+            (placa or "").strip() or "sin placa",
+            "Revisión técnico-mecánica",
+            fecha,
+            agendamiento_url,
+            etapa="proximo",
+        )
+        return f"{_display_cda(nombre_cda)} - Recordatorio de próxima RTM", html_cuerpo
+    nombre_cda = _display_cda(nombre_cda)
+    nombre_cliente = _display_cliente(nombre_cliente)
+    placa_raw = (placa or "").strip()
+    placa_txt = html.escape(placa_raw) if placa_raw else ""
+    cta = _bloque_cta_agendar(agendamiento_url) if agendamiento_url else ""
+    if tipo_n == "inactivos":
+        highlight = ""
+        if placa_txt:
+            highlight = f"""
+    <div class="highlight">
+        <p style="margin:0 0 6px 0;">📍 <strong>Placa:</strong> {placa_txt}</p>
+        <p style="margin:0;">🔧 <strong>Servicio:</strong> Revisión técnico-mecánica</p>
+    </div>
+            """
+        title = f"Lo esperamos de nuevo - {nombre_cda}"
+        label = f"Campaña - {nombre_cda}"
+        asunto = f"{nombre_cda} - Lo esperamos para su revisión"
+        placa_frase = (
+            f" hace tiempo no vemos la placa <strong>{placa_txt}</strong> y"
+            if placa_txt
+            else ""
+        )
+        body_html = f"""
+    <p>Hola <strong>{html.escape(nombre_cliente)}</strong>,</p>
+    <p>
+        En <strong>{html.escape(nombre_cda)}</strong>{placa_frase} queremos volver a atenderle.
+        Una revisión técnico-mecánica a tiempo le evita contratiempos en carretera.
+    </p>
+    {highlight}
+    <p>Agendar su cita es sencillo:</p>
+    {cta}
+    <p>Si ya nos visitó o tiene cita, puede ignorar este mensaje.</p>
+    <p><strong>¡Que tengas un excelente día!</strong></p>
+    <p class="muted">
+        Saludos,<br />
+        El equipo de {html.escape(nombre_cda)}
+    </p>
+        """
+        return asunto[:180], _render_email_corporativo(title=title, body_html=body_html, label=label)
+
+    motivo_plain = _motivo_campana_en_oracion(etiqueta)
+    motivo_oracion = html.escape(motivo_plain)
+    title = f"Adelante su revisión - {nombre_cda}"
+    label = f"Campaña - {nombre_cda}"
+    asunto = f"{nombre_cda} — Adelante su revisión en {motivo_plain}"
+    highlight = ""
+    if placa_txt:
+        highlight = f"""
+    <div class="highlight">
+        <p style="margin:0 0 6px 0;">📍 <strong>Placa:</strong> {placa_txt}</p>
+        <p style="margin:0;">🔧 <strong>Servicio:</strong> Revisión técnico-mecánica</p>
+    </div>
+        """
+    body_html = f"""
+    <p>Hola <strong>{html.escape(nombre_cliente)}</strong>,</p>
+    <p>
+        Con motivo de {motivo_oracion}, en <strong>{html.escape(nombre_cda)}</strong>
+        lo invitamos a adelantar su revisión técnico-mecánica. Hacerla ahora le evita
+        filas y deja el vehículo listo para el camino.
+    </p>
+    {highlight}
+    <p>Agendar su cita es sencillo:</p>
+    {cta}
+    <p>Si ya tiene cita o acaba de hacérsela, ignore este mensaje.</p>
+    <p><strong>¡Que tengas un excelente día!</strong></p>
+    <p class="muted">
+        Saludos,<br />
+        El equipo de {html.escape(nombre_cda)}
+    </p>
+    """
+    return asunto[:180], _render_email_corporativo(title=title, body_html=body_html, label=label)
 
 
 def generar_email_recordatorio_control_preventivo(

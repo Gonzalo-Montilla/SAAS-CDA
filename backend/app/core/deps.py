@@ -276,6 +276,16 @@ def get_recepcionista_or_admin(current_user: Usuario = Depends(get_current_user)
     return current_user
 
 
+def get_comunicaciones(current_user: Usuario = Depends(get_current_user)) -> Usuario:
+    """Gerente, administrador de sede o comercial: campañas WhatsApp."""
+    if current_user.rol not in (RolEnum.GERENTE, RolEnum.ADMINISTRADOR, RolEnum.COMERCIAL):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Solo gerentes, administradores o comerciales pueden gestionar campañas.",
+        )
+    return current_user
+
+
 def get_agendamiento_or_admin(current_user: Usuario = Depends(get_current_user)) -> Usuario:
     """Recepcionistas, comerciales, administradores de sede o gerente."""
     if current_user.rol not in (

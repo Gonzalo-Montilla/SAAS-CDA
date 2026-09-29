@@ -27,6 +27,8 @@ export interface WhatsAppSettings {
   plantilla_preventiva: string | null;
   plantilla_reinspeccion: string | null;
   plantilla_aprobacion: string | null;
+  plantilla_campana_inactivos?: string | null;
+  plantilla_campana_temporada?: string | null;
   asistente_habilitado: boolean;
   listo_para_enviar: boolean;
   webhook_url: string | null;
@@ -57,6 +59,8 @@ export interface WhatsAppSettingsUpdatePayload {
   plantilla_preventiva?: string | null;
   plantilla_reinspeccion?: string | null;
   plantilla_aprobacion?: string | null;
+  plantilla_campana_inactivos?: string | null;
+  plantilla_campana_temporada?: string | null;
   asistente_habilitado?: boolean;
 }
 
@@ -80,7 +84,9 @@ export type WhatsAppEventoPrueba =
   | 'preventiva'
   | 'preventiva_vencida'
   | 'reinspeccion'
-  | 'aprobado';
+  | 'aprobado'
+  | 'campana_inactivos'
+  | 'campana_jornada';
 
 export interface WhatsAppPackItem {
   evento: WhatsAppEventoPrueba;
@@ -96,6 +102,18 @@ export interface WhatsAppTestSendResult {
   message: string;
   destino_e164?: string | null;
   message_id?: string | null;
+}
+
+export interface WhatsAppPlantillaCrearItem {
+  nombre: string;
+  status: string;
+  message: string;
+}
+
+export interface WhatsAppPlantillasCrearOut {
+  ok: boolean;
+  message: string;
+  items: WhatsAppPlantillaCrearItem[];
 }
 
 export const whatsappApi = {
@@ -117,6 +135,10 @@ export const whatsappApi = {
   },
   testSend: async (celular: string, evento: WhatsAppEventoPrueba = 'calidad'): Promise<WhatsAppTestSendResult> => {
     const { data } = await apiClient.post<WhatsAppTestSendResult>('/whatsapp/test-send', { celular, evento });
+    return data;
+  },
+  crearPlantillasCampana: async (): Promise<WhatsAppPlantillasCrearOut> => {
+    const { data } = await apiClient.post<WhatsAppPlantillasCrearOut>('/whatsapp/plantillas-campana');
     return data;
   },
 };

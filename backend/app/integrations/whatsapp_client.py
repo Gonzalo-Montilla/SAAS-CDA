@@ -36,6 +36,7 @@ def build_template_payload(
     template_name: str,
     lang: str,
     body_params: list[str],
+    url_button_suffix: str | None = None,
 ) -> dict:
     components = []
     if body_params:
@@ -43,6 +44,16 @@ def build_template_payload(
             {
                 "type": "body",
                 "parameters": [{"type": "text", "text": str(p)[:1024]} for p in body_params],
+            }
+        )
+    suffix = (url_button_suffix or "").strip()
+    if suffix:
+        components.append(
+            {
+                "type": "button",
+                "sub_type": "url",
+                "index": "0",
+                "parameters": [{"type": "text", "text": suffix[:1024]}],
             }
         )
     return {
@@ -193,6 +204,132 @@ def probar_dialog360(*, api_key: str, timeout: float = 20.0) -> WhatsAppApiResul
     except Exception as exc:
         return WhatsAppApiResult(ok=False, status_code=0, error=str(exc)[:500])
     return WhatsAppApiResult(ok=False, status_code=last_status, error=last_error)
+
+
+def _headers_dialog360(api_key: str) -> dict[str, str]:
+    return {"D360-API-KEY": api_key, "Content-Type": "application/json"}
+
+
+def listar_plantillas_dialog360(*, api_key: str, timeout: float = 20.0) -> tuple[list[dict], WhatsAppApiResult]:
+    url = f"{DIALOG360_BASE}/message_templates"
+    params = {"fields": "id,name,status,language,category,rejected_reason", "limit": 100}
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.get(url, headers=_headers_dialog360(api_key), params=params)
+    except Exception as exc:
+        return [], WhatsAppApiResult(ok=False, status_code=0, error=str(exc)[:500])
+    if resp.status_code >= 400:
+        return [], WhatsAppApiResult(ok=False, status_code=resp.status_code, error=_truncate_error(resp.text))
+    rows: list[dict] = []
+    try:
+        data = resp.json()
+        if isinstance(data, dict) and isinstance(data.get("data"), list):
+            rows = [x for x in data["data"] if isinstance(x, dict)]
+        elif isinstance(data, list):
+            rows = [x for x in data if isinstance(x, dict)]
+    except Exception:
+        rows = []
+    return rows, WhatsAppApiResult(ok=True, status_code=resp.status_code)
+
+
+def crear_plantilla_dialog360(*, api_key: str, payload: dict, timeout: float = 30.0) -> WhatsAppApiResult:
+    url = f"{DIALOG360_BASE}/message_templates"
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.post(url, headers=_headers_dialog360(api_key), json=payload)
+    except Exception as exc:
+        return WhatsAppApiResult(ok=False, status_code=0, error=str(exc)[:500])
+    if resp.status_code >= 400:
+        return WhatsAppApiResult(ok=False, status_code=resp.status_code, error=_truncate_error(resp.text))
+    template_id = None
+    try:
+        data = resp.json()
+        if isinstance(data, dict):
+            template_id = str(data.get("id") or "") or None
+    except Exception:
+        pass
+    return WhatsAppApiResult(ok=True, status_code=resp.status_code, message_id=template_id)
+
+
+def editar_plantilla_dialog360(*, api_key: str, template_id: str, payload: dict, timeout: float = 30.0) -> WhatsAppApiResult:
+    url = f"{DIALOG360_BASE}/message_templates/{template_id.strip()}"
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.post(url, headers=_headers_dialog360(api_key), json=payload)
+    except Exception as exc:
+        return WhatsAppApiResult(ok=False, status_code=0, error=str(exc)[:500])
+    if resp.status_code >= 400:
+        return WhatsAppApiResult(ok=False, status_code=resp.status_code, error=_truncate_error(resp.text))
+    return WhatsAppApiResult(ok=True, status_code=resp.status_code, message_id=template_id.strip())
+
+
+def listar_plantillas_cloud_api(*, waba_id: str, access_token: str, timeout: float = 20.0) -> tuple[list[dict], WhatsAppApiResult]:
+    url = f"{GRAPH_BASE}/{waba_id.strip()}/message_templates"
+    params = {"fields": "id,name,status,language,category,rejected_reason", "limit": 100}
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.get(
+                url,
+                headers={"Authorization": f"Bearer {access_token}"},
+                params=params,
+            )
+    except Exception as exc:
+        return [], WhatsAppApiResult(ok=False, status_code=0, error=str(exc)[:500])
+    if resp.status_code >= 400:
+        return [], WhatsAppApiResult(ok=False, status_code=resp.status_code, error=_truncate_error(resp.text))
+    rows: list[dict] = []
+    try:
+        data = resp.json()
+        if isinstance(data, dict) and isinstance(data.get("data"), list):
+            rows = [x for x in data["data"] if isinstance(x, dict)]
+    except Exception:
+        rows = []
+    return rows, WhatsAppApiResult(ok=True, status_code=resp.status_code)
+
+
+def crear_plantilla_cloud_api(*, waba_id: str, access_token: str, payload: dict, timeout: float = 30.0) -> WhatsAppApiResult:
+    url = f"{GRAPH_BASE}/{waba_id.strip()}/message_templates"
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+    except Exception as exc:
+        return WhatsAppApiResult(ok=False, status_code=0, error=str(exc)[:500])
+    if resp.status_code >= 400:
+        return WhatsAppApiResult(ok=False, status_code=resp.status_code, error=_truncate_error(resp.text))
+    template_id = None
+    try:
+        data = resp.json()
+        if isinstance(data, dict):
+            template_id = str(data.get("id") or "") or None
+    except Exception:
+        pass
+    return WhatsAppApiResult(ok=True, status_code=resp.status_code, message_id=template_id)
+
+
+def editar_plantilla_cloud_api(*, access_token: str, template_id: str, payload: dict, timeout: float = 30.0) -> WhatsAppApiResult:
+    url = f"{GRAPH_BASE}/{template_id.strip()}"
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.post(
+                url,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+    except Exception as exc:
+        return WhatsAppApiResult(ok=False, status_code=0, error=str(exc)[:500])
+    if resp.status_code >= 400:
+        return WhatsAppApiResult(ok=False, status_code=resp.status_code, error=_truncate_error(resp.text))
+    return WhatsAppApiResult(ok=True, status_code=resp.status_code, message_id=template_id.strip())
 
 
 def _parse_send_response(resp: httpx.Response) -> WhatsAppApiResult:

@@ -1857,8 +1857,8 @@ export default function SaaSBackoffice() {
             <BackofficeSectionHeading
               className="mb-4"
               icon={Sparkles}
-              title="Métricas Grok (pago CDASoft)"
-              description="Costo estimado xAI: foto de tarjeta y redacciones del asistente WhatsApp. Abajo, cuántos WhatsApp se enviaron (volumen; Meta lo paga el CDA)."
+              title="Métricas del Asistente CDASoft"
+              description="Costo estimado: foto de tarjeta y redacciones del asistente WhatsApp. Abajo, cuántos WhatsApp se enviaron (volumen; Meta lo paga el CDA)."
             />
             <div className="grid grid-cols-1 md:grid-cols-3 gap-3 mb-4">
               <label className="text-sm text-slate-700">
@@ -1877,15 +1877,16 @@ export default function SaaSBackoffice() {
                 </select>
               </label>
               <label className="text-sm text-slate-700">
-                Origen Grok
+                Origen del Asistente
                 <select
                   className="mt-1 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"
                   value={grokOrigenFilter}
                   onChange={(e) => setGrokOrigenFilter(e.target.value)}
                 >
-                  <option value="">Todos (foto + WhatsApp)</option>
+                  <option value="">Todos (foto, WhatsApp, campaña)</option>
                   <option value="tarjeta">Foto de tarjeta</option>
                   <option value="whatsapp">WhatsApp asistente</option>
+                  <option value="campana">Campaña</option>
                 </select>
               </label>
               <label className="text-sm text-slate-700">
@@ -1934,7 +1935,7 @@ export default function SaaSBackoffice() {
 
             {grokMetricasQuery.isLoading && <LoadingBlock lines={4} />}
             {grokMetricasQuery.isError && (
-              <p className="text-sm text-red-600">No fue posible cargar métricas Grok del backoffice.</p>
+              <p className="text-sm text-red-600">No fue posible cargar métricas del Asistente CDASoft.</p>
             )}
             {grokMetricasQuery.data && (
               <div className="space-y-4">
@@ -1949,7 +1950,7 @@ export default function SaaSBackoffice() {
                     <p className="font-semibold">Usos útiles</p>
                     <p>
                       {grokMetricasQuery.data.total_usos === 0
-                        ? 'Sin llamadas Grok en el periodo'
+                        ? 'Sin usos del Asistente en el periodo'
                         : grokMetricasQuery.data.leidas_pct < 70
                           ? `Alerta: solo ${grokMetricasQuery.data.leidas_pct}% con éxito (meta sugerida >= 70%)`
                           : `OK: ${grokMetricasQuery.data.leidas_pct}% con éxito`}
@@ -1964,7 +1965,7 @@ export default function SaaSBackoffice() {
                     <p>
                       {grokMetricasQuery.data.error_count > 0
                         ? `${grokMetricasQuery.data.error_count} fallos (sin cobro estimado)`
-                        : 'Sin fallos de Grok en el periodo'}
+                        : 'Sin fallos del Asistente en el periodo'}
                     </p>
                   </div>
                   <div className="rounded-lg border border-violet-200 bg-violet-50 px-3 py-2 text-xs text-violet-800">
@@ -1974,7 +1975,7 @@ export default function SaaSBackoffice() {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
                   <div className="kpi-card">
-                    <p className="kpi-label">Usos Grok</p>
+                    <p className="kpi-label">Usos del Asistente</p>
                     <p className="kpi-value">{grokMetricasQuery.data.total_usos}</p>
                   </div>
                   <div className="kpi-card">
@@ -2033,10 +2034,10 @@ export default function SaaSBackoffice() {
 
                 <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
                   <div>
-                    <p className="mb-2 text-xs font-semibold text-slate-600">Costo Grok por origen</p>
+                    <p className="mb-2 text-xs font-semibold text-slate-600">Costo del Asistente por origen</p>
                     <SaasMetricBarChart
                       data={grokCostoChartFromSummary(grokMetricasQuery.data)}
-                      emptyText="Sin consumo Grok en el período."
+                      emptyText="Sin consumo del Asistente en el período."
                       yCompact
                       yWidth={52}
                       tooltipFormatter={(value, payload) => {
@@ -2059,7 +2060,7 @@ export default function SaaSBackoffice() {
 
                 <div className="section-card p-4 border border-slate-200">
                   <div className="mb-2 flex items-center justify-between gap-3">
-                    <p className="text-sm font-semibold text-slate-800">Por origen (Grok)</p>
+                    <p className="text-sm font-semibold text-slate-800">Por origen (Asistente CDASoft)</p>
                     <span className="text-xs text-slate-500">Foto vs redacción WhatsApp · mismo periodo</span>
                   </div>
                   <div className="table-shell">
@@ -2078,14 +2079,18 @@ export default function SaaSBackoffice() {
                         {(grokMetricasQuery.data.by_origen || []).length === 0 ? (
                           <tr>
                             <td colSpan={6} className="text-slate-500">
-                              Sin llamadas Grok en el período.
+                              Sin usos del Asistente en el período.
                             </td>
                           </tr>
                         ) : (
                           grokMetricasQuery.data.by_origen.map((row) => (
                             <tr key={row.origen}>
                               <td className="font-semibold text-slate-900">
-                                {row.origen === 'whatsapp' ? 'WhatsApp asistente' : 'Foto de tarjeta'}
+                                {row.origen === 'whatsapp'
+                                  ? 'WhatsApp asistente'
+                                  : row.origen === 'campana'
+                                    ? 'Campaña'
+                                    : 'Foto de tarjeta'}
                               </td>
                               <td>{row.usos}</td>
                               <td className="text-emerald-700">{row.exito}</td>
@@ -2110,7 +2115,7 @@ export default function SaaSBackoffice() {
                 <div className="section-card p-4 border border-slate-200">
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <p className="text-sm font-semibold text-slate-800">Por tenant</p>
-                    <span className="text-xs text-slate-500">Usos Grok y costo estimado CDASoft</span>
+                    <span className="text-xs text-slate-500">Usos del Asistente y costo estimado CDASoft</span>
                   </div>
                   <div className="table-shell">
                     <table className="table-enterprise">
@@ -2118,7 +2123,7 @@ export default function SaaSBackoffice() {
                         <tr>
                           <th>Tenant</th>
                           <th>Fotos</th>
-                          <th>WhatsApp Grok</th>
+                          <th>WhatsApp asistente</th>
                           <th>Éxito</th>
                           <th>Errores</th>
                           <th>Costo estimado (COP / USD)</th>
@@ -2163,7 +2168,7 @@ export default function SaaSBackoffice() {
               className="mb-4"
               icon={MessageCircle}
               title="WhatsApp enviados (volumen)"
-              description="Plantillas del CDA + respuestas del asistente. No es costo Meta ni Grok; es cuántos mensajes salieron."
+              description="Plantillas del CDA + respuestas del asistente. No es costo Meta ni del Asistente; es cuántos mensajes salieron."
             />
             {whatsappEnviosQuery.isLoading && <LoadingBlock lines={3} />}
             {whatsappEnviosQuery.isError && (
@@ -3929,8 +3934,8 @@ export default function SaaSBackoffice() {
     },
     {
       id: 'grok_metricas',
-      title: 'Métricas Grok',
-      subtitle: 'xAI y WhatsApp enviados',
+      title: 'Asistente CDASoft',
+      subtitle: 'Costo estimado y WhatsApp enviados',
       icon: Sparkles,
       color: 'text-violet-600',
       count: grokMetricasQuery.data?.total_usos,

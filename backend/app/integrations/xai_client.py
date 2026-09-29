@@ -5,6 +5,7 @@ El redactor de WhatsApp y la lectura de tarjeta son funciones distintas: no se m
 from __future__ import annotations
 
 import base64
+import json
 import re
 
 import httpx
@@ -189,6 +190,189 @@ def redactar_whatsapp(
     if not _respeta_hechos(content, texto_base):
         return None, uso
     return content[:4096], uso
+
+
+_SYSTEM_CAMPANA = (
+    "Eres el redactor de campañas de un CDA en Colombia. "
+    "De usted. Máximo 4 frases. No inventes precios, descuentos, fechas ni enlaces. "
+    "No digas que eres IA. El texto es una PROPUESTA para una plantilla Meta; "
+    "no se enviará tal cual a un lote. Conserva las variables {{1}} {{2}} {{3}} {{4}} si aparecen."
+)
+
+
+def redactar_campana(
+    *,
+    nombre_cda: str,
+    tipo: str,
+    etiqueta: str | None,
+    cuerpo_plantilla: str,
+) -> tuple[str | None, dict]:
+    """Propone el texto de plantilla. No envía WhatsApp."""
+    api_key = (getattr(settings, "XAI_API_KEY", None) or "").strip()
+    modelo = (getattr(settings, "XAI_MODEL", None) or "grok-4.3").strip() or "grok-4.3"
+    uso = _uso_respuesta(None, modelo)
+    if not api_key:
+        return None, uso
+    timeout = float(getattr(settings, "XAI_TIMEOUT_SECONDS", 20.0) or 20.0)
+    tipo_n = (tipo or "").strip() or "temporada"
+    etiqueta_n = (etiqueta or "").strip() or "convocatoria de revisión"
+    user = (
+        f"CDA: {nombre_cda}\n"
+        f"Tipo de campaña: {tipo_n}\n"
+        f"Etiqueta/jornada: {etiqueta_n}\n\n"
+        f"Plantilla Meta actual (conserva variables y hechos):\n{cuerpo_plantilla.strip()}\n\n"
+        "Escribe solo el cuerpo propuesto para Meta."
+    )
+    payload = {
+        "model": modelo,
+        "temperature": 0.3,
+        "max_tokens": 280,
+        "messages": [
+            {"role": "system", "content": _SYSTEM_CAMPANA},
+            {"role": "user", "content": user},
+        ],
+    }
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.post(
+                XAI_CHAT_URL,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+    except Exception:
+        return None, uso
+    try:
+        raw_json = resp.json()
+    except Exception:
+        raw_json = None
+    uso = _uso_respuesta(raw_json if isinstance(raw_json, dict) else None, modelo)
+    if resp.status_code >= 400:
+        print(f"[WARN] Grok campaña HTTP {resp.status_code}: {(resp.text or '')[:300]}")
+        return None, uso
+    try:
+        data = raw_json if isinstance(raw_json, dict) else {}
+        choices = data.get("choices") or []
+        if not choices:
+            return None, uso
+        content = ((choices[0].get("message") or {}).get("content") or "").strip()
+    except Exception:
+        return None, uso
+    if len(content) < 12:
+        return None, uso
+    return content[:4096], uso
+
+
+_SYSTEM_CORREO_CAMPANA = (
+    "Eres el redactor de correos de un CDA en Colombia. "
+    "Escribes el CUERPO de un correo electrónico (no WhatsApp, no plantilla de Meta). "
+    "De usted. Tono cercano y profesional. "
+    "No inventes precios, descuentos, fechas, horarios, sedes ni enlaces. "
+    "Solo usa los HECHOS (motivo y notas). Si un horario o dato no está en las notas, no lo agregues. "
+    "No pongas botón ni URL de agendar: el sistema los añade. "
+    "No digas que eres IA. "
+    "Puedes usar {{nombre}}, {{cda}}, {{placa}} y {{fecha}}. "
+    "Responde SOLO un JSON con claves asunto y cuerpo. "
+    "El cuerpo es texto plano, párrafos separados por línea en blanco, máximo 8 frases."
+)
+
+
+def _parse_asunto_cuerpo(raw: str) -> tuple[str, str] | None:
+    t = (raw or "").strip()
+    if not t:
+        return None
+    if t.startswith("```"):
+        t = re.sub(r"^```(?:json)?\s*", "", t, flags=re.I)
+        t = re.sub(r"\s*```$", "", t)
+    data = None
+    try:
+        data = json.loads(t)
+    except Exception:
+        match = re.search(r"\{.*\}", t, re.S)
+        if match:
+            try:
+                data = json.loads(match.group(0))
+            except Exception:
+                data = None
+    if not isinstance(data, dict):
+        return None
+    asunto = str(data.get("asunto") or "").strip()
+    cuerpo = str(data.get("cuerpo") or "").strip()
+    if len(cuerpo) < 12:
+        return None
+    if "{{1}}" in cuerpo or "{{2}}" in cuerpo:
+        return None
+    return (asunto or "Invitación a revisión")[:180], cuerpo[:8000]
+
+
+def redactar_correo_campana(
+    *,
+    nombre_cda: str,
+    tipo: str,
+    etiqueta: str | None,
+    notas: str | None,
+    cuerpo_actual: str | None = None,
+) -> tuple[tuple[str, str] | None, dict]:
+    """Propone asunto y cuerpo de correo. Eso sí se puede enviar."""
+    api_key = (getattr(settings, "XAI_API_KEY", None) or "").strip()
+    modelo = (getattr(settings, "XAI_MODEL", None) or "grok-4.3").strip() or "grok-4.3"
+    uso = _uso_respuesta(None, modelo)
+    if not api_key:
+        return None, uso
+    timeout = float(getattr(settings, "XAI_TIMEOUT_SECONDS", 20.0) or 20.0)
+    notas_n = (notas or "").strip() or "(sin notas adicionales)"
+    etiqueta_n = (etiqueta or "").strip() or "convocatoria de revisión"
+    actual = (cuerpo_actual or "").strip()
+    user = (
+        f"CDA: {nombre_cda}\n"
+        f"Tipo de campaña: {(tipo or '').strip() or 'temporada'}\n"
+        f"Motivo: {etiqueta_n}\n"
+        f"Hechos / notas del CDA:\n{notas_n}\n"
+    )
+    if actual:
+        user += f"\nBorrador actual (mejórelo si hace falta, sin inventar):\n{actual}\n"
+    user += "\nDevuelva JSON {\"asunto\": \"...\", \"cuerpo\": \"...\"}."
+    payload = {
+        "model": modelo,
+        "temperature": 0.3,
+        "max_tokens": 500,
+        "messages": [
+            {"role": "system", "content": _SYSTEM_CORREO_CAMPANA},
+            {"role": "user", "content": user},
+        ],
+    }
+    try:
+        with httpx.Client(timeout=timeout) as client:
+            resp = client.post(
+                XAI_CHAT_URL,
+                headers={
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            )
+    except Exception:
+        return None, uso
+    try:
+        raw_json = resp.json()
+    except Exception:
+        raw_json = None
+    uso = _uso_respuesta(raw_json if isinstance(raw_json, dict) else None, modelo)
+    if resp.status_code >= 400:
+        print(f"[WARN] Grok correo campaña HTTP {resp.status_code}: {(resp.text or '')[:300]}")
+        return None, uso
+    try:
+        data = raw_json if isinstance(raw_json, dict) else {}
+        choices = data.get("choices") or []
+        if not choices:
+            return None, uso
+        content = ((choices[0].get("message") or {}).get("content") or "").strip()
+    except Exception:
+        return None, uso
+    parsed = _parse_asunto_cuerpo(content)
+    return parsed, uso
 
 
 def _respeta_hechos(texto_grok: str, texto_base: str) -> bool:

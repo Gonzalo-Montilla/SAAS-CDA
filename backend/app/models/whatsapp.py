@@ -40,6 +40,8 @@ class TenantWhatsAppSettings(Base):
     plantilla_preventiva = Column(String(120), nullable=True)
     plantilla_reinspeccion = Column(String(120), nullable=True)
     plantilla_aprobacion = Column(String(120), nullable=True)
+    plantilla_campana_inactivos = Column(String(120), nullable=True)
+    plantilla_campana_temporada = Column(String(120), nullable=True)
     asistente_habilitado = Column(Boolean, nullable=False, default=False)
 
     last_error = Column(Text, nullable=True)
