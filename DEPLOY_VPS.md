@@ -457,8 +457,8 @@ Líneas ejemplo (ajusta rutas):
 # Alerta health cada 5 min (exit≠0 → logs/vps_alerts.log; opcional ALERT_WEBHOOK_URL)
 */5 * * * * /var/www/cdasoft/repo/scripts/vps_alert_cron.sh >> /var/www/cdasoft/repo/logs/vps_alert_cron.log 2>&1
 
-# Backup PostgreSQL diario 03:15 UTC (retención 14 días en el script)
-15 3 * * * /var/www/cdasoft/repo/backup_postgres_cdasoft.sh >> /var/www/cdasoft/repo/logs/pg_backup_cron.log 2>&1
+# Backup PostgreSQL diario 03:15 UTC (el script deja las 3 copias más recientes)
+15 3 * * * KEEP_LAST=3 /var/www/cdasoft/repo/backup_postgres_cdasoft.sh >> /var/www/cdasoft/repo/logs/pg_backup_cron.log 2>&1
 
 # Opcional: tar de uploads (documentos + logos) semanal
 0 4 * * 0 tar -czf /var/backups/cdasoft/uploads_$(date -u +\%Y\%m\%d).tar.gz -C /var/www/cdasoft/repo/backend private_uploads uploads >> /var/www/cdasoft/repo/logs/uploads_backup.log 2>&1
@@ -484,9 +484,9 @@ Restore / smoke test de un dump: ver [scripts/restore_postgres_cdasoft.md](scrip
 ## 14b. Backups PostgreSQL (imprescindible)
 
 - Script: [`backup_postgres_cdasoft.sh`](backup_postgres_cdasoft.sh) → `/var/backups/cdasoft/cdasoft_*.sql.gz`
-- Retención: `RETENTION_DAYS=14` por defecto (override con env)
+- Retención: `KEEP_LAST=3` por defecto (las 3 copias más recientes; ~45 GB). Override: `KEEP_LAST=2`
 - Procedimiento restore a DB temporal: [scripts/restore_postgres_cdasoft.md](scripts/restore_postgres_cdasoft.md)
-- Copia los `.sql.gz` (y tars de uploads) **fuera del VPS** cuando puedas (otro disco / Object Storage)
+- Copia los `.sql.gz` (y tars de uploads) **fuera del VPS** (otro disco / Object Storage). El disco local no alcanza para 14 días a 15 GB/día.
 
 ---
 

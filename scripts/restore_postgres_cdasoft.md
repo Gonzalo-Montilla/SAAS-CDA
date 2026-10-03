@@ -62,4 +62,4 @@ Programa un tar periódico (ver `DEPLOY_VPS.md` § backup) y guárdalo junto a l
 15 3 * * * /var/www/cdasoft/repo/backup_postgres_cdasoft.sh >> /var/www/cdasoft/repo/logs/pg_backup_cron.log 2>&1
 ```
 
-Retención: el script borra `cdasoft_*.sql.gz` con más de `RETENTION_DAYS` (default 14). Override: `RETENTION_DAYS=30 /var/www/cdasoft/repo/backup_postgres_cdasoft.sh`
+Retención: el script deja las `KEEP_LAST` copias más recientes (default **3**). Override: `KEEP_LAST=2 /var/www/cdasoft/repo/backup_postgres_cdasoft.sh`
