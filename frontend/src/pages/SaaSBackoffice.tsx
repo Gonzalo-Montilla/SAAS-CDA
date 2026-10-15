@@ -1623,7 +1623,7 @@ export default function SaaSBackoffice() {
                         <p>{data.success_rate_pct < 85 ? 'Alerta: éxito bajo en consultas cobradas (meta >= 85%)' : 'OK: tasa de éxito saludable (consultas cobradas)'}</p>
                       </div>
                       <div className={`rounded-lg border px-3 py-2 text-xs ${
-                        data.fallback_rate_pct > 40 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-sky-200 bg-sky-50 text-sky-800'
+                        data.fallback_rate_pct > 40 ? 'border-amber-200 bg-amber-50 text-amber-800' : 'border-brand-200 bg-brand-50 text-brand-800'
                       }`}>
                         <p className="font-semibold">Uso de fallback</p>
                         <p>{data.fallback_rate_pct > 40 ? 'Alerta: fallback alto en consultas cobradas (revisar proveedor principal)' : 'OK: fallback controlado'}</p>
@@ -2369,7 +2369,7 @@ export default function SaaSBackoffice() {
                   </div>
                   <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
                     <p className="text-slate-500">Cobro (Caja)</p>
-                    <p className="font-semibold text-indigo-700">{opensanctionsUsageQuery.data.recepcion_calls.toLocaleString('es-CO')}</p>
+                    <p className="font-semibold text-brand-700">{opensanctionsUsageQuery.data.recepcion_calls.toLocaleString('es-CO')}</p>
                   </div>
                   <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
                     <p className="text-slate-500">Manual</p>
@@ -2381,7 +2381,7 @@ export default function SaaSBackoffice() {
                   </div>
                   <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
                     <p className="text-slate-500">Screening oficial</p>
-                    <p className="font-semibold text-sky-700">{(opensanctionsUsageQuery.data.screening_calls ?? 0).toLocaleString('es-CO')}</p>
+                    <p className="font-semibold text-brand-700">{(opensanctionsUsageQuery.data.screening_calls ?? 0).toLocaleString('es-CO')}</p>
                   </div>
                   <div className="rounded-lg border border-slate-200 bg-white px-2 py-1.5 shadow-sm">
                     <p className="text-slate-500">Fallos (no en costo)</p>
@@ -2395,9 +2395,9 @@ export default function SaaSBackoffice() {
                     <p className="text-slate-500">Costo proveedor COP</p>
                     <p className="font-semibold text-slate-900">{formatCurrency(opensanctionsUsageQuery.data.estimated_cost_cop)}</p>
                   </div>
-                  <div className="rounded-lg border border-indigo-200 bg-indigo-50/70 px-2 py-1.5 shadow-sm">
+                  <div className="rounded-lg border border-brand-200 bg-brand-50 px-2 py-1.5 shadow-sm">
                     <p className="text-slate-500">Venta neta al CDA</p>
-                    <p className="font-semibold text-indigo-700">{formatCurrency(opensanctionsUsageQuery.data.billed_subtotal_cop)}</p>
+                    <p className="font-semibold text-brand-700">{formatCurrency(opensanctionsUsageQuery.data.billed_subtotal_cop)}</p>
                   </div>
                   <div className="rounded-lg border border-amber-200 bg-amber-50/70 px-2 py-1.5 shadow-sm">
                     <p className="text-slate-500">IVA venta</p>
@@ -2485,7 +2485,7 @@ export default function SaaSBackoffice() {
     if (activeModule === 'tenants') {
       return (
         <div className="space-y-6">
-          <div className="section-card p-6 ring-1 ring-indigo-100/70">
+          <div className="section-card p-6">
             <BackofficeSectionHeading
               className="mb-4"
               icon={Building2}
@@ -2525,7 +2525,7 @@ export default function SaaSBackoffice() {
                         </td>
                         <td className="text-slate-700">{tenant.correo_electronico || '-'}</td>
                         <td>
-                          <span className="inline-flex rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-semibold uppercase text-indigo-800">
+                          <span className="inline-flex rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-[11px] font-semibold uppercase text-brand-800">
                             {tenant.plan_actual}
                           </span>
                         </td>
@@ -2726,7 +2726,7 @@ export default function SaaSBackoffice() {
             </p>
           )}
 
-          <div className="section-card p-6 ring-1 ring-violet-200/80 bg-violet-50/30">
+          <div className="section-card p-6">
             <BackofficeSectionHeading
               className="mb-4"
               icon={FileText}
@@ -3016,7 +3016,7 @@ export default function SaaSBackoffice() {
                                       href={row.public_url}
                                       target="_blank"
                                       rel="noreferrer"
-                                      className="text-blue-600 hover:underline text-xs"
+                                      className="text-brand-600 hover:underline text-xs"
                                     >
                                       Abrir
                                     </a>
@@ -3247,7 +3247,7 @@ export default function SaaSBackoffice() {
 
       return (
         <div className="space-y-6">
-          <div className="section-card p-6 space-y-4 ring-1 ring-cyan-100/70">
+          <div className="section-card p-6 space-y-4">
             <BackofficeSectionHeading
               icon={LifeBuoy}
               title="Tickets de soporte"
@@ -3277,7 +3277,7 @@ export default function SaaSBackoffice() {
               </div>
               <div className="rounded-lg bg-white px-2 py-1.5">
                 <p className="text-slate-500">En progreso</p>
-                <p className="font-semibold text-cyan-700">{supportSummaryQuery.data?.en_progreso ?? '-'}</p>
+                <p className="font-semibold text-slate-700">{supportSummaryQuery.data?.en_progreso ?? '-'}</p>
               </div>
               <div className="rounded-lg bg-white px-2 py-1.5">
                 <p className="text-slate-500">Sin resolver</p>
@@ -3823,7 +3823,7 @@ export default function SaaSBackoffice() {
               <div className="kpi-card !p-3"><span className="kpi-label">Usuarios SaaS</span><p className="text-2xl font-bold text-slate-900 mt-1">{securitySummaryQuery.data.total_saas_users}</p></div>
               <div className="kpi-card !p-3"><span className="kpi-label">Activos</span><p className="text-2xl font-bold text-emerald-700 mt-1">{securitySummaryQuery.data.active_saas_users}</p></div>
               <div className="kpi-card !p-3"><span className="kpi-label">Bloqueados</span><p className="text-2xl font-bold text-amber-700 mt-1">{securitySummaryQuery.data.locked_saas_users}</p></div>
-              <div className="kpi-card !p-3"><span className="kpi-label">MFA activo</span><p className="text-2xl font-bold text-blue-700 mt-1">{securitySummaryQuery.data.mfa_enabled_users}</p></div>
+              <div className="kpi-card !p-3"><span className="kpi-label">MFA activo</span><p className="text-2xl font-bold text-brand-700 mt-1">{securitySummaryQuery.data.mfa_enabled_users}</p></div>
             </div>
           )}
         </div>
@@ -3915,13 +3915,13 @@ export default function SaaSBackoffice() {
     color: string;
     count?: number;
   }> = [
-    { id: 'resumen', title: 'Resumen', subtitle: 'Cobro, CDAs y soporte', icon: Building2, color: 'text-blue-600' },
+    { id: 'resumen', title: 'Resumen', subtitle: 'Cobro, CDAs y soporte', icon: Building2, color: 'text-slate-600' },
     {
       id: 'tenants',
       title: 'Tenants',
       subtitle: 'Gestión de CDAs y estado comercial',
       icon: Users,
-      color: 'text-indigo-600',
+      color: 'text-slate-600',
       count: tenantsQuery.data?.length,
     },
     {
@@ -3929,7 +3929,7 @@ export default function SaaSBackoffice() {
       title: 'Métricas RUNT',
       subtitle: 'Consumo y costo por proveedor',
       icon: Activity,
-      color: 'text-fuchsia-600',
+      color: 'text-slate-600',
       count: runtMetricasQuery.data?.total_consultas,
     },
     {
@@ -3937,7 +3937,7 @@ export default function SaaSBackoffice() {
       title: 'Asistente CDASoft',
       subtitle: 'Costo estimado y WhatsApp enviados',
       icon: Sparkles,
-      color: 'text-violet-600',
+      color: 'text-slate-600',
       count: grokMetricasQuery.data?.total_usos,
     },
     {
@@ -3945,7 +3945,7 @@ export default function SaaSBackoffice() {
       title: 'Métricas OpenSanctions',
       subtitle: 'Consumo API global y por CDA',
       icon: Coins,
-      color: 'text-sky-600',
+      color: 'text-slate-600',
       count: opensanctionsUsageQuery.data?.total_calls,
     },
     {
@@ -3953,14 +3953,14 @@ export default function SaaSBackoffice() {
       title: 'Facturación',
       subtitle: 'Cobros, checkout y FE de licencia',
       icon: Wallet,
-      color: 'text-violet-600',
+      color: 'text-slate-600',
     },
     {
       id: 'soporte',
       title: 'Soporte',
       subtitle: 'Tickets y SLA de atención',
       icon: LifeBuoy,
-      color: 'text-cyan-600',
+      color: 'text-slate-600',
       count: supportSummaryQuery.data?.notificaciones_pendientes,
     },
     {
@@ -3968,7 +3968,7 @@ export default function SaaSBackoffice() {
       title: 'Usuarios SaaS',
       subtitle: 'Accesos y roles internos',
       icon: ShieldCheck,
-      color: 'text-emerald-600',
+      color: 'text-slate-600',
       count: usersQuery.data?.length,
     },
     {
@@ -3976,14 +3976,14 @@ export default function SaaSBackoffice() {
       title: 'Auditoría',
       subtitle: 'Trazabilidad de acciones',
       icon: FileClock,
-      color: 'text-amber-600',
+      color: 'text-slate-600',
     },
     {
       id: 'seguridad',
       title: 'Seguridad',
       subtitle: 'Incidentes y controles',
       icon: Shield,
-      color: 'text-rose-600',
+      color: 'text-slate-600',
     },
   ];
 
@@ -3997,7 +3997,7 @@ export default function SaaSBackoffice() {
       <header className="app-header !z-30">
         <div className="app-header-inner">
           <div className="flex items-center gap-3">
-            <img src={logoCdaSoft} alt="CDASOFT" className="h-14 sm:h-18 lg:h-20 w-auto object-contain" />
+            <img src={logoCdaSoft} alt="CDASOFT" className="h-12 sm:h-14 w-auto object-contain" />
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Panel ejecutivo</p>
               <p className="text-sm font-semibold text-slate-900">CDASOFT SaaS Backoffice</p>
@@ -4014,7 +4014,7 @@ export default function SaaSBackoffice() {
       </header>
 
       <main className="app-main relative" data-table-density={tableDensity}>
-        <div className="section-card mb-6 border-brand-200 bg-gradient-to-r from-white via-brand-50/40 to-indigo-50/40 p-4 sm:p-6">
+        <div className="module-hero">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div>
               <p className="mb-1 text-sm text-slate-500">Sesión global activa</p>
@@ -4041,9 +4041,9 @@ export default function SaaSBackoffice() {
                 <p className="text-[10px] uppercase tracking-wide text-emerald-700">Activos</p>
                 <p className="text-sm font-bold text-emerald-800">{tenantsActive}</p>
               </div>
-              <div className="rounded-lg bg-cyan-50 px-2 py-2">
-                <p className="text-[10px] uppercase tracking-wide text-cyan-700">Tickets</p>
-                <p className="text-sm font-bold text-cyan-800">{supportPending}</p>
+              <div className="rounded-lg bg-slate-50 px-2 py-2">
+                <p className="text-[10px] uppercase tracking-wide text-slate-700">Tickets</p>
+                <p className="text-sm font-bold text-slate-800">{supportPending}</p>
               </div>
             </div>
           </div>
@@ -4142,7 +4142,7 @@ export default function SaaSBackoffice() {
                       <p className="text-xs text-slate-500">/{tenantProfileQuery.data.slug}</p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <span className="inline-flex rounded-full border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-xs font-semibold uppercase text-indigo-800">
+                      <span className="inline-flex rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-semibold uppercase text-brand-800">
                         {tenantProfileQuery.data.plan_actual}
                       </span>
                       <span className={statusBadgeClass(tenantProfileQuery.data.subscription_status)}>
@@ -4249,7 +4249,7 @@ export default function SaaSBackoffice() {
                             type="button"
                             disabled={tenantLogoMutation.isLoading}
                             onClick={() => tenantLogoMutation.mutate()}
-                            className="w-full rounded-lg bg-indigo-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-indigo-700 disabled:opacity-50"
+                            className="w-full rounded-lg bg-brand-600 px-3 py-2 text-xs font-semibold text-white shadow-sm hover:bg-brand-700 disabled:opacity-50"
                           >
                             {tenantLogoMutation.isLoading ? 'Guardando…' : 'Guardar logo'}
                           </button>
@@ -4259,8 +4259,8 @@ export default function SaaSBackoffice() {
                             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500 mb-2">
                               Información del CDA
                             </p>
-                            <div className="mb-3 rounded-xl border border-indigo-100 bg-indigo-50/70 p-3">
-                              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-indigo-700">
+                            <div className="mb-3 rounded-xl border border-brand-200 bg-brand-50 p-3">
+                              <p className="mb-2 text-[11px] font-semibold uppercase tracking-wide text-brand-700">
                                 Editar datos para FE SaaS
                               </p>
                               <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
@@ -4453,41 +4453,41 @@ export default function SaaSBackoffice() {
                             <div className="rounded-xl border border-slate-200 bg-gradient-to-b from-white to-slate-50/90 p-4 shadow-sm ring-1 ring-slate-900/5">
                               <div className="grid grid-cols-1 md:grid-cols-2 gap-x-6 gap-y-4">
                                 <div className="space-y-1">
-                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Nombre comercial</p>
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Nombre comercial</p>
                                   <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.nombre_comercial}</p>
                                 </div>
                                 <div className="space-y-1">
-                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Slug</p>
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Slug</p>
                                   <p className="text-sm font-mono font-semibold text-slate-900">/{tenantProfileQuery.data.slug}</p>
                                 </div>
                                 <div className="space-y-1">
-                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">NIT</p>
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">NIT</p>
                                   <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.nit_cda || '—'}</p>
                                 </div>
                                 <div className="space-y-1 min-w-0">
-                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Correo</p>
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Correo</p>
                                   <p className="text-sm font-semibold text-slate-900 break-all">{tenantProfileQuery.data.correo_electronico || '—'}</p>
                                 </div>
                                 <div className="space-y-1">
-                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Representante</p>
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Representante</p>
                                   <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.nombre_representante || '—'}</p>
                                 </div>
                                 <div className="space-y-1">
-                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Celular</p>
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Celular</p>
                                   <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.celular || '—'}</p>
                                 </div>
                                 <div className="space-y-1">
-                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Plan actual</p>
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Plan actual</p>
                                   <p className="text-sm font-semibold uppercase text-slate-900">{tenantProfileQuery.data.plan_actual}</p>
                                 </div>
                                 <div className="space-y-1.5">
-                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Estado suscripción</p>
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Estado suscripción</p>
                                   <span className={statusBadgeClass(tenantProfileQuery.data.subscription_status)}>
                                     {subscriptionStatusLabel(tenantProfileQuery.data.subscription_status)}
                                   </span>
                                 </div>
                                 <div className="space-y-1.5">
-                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Nómina</p>
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Nómina</p>
                                   <span
                                     className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
                                       tenantProfileQuery.data.nomina_enabled
@@ -4499,7 +4499,7 @@ export default function SaaSBackoffice() {
                                   </span>
                                 </div>
                                 <div className="space-y-1.5">
-                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">SARLAFT</p>
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">SARLAFT</p>
                                   <span
                                     className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
                                       tenantProfileQuery.data.sarlaft_enabled
@@ -4514,11 +4514,11 @@ export default function SaaSBackoffice() {
                                   </p>
                                 </div>
                                 <div className="space-y-1">
-                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Sucursales totales</p>
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Sucursales totales</p>
                                   <p className="text-sm font-semibold text-slate-900">{tenantProfileQuery.data.sedes_totales}</p>
                                 </div>
                                 <div className="space-y-1">
-                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
                                     Sucursales adicionales cobradas
                                   </p>
                                   <p className="text-sm font-semibold text-slate-900">
@@ -4526,13 +4526,13 @@ export default function SaaSBackoffice() {
                                   </p>
                                 </div>
                                 <div className="space-y-1">
-                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Próximo cobro</p>
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Próximo cobro</p>
                                   <p className="text-sm font-semibold text-slate-900">
                                     {formatBillingDate(tenantProfileQuery.data.next_billing_at, '—')}
                                   </p>
                                 </div>
                                 <div className="space-y-1">
-                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">Último pago</p>
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Último pago</p>
                                   <p className="text-sm font-semibold text-slate-900">
                                     {formatBillingDate(tenantProfileQuery.data.last_payment_at, '—')}
                                   </p>
@@ -4548,11 +4548,11 @@ export default function SaaSBackoffice() {
                             <div className="flex flex-col sm:flex-row gap-2 sm:items-stretch">
                               <div className="flex min-w-0 flex-1 items-start gap-2.5 rounded-xl border border-slate-200 bg-gradient-to-b from-white to-slate-50/90 px-3 py-2.5 shadow-sm ring-1 ring-slate-900/5">
                                 <Link2
-                                  className="mt-0.5 h-4 w-4 shrink-0 text-indigo-600"
+                                  className="mt-0.5 h-4 w-4 shrink-0 text-brand-600"
                                   aria-hidden
                                 />
                                 <div className="min-w-0 flex-1">
-                                  <p className="text-[11px] font-medium uppercase tracking-wide text-indigo-600">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">
                                     URL personalizada
                                   </p>
                                   <p className="mt-0.5 text-sm font-mono text-slate-900 leading-snug break-all">
@@ -4795,7 +4795,7 @@ export default function SaaSBackoffice() {
                                     <td className="text-right">
                                       <button
                                         type="button"
-                                        className="inline-flex items-center gap-1 text-xs font-semibold text-primary-600 hover:underline"
+                                        className="inline-flex items-center gap-1 text-xs font-semibold text-brand-600 hover:underline"
                                         onClick={() => {
                                           setSedeUbicacionError('');
                                         setSedeUbicacionEdit({

@@ -516,15 +516,13 @@ export default function Nomina() {
   return (
     <Layout title="Nómina">
       <div className="max-w-6xl mx-auto space-y-6 animate-fade-in">
-        <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-2xl bg-fuchsia-100 text-fuchsia-700 flex items-center justify-center">
-            <ReceiptText className="w-6 h-6" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-slate-900">Desprendibles de nomina</h1>
-            <p className="text-sm text-slate-600">Control de versiones, reemision y descarga historica por liquidacion.</p>
-          </div>
-        </div>
+        <section className="module-hero">
+          <p className="module-hero-title">
+            <ReceiptText className="w-5 h-5 text-slate-600" />
+            Desprendibles de nomina
+          </p>
+          <p className="module-hero-subtitle">Control de versiones, reemision y descarga historica por liquidacion.</p>
+        </section>
 
         {feedback && (
           <div
@@ -538,7 +536,7 @@ export default function Nomina() {
           </div>
         )}
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section className="section-card p-5">
           <div className="flex flex-wrap items-end gap-3 mb-4">
             <div className="min-w-[280px]">
               <label className="block text-xs font-medium text-slate-500 mb-1">Periodo</label>
@@ -665,7 +663,7 @@ export default function Nomina() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+        <section className="section-card p-5 space-y-4">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-slate-900">Parametros legales Colombia (tenant)</h2>
             <span className="text-xs text-slate-500">
@@ -725,7 +723,7 @@ export default function Nomina() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+        <section className="section-card p-5 space-y-4">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-slate-900">Novedades del periodo</h2>
             <span className="text-xs text-slate-500">{periodoId ? `Periodo: ${selectedPeriodo?.anio}-${selectedPeriodo?.mes}` : 'Seleccione periodo'}</span>
@@ -812,8 +810,8 @@ export default function Nomina() {
               </button>
             </div>
           </div>
-          <div className="overflow-x-auto border border-slate-100 rounded-xl">
-            <table className="w-full text-sm">
+          <div className="table-shell">
+            <table className="table-enterprise">
               <thead className="bg-slate-50 text-left text-slate-600">
                 <tr>
                   <th className="px-3 py-2 font-medium">Empleado</th>
@@ -846,7 +844,7 @@ export default function Nomina() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+        <section className="section-card p-5 space-y-4">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-slate-900">Centros de costo</h2>
             <span className="text-xs text-slate-500">{(centrosCostoQuery.data ?? []).length} registrados</span>
@@ -878,8 +876,8 @@ export default function Nomina() {
               {crearCentroCostoMutation.isLoading ? 'Guardando...' : 'Crear centro de costo'}
             </button>
           </div>
-          <div className="overflow-x-auto border border-slate-100 rounded-xl">
-            <table className="w-full text-sm">
+          <div className="table-shell">
+            <table className="table-enterprise">
               <thead className="bg-slate-50 text-left text-slate-600">
                 <tr>
                   <th className="px-3 py-2 font-medium">Codigo</th>
@@ -905,7 +903,7 @@ export default function Nomina() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+        <section className="section-card p-5 space-y-4">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-slate-900">Empleados (hoja de vida basica)</h2>
             <span className="text-xs text-slate-500">{(empleadosQuery.data ?? []).length} registrados</span>
@@ -969,8 +967,8 @@ export default function Nomina() {
               {crearEmpleadoMutation.isLoading ? 'Guardando...' : 'Crear empleado'}
             </button>
           </div>
-          <div className="overflow-x-auto border border-slate-100 rounded-xl">
-            <table className="w-full text-sm">
+          <div className="table-shell">
+            <table className="table-enterprise">
               <thead className="bg-slate-50 text-left text-slate-600">
                 <tr>
                   <th className="px-3 py-2 font-medium">Empleado</th>
@@ -1002,7 +1000,7 @@ export default function Nomina() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm space-y-4">
+        <section className="section-card p-5 space-y-4">
           <div className="flex items-center justify-between gap-3">
             <h2 className="text-lg font-semibold text-slate-900">Contratos</h2>
             <span className="text-xs text-slate-500">{(contratosQuery.data ?? []).length} registrados</span>
@@ -1066,8 +1064,8 @@ export default function Nomina() {
               {crearContratoMutation.isLoading ? 'Guardando...' : 'Crear contrato'}
             </button>
           </div>
-          <div className="overflow-x-auto border border-slate-100 rounded-xl">
-            <table className="w-full text-sm">
+          <div className="table-shell">
+            <table className="table-enterprise">
               <thead className="bg-slate-50 text-left text-slate-600">
                 <tr>
                   <th className="px-3 py-2 font-medium">Empleado</th>
@@ -1106,7 +1104,7 @@ export default function Nomina() {
           </div>
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <section className="section-card overflow-hidden">
           <div className="px-5 py-3 border-b border-slate-100">
             <h2 className="text-lg font-semibold text-slate-900">Liquidaciones del periodo</h2>
           </div>
@@ -1165,8 +1163,8 @@ export default function Nomina() {
             <p className="p-5 text-sm text-slate-600">No hay liquidaciones para este periodo.</p>
           )}
           {periodoId && liquidacionesQuery.data && liquidacionesQuery.data.length > 0 && (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div className="table-shell">
+              <table className="table-enterprise">
                 <thead className="bg-slate-50 text-left text-slate-600">
                   <tr>
                     <th className="px-4 py-3 font-medium">Empleado</th>
@@ -1264,8 +1262,8 @@ export default function Nomina() {
                 <p className="text-sm text-slate-600">No hay versiones registradas para esta liquidacion.</p>
               )}
               {versionesQuery.data && versionesQuery.data.length > 0 && (
-                <div className="overflow-x-auto border border-slate-100 rounded-xl">
-                  <table className="w-full text-sm">
+                <div className="table-shell">
+                  <table className="table-enterprise">
                     <thead className="bg-slate-50 text-left text-slate-600">
                       <tr>
                         <th className="px-3 py-2 font-medium">Version</th>

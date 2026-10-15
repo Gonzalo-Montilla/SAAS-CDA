@@ -141,7 +141,7 @@ export default function Dashboard() {
             <img 
               src={brand.logoSrc}
               alt={brand.nombreComercial}
-              className="h-16 sm:h-20 rounded-2xl shadow-soft"
+              className="h-12 sm:h-14 rounded-xl"
             />
             <div>
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Panel de operación</p>
@@ -236,8 +236,8 @@ export default function Dashboard() {
               onClick={() => navigate('/recepcion')}
               className="card-pos text-left group animate-fade-in"
             >
-              <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-blue-100 text-blue-600 mb-4 group-hover:bg-blue-600 group-hover:text-white transition-all duration-300">
-                <ClipboardList className="w-8 h-8 icon-hover" />
+              <div className="module-tile-icon">
+                <ClipboardList className="w-8 h-8" />
               </div>
               <h3 className="text-xl font-bold text-slate-900 mb-2">Recepción</h3>
               <p className="text-slate-600 text-sm">
@@ -251,8 +251,8 @@ export default function Dashboard() {
               onClick={() => navigate('/agendamiento')}
               className="card-pos text-left group animate-fade-in animate-delay-100"
             >
-              <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-sky-100 text-sky-600 mb-4 group-hover:bg-sky-600 group-hover:text-white transition-all duration-300">
-                <CalendarClock className="w-8 h-8 icon-hover" />
+              <div className="module-tile-icon">
+                <CalendarClock className="w-8 h-8" />
               </div>
               <h3 className="text-xl font-bold text-slate-900 mb-2">Agendamiento</h3>
               <p className="text-slate-600 text-sm">
@@ -267,8 +267,8 @@ export default function Dashboard() {
               onClick={() => navigate('/caja')}
               className="card-pos text-left group animate-fade-in animate-delay-100"
             >
-              <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-emerald-100 text-emerald-600 mb-4 group-hover:bg-emerald-600 group-hover:text-white transition-all duration-300">
-                <Wallet className="w-8 h-8 icon-hover" />
+              <div className="module-tile-icon">
+                <Wallet className="w-8 h-8" />
               </div>
               <h3 className="text-xl font-bold text-slate-900 mb-2">Caja</h3>
               <p className="text-slate-600 text-sm">
@@ -284,8 +284,8 @@ export default function Dashboard() {
                 onClick={() => navigate('/tarifas')}
                 className="card-pos text-left group animate-fade-in animate-delay-200"
               >
-                <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-amber-100 text-amber-600 mb-4 group-hover:bg-amber-600 group-hover:text-white transition-all duration-300">
-                  <DollarSign className="w-8 h-8 icon-hover" />
+                <div className="module-tile-icon">
+                  <DollarSign className="w-8 h-8" />
                 </div>
                 <h3 className="text-xl font-bold text-slate-900 mb-2">Tarifas</h3>
                 <p className="text-slate-600 text-sm">
@@ -297,8 +297,8 @@ export default function Dashboard() {
                 onClick={() => navigate('/proveedores-catalogo')}
                 className="card-pos text-left group animate-fade-in animate-delay-200"
               >
-                <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-teal-100 text-teal-700 mb-4 group-hover:bg-teal-600 group-hover:text-white transition-all duration-300">
-                  <BookUser className="w-8 h-8 icon-hover" />
+                <div className="module-tile-icon">
+                  <BookUser className="w-8 h-8" />
                 </div>
                 <h3 className="text-xl font-bold text-slate-900 mb-2">Proveedores</h3>
                 <p className="text-slate-600 text-sm">
@@ -310,8 +310,8 @@ export default function Dashboard() {
                 onClick={() => navigate('/tesoreria')}
                 className="card-pos text-left group animate-fade-in animate-delay-300"
               >
-                <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-purple-100 text-purple-600 mb-4 group-hover:bg-purple-600 group-hover:text-white transition-all duration-300">
-                  <Vault className="w-8 h-8 icon-hover" />
+                <div className="module-tile-icon">
+                  <Vault className="w-8 h-8" />
                 </div>
                 <h3 className="text-xl font-bold text-slate-900 mb-2">Tesorería</h3>
                 <p className="text-slate-600 text-sm">
@@ -329,8 +329,8 @@ export default function Dashboard() {
                 }}
                 className="card-pos text-left group animate-fade-in animate-delay-300"
               >
-                <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-fuchsia-100 text-fuchsia-700 mb-4 group-hover:bg-fuchsia-600 group-hover:text-white transition-all duration-300">
-                  <ReceiptText className="w-8 h-8 icon-hover" />
+                <div className="module-tile-icon">
+                  <ReceiptText className="w-8 h-8" />
                 </div>
                 <h3 className="text-xl font-bold text-slate-900 mb-2">Nómina</h3>
                 <p className="text-slate-600 text-sm">
@@ -348,8 +348,8 @@ export default function Dashboard() {
                 }}
                 className="card-pos text-left group animate-fade-in animate-delay-300"
               >
-                <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-cyan-100 text-cyan-700 mb-4 group-hover:bg-cyan-600 group-hover:text-white transition-all duration-300">
-                  <FileSpreadsheet className="w-8 h-8 icon-hover" />
+                <div className="module-tile-icon">
+                  <FileSpreadsheet className="w-8 h-8" />
                 </div>
                 <h3 className="text-xl font-bold text-slate-900 mb-2">Contador</h3>
                 <p className="text-slate-600 text-sm">
@@ -361,8 +361,8 @@ export default function Dashboard() {
                 onClick={() => navigate('/reportes')}
                 className="card-pos text-left group animate-fade-in"
               >
-                <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-indigo-100 text-indigo-600 mb-4 group-hover:bg-indigo-600 group-hover:text-white transition-all duration-300">
-                  <BarChart3 className="w-8 h-8 icon-hover" />
+                <div className="module-tile-icon">
+                  <BarChart3 className="w-8 h-8" />
                 </div>
                 <h3 className="text-xl font-bold text-slate-900 mb-2">Reportes</h3>
                 <p className="text-slate-600 text-sm">
@@ -378,8 +378,8 @@ export default function Dashboard() {
               onClick={() => navigate('/organizacion')}
               className="card-pos text-left group animate-fade-in animate-delay-100"
             >
-              <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-rose-100 text-rose-600 mb-4 group-hover:bg-rose-600 group-hover:text-white transition-all duration-300">
-                <Users className="w-8 h-8 icon-hover" />
+              <div className="module-tile-icon">
+                <Users className="w-8 h-8" />
               </div>
               <h3 className="text-xl font-bold text-slate-900 mb-2">Sedes y usuarios</h3>
               <p className="text-slate-600 text-sm">
@@ -393,8 +393,8 @@ export default function Dashboard() {
               onClick={() => navigate('/comunicaciones')}
               className="card-pos text-left group animate-fade-in animate-delay-200"
             >
-              <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-orange-100 text-orange-600 mb-4 group-hover:bg-orange-600 group-hover:text-white transition-all duration-300">
-                <Megaphone className="w-8 h-8 icon-hover" />
+              <div className="module-tile-icon">
+                <Megaphone className="w-8 h-8" />
               </div>
               <h3 className="text-xl font-bold text-slate-900 mb-2">Comunicaciones</h3>
               <p className="text-slate-600 text-sm">
@@ -408,8 +408,8 @@ export default function Dashboard() {
               onClick={() => navigate('/calidad')}
               className="card-pos text-left group animate-fade-in animate-delay-200"
             >
-              <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-violet-100 text-violet-600 mb-4 group-hover:bg-violet-600 group-hover:text-white transition-all duration-300">
-                <MessageSquareHeart className="w-8 h-8 icon-hover" />
+              <div className="module-tile-icon">
+                <MessageSquareHeart className="w-8 h-8" />
               </div>
               <h3 className="text-xl font-bold text-slate-900 mb-2">Calidad</h3>
               <p className="text-slate-600 text-sm">
@@ -429,8 +429,8 @@ export default function Dashboard() {
               }}
               className="card-pos text-left group animate-fade-in animate-delay-300"
             >
-              <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-amber-100 text-amber-700 mb-4 group-hover:bg-amber-600 group-hover:text-white transition-all duration-300">
-                <Shield className="w-8 h-8 icon-hover" />
+              <div className="module-tile-icon">
+                <Shield className="w-8 h-8" />
               </div>
               <h3 className="text-xl font-bold text-slate-900 mb-2">SARLAFT</h3>
               <p className="text-slate-600 text-sm">
@@ -443,8 +443,8 @@ export default function Dashboard() {
             onClick={() => navigate('/soporte')}
             className="card-pos text-left group animate-fade-in animate-delay-200"
           >
-            <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-cyan-100 text-cyan-600 mb-4 group-hover:bg-cyan-600 group-hover:text-white transition-all duration-300">
-              <LifeBuoy className="w-8 h-8 icon-hover" />
+            <div className="module-tile-icon">
+              <LifeBuoy className="w-8 h-8" />
             </div>
             <h3 className="text-xl font-bold text-slate-900 mb-2">Soporte</h3>
             <p className="text-slate-600 text-sm">
@@ -456,8 +456,8 @@ export default function Dashboard() {
             onClick={() => navigate('/documentos')}
             className="card-pos text-left group animate-fade-in animate-delay-200"
           >
-            <div className="flex items-center justify-center w-16 h-16 rounded-2xl bg-teal-100 text-teal-700 mb-4 group-hover:bg-teal-700 group-hover:text-white transition-all duration-300">
-              <FileStack className="w-8 h-8 icon-hover" />
+            <div className="module-tile-icon">
+              <FileStack className="w-8 h-8" />
             </div>
             <h3 className="text-xl font-bold text-slate-900 mb-2">Documentos</h3>
             <p className="text-slate-600 text-sm">
@@ -468,37 +468,37 @@ export default function Dashboard() {
 
         {/* Info rápida: mismo destino /suscripcion que los avisos al terminar el demo o la gracia */}
         <div className="mt-8 grid grid-cols-1 md:grid-cols-3 gap-4 animate-fade-in">
-          <div className="bg-gradient-to-br from-emerald-50 to-emerald-100 border border-emerald-200 rounded-2xl p-5 flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-emerald-600 flex items-center justify-center">
-              <CheckCircle2 className="w-6 h-6 text-white" />
+          <div className="section-card p-5 flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
+              <CheckCircle2 className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-sm text-emerald-700 font-medium">{platformCardSubtitle()}</p>
-              <p className="text-xl font-bold text-emerald-900">{platformCardTitle()}</p>
+              <p className="text-sm text-slate-500 font-medium">{platformCardSubtitle()}</p>
+              <p className="text-xl font-bold text-slate-900">{platformCardTitle()}</p>
             </div>
           </div>
-          <div className="bg-gradient-to-br from-blue-50 to-blue-100 border border-blue-200 rounded-2xl p-5 flex items-center gap-4">
-            <div className="w-12 h-12 rounded-xl bg-primary-600 flex items-center justify-center">
-              <Shield className="w-6 h-6 text-white" />
+          <div className="section-card p-5 flex items-center gap-4">
+            <div className="w-12 h-12 rounded-xl bg-slate-100 text-slate-700 flex items-center justify-center">
+              <Shield className="w-6 h-6" />
             </div>
             <div>
-              <p className="text-sm text-blue-700 font-medium">Rol actual</p>
-              <p className="text-xl font-bold text-blue-900 capitalize">{user?.rol}</p>
+              <p className="text-sm text-slate-500 font-medium">Rol actual</p>
+              <p className="text-xl font-bold text-slate-900 capitalize">{user?.rol}</p>
             </div>
           </div>
           {isGerente(user?.rol) && (
           <button
             type="button"
             onClick={() => navigate('/suscripcion')}
-            className="text-left bg-gradient-to-br from-violet-50 to-violet-100 border border-violet-200 rounded-2xl p-5 flex items-center gap-4 hover:from-violet-100 hover:to-violet-200 hover:border-violet-300 transition-colors shadow-sm"
+            className="text-left section-card p-5 flex items-center gap-4 hover:border-slate-300"
           >
-            <div className="w-12 h-12 rounded-xl bg-violet-600 flex items-center justify-center shrink-0">
+            <div className="w-12 h-12 rounded-xl bg-brand-600 flex items-center justify-center shrink-0">
               <Wallet className="w-6 h-6 text-white" />
             </div>
             <div className="min-w-0">
-              <p className="text-sm text-violet-800 font-medium">Planes y licencia</p>
-              <p className="text-lg font-bold text-violet-950 leading-snug">Gestionar plan</p>
-              <p className="text-xs text-violet-700/90 mt-1">
+              <p className="text-sm text-slate-500 font-medium">Planes y licencia</p>
+              <p className="text-lg font-bold text-slate-900 leading-snug">Gestionar plan</p>
+              <p className="text-xs text-slate-500 mt-1">
                 Revisa planes, calcula tu valor por sedes y paga en línea de forma segura.
               </p>
             </div>

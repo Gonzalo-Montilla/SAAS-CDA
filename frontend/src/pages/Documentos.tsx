@@ -805,30 +805,30 @@ export default function Documentos() {
   return (
     <Layout title="Documentos del CDA">
       <div className="max-w-6xl mx-auto space-y-6 animate-fade-in">
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-slate-100 text-slate-700 flex items-center justify-center">
-              <FileStack className="w-6 h-6" />
-            </div>
+        <section className="module-hero">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
             <div>
-              <h1 className="text-2xl font-bold text-slate-900">Biblioteca documental</h1>
-              <p className="text-sm text-slate-600">
+              <p className="module-hero-title">
+                <FileStack className="w-5 h-5 text-slate-600" />
+                Biblioteca documental
+              </p>
+              <p className="module-hero-subtitle">
                 Versionado, categorías y sede. La descarga requiere sesión iniciada.
               </p>
             </div>
+            {esAdmin && (
+              <button
+                type="button"
+                className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                disabled={certificarCuentaMutation.isLoading}
+                onClick={() => certificarCuentaMutation.mutate()}
+              >
+                <ShieldCheck className="w-4 h-4" />
+                {certificarCuentaMutation.isLoading ? 'Generando certificación…' : 'Certificación en cuenta'}
+              </button>
+            )}
           </div>
-          {esAdmin && (
-            <button
-              type="button"
-              className="inline-flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-600 text-white text-sm font-semibold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
-              disabled={certificarCuentaMutation.isLoading}
-              onClick={() => certificarCuentaMutation.mutate()}
-            >
-              <ShieldCheck className="w-4 h-4" />
-              {certificarCuentaMutation.isLoading ? 'Generando certificación…' : 'Certificación en cuenta'}
-            </button>
-          )}
-        </div>
+        </section>
 
         {feedback && (
           <div
@@ -842,7 +842,7 @@ export default function Documentos() {
           </div>
         )}
 
-        <section className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <section className="section-card p-5">
           <div className="flex flex-wrap items-center justify-between gap-2 mb-3">
             <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center shrink-0">
@@ -981,11 +981,11 @@ export default function Documentos() {
 
         <section
           id="documentos-seccion-subida"
-          className="rounded-2xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/50 shadow-md shadow-slate-200/40 scroll-mt-4 overflow-hidden ring-1 ring-slate-100"
+          className="section-card scroll-mt-4 overflow-hidden"
         >
           <button
             type="button"
-            className="w-full flex items-center justify-between gap-3 px-5 py-4 text-left bg-gradient-to-r from-primary-50/80 via-white to-slate-50/50 border-b border-slate-100/80 hover:from-primary-50 transition-colors"
+            className="w-full flex items-center justify-between gap-3 px-5 py-4 text-left border-b border-slate-100 hover:bg-slate-50 transition-colors"
             onClick={() => setSubidaSeccionAbierta((o) => !o)}
             aria-expanded={subidaSeccionAbierta}
           >
@@ -1196,7 +1196,7 @@ export default function Documentos() {
           )}
         </section>
 
-        <section className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+        <section className="section-card overflow-hidden">
           <div className="px-5 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center gap-3 min-w-0">
               {!carpetaActiva && (
@@ -1352,8 +1352,8 @@ export default function Documentos() {
           {mostrarListado && !listQuery.isLoading && documentosPagina.length > 0 && (
             <>
             {vistaCarpeta === 'tabla' ? (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
+            <div className="table-shell">
+              <table className="table-enterprise">
                 <thead className="bg-slate-50 text-left text-slate-600">
                   <tr>
                     <th className="px-4 py-3 font-medium w-14">Ver.</th>
@@ -1652,7 +1652,7 @@ export default function Documentos() {
         </section>
 
         {esAdmin && (
-          <section className="rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+          <section className="section-card overflow-hidden">
             <div className="px-5 py-3 border-b border-slate-100 flex flex-wrap items-center justify-between gap-3">
               <div className="flex items-start gap-3 min-w-0">
                 <div className="w-10 h-10 rounded-xl bg-slate-100 text-slate-600 flex items-center justify-center shrink-0">
@@ -1742,8 +1742,8 @@ export default function Documentos() {
               <p className="p-8 text-center text-slate-600 text-sm">Aún no hay eventos registrados.</p>
             )}
             {auditoriaQuery.data && auditoriaItems.length > 0 && (
-              <div className="overflow-x-auto max-h-[420px] overflow-y-auto">
-                <table className="w-full text-sm">
+              <div className="table-shell max-h-[420px] overflow-y-auto">
+                <table className="table-enterprise">
                   <thead className="bg-slate-50 text-left text-slate-600 sticky top-0">
                     <tr>
                       <th className="px-4 py-2 font-medium">Fecha</th>
@@ -1873,8 +1873,8 @@ export default function Documentos() {
                 <p className="text-sm text-red-600">No se pudo cargar el historial.</p>
               )}
               {versionesQuery.data && versionesQuery.data.length > 0 && (
-                <div className="overflow-x-auto border border-slate-100 rounded-xl">
-                  <table className="w-full text-sm">
+                <div className="table-shell">
+                  <table className="table-enterprise">
                     <thead className="bg-slate-50 text-left text-slate-600">
                       <tr>
                         <th className="px-3 py-2 font-medium">Ver.</th>

@@ -2671,7 +2671,7 @@ export default function Recepcion() {
                 Si no usa la foto: placa + documento y Consultar RUNT.
               </p>
               {tarjetaAplicada && (
-                <div className="text-xs rounded-lg border border-sky-200 bg-sky-50 p-2 text-sky-900 font-semibold">
+                <div className="text-xs rounded-lg border border-brand-200 bg-brand-50 p-2 text-brand-900 font-semibold">
                   Fuente: datos desde tarjeta. Revise y confirme antes de registrar. No se disparó RUNT.
                 </div>
               )}
@@ -2716,7 +2716,7 @@ export default function Recepcion() {
                 </div>
               )}
               {tarjetaSugerencia && (
-                <div className="mt-2 p-2 rounded-lg border border-sky-200 bg-white text-xs text-slate-700">
+                <div className="mt-2 p-2 rounded-lg border border-brand-200 bg-white text-xs text-slate-700">
                   <p className="font-semibold mb-1">
                     {tarjetaSugerencia.encontrado
                       ? `Sugerencias de tarjeta para ${tarjetaSugerencia.placa_consultada}`
@@ -3448,8 +3448,8 @@ export default function Recepcion() {
                   </label>
                 </div>
               ) : (
-                <div className="md:col-span-2 mt-1 rounded-lg border border-cyan-200 bg-cyan-50 px-4 py-3">
-                  <p className="text-sm font-semibold text-cyan-900">Pruebas de Auditoría no permite cobro de SOAT.</p>
+                <div className="md:col-span-2 mt-1 rounded-lg border border-brand-200 bg-brand-50 px-4 py-3">
+                  <p className="text-sm font-semibold text-brand-900">Pruebas de Auditoría no permite cobro de SOAT.</p>
                 </div>
               )}
             </div>
@@ -3604,7 +3604,7 @@ export default function Recepcion() {
                     Municipio seleccionado: {clienteFactusMunicipalityLabel}
                   </div>
                 ) : clienteFactusMunicipalityId ? (
-                  <div className="mt-2 inline-flex items-center rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-xs font-medium text-sky-800">
+                  <div className="mt-2 inline-flex items-center rounded-full border border-brand-200 bg-brand-50 px-2.5 py-1 text-xs font-medium text-brand-800">
                     Municipio aplicado por defecto (sede/CDA)
                   </div>
                 ) : null}
@@ -4075,7 +4075,7 @@ export default function Recepcion() {
                     <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
                       vehiculo.estado === 'registrado' ? 'bg-yellow-100 text-yellow-800' :
                       vehiculo.estado === 'pagado' ? 'bg-green-100 text-green-800' :
-                      vehiculo.estado === 'en_pista' ? 'bg-blue-100 text-blue-800' :
+                      vehiculo.estado === 'en_pista' ? 'bg-brand-100 text-brand-800' :
                       vehiculo.estado === 'aprobado' ? 'bg-green-100 text-green-800' :
                       'bg-slate-100 text-slate-800'
                     }`}>

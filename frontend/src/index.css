@@ -4,15 +4,15 @@
 
 @layer base {
   :root {
-    --ui-bg: #f3f7fd;
+    --ui-bg: #f8fafc;
     --ui-surface: #ffffff;
     --ui-surface-muted: #f8fafc;
     --ui-border: #d9e2ef;
     --ui-text: #0f172a;
     --ui-text-soft: #475569;
     --ui-primary: #1f4ed8;
-    --ui-primary-strong: #1d325f;
-    --ui-info: #2563eb;
+    --ui-primary-strong: #1d3ea8;
+    --ui-info: #1f4ed8;
     --ui-success: #0f766e;
     --ui-warning: #b45309;
     --ui-danger: #b91c1c;
@@ -23,11 +23,7 @@
   }
 
   body {
-    @apply text-slate-900 font-sans antialiased;
-    background:
-      radial-gradient(1200px 500px at 10% -10%, rgba(37, 99, 235, 0.14), transparent 60%),
-      radial-gradient(900px 420px at 95% 0%, rgba(14, 165, 233, 0.12), transparent 60%),
-      linear-gradient(180deg, #f8fbff 0%, #f1f5fb 45%, #eef3f9 100%);
+    @apply text-slate-900 font-sans antialiased bg-slate-50;
   }
 }
 
@@ -104,16 +100,16 @@
   }
 
   .btn-corporate-danger {
-    @apply rounded-lg text-white text-sm font-semibold py-2.5 transition shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed;
-    background: linear-gradient(120deg, #be123c 0%, #dc2626 60%, #b91c1c 100%);
+    @apply rounded-lg text-white text-sm font-semibold py-2.5 transition disabled:opacity-50 disabled:cursor-not-allowed;
+    background-color: var(--ui-danger);
+  }
+
+  .btn-corporate-danger:hover {
+    filter: brightness(0.94);
   }
 
   .corporate-shell::before {
-    content: '';
-    @apply absolute inset-0 pointer-events-none;
-    background:
-      radial-gradient(900px 340px at 0% 100%, rgba(15, 23, 42, 0.05), transparent 60%),
-      radial-gradient(700px 280px at 100% 90%, rgba(30, 64, 175, 0.08), transparent 60%);
+    content: none;
   }
 
   .glass-card {
@@ -246,13 +242,19 @@
   }
 
   .input-corporate:focus {
-    border-color: rgba(37, 99, 235, 0.6);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+    border-color: var(--ui-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-primary) 18%, transparent);
   }
 
+  .btn-primary-solid,
   .btn-corporate-primary {
-    @apply rounded-lg text-white text-sm font-semibold py-2.5 transition shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed;
-    background: linear-gradient(125deg, var(--ui-primary) 0%, #2f67f6 45%, var(--ui-primary-strong) 100%);
+    @apply rounded-lg text-white text-sm font-semibold py-2.5 px-4 transition disabled:opacity-50 disabled:cursor-not-allowed;
+    background-color: var(--ui-primary);
+  }
+
+  .btn-primary-solid:hover,
+  .btn-corporate-primary:hover {
+    background-color: var(--ui-primary-strong);
   }
 
   .btn-corporate-muted {
@@ -265,34 +267,28 @@
     background-color: var(--ui-surface-muted);
   }
 
-  .btn-primary-solid {
-    @apply rounded-lg text-white text-sm font-semibold py-2.5 px-4 transition shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed;
-    background: linear-gradient(125deg, var(--ui-primary) 0%, #2f67f6 45%, var(--ui-primary-strong) 100%);
+  .btn-success-solid {
+    @apply rounded-lg text-white text-sm font-semibold py-2.5 px-4 transition disabled:opacity-50 disabled:cursor-not-allowed;
+    background-color: var(--ui-success);
   }
 
-  .btn-success-solid {
-    @apply rounded-lg text-white text-sm font-semibold py-2.5 px-4 transition shadow-sm hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed;
-    background: linear-gradient(120deg, #059669 0%, #10b981 60%, #0f766e 100%);
+  .btn-success-solid:hover {
+    filter: brightness(0.94);
+  }
+
+  .module-tile-icon {
+    @apply flex items-center justify-center w-16 h-16 rounded-2xl mb-4 transition-colors duration-200;
+    background-color: var(--ui-surface-muted);
+    color: var(--ui-text-soft);
+  }
+
+  .group:hover .module-tile-icon {
+    background-color: var(--ui-primary);
+    color: #fff;
   }
 
   .input {
     @apply input-corporate;
-  }
-
-  .table-base {
-    @apply w-full text-sm;
-  }
-
-  .table-base thead th {
-    @apply px-3 py-2 text-left text-slate-600 font-semibold;
-  }
-
-  .table-base tbody tr {
-    @apply border-t border-slate-200;
-  }
-
-  .table-base tbody td {
-    @apply px-3 py-2 text-slate-700;
   }
 
   .table-corporate {
@@ -334,13 +330,34 @@
     @apply text-sm sm:text-base text-slate-600;
   }
 
+  .module-tabs {
+    @apply section-card p-2;
+  }
+
+  .module-tab {
+    @apply px-4 py-2 rounded-lg text-sm font-semibold transition text-slate-700 hover:bg-slate-100;
+  }
+
+  .module-tab-active {
+    @apply bg-slate-900 text-white shadow-sm hover:bg-slate-900;
+  }
+
   /* Botones POS - Diseño Profesional */
   .btn-pos {
-    @apply px-6 py-3 rounded-xl font-semibold text-base shadow-sm transition-all duration-200 transform hover:scale-[1.02] active:scale-[0.98] flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100;
+    @apply px-6 py-3 rounded-xl font-semibold text-base shadow-sm transition-colors duration-200 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed;
   }
   
   .btn-primary {
-    @apply bg-primary-600 text-white hover:bg-primary-700 active:bg-primary-800;
+    @apply text-white;
+    background-color: var(--ui-primary);
+  }
+
+  .btn-primary:hover {
+    background-color: var(--ui-primary-strong);
+  }
+
+  .btn-primary:active {
+    filter: brightness(0.92);
   }
   
   .btn-success {
@@ -374,7 +391,7 @@
   }
 
   .vehicle-card:hover {
-    border-color: rgba(37, 99, 235, 0.35);
+    border-color: color-mix(in srgb, var(--ui-primary) 35%, var(--ui-border));
     box-shadow: var(--ui-shadow-panel);
   }
   
@@ -386,8 +403,8 @@
   }
 
   .input-pos:focus {
-    border-color: rgba(37, 99, 235, 0.6);
-    box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+    border-color: var(--ui-primary);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--ui-primary) 18%, transparent);
   }
   
   /* Badges */
@@ -411,8 +428,8 @@
   }
   
   .badge-info {
-    @apply text-blue-800;
-    background-color: rgba(59, 130, 246, 0.16);
+    color: var(--ui-primary-strong);
+    background-color: color-mix(in srgb, var(--ui-primary) 14%, #fff);
   }
   
   /* Modales profesionales */
@@ -430,27 +447,6 @@
   /* Efectos de iconos */
   .icon-hover {
     @apply transition-transform duration-200 hover:scale-110 active:scale-95;
-  }
-  
-  /* Tablas modernas */
-  .table-modern {
-    @apply w-full border-collapse;
-  }
-  
-  .table-modern thead {
-    @apply bg-gradient-to-r from-gray-50 to-gray-100;
-  }
-  
-  .table-modern thead th {
-    @apply px-6 py-4 text-left text-xs font-bold text-gray-700 uppercase tracking-wider;
-  }
-  
-  .table-modern tbody tr {
-    @apply border-b border-gray-100 hover:bg-primary-50 transition-colors duration-150;
-  }
-  
-  .table-modern tbody td {
-    @apply px-6 py-4 text-sm text-gray-900;
   }
   
   /* Loading skeleton */

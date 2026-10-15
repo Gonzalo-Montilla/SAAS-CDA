@@ -489,7 +489,7 @@ export default function ProveedoresCatalogoPage() {
     <Layout title="Catálogo de proveedores">
       <section className="module-hero">
         <p className="module-hero-title flex items-center gap-2">
-          <BookUser className="w-5 h-5 text-primary-600 shrink-0" />
+          <BookUser className="w-5 h-5 text-slate-600 shrink-0" />
           Catálogo de proveedores
         </p>
         <p className="module-hero-subtitle max-w-3xl">
@@ -500,7 +500,7 @@ export default function ProveedoresCatalogoPage() {
       </section>
 
       {esAdmin && (
-        <section className="card-pos mb-6">
+        <section className="section-card p-6 mb-6">
           <button
             type="button"
             className="w-full flex items-start gap-2 sm:gap-3 text-left rounded-xl -m-1 p-1 hover:bg-slate-50/90 transition-colors"
@@ -516,7 +516,7 @@ export default function ProveedoresCatalogoPage() {
                 <ChevronRight className="w-5 h-5" />
               )}
             </span>
-            <SlidersHorizontal className="w-5 h-5 text-primary-600 shrink-0 mt-0.5" aria-hidden />
+            <SlidersHorizontal className="w-5 h-5 text-slate-600 shrink-0 mt-0.5" aria-hidden />
             <div className="min-w-0 flex-1">
               <h2 className="text-lg font-semibold text-slate-900">Entorno retención (documento soporte)</h2>
               {entornoRetencionAbierto ? (
@@ -561,7 +561,7 @@ export default function ProveedoresCatalogoPage() {
       )}
 
       {esAdmin && (
-        <section className="card-pos mb-6">
+        <section className="section-card p-6 mb-6">
           <button
             type="button"
             className="w-full flex items-start gap-2 sm:gap-3 text-left rounded-xl -m-1 p-1 hover:bg-slate-50/90 transition-colors"
@@ -577,7 +577,7 @@ export default function ProveedoresCatalogoPage() {
                 <ChevronRight className="w-5 h-5" />
               )}
             </span>
-            <Percent className="w-5 h-5 text-primary-600 shrink-0 mt-0.5" aria-hidden />
+            <Percent className="w-5 h-5 text-slate-600 shrink-0 mt-0.5" aria-hidden />
             <div className="min-w-0 flex-1">
               <h2 className="text-lg font-semibold text-slate-900">Parámetros motor retención (por año)</h2>
               {motorRetencionAbierto ? (
@@ -597,7 +597,7 @@ export default function ProveedoresCatalogoPage() {
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Año fiscal</label>
                   <input
                     type="number"
-                    className="input-pos w-28 tabular-nums"
+                    className="input-corporate w-28 tabular-nums"
                     min={2000}
                     max={2100}
                     value={anioMotor}
@@ -619,7 +619,7 @@ export default function ProveedoresCatalogoPage() {
                     <input
                       type="text"
                       inputMode="decimal"
-                      className="input-pos max-w-xs"
+                      className="input-corporate max-w-xs"
                       placeholder="Ej. 51500"
                       value={uvtDraft}
                       onChange={(e) => setUvtDraft(e.target.value)}
@@ -638,7 +638,7 @@ export default function ProveedoresCatalogoPage() {
                         <input
                           type="text"
                           inputMode="decimal"
-                          className="input-pos w-full tabular-nums"
+                          className="input-corporate w-full tabular-nums"
                           placeholder="Ej. 4"
                           title="Porcentaje entre 0 y 100. Dejar vacío y guardar borra la tasa."
                           value={tasasDraft[c] ?? ''}
@@ -655,7 +655,7 @@ export default function ProveedoresCatalogoPage() {
                   </div>
                   <button
                     type="button"
-                    className="btn-pos btn-primary"
+                    className="btn-primary-solid"
                     disabled={guardarMotorParams.isLoading}
                     onClick={() => guardarMotorParams.mutate()}
                   >
@@ -669,7 +669,7 @@ export default function ProveedoresCatalogoPage() {
       )}
 
       {puedeVistaPreviaMotor && (
-        <section className="card-pos mb-6 border border-dashed border-slate-200 bg-slate-50/60">
+        <section className="section-card p-6 mb-6 border border-dashed border-slate-200 bg-slate-50/60">
           <h2 className="text-lg font-semibold text-slate-900 mb-1">Vista previa del motor (simulación)</h2>
           <p className="text-sm text-slate-500 mb-4 max-w-3xl">
             Usa el UVT, la tasa del año <span className="font-mono tabular-nums">{anioMotor}</span> y los umbrales UVT por
@@ -681,7 +681,7 @@ export default function ProveedoresCatalogoPage() {
               <input
                 type="text"
                 inputMode="decimal"
-                className="input-pos w-40 tabular-nums"
+                className="input-corporate w-40 tabular-nums"
                 placeholder="Ej. 1500000"
                 value={previewMonto}
                 onChange={(e) => setPreviewMonto(e.target.value)}
@@ -691,7 +691,7 @@ export default function ProveedoresCatalogoPage() {
             <div>
               <label className="block text-xs font-semibold text-slate-700 mb-1">Concepto</label>
               <select
-                className="input-pos min-w-[200px]"
+                className="input-corporate min-w-[200px]"
                 value={previewConcepto}
                 onChange={(e) => setPreviewConcepto(e.target.value as ConceptoRetencionDse)}
               >
@@ -704,7 +704,7 @@ export default function ProveedoresCatalogoPage() {
             </div>
             <button
               type="button"
-              className="btn-pos btn-secondary"
+              className="btn-corporate-muted"
               disabled={previewMotor.isLoading}
               onClick={() => previewMotor.mutate()}
             >
@@ -752,11 +752,11 @@ export default function ProveedoresCatalogoPage() {
       )}
 
       {isLoading ? (
-        <div className="card-pos flex justify-center py-16">
+        <div className="section-card p-6 flex justify-center py-16">
           <LoadingSpinner message="Cargando catálogo de proveedores…" />
         </div>
       ) : (
-        <div className="card-pos">
+        <div className="section-card p-6">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 mb-4 pb-4 border-b border-slate-100">
             <div>
               <h2 className="text-lg font-semibold text-slate-900">Proveedores registrados</h2>
@@ -767,13 +767,13 @@ export default function ProveedoresCatalogoPage() {
             <div className="flex flex-wrap items-center gap-2 shrink-0">
               <button
                 type="button"
-                className="btn-pos btn-secondary inline-flex items-center gap-2"
+                className="btn-corporate-muted inline-flex items-center gap-2"
                 onClick={() => navigate('/contador')}
               >
                 Ir a Contador
                 <ArrowUpRight className="w-4 h-4" />
               </button>
-              <button type="button" onClick={abrirCrear} className="btn-pos btn-primary inline-flex items-center gap-2">
+              <button type="button" onClick={abrirCrear} className="btn-primary-solid inline-flex items-center gap-2">
                 <Plus className="w-5 h-5" />
                 Nuevo proveedor
               </button>
@@ -853,7 +853,7 @@ export default function ProveedoresCatalogoPage() {
                           disabled={previewLoadingId === p.id}
                           title="Abrir o comprobar el PDF del RUT (certificación DIAN)"
                           onClick={() => void abrirPreviewPdf(p.id, p.razon_social_rut)}
-                          className="text-primary-600 hover:text-primary-700 hover:underline inline-flex items-center gap-1.5 text-left"
+                          className="text-brand-600 hover:text-brand-700 hover:underline inline-flex items-center gap-1.5 text-left"
                         >
                           <Eye className="w-4 h-4 shrink-0" />
                           {previewLoadingId === p.id ? 'Abriendo…' : 'Vista previa'}
@@ -863,7 +863,7 @@ export default function ProveedoresCatalogoPage() {
                         <button
                           type="button"
                           onClick={() => abrirEditar(p)}
-                          className="text-primary-600 hover:text-primary-700 hover:underline inline-flex items-center gap-1.5 font-medium"
+                          className="text-brand-600 hover:text-brand-700 hover:underline inline-flex items-center gap-1.5 font-medium"
                         >
                           <Pencil className="w-4 h-4" />
                           Editar
@@ -909,7 +909,7 @@ export default function ProveedoresCatalogoPage() {
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Alias (opcional)</label>
                 <input
-                  className="input-pos w-full"
+                  className="input-corporate w-full"
                   value={form.alias ?? ''}
                   onChange={(e) => setForm((f) => ({ ...f, alias: e.target.value }))}
                   placeholder="Ej: Papelera Central"
@@ -918,7 +918,7 @@ export default function ProveedoresCatalogoPage() {
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Nombre o razón social (RUT)</label>
                 <input
-                  className="input-pos w-full"
+                  className="input-corporate w-full"
                   value={form.razon_social_rut}
                   onChange={(e) => setForm((f) => ({ ...f, razon_social_rut: e.target.value }))}
                   required
@@ -928,7 +928,7 @@ export default function ProveedoresCatalogoPage() {
               <div>
                 <label className="block text-xs font-semibold text-slate-700 mb-1">Tipo de identificación</label>
                 <select
-                  className="input-pos w-full max-w-xs"
+                  className="input-corporate w-full max-w-xs"
                   value={form.tipo_identificacion}
                   onChange={(e) => setForm((f) => ({ ...f, tipo_identificacion: e.target.value }))}
                 >
@@ -944,7 +944,7 @@ export default function ProveedoresCatalogoPage() {
                   Número de identificación (como en el RUT / registro DIAN)
                 </label>
                 <input
-                  className="input-pos w-full"
+                  className="input-corporate w-full"
                   value={form.numero_identificacion}
                   onChange={(e) => setForm((f) => ({ ...f, numero_identificacion: e.target.value }))}
                   required
@@ -962,7 +962,7 @@ export default function ProveedoresCatalogoPage() {
                   Dirección (calle, número, barrio — la usa Exógena 1001)
                 </label>
                 <textarea
-                  className="input-pos w-full min-h-[72px]"
+                  className="input-corporate w-full min-h-[72px]"
                   value={form.direccion}
                   onChange={(e) => setForm((f) => ({ ...f, direccion: e.target.value }))}
                   required
@@ -978,7 +978,7 @@ export default function ProveedoresCatalogoPage() {
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Correo</label>
                   <input
                     type="email"
-                    className="input-pos w-full"
+                    className="input-corporate w-full"
                     value={form.email}
                     onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
                     required
@@ -987,7 +987,7 @@ export default function ProveedoresCatalogoPage() {
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">Teléfono</label>
                   <input
-                    className="input-pos w-full"
+                    className="input-corporate w-full"
                     value={form.telefono}
                     onChange={(e) => setForm((f) => ({ ...f, telefono: e.target.value }))}
                     required
@@ -1012,7 +1012,7 @@ export default function ProveedoresCatalogoPage() {
                   Concepto de retención (documento soporte)
                 </label>
                 <select
-                  className="input-pos w-full max-w-md"
+                  className="input-corporate w-full max-w-md"
                   value={form.concepto_retencion_dse ?? 'servicios'}
                   onChange={(e) =>
                     setForm((f) => ({
@@ -1051,7 +1051,7 @@ export default function ProveedoresCatalogoPage() {
               {editId && (
                 <div className="rounded-xl border border-slate-200 p-4 space-y-3 bg-slate-50/90">
                   <div className="flex items-start gap-2">
-                    <FileText className="w-5 h-5 text-primary-600 shrink-0 mt-0.5" />
+                    <FileText className="w-5 h-5 text-slate-600 shrink-0 mt-0.5" />
                     <div>
                       <p className="text-xs font-bold text-slate-800 uppercase tracking-wide">Certificación RUT (PDF)</p>
                       <p className="text-xs text-slate-600 mt-1 leading-relaxed">
@@ -1069,7 +1069,7 @@ export default function ProveedoresCatalogoPage() {
                     <button
                       type="button"
                       disabled={!rutFile || subirRut.isLoading}
-                      className="btn-pos btn-primary text-sm py-1.5 px-3"
+                      className="btn-primary-solid text-sm py-1.5 px-3"
                       onClick={() => {
                         if (editId && rutFile) subirRut.mutate({ id: editId, file: rutFile });
                       }}
@@ -1080,7 +1080,7 @@ export default function ProveedoresCatalogoPage() {
                       <>
                         <button
                           type="button"
-                          className="btn-pos btn-secondary text-sm py-1.5 px-3 inline-flex items-center gap-1"
+                          className="btn-corporate-muted text-sm py-1.5 px-3 inline-flex items-center gap-1"
                           onClick={() => editId && abrirPreviewPdf(editId, form.razon_social_rut)}
                           disabled={!!editId && previewLoadingId === editId}
                         >
@@ -1110,11 +1110,11 @@ export default function ProveedoresCatalogoPage() {
                 <button
                   type="submit"
                   disabled={crear.isLoading || actualizar.isLoading}
-                  className="flex-1 btn-pos btn-primary"
+                  className="flex-1 btn-primary-solid"
                 >
                   {crear.isLoading || actualizar.isLoading ? 'Guardando…' : 'Guardar'}
                 </button>
-                <button type="button" className="flex-1 btn-pos btn-secondary" onClick={cerrarModal}>
+                <button type="button" className="flex-1 btn-corporate-muted" onClick={cerrarModal}>
                   Cancelar
                 </button>
               </div>

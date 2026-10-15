@@ -419,7 +419,7 @@ export default function Comunicaciones() {
       <div className="space-y-6">
         <section className="module-hero">
           <p className="module-hero-title">
-            <Megaphone className="w-5 h-5 text-orange-600" />
+            <Megaphone className="w-5 h-5 text-slate-600" />
             Comunicaciones
           </p>
           <p className="module-hero-subtitle">

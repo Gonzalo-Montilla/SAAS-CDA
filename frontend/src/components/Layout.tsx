@@ -35,11 +35,11 @@ export default function Layout({ children, title }: LayoutProps) {
               <img 
                 src={brand.logoSrc}
                 alt={brand.nombreComercial}
-                className="h-16 sm:h-20 rounded-2xl shadow-soft"
+                className="h-12 sm:h-14 rounded-xl"
               />
               <div>
                 <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{brand.nombreComercial}</p>
-                <p className="text-sm text-primary-600 font-semibold">{title}</p>
+                <p className="text-sm text-slate-700 font-semibold">{title}</p>
               </div>
             </button>
           </div>
@@ -53,7 +53,7 @@ export default function Layout({ children, title }: LayoutProps) {
               Inicio
             </button>
             <div className="app-user-chip">
-              <div className="w-8 h-8 rounded-full bg-primary-100 text-primary-600 flex items-center justify-center">
+              <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center">
                 <User className="w-4 h-4" />
               </div>
               <div className="text-right">

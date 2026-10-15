@@ -66,7 +66,7 @@ export default function TarifasPage() {
     <Layout title="Gestión de Tarifas">
       <section className="module-hero">
         <p className="module-hero-title flex items-center gap-2">
-          <DollarSign className="w-5 h-5 text-primary-600" />
+          <DollarSign className="w-5 h-5 text-slate-600" />
           Gestión de tarifas y comisiones
         </p>
         <p className="module-hero-subtitle">
@@ -91,22 +91,14 @@ export default function TarifasPage() {
             <button
               type="button"
               onClick={() => setAlcance('catalogo')}
-              className={`btn-chip px-3 py-1.5 text-sm ${
-                alcance === 'catalogo'
-                  ? 'bg-primary-600 text-white border-primary-600 shadow-sm'
-                  : 'text-slate-700'
-              }`}
+              className={`module-tab ${alcance === 'catalogo' ? 'module-tab-active' : ''}`}
             >
               Catálogo del CDA
             </button>
             <button
               type="button"
               onClick={() => setAlcance('sede')}
-              className={`btn-chip px-3 py-1.5 text-sm ${
-                alcance === 'sede'
-                  ? 'bg-primary-600 text-white border-primary-600 shadow-sm'
-                  : 'text-slate-700'
-              }`}
+              className={`module-tab ${alcance === 'sede' ? 'module-tab-active' : ''}`}
             >
               Esta sede ({sedeActivaNombre})
             </button>
@@ -115,13 +107,12 @@ export default function TarifasPage() {
       </section>
 
       {/* Navegación */}
-      <div className="flex flex-wrap gap-2 mb-6">
+      <section className="module-tabs mb-6">
+        <div className="flex flex-wrap gap-2">
         <button
           onClick={() => setVistaActual('tarifas')}
-          className={`btn-chip px-4 py-2 text-sm sm:text-base ${
-            vistaActual === 'tarifas'
-              ? 'bg-primary-600 text-white border-primary-600 shadow-sm'
-              : 'text-slate-700'
+          className={`module-tab inline-flex items-center gap-2 ${
+            vistaActual === 'tarifas' ? 'module-tab-active' : ''
           }`}
         >
           <DollarSign className="w-5 h-5" />
@@ -129,16 +120,15 @@ export default function TarifasPage() {
         </button>
         <button
           onClick={() => setVistaActual('comisiones')}
-          className={`btn-chip px-4 py-2 text-sm sm:text-base ${
-            vistaActual === 'comisiones'
-              ? 'bg-primary-600 text-white border-primary-600 shadow-sm'
-              : 'text-slate-700'
+          className={`module-tab inline-flex items-center gap-2 ${
+            vistaActual === 'comisiones' ? 'module-tab-active' : ''
           }`}
         >
           <Shield className="w-5 h-5" />
           Comisiones SOAT
         </button>
-      </div>
+        </div>
+      </section>
 
       {/* Contenido */}
       {vistaActual === 'tarifas' ? (
@@ -240,7 +230,7 @@ function TarifasRTM({
 
       {/* Tabla de Tarifas */}
       {tarifasDelAno.length === 0 ? (
-        <div className="card-pos text-center py-12">
+        <div className="section-card p-6 text-center py-12">
           <div className="flex justify-center mb-4">
             <FileText className="w-16 h-16 text-slate-400" />
           </div>
@@ -253,7 +243,7 @@ function TarifasRTM({
           {puedeEscribir && (
           <button
             onClick={() => setMostrarModalCrear(true)}
-            className="btn-pos btn-primary inline-flex items-center gap-2"
+            className="btn-primary-solid inline-flex items-center gap-2"
           >
             <Plus className="w-5 h-5" />
             Crear Tarifa
@@ -308,7 +298,7 @@ function TarifasRTM({
                         {tarifa.antiguedad_min} - {tarifa.antiguedad_max || '∞'} años
                       </span>
                     </td>
-                    <td className="pl-3 text-right font-semibold text-primary-700">
+                    <td className="pl-3 text-right font-semibold text-slate-900">
                       {formatCOP(tarifa.valor_rtm)}
                     </td>
                     <td className="pl-3 text-right font-semibold text-slate-600">
@@ -347,7 +337,7 @@ function TarifasRTM({
                       {puedeEscribir ? (
                       <button
                         onClick={() => setTarifaEditar(tarifa)}
-                        className="btn-chip border-primary-300 bg-primary-50 text-primary-700 hover:bg-primary-100 px-3 py-1 inline-flex items-center gap-1"
+                        className="btn-chip px-3 py-1 inline-flex items-center gap-1"
                       >
                         <Edit className="w-4 h-4" />
                         Editar
@@ -518,7 +508,7 @@ function ModalTarifa({
                     setFormError('');
                     setFormData({ ...formData, ano_vigencia: parsePositiveInt(e.target.value) });
                   }}
-                className="input-pos"
+                className="input-corporate"
                 required
                 min={new Date().getFullYear()}
               />
@@ -548,7 +538,7 @@ function ModalTarifa({
                       : {}),
                   }));
                 }}
-                className="input-pos"
+                className="input-corporate"
                 required
               >
                 <option value="moto">Motocicleta</option>
@@ -573,7 +563,7 @@ function ModalTarifa({
                     setFormError('');
                     setFormData({ ...formData, vigencia_inicio: e.target.value });
                   }}
-                  className="input-pos"
+                  className="input-corporate"
                   required
                 />
               </div>
@@ -588,7 +578,7 @@ function ModalTarifa({
                     setFormError('');
                     setFormData({ ...formData, vigencia_fin: e.target.value });
                   }}
-                  className="input-pos"
+                  className="input-corporate"
                   required
                 />
               </div>
@@ -614,7 +604,7 @@ function ModalTarifa({
                       antiguedad_max: Math.max(prev.antiguedad_max, nuevoMin),
                     }));
                   }}
-                  className="input-pos"
+                  className="input-corporate"
                   required
                   min={0}
                 />
@@ -631,7 +621,7 @@ function ModalTarifa({
                     setFormError('');
                     setFormData({ ...formData, antiguedad_max: parsePositiveInt(e.target.value) });
                   }}
-                  className="input-pos"
+                  className="input-corporate"
                   required
                   min={formData.antiguedad_min}
                 />
@@ -656,7 +646,7 @@ function ModalTarifa({
                     setFormError('');
                     setFormData({ ...formData, valor_rtm: parsePositiveInt(e.target.value) });
                   }}
-                  className="input-pos"
+                  className="input-corporate"
                   required
                   step="any"
                   min={0}
@@ -686,7 +676,7 @@ function ModalTarifa({
                           setFormError('');
                           setFormData({ ...formData, [key]: parseTerceroInput(e.target.value) });
                         }}
-                        className="input-pos"
+                        className="input-corporate"
                         step="any"
                         min={0}
                         placeholder="0"
@@ -705,7 +695,7 @@ function ModalTarifa({
                   Valor Total (Cliente Paga)
                 </label>
                 <div
-                  className="input-pos text-2xl font-bold bg-slate-100 text-slate-900 cursor-default select-none"
+                  className="input-corporate text-2xl font-bold bg-slate-100 text-slate-900 cursor-default select-none"
                   aria-readonly="true"
                 >
                   {formatCurrency(totalCliente)}
@@ -722,7 +712,7 @@ function ModalTarifa({
               <button
                 type="button"
                 onClick={onClose}
-                className="flex-1 btn-pos btn-secondary"
+                className="flex-1 btn-corporate-muted"
                 disabled={crearMutation.isLoading}
               >
                 Cancelar
@@ -730,7 +720,7 @@ function ModalTarifa({
               <button
                 type="submit"
                 disabled={crearMutation.isLoading}
-                className="flex-1 btn-pos btn-success disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                className="flex-1 btn-success-solid disabled:opacity-50 inline-flex items-center justify-center gap-2"
               >
                 {crearMutation.isLoading ? (
                   'Creando...'
@@ -889,7 +879,7 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
                     setFormError('');
                     setFormData({ ...formData, valor_rtm: parsePositiveInt(e.target.value) });
                   }}
-                className="input-pos"
+                className="input-corporate"
                 step="any"
                 required
               />
@@ -918,7 +908,7 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
                         setFormError('');
                         setFormData({ ...formData, [key]: parseTerceroInput(e.target.value) });
                       }}
-                      className="input-pos"
+                      className="input-corporate"
                       step="any"
                       min={0}
                       placeholder="0"
@@ -935,7 +925,7 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
                 Valor Total (Cliente Paga)
               </label>
               <div
-                className="input-pos text-xl font-bold bg-slate-100 text-slate-900 cursor-default select-none"
+                className="input-corporate text-xl font-bold bg-slate-100 text-slate-900 cursor-default select-none"
                 aria-readonly="true"
               >
                 {formatCurrency(totalCliente)}
@@ -974,7 +964,7 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
               <button
                 type="button"
                 onClick={onClose}
-                className="flex-1 btn-pos btn-secondary"
+                className="flex-1 btn-corporate-muted"
                 disabled={editarMutation.isLoading}
               >
                 Cancelar
@@ -982,7 +972,7 @@ function ModalEditarTarifa({ tarifa, onClose }: { tarifa: Tarifa; onClose: () =>
               <button
                 type="submit"
                 disabled={editarMutation.isLoading}
-                className="flex-1 btn-pos btn-success disabled:opacity-50 inline-flex items-center justify-center gap-2"
+                className="flex-1 btn-success-solid disabled:opacity-50 inline-flex items-center justify-center gap-2"
               >
                 {editarMutation.isLoading ? (
                   'Guardando...'
@@ -1067,7 +1057,7 @@ function ComisionesSOAT({
         </div>
 
       {!comisiones || comisiones.length === 0 ? (
-        <div className="card-pos text-center py-12">
+        <div className="section-card p-6 text-center py-12">
           <div className="flex justify-center mb-4">
             <AlertTriangle className="w-16 h-16 text-yellow-500" />
           </div>
@@ -1085,10 +1075,10 @@ function ComisionesSOAT({
             const IconoVehiculo = comision.tipo_vehiculo === 'moto' ? Bike : Car;
             
             return (
-              <div key={comision.id} className="card-pos">
+              <div key={comision.id} className="section-card p-6">
                 <div className="flex items-start gap-4">
                   <div className="flex-shrink-0">
-                    <IconoVehiculo className="w-16 h-16 text-primary-600" />
+                    <IconoVehiculo className="w-16 h-16 text-slate-600" />
                   </div>
                   <div className="flex-1">
                     <h4 className="text-2xl font-bold text-slate-900 capitalize mb-2">
@@ -1226,7 +1216,7 @@ function ModalEditarComisionSOAT({
           {/* Header */}
           <div className="modal-header-sticky -mx-6 px-6 pt-1 pb-4 flex justify-between items-start mb-6 border-b border-slate-200">
             <div className="flex items-center gap-3">
-              <IconoVehiculo className="w-10 h-10 text-primary-600" />
+              <IconoVehiculo className="w-10 h-10 text-slate-600" />
               <div>
                 <h3 className="text-2xl font-bold text-slate-900 capitalize">
                   {esNuevo ? 'Nueva' : 'Editar'} Comisión SOAT
@@ -1254,7 +1244,7 @@ function ModalEditarComisionSOAT({
                     onClick={() => setFormData({ ...formData, tipo_vehiculo: 'moto' })}
                     className={`p-4 rounded-lg border-2 transition-all ${
                       formData.tipo_vehiculo === 'moto'
-                        ? 'border-primary-600 bg-primary-50'
+                        ? 'border-brand-600 bg-brand-50'
                         : 'border-slate-300 hover:border-slate-400'
                     }`}
                   >
@@ -1266,7 +1256,7 @@ function ModalEditarComisionSOAT({
                     onClick={() => setFormData({ ...formData, tipo_vehiculo: 'carro' })}
                     className={`p-4 rounded-lg border-2 transition-all ${
                       formData.tipo_vehiculo === 'carro'
-                        ? 'border-primary-600 bg-primary-50'
+                        ? 'border-brand-600 bg-brand-50'
                         : 'border-slate-300 hover:border-slate-400'
                     }`}
                   >
@@ -1293,7 +1283,7 @@ function ModalEditarComisionSOAT({
                     const valor = parseInt(e.target.value);
                     setFormData({ ...formData, valor_comision: isNaN(valor) ? 0 : valor });
                   }}
-                  className="input-pos text-2xl text-center font-bold pl-12"
+                  className="input-corporate text-2xl text-center font-bold pl-12"
                   required
                   step="any"
                   min={0}
@@ -1315,7 +1305,7 @@ function ModalEditarComisionSOAT({
                     type="date"
                     value={formData.vigencia_inicio}
                     onChange={(e) => setFormData({ ...formData, vigencia_inicio: e.target.value })}
-                    className="input-pos"
+                    className="input-corporate"
                     required
                   />
                 </div>
@@ -1327,7 +1317,7 @@ function ModalEditarComisionSOAT({
                     type="date"
                     value={formData.vigencia_fin}
                     onChange={(e) => setFormData({ ...formData, vigencia_fin: e.target.value })}
-                    className="input-pos"
+                    className="input-corporate"
                   />
                 </div>
               </div>
@@ -1368,14 +1358,14 @@ function ModalEditarComisionSOAT({
               <button
                 type="button"
                 onClick={onClose}
-                className="flex-1 btn-pos btn-secondary"
+                className="flex-1 btn-corporate-muted"
               >
                 Cancelar
               </button>
               <button
                 type="submit"
                 disabled={mutation.isLoading}
-                className="flex-1 btn-pos btn-primary disabled:opacity-50"
+                className="flex-1 btn-primary-solid disabled:opacity-50"
               >
                 {mutation.isLoading ? 'Guardando...' : esNuevo ? 'Crear Comisión' : 'Guardar Cambios'}
               </button>

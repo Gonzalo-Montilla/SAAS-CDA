@@ -761,7 +761,7 @@ function AperturaCaja() {
 
       {/* Resumen de la Última Caja Cerrada */}
       {ultimaCaja && (
-        <div className="card-pos mb-8 bg-gradient-to-r from-blue-50 to-cyan-50">
+        <div className="card-pos mb-8 bg-gradient-to-r from-brand-50 to-brand-50">
           <div className="flex items-center gap-3 mb-4">
             <BarChart3 className="w-8 h-8 text-primary-600" />
             <h3 className="text-xl font-bold text-gray-900">
@@ -1173,7 +1173,7 @@ function VehiculosPendientes({
                     </p>
                   )}
                   {vehiculo.tipo_vehiculo === 'pruebas_auditoria' && (
-                    <p className="mt-1 text-xs font-semibold text-cyan-700">
+                    <p className="mt-1 text-xs font-semibold text-brand-700">
                       Prueba de auditoría · sin cobro
                     </p>
                   )}
@@ -1183,7 +1183,7 @@ function VehiculosPendientes({
                     Reintento
                   </span>
                 ) : vehiculo.tipo_vehiculo === 'pruebas_auditoria' ? (
-                  <span className="shrink-0 rounded-full bg-cyan-100 px-2.5 py-0.5 text-xs font-semibold text-cyan-900">
+                  <span className="shrink-0 rounded-full bg-brand-100 px-2.5 py-0.5 text-xs font-semibold text-brand-900">
                     Auditoría
                   </span>
                 ) : (
@@ -1580,7 +1580,7 @@ function ModalCobro({
         ? 'border-green-600 bg-green-50 text-green-900 shadow-sm ring-2 ring-green-600/25'
         : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400',
       tarjeta_debito: isSelected
-        ? 'border-blue-600 bg-blue-50 text-blue-900 shadow-sm ring-2 ring-blue-600/25'
+        ? 'border-brand-600 bg-brand-50 text-brand-900 shadow-sm ring-2 ring-brand-600/25'
         : 'border-gray-300 bg-white text-gray-700 hover:border-gray-400',
       tarjeta_credito: isSelected
         ? 'border-indigo-600 bg-indigo-50 text-indigo-900 shadow-sm ring-2 ring-indigo-600/25'
@@ -1657,8 +1657,8 @@ function ModalCobro({
             </div>
           )}
           {esPruebaAuditoria && (
-            <div className="bg-cyan-50 border-2 border-cyan-200 rounded-lg p-4 mb-6">
-              <p className="text-cyan-900 font-semibold text-left flex items-start gap-2">
+            <div className="bg-brand-50 border-2 border-brand-200 rounded-lg p-4 mb-6">
+              <p className="text-brand-900 font-semibold text-left flex items-start gap-2">
                 <CheckCircle2 className="w-5 h-5 shrink-0 mt-0.5" />
                 Prueba de auditoría registrada con valor $0. Confirma para enviar el vehículo a Calidad sin generar cobro.
               </p>
@@ -1805,7 +1805,7 @@ function ModalCobro({
                       metodo.canal === 'Caja'
                         ? 'bg-emerald-100 text-emerald-800'
                         : metodo.canal === 'Electrónico'
-                          ? 'bg-blue-100 text-blue-800'
+                          ? 'bg-brand-100 text-brand-800'
                           : metodo.canal === 'Crédito CDA'
                             ? 'bg-amber-100 text-amber-800'
                             : 'bg-teal-100 text-teal-800'
@@ -1826,8 +1826,8 @@ function ModalCobro({
               </div>
             )}
             {['tarjeta_debito', 'tarjeta_credito', 'transferencia'].includes(metodoPago) && (
-              <div className="mt-3 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                <p className="text-sm text-blue-800 flex items-start gap-2">
+              <div className="mt-3 p-3 bg-brand-50 border border-brand-200 rounded-lg">
+                <p className="text-sm text-brand-800 flex items-start gap-2">
                   <CreditCard className="w-5 h-5 flex-shrink-0 mt-0.5" />
                   <span><strong>Pago Electrónico:</strong> El dinero va directo a cuenta bancaria, NO se cuenta en el arqueo de caja</span>
                 </p>
@@ -2008,14 +2008,14 @@ function ModalCobro({
             </p>
             <div className="space-y-4">
               {/* RUNT */}
-              <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
+              <div className="bg-brand-50 border-2 border-brand-200 rounded-lg p-4">
                 <div className="flex items-center justify-between mb-3">
                   <div>
-                    <h4 className="font-bold text-blue-900 flex items-center gap-2">
+                    <h4 className="font-bold text-brand-900 flex items-center gap-2">
                       <Landmark className="w-5 h-5" />
                       RUNT - Ministerio de Transporte
                     </h4>
-                    <p className="text-xs text-blue-700">Registro oficial de la revisión técnico-mecánica</p>
+                    <p className="text-xs text-brand-700">Registro oficial de la revisión técnico-mecánica</p>
                   </div>
                 </div>
                 <div className="flex gap-3">
@@ -2023,19 +2023,19 @@ function ModalCobro({
                     type="button"
                     onClick={() => urls && window.open(urls.runt_url, '_blank', 'width=1200,height=800')}
                     disabled={loadingUrls || !urls}
-                    className="flex-1 px-4 py-2 bg-blue-600 text-white rounded-lg font-semibold hover:bg-blue-700 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-2"
+                    className="flex-1 px-4 py-2 bg-brand-600 text-white rounded-lg font-semibold hover:bg-brand-700 disabled:opacity-50 transition-colors inline-flex items-center justify-center gap-2"
                   >
                     <Link2 className="w-4 h-4" />
                     Abrir RUNT
                   </button>
-                  <label className="flex items-center px-4 py-2 bg-white border-2 border-blue-600 rounded-lg cursor-pointer hover:bg-blue-50 transition-colors">
+                  <label className="flex items-center px-4 py-2 bg-white border-2 border-brand-600 rounded-lg cursor-pointer hover:bg-brand-50 transition-colors">
                     <input
                       type="checkbox"
                       checked={registros.registrado_runt}
                       onChange={(e) => setRegistros({ ...registros, registrado_runt: e.target.checked })}
-                      className="w-5 h-5 text-blue-600 rounded"
+                      className="w-5 h-5 text-brand-600 rounded"
                     />
-                    <span className="ml-2 font-semibold text-blue-900 flex items-center gap-1">
+                    <span className="ml-2 font-semibold text-brand-900 flex items-center gap-1">
                       <CheckSquare className="w-4 h-4" />
                       Registrado
                     </span>
@@ -2605,7 +2605,7 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
         ? 'border-amber-500 bg-amber-50/80 text-amber-900 shadow-sm'
         : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300',
       ajuste: isSelected
-        ? 'border-sky-500 bg-sky-50/80 text-sky-900 shadow-sm'
+        ? 'border-brand-500 bg-brand-50 text-brand-900 shadow-sm'
         : 'border-slate-200 bg-white text-slate-700 hover:border-slate-300',
     };
     return styles[tipoId] || '';
@@ -2632,12 +2632,12 @@ function ModalGasto({ onClose, onSuccess }: { onClose: () => void, onSuccess: ()
               ${formatCurrency(montoNumerico)}
             </p>
             
-            <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4 mb-6">
-              <p className="text-sm font-semibold text-blue-900 mb-2 flex items-center justify-center gap-2">
+            <div className="bg-brand-50 border-2 border-brand-200 rounded-lg p-4 mb-6">
+              <p className="text-sm font-semibold text-brand-900 mb-2 flex items-center justify-center gap-2">
                 <FileText className="w-5 h-5" />
                 Comprobante descargado (mismo que en Reportes → Detalle)
               </p>
-              <p className="text-xs text-blue-700 break-all">
+              <p className="text-xs text-brand-700 break-all">
                 {nombreArchivoPDF}
               </p>
             </div>
@@ -3241,16 +3241,16 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
             Desglose por Concepto
           </h4>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="bg-cyan-50 border-2 border-cyan-200 rounded-lg p-5">
+            <div className="bg-brand-50 border-2 border-brand-200 rounded-lg p-5">
               <div className="flex justify-between items-center">
                 <div>
-                  <p className="text-xs text-cyan-700 mb-1 flex items-center gap-1">
+                  <p className="text-xs text-brand-700 mb-1 flex items-center gap-1">
                     <Car className="w-4 h-4" />
                     Revisión Técnico-Mecánica
                   </p>
-                  <p className="text-sm font-semibold text-cyan-800">Total RTM</p>
+                  <p className="text-sm font-semibold text-brand-800">Total RTM</p>
                 </div>
-                <p className="text-3xl font-bold text-cyan-900">
+                <p className="text-3xl font-bold text-brand-900">
                   ${formatCurrency(resumen.total_rtm)}
                 </p>
               </div>
@@ -3301,12 +3301,12 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
             Estos pagos fueron a cuentas bancarias/billeteras, no se cuentan en el arqueo
           </p>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
-            <div className="bg-blue-50 border-2 border-blue-200 rounded-lg p-4">
-              <p className="text-xs text-blue-700 mb-1 flex items-center gap-1">
+            <div className="bg-brand-50 border-2 border-brand-200 rounded-lg p-4">
+              <p className="text-xs text-brand-700 mb-1 flex items-center gap-1">
                 <CreditCard className="w-4 h-4" />
                 Tarjeta Débito
               </p>
-              <p className="text-2xl font-bold text-blue-900">
+              <p className="text-2xl font-bold text-brand-900">
                 ${formatCurrency(resumen.tarjeta_debito)}
               </p>
             </div>
@@ -3420,13 +3420,13 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                   {/* Tarjeta Débito */}
                   {vehiculosPorMetodo.tarjeta_debito && vehiculosPorMetodo.tarjeta_debito.length > 0 && (
                     <div>
-                      <h5 className="font-bold text-blue-900 mb-2 flex items-center gap-2">
+                      <h5 className="font-bold text-brand-900 mb-2 flex items-center gap-2">
                         <CreditCard className="w-5 h-5" />
                         Tarjeta Débito ({vehiculosPorMetodo.tarjeta_debito.length})
                       </h5>
                       <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
                         {vehiculosPorMetodo.tarjeta_debito.map((v, idx) => (
-                          <div key={idx} className="bg-blue-50 border border-blue-200 rounded p-2">
+                          <div key={idx} className="bg-brand-50 border border-brand-200 rounded p-2">
                             <p className="font-bold text-sm">{v.placa}</p>
                             <p className="text-xs text-gray-600">${formatCurrency(v.total_cobrado)}</p>
                           </div>
@@ -3741,8 +3741,8 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                 { key: 'monedas_100', label: '$100', valor: 100 },
                 { key: 'monedas_50', label: '$50', valor: 50 },
               ].map(({ key, label, valor }) => (
-                <div key={key} className="bg-blue-50 border border-blue-300 rounded-lg p-3">
-                  <label className="block text-xs font-semibold text-blue-900 mb-1">{label}</label>
+                <div key={key} className="bg-brand-50 border border-brand-300 rounded-lg p-3">
+                  <label className="block text-xs font-semibold text-brand-900 mb-1">{label}</label>
                   <input
                     type="number"
                     min="0"
@@ -3751,10 +3751,10 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                       const val = parseInt(e.target.value) || 0;
                       setDesglose({ ...desglose, [key]: val });
                     }}
-                    className="w-full px-2 py-1 text-center border border-blue-400 rounded font-bold text-lg"
+                    className="w-full px-2 py-1 text-center border border-brand-400 rounded font-bold text-lg"
                     placeholder="0"
                   />
-                  <p className="text-xs text-blue-700 mt-1 text-center">
+                  <p className="text-xs text-brand-700 mt-1 text-center">
                     ${formatCurrency((desglose[key as keyof typeof desglose] as number) * valor)}
                   </p>
                 </div>
@@ -3781,7 +3781,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
               diferencia === 0
                 ? 'bg-green-50 border-green-200'
                 : diferencia > 0
-                ? 'bg-blue-50 border-blue-200'
+                ? 'bg-brand-50 border-brand-200'
                 : 'bg-red-50 border-red-200'
             }`}>
               <div className="flex justify-between items-center">
@@ -3812,7 +3812,7 @@ function CierreCaja({ cajaId, onCerrado }: { cajaId: string, onCerrado: () => vo
                   diferencia === 0
                     ? 'text-green-900'
                     : diferencia > 0
-                    ? 'text-blue-900'
+                    ? 'text-brand-900'
                     : 'text-red-900'
                 }`}>
                   {diferencia === 0 ? '✓' : (diferencia > 0 ? '+' : '') + '$' + formatCurrency(diferencia)}
@@ -4122,7 +4122,7 @@ function HistorialCajas() {
                     </div>
                   )}
                   {esCerrada && diferencia > 0 && (
-                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg text-sm font-semibold bg-blue-100 text-blue-800">
+                    <div className="inline-flex items-center gap-2 px-3 py-1 rounded-lg text-sm font-semibold bg-brand-100 text-brand-800">
                       <TrendingUp className="w-4 h-4" />
                       Sobrante: +${formatCurrency(diferencia)}
                     </div>
@@ -4717,7 +4717,7 @@ function VehiculosCobradosHoy({
               {permiteCambioMetodo && (
                 <button
                   onClick={() => setVehiculoSeleccionado(vehiculo)}
-                  className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg font-semibold text-sm transition-colors inline-flex items-center justify-center gap-2"
+                  className="w-full py-2 bg-brand-600 hover:bg-brand-700 text-white rounded-lg font-semibold text-sm transition-colors inline-flex items-center justify-center gap-2"
                 >
                   <RefreshCw className="w-4 h-4" />
                   Cambiar Método de Pago
@@ -5260,7 +5260,7 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
                         nuevoMetodo === metodo.id
                           ? metodo.id === 'mixto'
                             ? 'border-teal-600 bg-teal-50 text-teal-900 scale-105'
-                            : 'border-blue-600 bg-blue-50 text-blue-900 scale-105'
+                            : 'border-brand-600 bg-brand-50 text-brand-900 scale-105'
                           : 'border-slate-300 bg-white text-slate-700 hover:border-slate-400'
                       }`}
                     >
@@ -5273,7 +5273,7 @@ function ModalCambiarMetodoPago({ vehiculo, onClose }: { vehiculo: Vehiculo, onC
                           metodo.canal === 'Caja'
                             ? 'bg-emerald-100 text-emerald-800'
                             : metodo.canal === 'Electrónico'
-                              ? 'bg-blue-100 text-blue-800'
+                              ? 'bg-brand-100 text-brand-800'
                               : metodo.canal === 'Combinado'
                                 ? 'bg-teal-100 text-teal-800'
                                 : 'bg-amber-100 text-amber-800'
@@ -5693,7 +5693,7 @@ function ModalVentaSOAT({ onClose, onSuccess }: { onClose: () => void, onSuccess
                           metodo.canal === 'Caja'
                             ? 'bg-emerald-100 text-emerald-800'
                             : metodo.canal === 'Electrónico'
-                              ? 'bg-blue-100 text-blue-800'
+                              ? 'bg-brand-100 text-brand-800'
                               : 'bg-amber-100 text-amber-800'
                         }`}
                       >

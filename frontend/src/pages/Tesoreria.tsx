@@ -54,48 +54,47 @@ export default function TesoreriaPage() {
     <Layout title="Tesorería - Caja Fuerte">
       <section className="module-hero">
         <p className="module-hero-title flex items-center gap-3">
-          <Vault className="w-7 h-7 text-primary-600" />
+          <Vault className="w-7 h-7 text-slate-600" />
           Tesorería - Caja Fuerte
         </p>
         <p className="module-hero-subtitle">Gestión centralizada del dinero del CDA</p>
       </section>
 
       {/* Navegación de vistas */}
-      <div className="flex flex-wrap gap-2 mb-6">
+      <section className="module-tabs mb-6">
+        <div className="flex flex-wrap gap-2">
         <button
+          type="button"
           onClick={() => setVistaActual('dashboard')}
-          className={`btn-chip px-4 py-2 text-sm sm:text-base ${
-            vistaActual === 'dashboard'
-              ? 'bg-primary-600 text-white border-primary-600 shadow-sm'
-              : 'text-slate-700'
+          className={`module-tab inline-flex items-center gap-2 ${
+            vistaActual === 'dashboard' ? 'module-tab-active' : ''
           }`}
         >
           <BarChart3 className="w-5 h-5" />
           Dashboard
         </button>
         <button
+          type="button"
           onClick={() => setVistaActual('registrar')}
-          className={`btn-chip px-4 py-2 text-sm sm:text-base ${
-            vistaActual === 'registrar'
-              ? 'bg-secondary-500 text-white border-secondary-500 shadow-sm'
-              : 'text-slate-700'
+          className={`module-tab inline-flex items-center gap-2 ${
+            vistaActual === 'registrar' ? 'module-tab-active' : ''
           }`}
         >
           <Plus className="w-5 h-5" />
           Registrar Movimiento
         </button>
         <button
+          type="button"
           onClick={() => setVistaActual('historial')}
-          className={`btn-chip px-4 py-2 text-sm sm:text-base ${
-            vistaActual === 'historial'
-              ? 'bg-purple-600 text-white border-purple-600 shadow-sm'
-              : 'text-slate-700'
+          className={`module-tab inline-flex items-center gap-2 ${
+            vistaActual === 'historial' ? 'module-tab-active' : ''
           }`}
         >
           <FileText className="w-5 h-5" />
           Historial
         </button>
-      </div>
+        </div>
+      </section>
 
       {/* Contenido según vista */}
       {vistaActual === 'dashboard' && <Dashboard />}
@@ -195,15 +194,15 @@ function Dashboard() {
       )}
 
       {/* Tarjeta principal: Saldo Actual */}
-      <div className="card-pos bg-gradient-to-r from-primary-600 to-primary-700 text-white">
-        <h3 className="text-xl font-bold mb-2 flex items-center gap-2">
-          <Wallet className="w-6 h-6" />
+      <div className="section-card p-5 sm:p-6">
+        <h3 className="text-xl font-bold mb-2 flex items-center gap-2 text-slate-900">
+          <Wallet className="w-6 h-6 text-slate-600" />
           Saldo Actual en Caja Fuerte
         </h3>
-        <p className="text-5xl font-bold mb-4">
+        <p className="text-5xl font-bold mb-4 text-slate-900">
           ${formatCurrency(saldoActual)}
         </p>
-        <p className="text-sm opacity-90">
+        <p className="text-sm text-slate-600">
           Actualizado: {new Date(saldo?.fecha_calculo || '').toLocaleString('es-CO')}
         </p>
       </div>
@@ -211,18 +210,18 @@ function Dashboard() {
       {/* Grid de resumen */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Ingresos del mes */}
-        <div className="card-pos bg-blue-50 border-2 border-blue-200">
-          <p className="text-sm text-blue-700 mb-1 flex items-center gap-1">
+        <div className="section-card p-5">
+          <p className="text-sm text-emerald-700 mb-1 flex items-center gap-1">
             <TrendingUp className="w-4 h-4" />
             Ingresos del Mes
           </p>
-          <p className="text-3xl font-bold text-blue-900">
+          <p className="text-3xl font-bold text-emerald-900">
             ${formatCurrency(resumen?.total_ingresos ?? 0)}
           </p>
         </div>
 
         {/* Egresos del mes */}
-        <div className="card-pos bg-red-50 border-2 border-red-200">
+        <div className="section-card p-5">
           <p className="text-sm text-red-700 mb-1 flex items-center gap-1">
             <TrendingDown className="w-4 h-4" />
             Egresos del Mes
@@ -233,12 +232,12 @@ function Dashboard() {
         </div>
 
         {/* Movimientos */}
-        <div className="card-pos bg-purple-50 border-2 border-purple-200">
-          <p className="text-sm text-purple-700 mb-1 flex items-center gap-1">
+        <div className="section-card p-5">
+          <p className="text-sm text-slate-600 mb-1 flex items-center gap-1">
             <FileText className="w-4 h-4" />
             Movimientos
           </p>
-          <p className="text-3xl font-bold text-purple-900">
+          <p className="text-3xl font-bold text-slate-900">
             {resumen?.cantidad_movimientos || 0}
           </p>
         </div>
@@ -247,25 +246,25 @@ function Dashboard() {
       {/* Tarjetas de Desglose */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         {/* Tarjeta 1: Medios Electrónicos */}
-        <div className="card-pos bg-gradient-to-br from-blue-50 to-purple-50 border-2 border-blue-200">
+        <div className="section-card p-5 sm:p-6">
           <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
-            <Building2 className="w-6 h-6 text-blue-600" />
+            <Building2 className="w-6 h-6 text-brand-600" />
             Medios Electrónicos
           </h3>
           <div className="space-y-3">
             {loadingDesglose ? (
               <div className="text-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-600 mx-auto"></div>
                 <p className="text-sm text-slate-500 mt-2">Cargando detalle...</p>
               </div>
             ) : desglose && (
               <>
                 <div className="flex justify-between items-center p-3 bg-white rounded-lg">
                   <span className="text-sm font-semibold text-slate-700 flex items-center gap-2">
-                    <ArrowUpCircle className="w-4 h-4 text-blue-600" />
+                    <ArrowUpCircle className="w-4 h-4 text-brand-600" />
                     Transferencia
                   </span>
-                  <span className="text-xl font-bold text-blue-600">
+                  <span className="text-xl font-bold text-brand-600">
                     ${formatCurrency(desglose.desglose.transferencia || 0)}
                   </span>
                 </div>
@@ -287,10 +286,10 @@ function Dashboard() {
                     ${formatCurrency(desglose.desglose.cheque || 0)}
                   </span>
                 </div>
-                <div className="border-t-2 border-blue-300 pt-3 mt-3">
+                <div className="border-t border-slate-200 pt-3 mt-3">
                   <div className="flex justify-between items-center">
                     <span className="text-lg font-bold text-slate-900">Total Electrónico:</span>
-                    <span className="text-2xl font-bold text-blue-700">
+                    <span className="text-2xl font-bold text-brand-700">
                       ${formatCurrency(
                         (desglose.desglose.transferencia || 0) +
                         (desglose.desglose.consignacion || 0) +
@@ -305,7 +304,7 @@ function Dashboard() {
         </div>
 
         {/* Tarjeta 2: Efectivo con Desglose */}
-        <div className="card-pos bg-gradient-to-br from-green-50 to-yellow-50 border-2 border-green-200">
+        <div className="section-card p-5 sm:p-6">
           <h3 className="text-xl font-bold text-slate-900 mb-4 flex items-center gap-2">
             <Banknote className="w-6 h-6 text-green-600" />
             Efectivo en Caja
@@ -444,7 +443,7 @@ function Dashboard() {
                   <div className="flex items-center gap-2 mb-1">
                     <span className={`px-2 py-1 rounded text-xs font-semibold flex items-center gap-1 ${
                       mov.tipo === 'ingreso' 
-                        ? 'bg-blue-100 text-blue-800' 
+                        ? 'bg-emerald-100 text-emerald-800' 
                         : 'bg-red-100 text-red-800'
                     }`}>
                       {mov.tipo === 'ingreso' ? (
@@ -857,7 +856,7 @@ function RegistrarMovimiento() {
   if (loadingCategorias) {
     return (
       <div className="max-w-3xl mx-auto">
-        <div className="card-pos">
+        <div className="section-card p-6">
           <LoadingSpinner message="Cargando formulario..." />
         </div>
       </div>
@@ -868,7 +867,7 @@ function RegistrarMovimiento() {
   if (errorCategorias || !categorias) {
     return (
       <div className="max-w-3xl mx-auto">
-        <div className="card-pos">
+        <div className="section-card p-6">
           <div className="bg-red-50 border-2 border-red-200 rounded-lg p-6 text-center">
             <div className="flex items-center justify-center gap-2 mb-2">
               <AlertTriangle className="w-6 h-6 text-red-600" />
@@ -932,8 +931,8 @@ function RegistrarMovimiento() {
                 onClick={() => setTipoMovimiento('ingreso')}
                 className={`p-4 rounded-lg border-2 font-semibold transition-all ${
                   tipoMovimiento === 'ingreso'
-                    ? 'border-blue-600 bg-blue-50 text-blue-900 scale-105'
-                    : 'border-gray-300 bg-white text-gray-700 hover:border-blue-400'
+                    ? 'border-brand-600 bg-brand-50 text-brand-900 scale-105'
+                    : 'border-gray-300 bg-white text-gray-700 hover:border-brand-400'
                 }`}
               >
                 <ArrowDownCircle className="w-10 h-10 mx-auto mb-2" />
@@ -1241,12 +1240,12 @@ function RegistrarMovimiento() {
           {formData.metodo_pago === 'efectivo' && formData.monto && parseFloat(formData.monto) > 0 && (
             <div className="mb-6">
               {tipoMovimiento === 'egreso' && inventarioDisponible && (
-                <div className="mb-4 bg-blue-50 border-2 border-blue-300 rounded-lg p-4">
-                  <p className="text-sm font-bold text-blue-900 mb-2 flex items-center gap-2">
+                <div className="mb-4 bg-brand-50 border border-brand-200 rounded-lg p-4">
+                  <p className="text-sm font-bold text-brand-900 mb-2 flex items-center gap-2">
                     <Banknote className="w-5 h-5" />
                     Denominaciones Disponibles en Caja
                   </p>
-                  <p className="text-xs text-blue-700">
+                  <p className="text-xs text-brand-700">
                     Total efectivo: <span className="font-bold">${formatCurrency(inventarioDisponible.total_efectivo || 0)}</span>
                   </p>
                 </div>
@@ -1720,7 +1719,7 @@ function Historial() {
                     <td className="align-middle">
                       <span className={`px-2 py-1 rounded text-xs font-semibold inline-flex items-center gap-1 ${
                         mov.tipo === 'ingreso'
-                          ? 'bg-blue-100 text-blue-800'
+                          ? 'bg-emerald-100 text-emerald-800'
                           : 'bg-red-100 text-red-800'
                       }`}>
                         {mov.tipo === 'ingreso' ? (

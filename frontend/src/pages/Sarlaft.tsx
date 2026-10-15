@@ -972,11 +972,11 @@ export default function Sarlaft() {
   return (
     <Layout title="SARLAFT">
       <div className="space-y-6">
-        <div className="sticky top-0 z-10 rounded-xl border border-slate-200/90 bg-white/95 shadow-sm backdrop-blur-sm supports-[backdrop-filter]:bg-white/90">
+        <div className="sticky top-0 z-10 section-card">
           <div className="flex flex-col gap-2 border-b border-slate-100 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Motor SARLAFT</p>
-              <p className="text-sm text-slate-700">
+              <p className="module-hero-title mb-1 text-xl sm:text-2xl">SARLAFT</p>
+              <p className="module-hero-subtitle">
                 Monitoreo interno: <strong>Siempre activo</strong>
               </p>
             </div>
@@ -1032,7 +1032,7 @@ export default function Sarlaft() {
             </div>
           </div>
           <div
-            className="flex overflow-x-auto gap-0 border-b border-slate-100 px-1 pt-1 sm:px-2"
+            className="flex overflow-x-auto gap-2 px-2 py-2 sm:px-3"
             role="tablist"
             aria-label="Secciones del panel SARLAFT"
           >
@@ -1045,10 +1045,8 @@ export default function Sarlaft() {
                   role="tab"
                   aria-selected={active}
                   onClick={() => setSarlaftSeccion(s.id)}
-                  className={`min-w-[6.5rem] shrink-0 rounded-t-lg px-3 py-2.5 text-sm font-semibold transition-colors sm:min-w-0 sm:px-4 ${
-                    active
-                      ? 'border-b-2 border-primary-600 bg-primary-50/70 text-primary-900'
-                      : 'border-b-2 border-transparent text-slate-600 hover:bg-slate-50 hover:text-slate-900'
+                  className={`module-tab min-w-[6.5rem] shrink-0 sm:min-w-0 ${
+                    active ? 'module-tab-active' : ''
                   }`}
                 >
                   <span className="inline-flex items-center gap-1.5">
@@ -1071,7 +1069,7 @@ export default function Sarlaft() {
         {sarlaftSeccion === 'resumen' && (
           <div className="space-y-4">
             <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-5">
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="section-card p-4">
                 <p className="text-xs text-slate-500">Alertas internas</p>
                 <p className="mt-1 text-2xl font-semibold text-slate-900">{resumenKpi.alertasInternas}</p>
               </div>
@@ -1079,11 +1077,11 @@ export default function Sarlaft() {
                 <p className="text-xs text-rose-700">Alertas críticas</p>
                 <p className="mt-1 text-2xl font-semibold text-rose-800">{resumenKpi.alertasCriticas}</p>
               </div>
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="section-card p-4">
                 <p className="text-xs text-slate-500">Casos SARLAFT</p>
                 <p className="mt-1 text-2xl font-semibold text-slate-900">{resumenKpi.casosRegistrados}</p>
               </div>
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="section-card p-4">
                 <p className="text-xs text-slate-500">Consultas manuales</p>
                 <p className="mt-1 text-2xl font-semibold text-slate-900">{resumenKpi.consultasManuales}</p>
               </div>
@@ -1092,7 +1090,7 @@ export default function Sarlaft() {
                 <p className="mt-1 text-2xl font-semibold text-indigo-800">{resumenKpi.sirelPendientes}</p>
               </div>
             </div>
-            <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+            <div className="section-card p-5">
               <h3 className="text-base font-semibold text-slate-900">Atajos rápidos</h3>
               <p className="mt-1 text-xs text-slate-500">Navega por pestañas para evitar una pantalla extensa y mantener foco operativo.</p>
               <div className="mt-4 flex flex-wrap gap-2">
@@ -1185,7 +1183,7 @@ export default function Sarlaft() {
         )}
 
         {sarlaftSeccion === 'consultas' && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="section-card p-5">
           <div className="flex items-center gap-3 mb-4">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-violet-100 text-violet-700">
               <Search className="h-5 w-5" />
@@ -1322,7 +1320,7 @@ export default function Sarlaft() {
         )}
 
         {sarlaftSeccion === 'screening' && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="section-card p-5">
           <div className="flex items-center gap-3 mb-4">
             <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-sky-100 text-sky-700">
               <ShieldCheck className="h-5 w-5" />
@@ -1398,7 +1396,7 @@ export default function Sarlaft() {
 
         {sarlaftSeccion === 'casos' && (
         <>
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="section-card p-5">
           <h3 className="text-base font-semibold text-slate-900 mb-3">Consultar caso por ID</h3>
           <div className="flex gap-2">
             <input className="input-corporate flex-1" placeholder="UUID del caso SARLAFT" value={caseIdLookup} onChange={(e) => setCaseIdLookup(e.target.value)} />
@@ -1416,10 +1414,10 @@ export default function Sarlaft() {
           </p>
         </div>
 
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="section-card p-5">
           <h3 className="text-base font-semibold text-slate-900 mb-3">Bandeja básica SARLAFT (últimos 20)</h3>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
+          <div className="table-shell">
+            <table className="table-enterprise">
               <thead className="text-left text-slate-500">
                 <tr>
                   <th className="py-2 pr-3">Operación</th>
@@ -1503,7 +1501,7 @@ export default function Sarlaft() {
 
         {sarlaftSeccion === 'expediente' && (
         <>
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="section-card p-5">
           <h3 className="text-base font-semibold text-slate-900 mb-3">Expediente SARLAFT por documento</h3>
           <div className="grid gap-2 md:grid-cols-[170px_minmax(0,1fr)_auto]">
             <select
@@ -1536,7 +1534,7 @@ export default function Sarlaft() {
 
         {expedienteData && (
           <div className="mt-4 space-y-4">
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="section-card p-4">
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Documento</span>
                 <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-xs font-semibold text-slate-700">
@@ -1556,10 +1554,10 @@ export default function Sarlaft() {
               </p>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="section-card p-4">
               <h4 className="text-sm font-semibold text-slate-900 mb-2">Casos SARLAFT</h4>
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
+              <div className="table-shell">
+                <table className="table-enterprise">
                   <thead className="text-left text-slate-500">
                     <tr>
                       <th className="py-2 pr-3">Operación</th>
@@ -1592,7 +1590,7 @@ export default function Sarlaft() {
             </div>
 
             <div className="grid gap-4 lg:grid-cols-2">
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="section-card p-4">
                 <h4 className="text-sm font-semibold text-slate-900 mb-2">Consultas manuales</h4>
                 <div className="space-y-2">
                   {expedienteData.manual_checks.map((m) => (
@@ -1676,7 +1674,7 @@ export default function Sarlaft() {
                 </div>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+              <div className="section-card p-4">
                 <h4 className="text-sm font-semibold text-slate-900 mb-2">Alertas internas</h4>
                 <div className="space-y-2">
                   {expedienteData.alerts.map((a) => (
@@ -1694,10 +1692,10 @@ export default function Sarlaft() {
               </div>
             </div>
 
-            <div className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+            <div className="section-card p-4">
               <h4 className="text-sm font-semibold text-slate-900 mb-2">Documentos y evidencias</h4>
-              <div className="overflow-x-auto">
-                <table className="min-w-full text-sm">
+              <div className="table-shell">
+                <table className="table-enterprise">
                   <thead className="text-left text-slate-500">
                     <tr>
                       <th className="py-2 pr-3">Tipo</th>
@@ -1756,7 +1754,7 @@ export default function Sarlaft() {
         )}
 
         {sarlaftSeccion === 'alertas' && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="section-card p-5">
           <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
             <div className="flex items-start gap-3">
               <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-rose-100 text-rose-700">
@@ -1832,8 +1830,8 @@ export default function Sarlaft() {
               <p className="text-lg font-semibold text-indigo-800">{internalAlertsKpi.pagoRiesgoso}</p>
             </div>
           </div>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
+          <div className="table-shell">
+            <table className="table-enterprise">
               <thead className="text-left text-slate-500">
                 <tr>
                   <th className="py-2 pr-3">Nivel alerta</th>
@@ -2028,7 +2026,7 @@ export default function Sarlaft() {
         )}
 
         {sarlaftSeccion === 'sirel' && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="section-card p-5">
           <div className="mb-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
             <div>
               <h3 className="text-base font-semibold text-slate-900">Bandeja SIREL/UIAF (ROS)</h3>
@@ -2085,8 +2083,8 @@ export default function Sarlaft() {
             </div>
           </div>
 
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
+          <div className="table-shell">
+            <table className="table-enterprise">
               <thead className="text-left text-slate-500">
                 <tr>
                   <th className="py-2 pr-3">Operación</th>
@@ -2212,7 +2210,7 @@ export default function Sarlaft() {
         )}
 
         {(sarlaftSeccion === 'consultas' || sarlaftSeccion === 'lotes') && (
-        <div className="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+        <div className="section-card p-5">
           {sarlaftSeccion === 'lotes' && (
           <>
           <div className="mb-4 rounded-xl border border-indigo-200 bg-indigo-50 p-4">
@@ -2261,8 +2259,8 @@ export default function Sarlaft() {
 
           <div className="mb-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
             <h4 className="text-sm font-semibold text-slate-900">Lotes recientes</h4>
-            <div className="mt-2 overflow-x-auto">
-              <table className="min-w-full text-xs">
+            <div className="mt-2 table-shell">
+              <table className="table-enterprise text-xs">
                 <thead className="text-left text-slate-500">
                   <tr>
                     <th className="py-2 pr-3">Fecha</th>
@@ -2322,8 +2320,8 @@ export default function Sarlaft() {
           {selectedBatchJobId && (
             <div className="mb-4 rounded-xl border border-slate-200 bg-white p-4">
               <h4 className="text-sm font-semibold text-slate-900">Detalle lote seleccionado</h4>
-              <div className="mt-2 overflow-x-auto">
-                <table className="min-w-full text-xs">
+              <div className="mt-2 table-shell">
+                <table className="table-enterprise text-xs">
                   <thead className="text-left text-slate-500">
                     <tr>
                       <th className="py-2 pr-3">#</th>
@@ -2383,8 +2381,8 @@ export default function Sarlaft() {
           <h3 className="text-base font-semibold text-slate-900 mb-3">
             Consultas manuales SARLAFT (últimas 20)
           </h3>
-          <div className="overflow-x-auto">
-            <table className="min-w-full text-sm">
+          <div className="table-shell">
+            <table className="table-enterprise">
               <thead className="text-left text-slate-500">
                 <tr>
                   <th className="py-2 pr-3">Tipo</th>
@@ -3019,8 +3017,8 @@ export default function Sarlaft() {
 
                       <div className="rounded-xl border border-slate-200 p-4">
                         <h4 className="text-sm font-semibold text-slate-900">Partes asociadas ({c.parties.length})</h4>
-                        <div className="mt-3 overflow-x-auto">
-                          <table className="min-w-full text-sm">
+                        <div className="mt-3 table-shell">
+                          <table className="table-enterprise">
                             <thead className="text-left text-slate-500">
                               <tr>
                                 <th className="py-2 pr-3">Rol</th>

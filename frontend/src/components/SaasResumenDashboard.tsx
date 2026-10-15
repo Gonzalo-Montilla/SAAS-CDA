@@ -243,7 +243,7 @@ export function SaasResumenDashboard({
         </button>
         <button type="button" className="kpi-card text-left" onClick={canReadSupport ? onOpenSoporte : undefined}>
           <p className="kpi-label">Tickets abiertos</p>
-          <p className="kpi-value text-cyan-800">
+          <p className="kpi-value text-slate-900">
             {canReadSupport ? (supportLoading ? '…' : support?.sin_resolver ?? 0) : '—'}
           </p>
           <p className="mt-1 text-xs text-slate-500">{support?.criticos_abiertos ?? 0} críticos</p>

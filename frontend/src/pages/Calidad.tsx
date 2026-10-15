@@ -676,7 +676,7 @@ export default function Calidad() {
       <div className="space-y-6">
         <section className="module-hero">
           <p className="module-hero-title flex items-center gap-2">
-            <MessageSquareHeart className="w-5 h-5 text-violet-600" />
+            <MessageSquareHeart className="w-5 h-5 text-slate-600" />
             Gestión de calidad
           </p>
           <p className="module-hero-subtitle">
