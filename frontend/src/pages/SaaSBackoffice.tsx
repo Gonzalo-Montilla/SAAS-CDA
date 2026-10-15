@@ -4050,7 +4050,7 @@ export default function SaaSBackoffice() {
         </div>
 
         <div className="mb-6 overflow-x-auto pt-1">
-          <div className="grid grid-cols-7 gap-3 min-w-[860px] md:min-w-0">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-7 gap-3">
             {moduleCards.map((module) => (
               <button
                 key={module.id}

@@ -90,7 +90,7 @@
   }
 
   .app-main {
-    @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8;
+    @apply max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-4 sm:py-8;
   }
 
   .app-user-chip {
@@ -277,7 +277,7 @@
   }
 
   .module-tile-icon {
-    @apply flex items-center justify-center w-16 h-16 rounded-2xl mb-4 transition-colors duration-200;
+    @apply flex items-center justify-center w-14 h-14 sm:w-16 sm:h-16 rounded-2xl mb-4 transition-colors duration-200;
     background-color: var(--ui-surface-muted);
     color: var(--ui-text-soft);
   }
@@ -323,7 +323,7 @@
   }
 
   .module-hero-title {
-    @apply text-2xl sm:text-3xl font-bold text-slate-900 mb-2 flex items-center gap-3;
+    @apply text-xl sm:text-2xl md:text-3xl font-bold text-slate-900 mb-2 flex items-center gap-2 sm:gap-3;
   }
 
   .module-hero-subtitle {
@@ -331,11 +331,11 @@
   }
 
   .module-tabs {
-    @apply section-card p-2;
+    @apply section-card p-2 overflow-x-auto;
   }
 
   .module-tab {
-    @apply px-4 py-2 rounded-lg text-sm font-semibold transition text-slate-700 hover:bg-slate-100;
+    @apply px-4 py-2.5 sm:py-2 min-h-11 sm:min-h-0 whitespace-nowrap rounded-lg text-sm font-semibold transition text-slate-700 hover:bg-slate-100;
   }
 
   .module-tab-active {
@@ -374,7 +374,7 @@
   
   /* Tarjetas - Diseño Limpio */
   .card-pos {
-    @apply bg-white rounded-2xl border p-6 transition-all duration-300 transform hover:-translate-y-1;
+    @apply bg-white rounded-2xl border p-4 sm:p-6 transition-all duration-300 transform hover:-translate-y-1;
     border-color: var(--ui-border);
     box-shadow: var(--ui-shadow-soft);
   }

@@ -466,7 +466,7 @@ export default function Comunicaciones() {
 
         <section className="section-card p-6">
           <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-            <div className="min-w-[16rem] flex-1">
+            <div className="min-w-0 flex-1">
               <p className="text-sm font-semibold text-slate-800">{tipoMeta.label}</p>
               <p className="text-xs text-slate-500 mt-1">{tipoMeta.help}</p>
             </div>

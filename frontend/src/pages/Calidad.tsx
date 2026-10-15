@@ -1412,7 +1412,7 @@ export default function Calidad() {
 
             <section className="section-card p-6">
               <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-                <div className="min-w-[16rem] flex-1">
+                <div className="min-w-0 flex-1">
                   <p className="text-sm font-semibold text-slate-800 flex items-center gap-2">
                     <CalendarCheck2 className="w-4 h-4 text-violet-600" />
                     Gestión comercial de vencimientos

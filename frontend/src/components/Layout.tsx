@@ -30,42 +30,42 @@ export default function Layout({ children, title }: LayoutProps) {
           <div className="flex items-center gap-4">
             <button
               onClick={() => navigate('/dashboard')}
-              className="flex items-center gap-4 hover:opacity-80 transition-opacity"
+              className="flex items-center gap-3 sm:gap-4 hover:opacity-80 transition-opacity min-w-0"
             >
               <img 
                 src={brand.logoSrc}
                 alt={brand.nombreComercial}
-                className="h-12 sm:h-14 rounded-xl"
+                className="h-12 sm:h-14 rounded-xl shrink-0"
               />
-              <div>
-                <p className="text-xs font-medium uppercase tracking-wide text-slate-500">{brand.nombreComercial}</p>
-                <p className="text-sm text-slate-700 font-semibold">{title}</p>
+              <div className="min-w-0">
+                <p className="text-xs font-medium uppercase tracking-wide text-slate-500 truncate">{brand.nombreComercial}</p>
+                <p className="text-sm text-slate-700 font-semibold truncate">{title}</p>
               </div>
             </button>
           </div>
-          <div className="flex items-center gap-3 flex-wrap justify-end">
+          <div className="flex items-center gap-2 sm:gap-3 flex-wrap justify-end min-w-0">
             <BranchSelector />
             <button
               onClick={() => navigate('/dashboard')}
-              className="px-4 btn-corporate-muted flex items-center gap-2"
+              className="px-3 sm:px-4 btn-corporate-muted flex items-center gap-2"
             >
-              <Home className="w-4 h-4" />
-              Inicio
+              <Home className="w-4 h-4 shrink-0" />
+              <span className="hidden sm:inline">Inicio</span>
             </button>
-            <div className="app-user-chip">
-              <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center">
+            <div className="app-user-chip min-w-0">
+              <div className="w-8 h-8 rounded-full bg-slate-100 text-slate-600 flex items-center justify-center shrink-0">
                 <User className="w-4 h-4" />
               </div>
-              <div className="text-right">
-                <p className="text-sm font-semibold text-slate-900">{user?.nombre_completo}</p>
-                <p className="text-xs text-slate-500 capitalize">{user?.rol}</p>
+              <div className="text-right hidden sm:block min-w-0">
+                <p className="text-sm font-semibold text-slate-900 truncate max-w-[10rem]">{user?.nombre_completo}</p>
+                <p className="text-xs text-slate-500 capitalize truncate">{user?.rol}</p>
               </div>
             </div>
             <button
               onClick={handleLogout}
-              className="px-4 btn-corporate-danger flex items-center gap-2"
+              className="px-3 sm:px-4 btn-corporate-danger flex items-center gap-2"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut className="w-4 h-4 shrink-0" />
               Salir
             </button>
           </div>

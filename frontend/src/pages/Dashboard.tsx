@@ -141,26 +141,26 @@ export default function Dashboard() {
             <img 
               src={brand.logoSrc}
               alt={brand.nombreComercial}
-              className="h-12 sm:h-14 rounded-xl"
+              className="h-12 sm:h-14 rounded-xl shrink-0"
             />
-            <div>
+            <div className="min-w-0">
               <p className="text-xs font-medium uppercase tracking-wide text-slate-500">Panel de operación</p>
-              <p className="text-2xl font-bold text-slate-900 leading-tight">{brand.nombreComercial}</p>
+              <p className="text-lg sm:text-2xl font-bold text-slate-900 leading-tight break-words">{brand.nombreComercial}</p>
             </div>
           </div>
-          <div className="flex items-center gap-4 flex-wrap justify-end">
+          <div className="flex items-center gap-2 sm:gap-4 flex-wrap justify-end min-w-0">
             <BranchSelector />
-            <div className="app-user-chip">
-              <div className="text-right">
-                <p className="text-sm font-medium text-slate-900">{user?.nombre_completo}</p>
-                <p className="text-xs text-slate-500 capitalize">{user?.rol}</p>
+            <div className="app-user-chip min-w-0">
+              <div className="text-right min-w-0">
+                <p className="text-sm font-medium text-slate-900 truncate max-w-[9rem] sm:max-w-[14rem]">{user?.nombre_completo}</p>
+                <p className="text-xs text-slate-500 capitalize truncate">{user?.rol}</p>
               </div>
             </div>
             <button
               onClick={handleLogout}
-              className="px-4 btn-corporate-danger flex items-center gap-2"
+              className="px-3 sm:px-4 btn-corporate-danger flex items-center gap-2"
             >
-              <LogOut className="w-4 h-4" />
+              <LogOut className="w-4 h-4 shrink-0" />
               Salir
             </button>
           </div>
@@ -221,7 +221,7 @@ export default function Dashboard() {
         )}
 
         <div className="mb-8 animate-fade-in">
-          <h2 className="text-3xl font-bold text-slate-900 mb-2">
+          <h2 className="text-2xl sm:text-3xl font-bold text-slate-900 mb-2 break-words">
             Bienvenido, {user?.nombre_completo}
           </h2>
           <p className="text-slate-600">Selecciona un módulo para comenzar tu operación.</p>

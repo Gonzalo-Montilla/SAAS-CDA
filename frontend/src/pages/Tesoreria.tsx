@@ -199,7 +199,7 @@ function Dashboard() {
           <Wallet className="w-6 h-6 text-slate-600" />
           Saldo Actual en Caja Fuerte
         </h3>
-        <p className="text-5xl font-bold mb-4 text-slate-900">
+        <p className="text-3xl sm:text-5xl font-bold mb-4 text-slate-900 break-words">
           ${formatCurrency(saldoActual)}
         </p>
         <p className="text-sm text-slate-600">
@@ -215,7 +215,7 @@ function Dashboard() {
             <TrendingUp className="w-4 h-4" />
             Ingresos del Mes
           </p>
-          <p className="text-3xl font-bold text-emerald-900">
+          <p className="text-2xl sm:text-3xl font-bold text-emerald-900 break-words">
             ${formatCurrency(resumen?.total_ingresos ?? 0)}
           </p>
         </div>
@@ -226,7 +226,7 @@ function Dashboard() {
             <TrendingDown className="w-4 h-4" />
             Egresos del Mes
           </p>
-          <p className="text-3xl font-bold text-red-900">
+          <p className="text-2xl sm:text-3xl font-bold text-red-900 break-words">
             ${formatCurrency(resumen?.total_egresos ?? 0)}
           </p>
         </div>

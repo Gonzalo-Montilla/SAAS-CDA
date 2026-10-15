@@ -538,7 +538,7 @@ export default function Nomina() {
 
         <section className="section-card p-5">
           <div className="flex flex-wrap items-end gap-3 mb-4">
-            <div className="min-w-[280px]">
+            <div className="w-full min-w-0 sm:min-w-[280px] sm:w-auto">
               <label className="block text-xs font-medium text-slate-500 mb-1">Periodo</label>
               <select
                 className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm"

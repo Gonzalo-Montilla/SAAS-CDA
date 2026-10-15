@@ -777,7 +777,7 @@ function AperturaCaja() {
               day: 'numeric' 
             })}
           </p>
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 sm:gap-4">
             <div className="bg-white rounded-lg p-4 text-center">
               <p className="text-xs text-gray-600 mb-1 flex items-center justify-center gap-1">
                 <Car className="w-4 h-4" /> Vehículos
@@ -854,7 +854,7 @@ function AperturaCaja() {
               <Clock className="w-5 h-5" />
               Turno de Trabajo
             </label>
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-3 gap-2 sm:gap-4">
               {(['mañana', 'tarde', 'noche'] as const).map((turno) => (
                 <button
                   key={turno}

@@ -507,7 +507,7 @@ export default function Login() {
               <img
                 src={effectiveBrand.logoSrc}
                 alt={effectiveBrand.nombreComercial}
-                className={`block h-48 w-auto max-w-[92%] mb-5 object-contain object-center mx-auto ${
+                className={`block h-28 sm:h-40 md:h-48 w-auto max-w-[92%] mb-4 sm:mb-5 object-contain object-center mx-auto ${
                   isDefaultBrandLogin ? '-translate-x-2' : ''
                 }`}
               />
