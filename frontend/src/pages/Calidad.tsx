@@ -226,7 +226,7 @@ export default function Calidad() {
     return () => window.clearTimeout(t);
   }, [satSearchInput]);
 
-  const [rtmWindow, setRtmWindow] = useState<8 | 15 | 30>(30);
+  const [rtmWindow, setRtmWindow] = useState<8 | 15 | 30 | 45>(30);
   const [rtmStatusFilter, setRtmStatusFilter] = useState<string>('todos');
   const [rtmSearch, setRtmSearch] = useState('');
   const [rtmNotesDraft, setRtmNotesDraft] = useState<Record<string, string>>({});
@@ -470,8 +470,8 @@ export default function Calidad() {
   });
 
   const rtmSummaryQuery = useQuery({
-    queryKey: ['quality-rtm-summary'],
-    queryFn: qualityApi.getRTMSummary,
+    queryKey: ['quality-rtm-summary', rtmWindow],
+    queryFn: () => qualityApi.getRTMSummary({ days_window: rtmWindow }),
     refetchInterval: 30000,
   });
 
@@ -574,7 +574,14 @@ export default function Calidad() {
   const urgencyClass = (days: number) => {
     if (days <= 8) return 'badge bg-red-100 text-red-700';
     if (days <= 15) return 'badge bg-amber-100 text-amber-800';
-    return 'badge bg-emerald-100 text-emerald-700';
+    if (days <= 30) return 'badge bg-emerald-100 text-emerald-700';
+    return 'badge bg-slate-100 text-slate-700';
+  };
+
+  const etiquetaTipoVencimiento = (tipo: string) => {
+    const t = (tipo || '').trim().toLowerCase();
+    if (t === 'preventiva') return 'Preventiva';
+    return 'RTM anual';
   };
 
   const statusCommercialClass = (value: string) => {
@@ -594,9 +601,13 @@ export default function Calidad() {
       showToast('warning', 'Sin celular', 'Este cliente no tiene celular válido para WhatsApp.');
       return false;
     }
-    const message = encodeURIComponent(
-      `Hola ${row.cliente_nombre}, te escribimos de ${nombreCda} para recordarte la próxima RTM de tu vehículo ${row.placa}. ¿Te gustaría agendar tu cita? ${row.agendamiento_url || ''}`
-    );
+    const esPreventiva = (row.tipo_vehiculo || '').trim().toLowerCase() === 'preventiva';
+    const tramite = esPreventiva ? 'el control preventivo' : 'la próxima RTM';
+    const enlace = (row.agendamiento_url || '').trim();
+    const cuerpo =
+      `Hola ${row.cliente_nombre}, te escribimos de ${nombreCda} para recordarte ${tramite} de tu vehículo ${row.placa} ` +
+      `¡Visítanos y mantén tu vehículo al día!.  ¿Te gustaría agendar tu cita?${enlace ? ` ${enlace}` : ''}`;
+    const message = encodeURIComponent(cuerpo);
     window.open(`https://wa.me/${phone}?text=${message}`, '_blank', 'noopener,noreferrer');
     touchRTMManagementMutation.mutate({
       reminderId: row.id,
@@ -1383,10 +1394,14 @@ export default function Calidad() {
 
         {activeTab === 'vencimientos' && (
           <>
-            <section className="grid grid-cols-1 md:grid-cols-6 gap-4">
+            <section className="grid grid-cols-2 gap-4 md:grid-cols-4 xl:grid-cols-7">
               <div className="section-card p-4">
                 <p className="text-xs text-slate-500">Total próximos</p>
                 <p className="text-2xl font-bold text-slate-900">{rtmSummaryQuery.data?.total_upcoming || 0}</p>
+              </div>
+              <div className="section-card p-4">
+                <p className="text-xs text-slate-500">45 días</p>
+                <p className="text-2xl font-bold text-slate-700">{rtmSummaryQuery.data?.due_45d || 0}</p>
               </div>
               <div className="section-card p-4">
                 <p className="text-xs text-slate-500">30 días</p>
@@ -1418,7 +1433,7 @@ export default function Calidad() {
                     Gestión comercial de vencimientos
                   </p>
                   <p className="text-xs text-slate-500 mt-1">
-                    Esta lista (30 / 15 / 8) es para llamar o escribir a mano. El automático es aparte:
+                    Esta lista (45 / 30 / 15 / 8) es para llamar o escribir a mano. El automático es aparte:
                     correo RTM a 30, 15, 8, 2 días y vencido+1; WhatsApp solo 30, 2 y vencido+1.
                     Preventiva: 7, 2 y vencido+1. Si el cliente ya está agendado o descartado, no se vuelve a mandar.
                   </p>
@@ -1435,7 +1450,8 @@ export default function Calidad() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
-                <select value={rtmWindow} onChange={(e) => setRtmWindow(Number(e.target.value) as 8 | 15 | 30)} className="input-corporate">
+                <select value={rtmWindow} onChange={(e) => setRtmWindow(Number(e.target.value) as 8 | 15 | 30 | 45)} className="input-corporate">
+                  <option value={45}>Ventana 45 días</option>
                   <option value={30}>Ventana 30 días</option>
                   <option value={15}>Ventana 15 días</option>
                   <option value={8}>Ventana 8 días</option>
@@ -1469,6 +1485,7 @@ export default function Calidad() {
                     <tr>
                       <th>Cliente</th>
                       <th>Placa</th>
+                      <th>Tipo</th>
                       <th>Celular</th>
                       <th>Email</th>
                       <th>Vencimiento</th>
@@ -1481,15 +1498,20 @@ export default function Calidad() {
                   </thead>
                   <tbody>
                     {rtmRemindersQuery.isLoading && (
-                      <tr><td colSpan={10} className="text-sm text-slate-500">Cargando vencimientos...</td></tr>
+                      <tr><td colSpan={11} className="text-sm text-slate-500">Cargando vencimientos...</td></tr>
                     )}
                     {!rtmRemindersQuery.isLoading && rtmRows.length === 0 && (
-                      <tr><td colSpan={10} className="text-sm text-slate-500">No hay vencimientos en esta ventana.</td></tr>
+                      <tr><td colSpan={11} className="text-sm text-slate-500">No hay vencimientos en esta ventana.</td></tr>
                     )}
                     {rtmRows.map((row) => (
                       <tr key={row.id}>
                         <td>{row.cliente_nombre}</td>
                         <td className="font-semibold text-slate-900">{row.placa}</td>
+                        <td>
+                          <span className={(row.tipo_vehiculo || '').toLowerCase() === 'preventiva' ? 'badge bg-cyan-100 text-cyan-800' : 'badge bg-slate-100 text-slate-700'}>
+                            {etiquetaTipoVencimiento(row.tipo_vehiculo)}
+                          </span>
+                        </td>
                         <td>{row.cliente_celular || '-'}</td>
                         <td className="max-w-[220px] truncate" title={row.cliente_email || ''}>{row.cliente_email || '-'}</td>
                         <td>{new Date(row.next_due_at).toLocaleDateString()}</td>
@@ -1554,7 +1576,7 @@ export default function Calidad() {
                                       cliente_celular: row.cliente_celular || '',
                                       placa: row.placa,
                                       tipo_vehiculo: row.tipo_vehiculo,
-                                      notes: `Seguimiento comercial por vencimiento RTM (${row.days_until_due} días restantes).`,
+                                      notes: `Seguimiento comercial por vencimiento ${(row.tipo_vehiculo || '').toLowerCase() === 'preventiva' ? 'preventivo' : 'RTM'} (${row.days_until_due} días restantes).`,
                                       rtm_reminder_id: row.id,
                                     },
                                   },

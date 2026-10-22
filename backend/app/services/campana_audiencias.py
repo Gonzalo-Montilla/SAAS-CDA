@@ -22,10 +22,25 @@ from app.services.whatsapp_pack import plantilla_por_evento
 from app.utils.whatsapp_phone import normalizar_celular_co
 
 BOGOTA_TZ = ZoneInfo("America/Bogota")
+_MESES_ES = (
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "octubre",
+    "noviembre",
+    "diciembre",
+)
 TOPE_ENVIO = 500
 OPT_IN_RTM = "contacto_recordatorio_rtm_soat"
 OPT_IN_COMERCIAL = "contacto_fuerza_comercial"
 TIPOS_NO_RTM = {"preventiva", "pruebas_auditoria"}
+TIPOS_CAMPANA_UTILIDAD = frozenset({"por_vencer", "preventiva_por_vencer"})
 COMMERCIAL_EXCLUIDOS = {"agendado", "descartado"}
 EVENTOS_MARKETING_CAMPANA = (
     "campana_excel",
@@ -48,6 +63,7 @@ _FESTIVOS_CO = {
 
 PLANTILLA_POR_TIPO = {
     "por_vencer": "cdasoft_rtm",
+    "preventiva_por_vencer": "cdasoft_preventiva",
     "inactivos": "cdasoft_campana_inactivos",
     "excel": "cdasoft_campana_jornada",
     "temporada": "cdasoft_campana_jornada",
@@ -75,6 +91,14 @@ def _to_naive_utc(dt: datetime | None) -> datetime | None:
     if dt.tzinfo is None:
         return dt
     return dt.astimezone(timezone.utc).replace(tzinfo=None)
+
+
+def _fecha_vence_es(due: datetime | None) -> str:
+    naive = _to_naive_utc(due)
+    if naive is None:
+        return "próximamente"
+    local = naive.replace(tzinfo=timezone.utc).astimezone(BOGOTA_TZ)
+    return f"{local.day} de {_MESES_ES[local.month - 1]} de {local.year}"
 
 
 def ahora_bogota(now: datetime | None = None) -> datetime:
@@ -133,7 +157,7 @@ def _es_rtm(tipo: str | None) -> bool:
 
 
 def categoria_meta_para(tipo: str) -> str:
-    return "utility" if tipo == "por_vencer" else "marketing"
+    return "utility" if tipo in TIPOS_CAMPANA_UTILIDAD else "marketing"
 
 
 def plantilla_para_tipo(
@@ -146,6 +170,8 @@ def plantilla_para_tipo(
         return default
     if tipo == "por_vencer":
         return (getattr(row, "plantilla_rtm", None) or "").strip() or default
+    if tipo == "preventiva_por_vencer":
+        return (getattr(row, "plantilla_preventiva", None) or "").strip() or default
     if tipo == "inactivos":
         return (getattr(row, "plantilla_campana_inactivos", None) or "").strip() or default
     jornada = plantilla_por_evento("campana_jornada")
@@ -202,19 +228,28 @@ def _dedupe_destinatarios(items: list[DestinatarioPreview]) -> list[Destinatario
     return out
 
 
-def _celulares_con_rtm_reciente(db: Session, tenant_id: UUID, dias: int = 7) -> set[str]:
+def _celulares_con_eventos_recientes(
+    db: Session,
+    tenant_id: UUID,
+    eventos: tuple[str, ...],
+    dias: int = 7,
+) -> set[str]:
     since = utcnow_naive() - timedelta(days=dias)
     rows = (
         db.query(TenantWhatsAppEnvio.destino_e164)
         .filter(
             TenantWhatsAppEnvio.tenant_id == tenant_id,
-            TenantWhatsAppEnvio.evento.in_(("rtm", "rtm_vencida")),
+            TenantWhatsAppEnvio.evento.in_(eventos),
             TenantWhatsAppEnvio.estado == "ok",
             TenantWhatsAppEnvio.created_at >= since,
         )
         .all()
     )
     return {str(r[0]) for r in rows if r[0]}
+
+
+def _celulares_con_rtm_reciente(db: Session, tenant_id: UUID, dias: int = 7) -> set[str]:
+    return _celulares_con_eventos_recientes(db, tenant_id, ("rtm", "rtm_vencida"), dias)
 
 
 def celulares_marketing_hoy(db: Session, tenant_id: UUID, now: datetime | None = None) -> set[str]:
@@ -244,6 +279,7 @@ def preview_por_vencer(
     dias_desde: int,
     dias_hasta: int,
     sucursales_permitidas: list[UUID] | None,
+    solo_preventiva: bool = False,
 ) -> tuple[list[DestinatarioPreview], int]:
     now = utcnow_naive()
     if dias_hasta < dias_desde:
@@ -268,14 +304,32 @@ def preview_por_vencer(
         q = q.filter(VehiculoProceso.sucursal_id == sucursal_id)
     elif sucursales_permitidas is not None:
         q = q.filter(VehiculoProceso.sucursal_id.in_(sucursales_permitidas))
-    if tipo_vehiculo:
+    tipo_sql = func.lower(func.coalesce(VehiculoProceso.tipo_vehiculo, RTMRenewalReminder.tipo_vehiculo, ""))
+    if solo_preventiva:
+        q = q.filter(tipo_sql == "preventiva")
+    else:
+        q = q.filter(tipo_sql.notin_(tuple(TIPOS_NO_RTM)))
+    if tipo_vehiculo and not solo_preventiva:
         q = q.filter(func.lower(VehiculoProceso.tipo_vehiculo) == tipo_vehiculo.strip().lower())
     rows = q.order_by(RTMRenewalReminder.next_due_at.asc()).all()
-    recientes = _celulares_con_rtm_reciente(db, tenant_id)
+    recientes = (
+        _celulares_con_eventos_recientes(
+            db,
+            tenant_id,
+            ("preventiva", "preventiva_vencida", "campana_preventiva_por_vencer"),
+        )
+        if solo_preventiva
+        else _celulares_con_rtm_reciente(db, tenant_id)
+    )
     omitidos = 0
     dests: list[DestinatarioPreview] = []
     for reminder, vehiculo in rows:
-        if not _es_rtm(vehiculo.tipo_vehiculo or reminder.tipo_vehiculo):
+        tipo_v = (vehiculo.tipo_vehiculo or reminder.tipo_vehiculo or "").strip().lower()
+        if solo_preventiva:
+            if tipo_v != "preventiva":
+                omitidos += 1
+                continue
+        elif not _es_rtm(tipo_v):
             omitidos += 1
             continue
         raw_cel = reminder.cliente_celular or vehiculo.cliente_telefono
@@ -289,9 +343,14 @@ def preview_por_vencer(
             omitidos += 1
             continue
         due = _to_naive_utc(reminder.next_due_at)
-        motivo = "RTM por vencer (hueco d15, disparo del gerente)"
-        if due:
-            motivo = f"RTM vence el {due.date().isoformat()}"
+        if solo_preventiva:
+            motivo = "Preventiva por vencer"
+            if due:
+                motivo = f"Preventiva vence el {_fecha_vence_es(due)}"
+        else:
+            motivo = "RTM por vencer (hueco d15, disparo del gerente)"
+            if due:
+                motivo = f"RTM vence el {_fecha_vence_es(due)}"
         dests.append(
             DestinatarioPreview(
                 vehiculo_id=vehiculo.id,
@@ -365,7 +424,7 @@ def preview_inactivos(
         ultima_n = _to_naive_utc(ultima)
         motivo = f"Sin visita desde hace {meses_inactivo} meses"
         if ultima_n:
-            motivo = f"Última visita {ultima_n.date().isoformat()}"
+            motivo = f"Última visita {_fecha_vence_es(ultima_n)}"
         dests.append(
             DestinatarioPreview(
                 vehiculo_id=vehiculo.id,
@@ -420,7 +479,7 @@ def armar_preview(
     tipo = str(getattr(filtros, "tipo", "") or "").strip().lower()
     sucursal_id = getattr(filtros, "sucursal_id", None)
     tipo_vehiculo = (getattr(filtros, "tipo_vehiculo", None) or "").strip() or None
-    if tipo_vehiculo and tipo_vehiculo.lower() in TIPOS_NO_RTM:
+    if tipo != "preventiva_por_vencer" and tipo_vehiculo and tipo_vehiculo.lower() in TIPOS_NO_RTM:
         raise ValueError("No mezclar preventiva ni auditoría en la misma audiencia de RTM.")
     if tipo == "por_vencer":
         dests, omitidos = preview_por_vencer(
@@ -431,6 +490,17 @@ def armar_preview(
             dias_desde=int(getattr(filtros, "dias_desde", 10) or 10),
             dias_hasta=int(getattr(filtros, "dias_hasta", 20) or 20),
             sucursales_permitidas=sucursales_permitidas,
+        )
+    elif tipo == "preventiva_por_vencer":
+        dests, omitidos = preview_por_vencer(
+            db,
+            tenant_id=tenant_id,
+            sucursal_id=sucursal_id,
+            tipo_vehiculo=None,
+            dias_desde=int(getattr(filtros, "dias_desde", 1) or 1),
+            dias_hasta=int(getattr(filtros, "dias_hasta", 45) or 45),
+            sucursales_permitidas=sucursales_permitidas,
+            solo_preventiva=True,
         )
     elif tipo == "inactivos":
         dests, omitidos = preview_inactivos(

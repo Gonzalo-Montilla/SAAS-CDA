@@ -23,8 +23,14 @@ const TIPOS: { value: CampanaTipo; label: string; help: string; nombre: string }
   {
     value: 'por_vencer',
     label: 'RTM por vencer',
-    help: 'Toda la base de vencimientos (moto, liviano y pesado) con revisión en el rango de días y autorización de recordatorio. No vuelve a avisar si ya se les escribió esta semana.',
+    help: 'Toda la base de vencimientos RTM anual (moto, liviano y pesado) con revisión en el rango de días y autorización de recordatorio. No incluye control preventivo. No vuelve a avisar si ya se les escribió esta semana.',
     nombre: 'Campaña RTM por vencer',
+  },
+  {
+    value: 'preventiva_por_vencer',
+    label: 'Preventiva por vencer',
+    help: 'Solo control preventivo en el rango de días, con habeas de recordatorio. No mezcla RTM anual. No vuelve a avisar si ya se les escribió la preventiva esta semana.',
+    nombre: 'Campaña preventiva por vencer',
   },
   {
     value: 'inactivos',
@@ -112,7 +118,10 @@ function vacioLista(tipo: CampanaTipo): string {
   if (tipo === 'excel' || tipo === 'temporada') {
     return 'Nadie de esa lista tiene habeas (si) y un celular colombiano o un correo válido.';
   }
-  return 'En ese rango nadie tiene habeas de recordatorio y un celular o correo válido. Pruebe ampliar los días (por ejemplo 5 a 30).';
+  if (tipo === 'preventiva_por_vencer') {
+    return 'En ese rango nadie tiene habeas de recordatorio y un celular o correo válido, o ya se les avisó la preventiva esta semana. Pruebe 1 a 45 días.';
+  }
+  return 'En ese rango nadie tiene habeas de recordatorio y un celular o correo válido (solo RTM anual; las preventivas van en Preventiva por vencer). Pruebe ampliar los días.';
 }
 
 function estadoChip(estado: string): string {
@@ -166,6 +175,7 @@ function exportarDestinatarios(nombre: string, dests: { cliente_nombre: string; 
 
 function tipoLabel(tipo: string): string {
   if (tipo === 'por_vencer') return 'RTM por vencer';
+  if (tipo === 'preventiva_por_vencer') return 'Preventiva por vencer';
   if (tipo === 'inactivos') return 'Inactivos';
   if (tipo === 'temporada') return 'Temporada';
   if (tipo === 'excel') return 'Lista Excel';
@@ -400,10 +410,19 @@ export default function Comunicaciones() {
   const fallidas = campañas.filter((c) => c.estado === 'fallida').length;
   const puedeArmarLista = !usaExcel || filasExcel.length > 0;
 
+  const usaDiasVence = tipo === 'por_vencer' || tipo === 'preventiva_por_vencer';
+
   const elegirTipo = (value: CampanaTipo) => {
     const meta = TIPOS.find((t) => t.value === value) || TIPOS[0];
     setTipo(value);
     setNombre(meta.nombre);
+    if (value === 'preventiva_por_vencer') {
+      setDiasDesde(1);
+      setDiasHasta(45);
+    } else if (value === 'por_vencer') {
+      setDiasDesde(10);
+      setDiasHasta(20);
+    }
     setCampanaId(null);
     setAsuntoCorreo('');
     setCuerpoCorreo('');
@@ -505,7 +524,7 @@ export default function Comunicaciones() {
                 </select>
               </label>
             )}
-            {tipo === 'por_vencer' && (
+            {usaDiasVence && (
               <label className="block text-sm md:col-span-2">
                 <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Vence entre (días)</span>
                 <div className="mt-1 flex items-center gap-2">
@@ -514,7 +533,7 @@ export default function Comunicaciones() {
                     className="input-corporate w-full"
                     value={diasDesde}
                     min={1}
-                    max={40}
+                    max={45}
                     aria-label="Días desde"
                     onChange={(e) => setDiasDesde(Number(e.target.value))}
                   />
@@ -524,7 +543,7 @@ export default function Comunicaciones() {
                     className="input-corporate w-full"
                     value={diasHasta}
                     min={1}
-                    max={40}
+                    max={45}
                     aria-label="Días hasta"
                     onChange={(e) => setDiasHasta(Number(e.target.value))}
                   />
@@ -737,7 +756,8 @@ export default function Comunicaciones() {
                     {preview.canal_listo
                       ? 'WhatsApp no cambia. Aquí sí: escriba el cuerpo o pida redacción al Asistente CDASoft. Use '
                       : 'Este es el mensaje que llega. Escríbalo usted o pida redacción al Asistente CDASoft. Use '}
-                    {'{{nombre}}'}, {'{{cda}}'}, {'{{placa}}'}. El botón Agendar lo pone CDASoft.
+                    {'{{nombre}}'}, {'{{cda}}'}, {'{{placa}}'}
+                    {usaDiasVence ? ', {{fecha}}' : ''}. El botón Agendar lo pone CDASoft.
                   </p>
                   <label className="block text-sm">
                     <span className="text-xs font-semibold uppercase tracking-wide text-slate-500">Asunto</span>

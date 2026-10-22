@@ -875,6 +875,51 @@ def _bloque_cta_agendar(agendamiento_url: str) -> str:
     """
 
 
+_MESES_ES = (
+    "enero",
+    "febrero",
+    "marzo",
+    "abril",
+    "mayo",
+    "junio",
+    "julio",
+    "agosto",
+    "septiembre",
+    "octubre",
+    "noviembre",
+    "diciembre",
+)
+_ISO_FECHA = re.compile(r"^(\d{4})-(\d{2})-(\d{2})$")
+
+
+def fecha_humana_es(texto: str | None) -> str:
+    """Convierte YYYY-MM-DD a «21 de noviembre de 2026». Otro texto se deja igual."""
+    crudo = (texto or "").strip()
+    match = _ISO_FECHA.match(crudo)
+    if not match:
+        return crudo
+    year, month, day = int(match.group(1)), int(match.group(2)), int(match.group(3))
+    if month < 1 or month > 12 or day < 1 or day > 31:
+        return crudo
+    return f"{day} de {_MESES_ES[month - 1]} de {year}"
+
+
+def fecha_desde_motivo_campana(motivo: str | None) -> str:
+    """Quita el prefijo de motivo de audiencia y deja la fecha en español."""
+    texto = (motivo or "").strip()
+    for prefix in ("RTM vence el ", "Preventiva vence el ", "Última visita "):
+        if texto.startswith(prefix):
+            texto = texto[len(prefix) :].strip()
+            break
+    return fecha_humana_es(texto)
+
+
+def servicio_campana(tipo: str | None) -> str:
+    if (tipo or "").strip().lower() == "preventiva_por_vencer":
+        return "Control preventivo"
+    return "Revisión técnico-mecánica"
+
+
 def cuerpo_texto_predeterminado(*, tipo: str, etiqueta: str | None = None) -> tuple[str, str]:
     """Asunto y cuerpo plano (editables). Placeholders: {{nombre}} {{cda}} {{placa}} {{fecha}}."""
     tipo_n = (tipo or "").strip().lower()
@@ -887,6 +932,15 @@ def cuerpo_texto_predeterminado(*, tipo: str, etiqueta: str | None = None) -> tu
             "Placa: {{placa}}\n"
             "Fecha sugerida: {{fecha}}\n\n"
             "Si ya la hizo, puede ignorar este mensaje.",
+        )
+    if tipo_n == "preventiva_por_vencer":
+        return (
+            "{{cda}} - Recordatorio de control preventivo",
+            "Hola {{nombre}},\n\n"
+            "Te escribimos de {{cda}} para recordarte el control preventivo de tu vehículo {{placa}}. "
+            "¡Visítanos y mantén tu vehículo al día!\n\n"
+            "Fecha sugerida: {{fecha}}\n\n"
+            "¿Te gustaría agendar tu cita?",
         )
     if tipo_n == "inactivos":
         return (
@@ -932,12 +986,14 @@ def generar_email_desde_cuerpo_libre(
     asunto: str,
     cuerpo_texto: str,
     fecha: str | None = None,
+    servicio: str | None = None,
 ) -> tuple[str, str]:
     """Carta corporativa a partir de un cuerpo plano escrito por el CDA o por el Asistente CDASoft."""
     cda = _display_cda(nombre_cda)
     persona = _display_cliente(nombre_cliente)
     placa_raw = (placa or "").strip()
-    fecha_raw = (fecha or "").replace("RTM vence el ", "").strip()
+    fecha_raw = fecha_desde_motivo_campana(fecha)
+    servicio_txt = (servicio or "").strip() or "Revisión técnico-mecánica"
     asunto_f = _aplicar_placeholders_campana(
         (asunto or "").strip() or f"{cda} — Invitación a revisión",
         nombre_cda=cda,
@@ -968,7 +1024,7 @@ def generar_email_desde_cuerpo_libre(
         highlight = f"""
     <div class="highlight" style="background:#f8fafc;border:1px solid #e2e8f0;border-left:4px solid #1e3a8a;border-radius:8px;padding:12px 14px;margin:18px 0;color:#1e293b;font-family:Segoe UI,Arial,Helvetica,sans-serif;">
         <p style="margin:0 0 6px 0;font-family:Segoe UI,Arial,Helvetica,sans-serif;">📍 <strong>Placa:</strong> {html.escape(placa_raw)}</p>
-        <p style="margin:0;font-family:Segoe UI,Arial,Helvetica,sans-serif;">🔧 <strong>Servicio:</strong> Revisión técnico-mecánica</p>
+        <p style="margin:0;font-family:Segoe UI,Arial,Helvetica,sans-serif;">🔧 <strong>Servicio:</strong> {html.escape(servicio_txt)}</p>
     </div>
         """
     cta = _bloque_cta_agendar(agendamiento_url) if agendamiento_url else ""
@@ -1008,7 +1064,7 @@ def generar_email_campana(
 ) -> tuple[str, str]:
     """Correo de campaña Comunicaciones. Misma cáscara corporativa que el cron de RTM."""
     if (cuerpo_libre or "").strip():
-        fecha = (motivo or "").replace("RTM vence el ", "").strip() or None
+        fecha = fecha_desde_motivo_campana(motivo) or None
         return generar_email_desde_cuerpo_libre(
             nombre_cda=nombre_cda,
             nombre_cliente=nombre_cliente,
@@ -1017,10 +1073,11 @@ def generar_email_campana(
             asunto=asunto_libre or "",
             cuerpo_texto=cuerpo_libre or "",
             fecha=fecha,
+            servicio=servicio_campana(tipo),
         )
     tipo_n = (tipo or "").strip().lower()
     if tipo_n == "por_vencer":
-        fecha = html.escape((motivo or "próximamente").replace("RTM vence el ", "").strip() or "próximamente")
+        fecha = html.escape(fecha_desde_motivo_campana(motivo) or "próximamente")
         html_cuerpo = generar_email_recordatorio_proxima_rtm(
             nombre_cda,
             nombre_cliente,
@@ -1031,6 +1088,18 @@ def generar_email_campana(
             etapa="proximo",
         )
         return f"{_display_cda(nombre_cda)} - Recordatorio de próxima RTM", html_cuerpo
+    if tipo_n == "preventiva_por_vencer":
+        fecha = html.escape(fecha_desde_motivo_campana(motivo) or "próximamente")
+        html_cuerpo = generar_email_recordatorio_control_preventivo(
+            nombre_cda,
+            nombre_cliente,
+            (placa or "").strip() or "sin placa",
+            "Control preventivo",
+            fecha,
+            agendamiento_url,
+            etapa="proximo",
+        )
+        return f"{_display_cda(nombre_cda)} - Recordatorio de control preventivo", html_cuerpo
     nombre_cda = _display_cda(nombre_cda)
     nombre_cliente = _display_cliente(nombre_cliente)
     placa_raw = (placa or "").strip()

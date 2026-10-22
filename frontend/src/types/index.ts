@@ -800,7 +800,7 @@ export interface RTMReminderItem {
   tipo_vehiculo: string;
   next_due_at: string;
   days_until_due: number;
-  urgency_window_days: 8 | 15 | 30;
+  urgency_window_days: 8 | 15 | 30 | 45;
   agendamiento_url?: string | null;
   nombre_cda?: string | null;
   status: 'pending' | 'sent' | 'failed';
@@ -818,6 +818,7 @@ export interface RTMReminderItem {
 
 export interface RTMReminderSummary {
   total_upcoming: number;
+  due_45d: number;
   due_30d: number;
   due_15d: number;
   due_8d: number;

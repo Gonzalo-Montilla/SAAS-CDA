@@ -351,6 +351,7 @@ class RTMReminderItem(BaseModel):
 
 class RTMReminderSummary(BaseModel):
     total_upcoming: int
+    due_45d: int
     due_30d: int
     due_15d: int
     due_8d: int
@@ -670,12 +671,17 @@ def _format_fecha_es(target_date: datetime) -> str:
     return f"{target_date.day} de {months[target_date.month - 1]} de {target_date.year}"
 
 
+RTM_DAYS_WINDOWS = {8, 15, 30, 45}
+
+
 def _resolve_urgency_window(days_until_due: int) -> int:
     if days_until_due <= 8:
         return 8
     if days_until_due <= 15:
         return 15
-    return 30
+    if days_until_due <= 30:
+        return 30
+    return 45
 
 
 def _to_rtm_item(
@@ -1610,11 +1616,14 @@ def corregir_cierre_resultado(
 
 @router.get("/rtm-reminders/summary", response_model=RTMReminderSummary)
 def get_rtm_reminders_summary(
+    days_window: int = 30,
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
+    if days_window not in RTM_DAYS_WINDOWS:
+        days_window = 30
     now = _now_naive()
-    horizon = now + timedelta(days=30)
+    horizon = now + timedelta(days=45)
     rows = (
         db.query(RTMRenewalReminder)
         .filter(RTMRenewalReminder.tenant_id == current_user.tenant_id)
@@ -1623,15 +1632,19 @@ def get_rtm_reminders_summary(
         .filter(RTMRenewalReminder.next_due_at <= horizon)
         .all()
     )
-    due_30d = len(rows)
-    due_15d = sum(1 for row in rows if (row.next_due_at.date() - now.date()).days <= 15)
-    due_8d = sum(1 for row in rows if (row.next_due_at.date() - now.date()).days <= 8)
-    no_management = sum(1 for row in rows if (row.commercial_status or "pendiente") == "pendiente")
-    managed_count = sum(1 for row in rows if (row.commercial_status or "pendiente") != "pendiente")
-    agendados = sum(1 for row in rows if (row.commercial_status or "") == "agendado")
-    conversion = round((agendados / due_30d) * 100, 2) if due_30d else 0.0
+    due_45d = len(rows)
+    due_30d = sum(1 for row in rows if row.next_due_at <= now + timedelta(days=30))
+    due_15d = sum(1 for row in rows if row.next_due_at <= now + timedelta(days=15))
+    due_8d = sum(1 for row in rows if row.next_due_at <= now + timedelta(days=8))
+    window_rows = [row for row in rows if row.next_due_at <= now + timedelta(days=days_window)]
+    total_upcoming = len(window_rows)
+    no_management = sum(1 for row in window_rows if (row.commercial_status or "pendiente") == "pendiente")
+    managed_count = sum(1 for row in window_rows if (row.commercial_status or "pendiente") != "pendiente")
+    agendados = sum(1 for row in window_rows if (row.commercial_status or "") == "agendado")
+    conversion = round((agendados / total_upcoming) * 100, 2) if total_upcoming else 0.0
     return RTMReminderSummary(
-        total_upcoming=due_30d,
+        total_upcoming=total_upcoming,
+        due_45d=due_45d,
         due_30d=due_30d,
         due_15d=due_15d,
         due_8d=due_8d,
@@ -1650,7 +1663,7 @@ def list_rtm_reminders(
     db: Session = Depends(get_db),
     current_user: Usuario = Depends(get_current_user),
 ):
-    if days_window not in {8, 15, 30}:
+    if days_window not in RTM_DAYS_WINDOWS:
         days_window = 30
     now = _now_naive()
     upper = now + timedelta(days=days_window)

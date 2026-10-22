@@ -37,6 +37,7 @@ def test_opt_in_desde_formato_recepcion():
 
 def test_por_vencer_es_utilidad_el_resto_marketing():
     assert categoria_meta_para("por_vencer") == "utility"
+    assert categoria_meta_para("preventiva_por_vencer") == "utility"
     assert categoria_meta_para("inactivos") == "marketing"
     assert categoria_meta_para("excel") == "marketing"
     assert categoria_meta_para("temporada") == "marketing"
@@ -154,6 +155,69 @@ def test_preview_rtm_por_vencer_espera_renovarla():
     assert rtm is not None
     assert "Lo esperamos para renovarla" in rtm["cuerpo"]
     assert rtm["variables"] == 5
+
+
+def test_preview_preventiva_por_vencer_usa_pack_y_correo_acciones():
+    from types import SimpleNamespace
+    from app.services.campana_audiencias import plantilla_para_tipo
+    from app.services.campana_envio import _body_params, preview_canales_campana
+    from app.utils.email import cuerpo_texto_predeterminado, fecha_desde_motivo_campana
+
+    dest = SimpleNamespace(
+        cliente_nombre="Gonzalo Montilla",
+        placa="XYZ101",
+        motivo="Preventiva vence el 2026-11-15",
+    )
+    wa, asunto, html_cuerpo, cuerpo = preview_canales_campana(
+        tipo="preventiva_por_vencer",
+        etiqueta=None,
+        dest=dest,
+        nombre_cda="CDA Quitamelsueño",
+        agendar_url="https://www.cdasoft.com.co/agendar/cda-quitamelsueno",
+    )
+    assert "revisión preventiva" in wa
+    assert "renovarla" not in wa
+    assert "XYZ101" in wa
+    assert "Gonzalo" in wa
+    assert "15 de noviembre de 2026" in wa
+    assert "2026-11-15" not in wa
+    assert "control preventivo" in asunto.lower()
+    assert "Visítanos y mantén tu vehículo al día" in cuerpo
+    assert "control preventivo de tu vehículo" in cuerpo
+    assert "¿Te gustaría agendar tu cita?" in cuerpo
+    assert "técnico-mecánica" not in cuerpo.lower()
+    assert "Control preventivo" in html_cuerpo
+    assert "técnico-mecánica" not in html_cuerpo.lower()
+    preventiva = plantilla_por_evento("preventiva")
+    assert preventiva is not None
+    assert preventiva["variables"] == 5
+    assert plantilla_para_tipo(None, "preventiva_por_vencer") == "cdasoft_preventiva"
+    params = _body_params(
+        campana=SimpleNamespace(tipo="preventiva_por_vencer", etiqueta=None),
+        dest=dest,
+        nombre_cda="CDA Quitamelsueño",
+        agendar_url="https://www.cdasoft.com.co/agendar/cda-quitamelsueno",
+    )
+    assert len(params) == 5
+    assert params[3] == "15 de noviembre de 2026"
+    asunto_def, cuerpo_def = cuerpo_texto_predeterminado(tipo="preventiva_por_vencer")
+    assert "control preventivo" in asunto_def.lower()
+    assert "Visítanos y mantén tu vehículo al día" in cuerpo_def
+    assert fecha_desde_motivo_campana("Preventiva vence el 2026-11-21") == "21 de noviembre de 2026"
+    assert fecha_desde_motivo_campana("RTM vence el 15 de noviembre de 2026") == "15 de noviembre de 2026"
+    assert fecha_desde_motivo_campana("RTM vence el 2026-11-21") == "21 de noviembre de 2026"
+    assert fecha_desde_motivo_campana("Última visita 2026-03-08") == "8 de marzo de 2026"
+
+
+def test_filtros_preventiva_acepta_ventana_45():
+    from app.schemas.campana import CampanaFiltrosIn
+
+    body = CampanaFiltrosIn.model_validate(
+        {"tipo": "preventiva_por_vencer", "dias_desde": 1, "dias_hasta": 45}
+    )
+    assert body.tipo == "preventiva_por_vencer"
+    assert body.dias_desde == 1
+    assert body.dias_hasta == 45
 
 
 def test_preview_inactivos_le_escribe_y_encantaria():

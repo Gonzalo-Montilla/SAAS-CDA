@@ -28,6 +28,7 @@ from app.schemas.campana import (
     CampanaPreviewOut,
 )
 from app.services.campana_audiencias import (
+    TIPOS_CAMPANA_UTILIDAD,
     TOPE_ENVIO,
     armar_preview,
     canal_campana_listo,
@@ -157,7 +158,7 @@ def _preview_payload(
     )
     marketing_hoy = (
         set()
-        if filtros.tipo == "por_vencer"
+        if filtros.tipo in TIPOS_CAMPANA_UTILIDAD
         else celulares_marketing_hoy(db, user.tenant_id)
     )
     whatsapp_hoy = sum(
@@ -442,7 +443,13 @@ def proponer_texto_campana(
     nombre_cda = (tenant.nombre_comercial if tenant else None) or (tenant.nombre if tenant else None) or "CDA"
     cuerpo = (body.plantilla_cuerpo or "").strip() or cuerpo_plantilla_campana(body.tipo)
     pack = plantilla_por_evento(
-        "rtm" if body.tipo == "por_vencer" else ("campana_inactivos" if body.tipo == "inactivos" else "campana_temporada")
+        "rtm"
+        if body.tipo == "por_vencer"
+        else (
+            "preventiva"
+            if body.tipo == "preventiva_por_vencer"
+            else ("campana_inactivos" if body.tipo == "inactivos" else "campana_temporada")
+        )
     )
     if not grok_disponible():
         raise HTTPException(status_code=400, detail="El Asistente CDASoft no está configurado en el servidor.")

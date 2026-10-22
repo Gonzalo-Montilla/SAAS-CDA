@@ -512,8 +512,9 @@ export default function OrganizacionWhatsApp() {
               {campanaTplMutation.isLoading ? 'Creando en 360dialog…' : 'Crear plantillas de campañas'}
             </button>
             <p className="text-xs text-slate-500">
-              Inactivos, temporada y jornada comercial. RTM por vencer ya usa{' '}
-              <span className="font-mono">cdasoft_rtm</span>.
+              Inactivos, temporada y jornada comercial. RTM por vencer usa{' '}
+              <span className="font-mono">cdasoft_rtm</span>; Preventiva por vencer usa{' '}
+              <span className="font-mono">cdasoft_preventiva</span>.
             </p>
           </div>
           {packAgrupado.map((grupo) => (

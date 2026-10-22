@@ -1,6 +1,6 @@
 import apiClient from './client';
 
-export type CampanaTipo = 'por_vencer' | 'inactivos' | 'excel' | 'temporada';
+export type CampanaTipo = 'por_vencer' | 'preventiva_por_vencer' | 'inactivos' | 'excel' | 'temporada';
 
 export interface CampanaExcelFila {
   nombre: string;

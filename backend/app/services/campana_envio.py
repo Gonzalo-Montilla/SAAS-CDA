@@ -11,7 +11,13 @@ from sqlalchemy.orm import Session
 from app.models.campana import CampanaWhatsApp, CampanaWhatsAppDestinatario
 from app.models.tenant import Tenant
 from app.models.whatsapp import TenantWhatsAppSettings
-from app.services.campana_audiencias import TOPE_ENVIO, canal_campana_listo, celulares_marketing_hoy, ventana_ley_2300
+from app.services.campana_audiencias import (
+    TIPOS_CAMPANA_UTILIDAD,
+    TOPE_ENVIO,
+    canal_campana_listo,
+    celulares_marketing_hoy,
+    ventana_ley_2300,
+)
 from app.services.whatsapp_pack import PACK, plantilla_por_evento
 from app.services.whatsapp_tenant import (
     _cda,
@@ -24,6 +30,7 @@ from app.services.whatsapp_tenant import (
 from app.utils.email import (
     cuerpo_texto_predeterminado,
     enviar_email,
+    fecha_desde_motivo_campana,
     generar_email_campana,
 )
 from app.utils.nombres import formatear_nombre_comercial
@@ -75,12 +82,12 @@ def _body_params(
     nombre_cda: str,
     agendar_url: str,
 ) -> list[str]:
-    if campana.tipo == "por_vencer":
+    if campana.tipo in TIPOS_CAMPANA_UTILIDAD:
         return [
             _persona(dest.cliente_nombre),
             _cda(nombre_cda),
             _nombre_param(dest.placa, "SIN PLACA"),
-            _nombre_param(dest.motivo.replace("RTM vence el ", "") if dest.motivo else None, "próximamente"),
+            _nombre_param(fecha_desde_motivo_campana(dest.motivo), "próximamente"),
             _enlace_publico_whatsapp(agendar_url),
         ]
     if campana.tipo == "inactivos":
@@ -166,7 +173,7 @@ def _procesar_envio_campana(db: Session, campana: CampanaWhatsApp) -> None:
         "CDA",
     )
     slug = (tenant.slug if tenant else "") or ""
-    suffix = (slug.strip() or None) if campana.tipo != "por_vencer" else None
+    suffix = (slug.strip() or None) if campana.tipo not in TIPOS_CAMPANA_UTILIDAD else None
     agendar_url = enlace_agendar_publico(slug)
     evento = f"campana_{campana.tipo}"[:40]
     dests = (
@@ -185,7 +192,7 @@ def _procesar_envio_campana(db: Session, campana: CampanaWhatsApp) -> None:
         .first()
     )
     whatsapp_listo, _ = canal_campana_listo(settings_row)
-    es_marketing = campana.tipo != "por_vencer"
+    es_marketing = campana.tipo not in TIPOS_CAMPANA_UTILIDAD
     ya_marketing = celulares_marketing_hoy(db, campana.tenant_id) if es_marketing else set()
     ok_n = int(campana.enviados_ok or 0)
     fail_n = int(campana.enviados_fail or 0)
@@ -313,6 +320,7 @@ def cuerpo_plantilla_campana(tipo: str, plantilla: str | None = None) -> str:
                 return item["cuerpo"]
     evento = {
         "por_vencer": "rtm",
+        "preventiva_por_vencer": "preventiva",
         "inactivos": "campana_inactivos",
         "excel": "campana_jornada",
         "temporada": "campana_jornada",

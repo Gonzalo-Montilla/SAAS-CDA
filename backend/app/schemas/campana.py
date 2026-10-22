@@ -8,7 +8,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
-CampanaTipo = Literal["por_vencer", "inactivos", "excel", "temporada"]
+CampanaTipo = Literal["por_vencer", "preventiva_por_vencer", "inactivos", "excel", "temporada"]
 
 
 class CampanaExcelFilaIn(BaseModel):
@@ -38,8 +38,8 @@ class CampanaFiltrosIn(BaseModel):
     tipo: CampanaTipo
     sucursal_id: Optional[UUID] = None
     tipo_vehiculo: Optional[str] = None
-    dias_desde: int = Field(default=10, ge=1, le=30)
-    dias_hasta: int = Field(default=20, ge=1, le=40)
+    dias_desde: int = Field(default=10, ge=1, le=45)
+    dias_hasta: int = Field(default=20, ge=1, le=45)
     meses_inactivo: int = Field(default=11, ge=3, le=36)
     etiqueta: Optional[str] = Field(default=None, max_length=120)
     filas_excel: Optional[list[CampanaExcelFilaIn]] = None

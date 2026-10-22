@@ -34,6 +34,7 @@ EVENTO_LABEL = {
     "calidad": "Encuesta de calidad",
     "asistente": "Asistente (respuesta)",
     "campana_por_vencer": "Campaña RTM por vencer",
+    "campana_preventiva_por_vencer": "Campaña preventiva por vencer",
     "campana_inactivos": "Campaña inactivos",
     "campana_excel": "Campaña Excel",
     "campana_temporada": "Campaña temporada",

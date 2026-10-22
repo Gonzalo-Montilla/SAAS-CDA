@@ -325,12 +325,20 @@ def redactar_correo_campana(
     notas_n = (notas or "").strip() or "(sin notas adicionales)"
     etiqueta_n = (etiqueta or "").strip() or "convocatoria de revisión"
     actual = (cuerpo_actual or "").strip()
+    tipo_n = (tipo or "").strip() or "temporada"
     user = (
         f"CDA: {nombre_cda}\n"
-        f"Tipo de campaña: {(tipo or '').strip() or 'temporada'}\n"
+        f"Tipo de campaña: {tipo_n}\n"
         f"Motivo: {etiqueta_n}\n"
         f"Hechos / notas del CDA:\n{notas_n}\n"
     )
+    if tipo_n == "preventiva_por_vencer":
+        user += (
+            "Esta campaña es de CONTROL PREVENTIVO (no RTM anual). "
+            "Conserve el tono: «Te escribimos de {{cda}} para recordarte el control preventivo "
+            "de tu vehículo {{placa}}. ¡Visítanos y mantén tu vehículo al día!». "
+            "No hable de revisión técnico-mecánica ni de renovar RTM.\n"
+        )
     if actual:
         user += f"\nBorrador actual (mejórelo si hace falta, sin inventar):\n{actual}\n"
     user += "\nDevuelva JSON {\"asunto\": \"...\", \"cuerpo\": \"...\"}."

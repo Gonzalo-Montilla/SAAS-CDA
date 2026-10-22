@@ -194,13 +194,13 @@ export const qualityApi = {
     return response.data;
   },
 
-  getRTMSummary: async (): Promise<RTMReminderSummary> => {
-    const response = await apiClient.get<RTMReminderSummary>('/quality/rtm-reminders/summary');
+  getRTMSummary: async (params?: { days_window?: 8 | 15 | 30 | 45 }): Promise<RTMReminderSummary> => {
+    const response = await apiClient.get<RTMReminderSummary>('/quality/rtm-reminders/summary', { params });
     return response.data;
   },
 
   listRTMReminders: async (params?: {
-    days_window?: 8 | 15 | 30;
+    days_window?: 8 | 15 | 30 | 45;
     commercial_status?: string;
     search?: string;
   }): Promise<RTMReminderItem[]> => {
