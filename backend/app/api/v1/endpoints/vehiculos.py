@@ -327,26 +327,67 @@ def _select_credit_note_range_id(fs: TenantFactusSettings) -> int | None:
     return None
 
 
-def _extract_fotos_from_observaciones(observaciones: str | None) -> list[str]:
-    if not observaciones:
-        return []
+def _parse_observaciones_payload(observaciones: str | None) -> tuple[str, list[str], bool]:
+    """Texto, fotos y si el valor era JSON `{texto, fotos}` (vs texto plano legacy)."""
+    if observaciones is None:
+        return "", [], False
+    raw = str(observaciones)
+    if not raw.strip():
+        return "", [], False
     try:
-        parsed = json.loads(observaciones)
+        parsed = json.loads(raw)
     except Exception:
-        return []
+        return raw, [], False
     if not isinstance(parsed, dict):
-        return []
-    fotos = parsed.get("fotos")
-    if not isinstance(fotos, list):
-        return []
-    out: list[str] = []
-    for item in fotos:
-        if not isinstance(item, str):
-            continue
-        val = item.strip()
-        if val:
-            out.append(val)
-    return out
+        return raw, [], False
+    texto_raw = parsed.get("texto")
+    if texto_raw is None:
+        texto = ""
+    elif isinstance(texto_raw, str):
+        texto = texto_raw
+    else:
+        texto = str(texto_raw)
+    fotos_raw = parsed.get("fotos")
+    fotos: list[str] = []
+    if isinstance(fotos_raw, list):
+        for item in fotos_raw:
+            if not isinstance(item, str):
+                continue
+            val = item.strip()
+            if val:
+                fotos.append(val)
+    return texto, fotos, True
+
+
+def _extract_fotos_from_observaciones(observaciones: str | None) -> list[str]:
+    _texto, fotos, _was_json = _parse_observaciones_payload(observaciones)
+    return fotos
+
+
+def _observaciones_respuesta_sin_fotos(observaciones: str | None) -> tuple[str | None, int]:
+    """Quita base64 de fotos en la respuesta HTTP. No toca lo guardado en DB."""
+    if observaciones is None:
+        return None, 0
+    texto, fotos, was_json = _parse_observaciones_payload(observaciones)
+    if not was_json:
+        return observaciones, 0
+    slim = json.dumps({"texto": texto, "fotos": []}, ensure_ascii=False)
+    return slim, len(fotos)
+
+
+def _merge_observaciones_preserving_fotos(existing: str | None, incoming: str | None) -> str | None:
+    """
+    Al editar, el front ya no reenvía las fotos (el GET va sin base64).
+    Si incoming trae fotos vacías o no trae, se conservan las de DB.
+    Si incoming trae fotos no vacías (front viejo o registro), se reemplazan.
+    """
+    if incoming is None:
+        return existing
+    _ex_texto, ex_fotos, _ex_json = _parse_observaciones_payload(existing)
+    in_texto, in_fotos, in_json = _parse_observaciones_payload(incoming)
+    fotos = in_fotos if in_fotos else ex_fotos
+    texto = in_texto if in_json else str(incoming)
+    return json.dumps({"texto": texto, "fotos": fotos}, ensure_ascii=False)
 
 
 def _latest_factura_correcciones_by_vehiculo(
@@ -397,6 +438,11 @@ def _build_vehiculo_response_with_correccion(
     if compact:
         # Evita enviar JSON pesado de recepción en listados rápidos de Caja.
         update_data["recepcion_formato_extra_json"] = None
+    slim_obs, total_fotos = _observaciones_respuesta_sin_fotos(
+        getattr(vehiculo, "observaciones", None)
+    )
+    update_data["observaciones"] = slim_obs
+    update_data["total_fotos"] = total_fotos
     valor_rtm, comision_soat, total_cobrado, tiene_soat = _coaccionar_montos_sin_cobro(
         tipo_vehiculo=getattr(vehiculo, "tipo_vehiculo", None),
         reinspeccion_exenta=getattr(vehiculo, "reinspeccion_exenta", False),
@@ -2782,7 +2828,7 @@ def registrar_vehiculo(
     except Exception as e:
         print(f"[WARN] No se pudo enviar WhatsApp de recepción: {e}")
 
-    return nuevo_vehiculo
+    return _build_vehiculo_response_with_correccion(nuevo_vehiculo)
 
 
 @router.put("/{vehiculo_id}", response_model=VehiculoResponse)
@@ -2961,7 +3007,10 @@ def editar_vehiculo(
         or _es_prueba_auditoria(vehiculo_data.tipo_vehiculo)
         else vehiculo_data.tiene_soat
     )
-    vehiculo.observaciones = vehiculo_data.observaciones
+    vehiculo.observaciones = _merge_observaciones_preserving_fotos(
+        vehiculo.observaciones,
+        vehiculo_data.observaciones,
+    )
     vehiculo.recepcion_formato_extra_json = vehiculo_data.recepcion_formato_extra
     vehiculo.kilometraje = _kilometraje_column_from_formato(vehiculo_data.recepcion_formato_extra)
 
@@ -2972,8 +3021,9 @@ def editar_vehiculo(
     
     db.commit()
     db.refresh(vehiculo)
-    
-    return vehiculo
+
+    # Misma respuesta liviana que GET: no devolver fotos base64 (timeout en sedes lentas).
+    return _build_vehiculo_response_with_correccion(vehiculo)
 
 
 @router.get("/pendientes", response_model=VehiculosPendientes)
@@ -3731,8 +3781,10 @@ def cobrar_vehiculo(
                 "auditoria_exenta": es_prueba_auditoria,
             },
         )
-        
-        return vehiculo
+
+        # No devolver fotos base64: el cobro/reintento ya está en DB y un JSON de 5 MB
+        # hace timeout en sedes lentas (el trámite queda hecho y Caja muestra error).
+        return _build_vehiculo_response_with_correccion(vehiculo)
         
     except HTTPException:
         raise
@@ -4330,8 +4382,8 @@ def venta_solo_soat(
         
         db.commit()
         db.refresh(vehiculo_soat)
-        
-        return vehiculo_soat
+
+        return _build_vehiculo_response_with_correccion(vehiculo_soat)
         
     except Exception as e:
         db.rollback()
@@ -5037,7 +5089,8 @@ def obtener_vehiculo(
     active_sucursal_id: UUID = Depends(get_active_sucursal_id),
 ):
     """
-    Obtener detalles de un vehículo
+    Detalle para edición. Observaciones van sin fotos base64 (ver GET .../foto).
+    recepcion_formato_extra_json sí se incluye (firmas, ~50 kB).
     """
     vehiculo = _filtro_vehiculo_sede(
         db.query(VehiculoProceso),

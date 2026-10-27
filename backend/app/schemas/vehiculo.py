@@ -264,6 +264,10 @@ class VehiculoResponse(BaseModel):
     reinspeccion_vence_at: Optional[datetime] = None
     reinspeccion_exenta: Optional[bool] = None
     observaciones: Optional[str]
+    total_fotos: Optional[int] = Field(
+        default=None,
+        description="Conteo de fotos; el GET de detalle no envía los base64.",
+    )
     recepcion_formato_extra_json: Optional[dict[str, Any]] = None
     tiene_recepcion_formato_extra: Optional[bool] = None
     fecha_registro: datetime

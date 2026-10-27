@@ -527,6 +527,9 @@ export default function Recepcion() {
   const [tarifaCalculada, setTarifaCalculada] = useState<TarifaCalculada | null>(null);
   const [tarifaError, setTarifaError] = useState<string>('');
   const [fotosVehiculo, setFotosVehiculo] = useState<string[]>([]);
+  /** Fotos ya en servidor; en edición no se descargan (van por Ver foto). */
+  const [totalFotosGuardadas, setTotalFotosGuardadas] = useState(0);
+  const [cargandoEdicionId, setCargandoEdicionId] = useState<string | null>(null);
   const [runtSugerencia, setRuntSugerencia] = useState<VehiculoConsultaRunt | null>(null);
   const [tarjetaSugerencia, setTarjetaSugerencia] = useState<VehiculoLecturaTarjeta | null>(null);
   const [tarjetaAplicada, setTarjetaAplicada] = useState(false);
@@ -1228,6 +1231,7 @@ export default function Recepcion() {
   const resetForm = () => {
     // Limpiar fotos
     setFotosVehiculo([]);
+    setTotalFotosGuardadas(0);
     
     // Limpiar formulario PERO mantener el año para que la tarifa siga visible
     setFormData({
@@ -1271,10 +1275,7 @@ export default function Recepcion() {
   };
 
   const iniciarEdicion = (vehiculo: any) => {
-    // Extraer fotos de observaciones
-    const fotos = extraerFotosDeObservaciones(vehiculo.observaciones);
-    
-    // Extraer texto de observaciones
+    // Extraer texto de observaciones (el GET ya no trae fotos base64).
     let textoObservaciones = '';
     try {
       const parsed = JSON.parse(vehiculo.observaciones || '{}');
@@ -1282,12 +1283,17 @@ export default function Recepcion() {
     } catch {
       textoObservaciones = vehiculo.observaciones || '';
     }
+    const totalFotos =
+      typeof vehiculo.total_fotos === 'number'
+        ? vehiculo.total_fotos
+        : extraerFotosDeObservaciones(vehiculo.observaciones).length;
     
     setModoEdicion(true);
     setVehiculoEditando(vehiculo.id);
     setEsReingresoRechazoInicial(Boolean(vehiculo.reinspeccion_exenta));
     setPlacaEvaluadaReinspeccion((vehiculo.placa || '').trim().toUpperCase());
-    setFotosVehiculo(fotos);
+    setFotosVehiculo([]);
+    setTotalFotosGuardadas(totalFotos);
     setConsultaRunt({
       document_type: (vehiculo.cliente_tipo_documento || 'CC') as 'CC' | 'CE' | 'PA' | 'NIT',
       document_number: vehiculo.cliente_documento || '',
@@ -1346,7 +1352,9 @@ export default function Recepcion() {
   };
 
   const iniciarEdicionDesdeListado = async (vehiculo: any) => {
+    if (cargandoEdicionId) return;
     try {
+      setCargandoEdicionId(vehiculo.id);
       const detalle = await vehiculosApi.obtenerPorId(vehiculo.id);
       iniciarEdicion(detalle);
     } catch (error) {
@@ -1355,6 +1363,8 @@ export default function Recepcion() {
         'No fue posible cargar el detalle',
         extractApiErrorMessage(error, 'Intenta nuevamente para editar el vehículo.'),
       );
+    } finally {
+      setCargandoEdicionId(null);
     }
   };
 
@@ -1449,6 +1459,7 @@ export default function Recepcion() {
     setModoEdicion(false);
     setVehiculoEditando(null);
     setFotosVehiculo([]);
+    setTotalFotosGuardadas(0);
     setRuntSugerencia(null);
     setTarjetaSugerencia(null);
     setTarjetaAplicada(false);
@@ -2383,6 +2394,8 @@ export default function Recepcion() {
       return [];
     }
   };
+
+  const fotosCountIndicador = modoEdicion ? totalFotosGuardadas : fotosVehiculo.length;
 
   const escaparCsv = (value: unknown): string => {
     const text = String(value ?? '');
@@ -3630,12 +3643,26 @@ export default function Recepcion() {
 
             <hr className="my-6" />
 
-            {/* Captura de Fotos */}
-            <CapturaFotos 
-              fotos={fotosVehiculo}
-              onFotosChange={setFotosVehiculo}
-              maxFotos={5}
-            />
+            {/* Captura de Fotos: en edición no se recargan (varios MB). Ver foto en la tarjeta. */}
+            {modoEdicion ? (
+              <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-3 text-sm text-slate-700">
+                <p className="font-medium text-slate-900 flex items-center gap-2">
+                  <Camera className="w-4 h-4" />
+                  {totalFotosGuardadas > 0
+                    ? `${totalFotosGuardadas} foto${totalFotosGuardadas === 1 ? '' : 's'} ya guardada${totalFotosGuardadas === 1 ? '' : 's'}`
+                    : 'Este registro no tiene fotos guardadas'}
+                </p>
+                <p className="mt-1 text-xs text-slate-600">
+                  Para verlas usa «Ver foto» en la tarjeta. Al editar no se recargan ni se reemplazan, para que el formulario abra rápido.
+                </p>
+              </div>
+            ) : (
+              <CapturaFotos
+                fotos={fotosVehiculo}
+                onFotosChange={setFotosVehiculo}
+                maxFotos={5}
+              />
+            )}
 
             {/* Botones */}
             {bloqueoFirmaRegistro && (
@@ -3742,14 +3769,14 @@ export default function Recepcion() {
                 )}
 
                 {/* Indicador de fotos */}
-                {fotosVehiculo.length > 0 ? (
+                {fotosCountIndicador > 0 ? (
                   <div className="mt-4 p-3 rounded-lg bg-green-50 border-2 border-green-200">
                     <p className="text-xs font-medium mb-1 flex items-center gap-1">
                       <Camera className="w-4 h-4" />
                       <span>Fotos Capturadas</span>
                     </p>
                     <p className="text-sm font-bold text-green-900">
-                      <span>{fotosVehiculo.length} {fotosVehiculo.length === 1 ? 'foto' : 'fotos'}</span>
+                      <span>{fotosCountIndicador} {fotosCountIndicador === 1 ? 'foto' : 'fotos'}</span>
                     </p>
                   </div>
                 ) : (
@@ -3805,14 +3832,14 @@ export default function Recepcion() {
                 </div>
 
                 {/* Indicador de fotos */}
-                {fotosVehiculo.length > 0 ? (
+                {fotosCountIndicador > 0 ? (
                   <div className="mt-4 p-3 rounded-lg bg-green-50 border-2 border-green-200">
                     <p className="text-xs font-medium mb-1 flex items-center gap-1">
                       <Camera className="w-4 h-4" />
                       <span>Fotos Capturadas</span>
                     </p>
                     <p className="text-sm font-bold text-green-900">
-                      <span>{fotosVehiculo.length} {fotosVehiculo.length === 1 ? 'foto' : 'fotos'}</span>
+                      <span>{fotosCountIndicador} {fotosCountIndicador === 1 ? 'foto' : 'fotos'}</span>
                     </p>
                   </div>
                 ) : (
@@ -3861,14 +3888,14 @@ export default function Recepcion() {
                 </div>
 
                 {/* Indicador de fotos */}
-                {fotosVehiculo.length > 0 ? (
+                {fotosCountIndicador > 0 ? (
                   <div className="mt-4 p-3 rounded-lg bg-green-50 border-2 border-green-200">
                     <p className="text-xs font-medium mb-1 flex items-center gap-1">
                       <Camera className="w-4 h-4" />
                       <span>Fotos Capturadas</span>
                     </p>
                     <p className="text-sm font-bold text-green-900">
-                      <span>{fotosVehiculo.length} {fotosVehiculo.length === 1 ? 'foto' : 'fotos'}</span>
+                      <span>{fotosCountIndicador} {fotosCountIndicador === 1 ? 'foto' : 'fotos'}</span>
                     </p>
                   </div>
                 ) : (
@@ -4132,11 +4159,13 @@ export default function Recepcion() {
                   {/* Botón editar (solo si estado = registrado) */}
                   {vehiculo.estado === 'registrado' && (
                     <button
+                      type="button"
                       onClick={() => void iniciarEdicionDesdeListado(vehiculo)}
-                      className="w-full mt-3 btn-pos btn-secondary flex items-center justify-center gap-2 py-2 text-sm"
+                      disabled={cargandoEdicionId === vehiculo.id}
+                      className="w-full mt-3 btn-pos btn-secondary flex items-center justify-center gap-2 py-2 text-sm disabled:opacity-60 disabled:cursor-not-allowed"
                     >
                       <Edit className="w-4 h-4" />
-                      Editar
+                      {cargandoEdicionId === vehiculo.id ? 'Cargando...' : 'Editar'}
                     </button>
                   )}
                 </div>

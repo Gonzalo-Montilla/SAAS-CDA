@@ -1530,6 +1530,21 @@ function ModalCobro({
       // Si hay alerta SARLAFT, queda visible el modal de remisión al oficial.
       onClose();
     },
+    onError: (error: unknown) => {
+      queryClient.invalidateQueries({ queryKey: ['vehiculos-pendientes'] });
+      queryClient.invalidateQueries({ queryKey: ['dashboard-operativo'] });
+      const e = error as { code?: string; message?: string };
+      const timedOut =
+        e?.code === 'ECONNABORTED' ||
+        (typeof e?.message === 'string' && e.message.includes('timeout'));
+      if (timedOut) {
+        showToast(
+          'warning',
+          esCobroExento ? 'La validación tardó demasiado' : 'El cobro tardó demasiado',
+          'Si la placa ya no aparece en la cola, el trámite sí quedó registrado. No vuelvas a confirmar.',
+        );
+      }
+    },
   });
 
   const handleCobrar = () => {

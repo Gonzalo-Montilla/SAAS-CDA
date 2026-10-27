@@ -15,7 +15,7 @@ export function extractApiErrorMessage(err: unknown, fallback: string): string {
     if (import.meta.env.DEV) {
       return 'Tiempo de espera agotado al hablar con el API. Comprueba: 1) Backend en http://127.0.0.1:8000 (abre /docs o /health). 2) Tras cambiar .env reinicia npm run dev. 3) Si la base de datos está en otro servidor, que DATABASE_URL sea alcanzable.';
     }
-    return 'La petición expiró: el servidor no respondió a tiempo. Revisa que el backend esté arriba y que la URL del API (VITE_API_URL en el build) apunte al dominio correcto, sin mezclar HTTPS del sitio con HTTP del API bloqueado por el navegador.';
+    return 'La petición tardó demasiado. Si el listado de esta pantalla sí carga, no es un problema de URL del API: reintenta. Si persiste, avisa a soporte.';
   }
 
   const detail = e?.response?.data?.detail;

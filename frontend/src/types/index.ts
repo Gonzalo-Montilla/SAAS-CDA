@@ -967,6 +967,8 @@ export interface Vehiculo {
   reinspeccion_vence_at?: string | null;
   reinspeccion_exenta?: boolean | null;
   observaciones?: string;
+  /** Conteo de fotos; el detalle GET no trae los base64. */
+  total_fotos?: number | null;
   /** Solo listado liviano de pendientes (sin JSON de firmas). */
   kilometraje?: string | null;
   recepcion_formato_extra_json?: Record<string, unknown> | null;
