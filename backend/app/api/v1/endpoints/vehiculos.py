@@ -33,6 +33,7 @@ from app.models.usuario import Usuario
 from app.models.tarifa import Tarifa, ComisionSOAT
 from app.services.tarifas_resolver import resolver_comision_soat, resolver_tarifa_vigente
 from app.models.tenant import Tenant
+from app.services.motocarro_alcance import exigir_motocarro_habilitado, tenant_inspecciona_motocarro
 from app.models.vehiculo import VehiculoProceso, EstadoVehiculo, MetodoPago
 from app.models.factus import TenantFactusSettings, FacturaElectronica, FacturaCorreccion
 from app.models.runt_metrica import RuntConsultaMetrica
@@ -2417,10 +2418,11 @@ def _validate_mixed_breakdown(
 def mapear_tipo_vehiculo_a_comision(tipo_vehiculo: str) -> str:
     """
     Mapear tipo de vehículo RTM a tipo de comisión SOAT.
-    - Motos → 'moto' (comisión $30,000)
-    - Vehículos livianos y pesados → 'carro' (comisión $50,000)
+    - Motos y motocarros → 'moto'
+    - Vehículos livianos y pesados → 'carro'
     """
-    if tipo_vehiculo == "moto":
+    tipo = (tipo_vehiculo or "").strip().lower()
+    if tipo == "moto" or tipo.startswith("motocarro"):
         return "moto"
     elif tipo_vehiculo in ["liviano_particular", "liviano_publico", "pesado_particular", "pesado_publico"]:
         return "carro"
@@ -2561,6 +2563,8 @@ def registrar_vehiculo(
     """
     Registrar vehículo (Recepción)
     """
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    exigir_motocarro_habilitado(tenant, vehiculo_data.tipo_vehiculo)
     # Validar que no exista vehículo con la misma placa en proceso
     placa_upper = (vehiculo_data.placa or "").strip().upper()
     vehiculo_existente = db.query(VehiculoProceso).filter(
@@ -2861,6 +2865,11 @@ def editar_vehiculo(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"No se puede editar un vehículo en estado {vehiculo.estado}. Solo se pueden editar vehículos registrados."
         )
+
+    tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
+    tipo_nuevo = (vehiculo_data.tipo_vehiculo or vehiculo.tipo_vehiculo)
+    if (tipo_nuevo or "").strip().lower() != (vehiculo.tipo_vehiculo or "").strip().lower():
+        exigir_motocarro_habilitado(tenant, tipo_nuevo)
     
     # Si cambió la placa, validar que no exista otra con la misma placa
     placa_upper = (vehiculo_data.placa or "").strip().upper()
@@ -5060,6 +5069,7 @@ def descargar_recepcion_formato_extra_pdf(
         cliente_telefono=vehiculo.cliente_telefono,
         cliente_email=vehiculo.cliente_email,
         fecha_registro=vehiculo.fecha_registro,
+        inspecciona_motocarro=tenant_inspecciona_motocarro(tenant),
         formato_extra={
             **formato_extra,
             "observaciones_recepcion": (

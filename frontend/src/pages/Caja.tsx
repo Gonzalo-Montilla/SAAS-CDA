@@ -17,6 +17,7 @@ import { useBrand } from '../contexts/BrandContext';
 import { useToast } from '../contexts/ToastContext';
 import { formatCurrency } from '../utils/formatNumber';
 import { formatDateTimeShort, formatTime24, formatDateWithWeekday } from '../utils/formatDate';
+import { etiquetaTipoVehiculo, etiquetaTipoVehiculoMayus } from '../utils/formatTipoVehiculo';
 import { extractApiErrorMessage } from '../utils/apiError';
 import type { CajaApertura, MovimientoCaja, PosReceiptSettings, Vehiculo } from '../types';
 import { 
@@ -138,7 +139,7 @@ const renderPosReceiptHtml = (payload: PosReceiptPrintPayload): string => {
   const fecha = new Date(payload.fechaCobroISO);
   const clienteRows = [
     ['PLACA', payload.placa],
-    ['TIPO', payload.tipoVehiculo.toUpperCase()],
+    ['TIPO', etiquetaTipoVehiculoMayus(payload.tipoVehiculo)],
     ['CLIENTE', payload.clienteNombre.toUpperCase()],
     ['DOC', payload.clienteDocumento],
   ];
@@ -1166,7 +1167,7 @@ function VehiculosPendientes({
               <div className="mb-3 flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="text-2xl font-bold tracking-wide text-slate-900 sm:text-3xl">{vehiculo.placa}</p>
-                  <p className="text-sm capitalize text-slate-600">{vehiculo.tipo_vehiculo}</p>
+                  <p className="text-sm text-slate-600">{etiquetaTipoVehiculo(vehiculo.tipo_vehiculo)}</p>
                   {vehiculo.reinspeccion_exenta && (
                     <p className="mt-1 text-xs font-semibold text-emerald-700">
                       Reintento por rechazo inicial · intento {vehiculo.reinspeccion_intento || 2}/3
@@ -1694,7 +1695,7 @@ function ModalCobro({
                 </div>
                 <div>
                   <p className="text-slate-600">Tipo</p>
-                  <p className="font-semibold capitalize">{vehiculo.tipo_vehiculo}</p>
+                  <p className="font-semibold">{etiquetaTipoVehiculo(vehiculo.tipo_vehiculo)}</p>
                 </div>
                 <div>
                   <p className="text-slate-600">Modelo</p>
@@ -4686,7 +4687,7 @@ function VehiculosCobradosHoy({
             <div className="flex justify-between items-start mb-3">
               <div>
                 <p className="text-2xl font-bold text-gray-900">{vehiculo.placa}</p>
-                <p className="text-sm text-gray-600 capitalize">{vehiculo.tipo_vehiculo}</p>
+                <p className="text-sm text-gray-600">{etiquetaTipoVehiculo(vehiculo.tipo_vehiculo)}</p>
                 {vehiculo.factura_corregida && (
                   <p className="text-xs text-amber-700 mt-1 font-medium">
                     Factura corregida {vehiculo.factura_correccion_factura_original ? `(${vehiculo.factura_correccion_factura_original}` : ''}

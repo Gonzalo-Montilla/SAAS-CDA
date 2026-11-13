@@ -217,7 +217,9 @@ def _resolve_vehicle_diagram_path(tipo_vehiculo: str | None) -> str | None:
     base_dir_primary = os.path.join(os.path.dirname(__file__), "assets", "vehiculos")
     base_dir_fallback = os.path.join(os.path.dirname(__file__), "assets")
     tipo = (tipo_vehiculo or "").strip().lower()
-    if tipo == "moto":
+    if "motocarro" in tipo:
+        base_name = "motocarro_base"
+    elif tipo == "moto":
         base_name = "moto_base"
     elif "pesado" in tipo:
         base_name = "pesado_base"
@@ -291,7 +293,13 @@ def _resolve_visual_vehicle_type(
     def _has_any(raw: str, tokens: tuple[str, ...]) -> bool:
         return any(token in raw for token in tokens)
 
+    def _es_motocarro(raw: str) -> bool:
+        return "motocarro" in raw
+
     # 1) Tipo explícito del registro (si viene claro, manda).
+    # MOTOCARRO contiene "moto"; resolverlo antes de motocicleta.
+    if _es_motocarro(tipo):
+        return "motocarro"
     if _has_any(tipo, moto_tokens):
         return "moto"
     if _has_any(tipo, pesado_tokens):
@@ -300,6 +308,8 @@ def _resolve_visual_vehicle_type(
         return "liviano"
 
     # 2) Tipo visual del formato (corrección humana / encabezado) antes que clase RUNT.
+    if _es_motocarro(tipo_formato):
+        return "motocarro"
     if _has_any(tipo_formato, moto_tokens):
         return "moto"
     if _has_any(tipo_formato, pesado_tokens):
@@ -308,6 +318,8 @@ def _resolve_visual_vehicle_type(
         return "liviano"
 
     # 3) Clase técnica (RUNT u otros) como respaldo.
+    if _es_motocarro(clase):
+        return "motocarro"
     if _has_any(clase, moto_tokens):
         return "moto"
     if _has_any(clase, pesado_tokens):
@@ -321,6 +333,14 @@ def _resolve_visual_vehicle_type(
 
 def _diagram_points_for_tipo(tipo_vehiculo: str | None) -> dict[str, tuple[float, float]]:
     tipo = (tipo_vehiculo or "").strip().lower()
+    if "motocarro" in tipo:
+        # Frente a la izquierda; izquierda del vehículo = parte inferior del plano.
+        return {
+            "mc_delantera": (0.185, 0.56),
+            "mc_tra_izq": (0.705, 0.40),
+            "mc_tra_der": (0.705, 0.72),
+            "mc_rep_1": (0.866, 0.56),
+        }
     if tipo == "moto":
         return {
             "moto_delantera": (0.81, 0.29),
@@ -362,6 +382,13 @@ def _diagram_points_for_tipo(tipo_vehiculo: str | None) -> dict[str, tuple[float
 
 def _diagram_label_offsets_for_tipo(tipo_vehiculo: str | None) -> dict[str, tuple[float, float]]:
     tipo = (tipo_vehiculo or "").strip().lower()
+    if "motocarro" in tipo:
+        return {
+            "mc_delantera": (-54, -12),
+            "mc_tra_izq": (-18, -28),
+            "mc_tra_der": (-18, 16),
+            "mc_rep_1": (10, 10),
+        }
     if tipo == "moto":
         return {
             "moto_delantera": (8, -10),
@@ -428,6 +455,30 @@ def _trim_transparent_logo(source: Any) -> Any:
         return source
 
 
+def _texto_condicion_alcance_rtm(tenant_nombre: str, inspecciona_motocarro: bool) -> str:
+    nombre = tenant_nombre or "el CDA"
+    if inspecciona_motocarro:
+        alcance = (
+            f"{nombre} se encuentra acreditado para RTMyEC a vehiculos livianos, pesados rigidos, "
+            "motocicletas 4T y motocarros. El alcance no incluye ciclomotores, motocicletas con llanta gemela, "
+            "tricimotos, vehiculos electricos, cuatrimotos, cuadriciclos, vehiculos articulados y biarticulados."
+        )
+    else:
+        alcance = (
+            f"{nombre} se encuentra acreditado para RTMyEC a vehiculos livianos, pesados rigidos y "
+            "motocicletas 4T. El alcance no incluye ciclomotores, motocicletas con llanta gemela, tricimotos, "
+            "vehiculos electricos, cuatrimotos, motocarros, cuadriciclos, vehiculos articulados y biarticulados."
+        )
+    return (
+        "1. Aplicando la normatividad vigente, se le realizara al vehiculo, segun sus caracteristicas, las "
+        "pruebas que apliquen: emisiones contaminantes, frenos, medicion de desviacion lateral, suspension, "
+        "taximetro, intensidad e inclinacion de luces, inspeccion sensorial y presion sonora. El certificado "
+        "se expedira unicamente a vehiculos que cumplan Resolucion 3768 de 2013, Resolucion 0762 de 2022, "
+        "NTC 5375 y demas normas aplicables. Tener en cuenta que "
+        f"{alcance}"
+    )
+
+
 def generar_recepcion_formato_extra_pdf(
     *,
     tenant_nombre: str,
@@ -443,6 +494,7 @@ def generar_recepcion_formato_extra_pdf(
     cliente_email: Optional[str],
     fecha_registro: Optional[datetime],
     formato_extra: dict[str, Any],
+    inspecciona_motocarro: bool = False,
 ) -> bytes:
     primary = _parse_hex_color(tenant_color_primario, "#2563eb")
     secondary = _parse_hex_color(tenant_color_secundario, "#0f172a")
@@ -998,16 +1050,7 @@ def generar_recepcion_formato_extra_pdf(
     flow.append(Spacer(1, 0.05 * inch))
 
     condiciones = [
-        (
-            "1. Aplicando la normatividad vigente, se le realizara al vehiculo, segun sus caracteristicas, las "
-            "pruebas que apliquen: emisiones contaminantes, frenos, medicion de desviacion lateral, suspension, "
-            "taximetro, intensidad e inclinacion de luces, inspeccion sensorial y presion sonora. El certificado "
-            "se expedira unicamente a vehiculos que cumplan Resolucion 3768 de 2013, Resolucion 0762 de 2022, "
-            "NTC 5375 y demas normas aplicables. Tener en cuenta que "
-            f"{tenant_nombre} se encuentra acreditado para RTMyEC a vehiculos livianos, pesados rigidos y "
-            "motocicletas 4T. El alcance no incluye ciclomotores, motocicletas con llanta gemela, tricimotos, "
-            "vehiculos electricos, cuatrimotos, motocarros, cuadriciclos, vehiculos articulados y biarticulados."
-        ),
+        _texto_condicion_alcance_rtm(tenant_nombre, inspecciona_motocarro),
         (
             "2. Si en inspeccion sensorial se detectan defectos como labrado insuficiente o inferior a marcas de "
             "desgaste, protuberancias, deformaciones, despegue o rotura en banda de rodamiento de una o mas "

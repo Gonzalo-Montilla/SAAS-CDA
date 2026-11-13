@@ -277,6 +277,7 @@ def obtener_tenant_branding_publico(
         "color_primario": tenant.color_primario,
         "color_secundario": tenant.color_secundario,
         "login_url": login_url,
+        "motocarro_enabled": bool(getattr(tenant, "motocarro_enabled", False)),
     }
 
 

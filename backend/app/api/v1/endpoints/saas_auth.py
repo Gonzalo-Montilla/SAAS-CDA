@@ -141,6 +141,7 @@ class SaaSTenantSummary(BaseModel):
     nomina_enabled: bool = False
     exogena_enabled: bool = False
     sarlaft_enabled: bool = False
+    motocarro_enabled: bool = False
     sarlaft_mode: str = "manual"
     # NULL = default global; 0 = ilimitado; >0 = MB de este CDA
     documentos_quota_mb: int | None = None
@@ -208,6 +209,7 @@ class SaaSTenantCoreDataPatch(BaseModel):
     nomina_enabled: bool | None = None
     exogena_enabled: bool | None = None
     sarlaft_enabled: bool | None = None
+    motocarro_enabled: bool | None = None
     sarlaft_mode: str | None = Field(default=None, pattern="^(manual|api)$")
     # Enviar null explícito para volver al default global; 0 = ilimitado; >0 = MB custom
     documentos_quota_mb: int | None = Field(default=None, ge=0, le=102400)
@@ -940,6 +942,7 @@ def list_saas_tenants(
             nomina_enabled=bool(getattr(tenant, "nomina_enabled", False)),
             exogena_enabled=bool(getattr(tenant, "exogena_enabled", False)),
             sarlaft_enabled=bool(getattr(tenant, "sarlaft_enabled", False)),
+            motocarro_enabled=bool(getattr(tenant, "motocarro_enabled", False)),
             sarlaft_mode=(getattr(tenant, "sarlaft_mode", None) or "manual"),
             documentos_quota_mb=getattr(tenant, "documentos_quota_mb", None),
             login_url=f"{base_url}/{tenant.slug}",
@@ -1011,6 +1014,7 @@ def get_saas_tenant_profile(
         nomina_enabled=bool(getattr(tenant, "nomina_enabled", False)),
         exogena_enabled=bool(getattr(tenant, "exogena_enabled", False)),
         sarlaft_enabled=bool(getattr(tenant, "sarlaft_enabled", False)),
+        motocarro_enabled=bool(getattr(tenant, "motocarro_enabled", False)),
         sarlaft_mode=(getattr(tenant, "sarlaft_mode", None) or "manual"),
         documentos_quota_mb=getattr(tenant, "documentos_quota_mb", None),
         login_url=f"{base_url}/{tenant.slug}",
@@ -1162,6 +1166,8 @@ def patch_saas_tenant_core_data(
         tenant.exogena_enabled = bool(data["exogena_enabled"])
     if "sarlaft_enabled" in data and data["sarlaft_enabled"] is not None:
         tenant.sarlaft_enabled = bool(data["sarlaft_enabled"])
+    if "motocarro_enabled" in data and data["motocarro_enabled"] is not None:
+        tenant.motocarro_enabled = bool(data["motocarro_enabled"])
     if "sarlaft_mode" in data and data["sarlaft_mode"] is not None:
         tenant.sarlaft_mode = (str(data["sarlaft_mode"]).strip().lower() or "manual")
     if "documentos_quota_mb" in data:

@@ -77,6 +77,8 @@ def _parse_year(value: Any) -> int | None:
 
 def _suggest_tipo_vehiculo(clase: str | None) -> tuple[str | None, str | None]:
     c = (clase or "").upper()
+    if "MOTOCARRO" in c:
+        return "motocarro_particular", "high"
     if "MOTO" in c:
         return "moto", "high"
     heavy_keys = ("CAMION", "TRACTO", "BUS", "BUSETA", "MICROBUS", "VOLQUETA", "REMOL", "CARGA")

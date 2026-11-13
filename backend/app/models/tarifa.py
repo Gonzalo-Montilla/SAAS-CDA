@@ -24,7 +24,7 @@ class Tarifa(Base):
     vigencia_fin = Column(Date, nullable=False)
     
     # Tipo de vehículo
-    tipo_vehiculo = Column(String(50), nullable=False, index=True)  # 'moto', 'liviano_particular', 'liviano_publico', 'pesado_particular', 'pesado_publico'
+    tipo_vehiculo = Column(String(50), nullable=False, index=True)  # 'moto', 'liviano_*', 'pesado_*', 'motocarro_*'
     
     # Categoría (por antigüedad)
     antiguedad_min = Column(Integer, nullable=False)  # 0, 3, 8, 17

@@ -25,6 +25,7 @@ import { tarifasApi } from '../api/tarifas';
 import type { VehiculoRegistro, VehiculoConsultaRunt, VehiculoLecturaTarjeta, Usuario, ReinspeccionElegibilidad } from '../types';
 import { formatCOP } from '../utils/formatNumber';
 import { extractApiErrorMessage } from '../utils/apiError';
+import { etiquetaTipoVehiculo, esTipoMotocarro } from '../utils/formatTipoVehiculo';
 
 type SnNoNa = 'si' | 'no' | 'na' | '';
 type SnNo = 'si' | 'no' | '';
@@ -228,6 +229,12 @@ const TIPO_LLAYOUT = {
     { id: 'moto_delantera', label: 'Delantera', is_repuesto: false },
     { id: 'moto_trasera', label: 'Trasera', is_repuesto: false },
   ],
+  motocarro: [
+    { id: 'mc_delantera', label: 'Delantera', is_repuesto: false },
+    { id: 'mc_tra_izq', label: 'Trasera izquierda', is_repuesto: false },
+    { id: 'mc_tra_der', label: 'Trasera derecha', is_repuesto: false },
+    { id: 'mc_rep_1', label: 'Repuesto', is_repuesto: true },
+  ],
   liviano: [
     { id: 'liv_del_izq', label: 'Delantera izquierda', is_repuesto: false },
     { id: 'liv_del_der', label: 'Delantera derecha', is_repuesto: false },
@@ -287,6 +294,8 @@ const TIPO_VEHICULO_FISICO_VALUES = [
   'pesado_particular',
   'pesado_publico',
   'moto',
+  'motocarro_particular',
+  'motocarro_publico',
 ] as const;
 
 type TipoVehiculoFisico = (typeof TIPO_VEHICULO_FISICO_VALUES)[number];
@@ -298,6 +307,7 @@ const mapTipoVehiculoFormato = (tipo: string, claseVehiculo?: string): string =>
   const t = (tipo || '').trim().toLowerCase();
   const clase = (claseVehiculo || '').trim().toLowerCase();
   const hasAny = (raw: string, tokens: string[]) => tokens.some((token) => raw.includes(token));
+  const motocarroTokens = ['motocarro'];
   const motoTokens = ['moto', 'motocicleta'];
   const pesadoTokens = [
     'pesado',
@@ -315,9 +325,12 @@ const mapTipoVehiculoFormato = (tipo: string, claseVehiculo?: string): string =>
   const livianoTokens = ['liviano', 'carro', 'automovil', 'automóvil', 'camioneta', 'suv', 'pickup', 'pick-up'];
 
   // Prioridad: tipo del formulario (corrección humana / select) sobre clase RUNT.
+  // MOTOCARRO contiene "moto"; resolverlo antes de motocicleta.
+  if (hasAny(t, motocarroTokens)) return 'MOTOCARRO';
   if (hasAny(t, motoTokens)) return 'MOTOCICLETA 4T';
   if (hasAny(t, pesadoTokens)) return 'PESADO';
   if (hasAny(t, livianoTokens)) return 'LIVIANO';
+  if (hasAny(clase, motocarroTokens)) return 'MOTOCARRO';
   if (hasAny(clase, motoTokens)) return 'MOTOCICLETA 4T';
   if (hasAny(clase, pesadoTokens)) return 'PESADO';
   if (hasAny(clase, livianoTokens)) return 'LIVIANO';
@@ -331,6 +344,9 @@ const inferTipoVehiculoFisico = (
 ): TipoVehiculoFisico => {
   const raw = `${tipoFormato || ''} ${claseVehiculo || ''}`.trim().toLowerCase();
   if (!raw) return fallback;
+  if (raw.includes('motocarro')) {
+    return raw.includes('publico') || raw.includes('público') ? 'motocarro_publico' : 'motocarro_particular';
+  }
   if (raw.includes('moto')) return 'moto';
   if (
     ['pesado', 'camion', 'camión', 'tracto', 'volqueta', 'bus', 'buseta', 'microbus', 'microbús'].some((t) =>
@@ -409,6 +425,7 @@ const resolveTipoLlantasKey = (
   const t = (tipoVehiculo || '').trim().toLowerCase();
   const clase = (claseVehiculo || '').trim().toLowerCase();
   const hasAny = (raw: string, tokens: string[]) => tokens.some((token) => raw.includes(token));
+  const motocarroTokens = ['motocarro'];
   const motoTokens = ['moto', 'motocicleta'];
   const pesadoTokens = [
     'pesado',
@@ -426,9 +443,11 @@ const resolveTipoLlantasKey = (
   const livianoTokens = ['liviano', 'carro', 'automovil', 'automóvil', 'camioneta', 'suv', 'pickup', 'pick-up'];
 
   // Prioridad: tipo del formulario sobre clase RUNT (evita diagrama pesado si ya corrigieron a liviano).
+  if (hasAny(t, motocarroTokens)) return 'motocarro';
   if (hasAny(t, motoTokens)) return 'moto';
   if (hasAny(t, pesadoTokens)) return 'pesado';
   if (hasAny(t, livianoTokens)) return 'liviano';
+  if (hasAny(clase, motocarroTokens)) return 'motocarro';
   if (hasAny(clase, motoTokens)) return 'moto';
   if (hasAny(clase, pesadoTokens)) return 'pesado';
   if (hasAny(clase, livianoTokens)) return 'liviano';
@@ -522,6 +541,7 @@ export default function Recepcion() {
   const location = useLocation();
   const { user } = useAuth();
   const tenantUser = user && 'tenant_id' in user ? (user as Usuario) : null;
+  const motocarroEnabled = Boolean(tenantUser?.tenant_motocarro_enabled);
   const { showToast } = useToast();
   const anoActual = new Date().getFullYear();
   const [tarifaCalculada, setTarifaCalculada] = useState<TarifaCalculada | null>(null);
@@ -539,6 +559,7 @@ export default function Recepcion() {
   const [clienteFactusMunicipalityLabel, setClienteFactusMunicipalityLabel] = useState('');
   const [reinspeccionInfo, setReinspeccionInfo] = useState<ReinspeccionElegibilidad | null>(null);
   const [mostrarModalReinspeccion, setMostrarModalReinspeccion] = useState(false);
+  const [mostrarConfirmLimpiar, setMostrarConfirmLimpiar] = useState(false);
   const [placaEvaluadaReinspeccion, setPlacaEvaluadaReinspeccion] = useState('');
   const [esReingresoRechazoInicial, setEsReingresoRechazoInicial] = useState(false);
   /** idle | loading | ok | error — no registrar si falla la consulta de elegibilidad. */
@@ -1122,6 +1143,8 @@ export default function Recepcion() {
       'pesado_particular',
       'pesado_publico',
       'moto',
+      'motocarro_particular',
+      'motocarro_publico',
       'preventiva',
       'pruebas_auditoria',
     ]);
@@ -1215,7 +1238,7 @@ export default function Recepcion() {
           setTarifaCalculada(null);
           if (error?.response?.status === 404) {
             setTarifaError(
-              `No hay tarifa vigente para ${formData.tipo_vehiculo} modelo ${formData.ano_modelo}. Configura tarifas para continuar.`,
+              `No hay tarifa vigente para ${etiquetaTipoVehiculo(formData.tipo_vehiculo)} modelo ${formData.ano_modelo}. Configura tarifas para continuar.`,
             );
             return;
           }
@@ -1228,7 +1251,59 @@ export default function Recepcion() {
     };
   }, [formData.ano_modelo, formData.tipo_vehiculo, anoActual, esPreventiva, esReingresoRechazoInicial]);
 
+  const formularioTieneDatos = (): boolean => {
+    const camposTexto = [
+      formData.placa,
+      formData.marca,
+      formData.modelo,
+      formData.cliente_nombre,
+      formData.cliente_documento,
+      formData.cliente_telefono,
+      formData.cliente_email,
+      formData.cliente_direccion,
+      formData.observaciones,
+      consultaRunt.document_number,
+      formatoExtra.observaciones_recepcion,
+    ];
+    const checklistCount = Object.values(formatoExtra.preparacion_checklist || {}).filter(
+      (v) => v === 'si' || v === 'no' || v === 'na'
+    ).length;
+    const titularCount = Object.values(formatoExtra.titular_datos || {}).filter(
+      (v) => String(v || '').trim().length > 0
+    ).length;
+    return (
+      camposTexto.some((v) => (v || '').trim().length > 0) ||
+      formData.tiene_soat ||
+      esPreventiva ||
+      (formData.tipo_vehiculo || '') !== 'moto' ||
+      formData.ano_modelo !== anoActual ||
+      fotosVehiculo.length > 0 ||
+      Boolean(runtSugerencia) ||
+      Boolean(tarjetaSugerencia) ||
+      tarjetaAplicada ||
+      checklistCount > 0 ||
+      titularCount > 0 ||
+      countTecnicosDiligenciados(formatoExtra.datos_tecnicos) > 0 ||
+      Boolean(formatoExtra.firma_titular?.data_url) ||
+      Boolean(formatoExtra.pre_revision?.firma_operario?.data_url)
+    );
+  };
+
+  const pedirConfirmacionLimpiar = () => {
+    if (!formularioTieneDatos()) {
+      resetForm();
+      return;
+    }
+    setMostrarConfirmLimpiar(true);
+  };
+
+  const confirmarLimpiarFormulario = () => {
+    setMostrarConfirmLimpiar(false);
+    resetForm();
+  };
+
   const resetForm = () => {
+    setMostrarConfirmLimpiar(false);
     // Limpiar fotos
     setFotosVehiculo([]);
     setTotalFotosGuardadas(0);
@@ -1491,9 +1566,15 @@ export default function Recepcion() {
       // En el formulario principal, modelo = línea/comercial (no el año).
       modelo: lineaRunt || prev.modelo || '',
       ano_modelo: anoRuntNum >= 1950 ? anoRuntNum : prev.ano_modelo,
-      tipo_vehiculo: runtSugerencia.tipo_vehiculo_sugerido || prev.tipo_vehiculo,
+      tipo_vehiculo:
+        runtSugerencia.tipo_vehiculo_sugerido &&
+        (!esTipoMotocarro(runtSugerencia.tipo_vehiculo_sugerido) || motocarroEnabled)
+          ? runtSugerencia.tipo_vehiculo_sugerido
+          : prev.tipo_vehiculo,
     }));
-    const tipoSugerido = (runtSugerencia.tipo_vehiculo_sugerido || '').trim();
+    const tipoSugeridoRaw = (runtSugerencia.tipo_vehiculo_sugerido || '').trim();
+    const tipoSugerido =
+      tipoSugeridoRaw && (!esTipoMotocarro(tipoSugeridoRaw) || motocarroEnabled) ? tipoSugeridoRaw : '';
     setFormatoExtra((prev) => {
       const withTecnicos: RecepcionFormatoExtra = {
         ...prev,
@@ -1556,14 +1637,22 @@ export default function Recepcion() {
       marca: tarjetaSugerencia.marca || prev.marca || '',
       modelo: lineaTarjeta || prev.modelo || '',
       ano_modelo: anoTarjetaNum >= 1950 ? anoTarjetaNum : prev.ano_modelo,
-      tipo_vehiculo: tarjetaSugerencia.tipo_vehiculo_sugerido || prev.tipo_vehiculo,
+      tipo_vehiculo:
+        tarjetaSugerencia.tipo_vehiculo_sugerido &&
+        (!esTipoMotocarro(tarjetaSugerencia.tipo_vehiculo_sugerido) || motocarroEnabled)
+          ? tarjetaSugerencia.tipo_vehiculo_sugerido
+          : prev.tipo_vehiculo,
       cliente_nombre: tarjetaSugerencia.titular_nombre
         ? String(tarjetaSugerencia.titular_nombre).toUpperCase()
         : prev.cliente_nombre,
       cliente_tipo_documento: docType,
       cliente_documento: docNumber || prev.cliente_documento,
     }));
-    const tipoSugerido = (tarjetaSugerencia.tipo_vehiculo_sugerido || '').trim();
+    const tipoSugeridoRawTarjeta = (tarjetaSugerencia.tipo_vehiculo_sugerido || '').trim();
+    const tipoSugerido =
+      tipoSugeridoRawTarjeta && (!esTipoMotocarro(tipoSugeridoRawTarjeta) || motocarroEnabled)
+        ? tipoSugeridoRawTarjeta
+        : '';
     setFormatoExtra((prev) => {
       const withTecnicos: RecepcionFormatoExtra = {
         ...prev,
@@ -2346,7 +2435,8 @@ export default function Recepcion() {
 
   // Mapear tipo de vehículo a tipo de comisión SOAT
   const mapearTipoVehiculoAComision = (tipoVehiculo: string): string => {
-    if (tipoVehiculo === 'moto') {
+    const t = (tipoVehiculo || '').trim().toLowerCase();
+    if (t === 'moto' || t.startsWith('motocarro')) {
       return 'moto';
     }
     // Todos los demás tipos (livianos y pesados) se mapean a 'carro'
@@ -2804,6 +2894,12 @@ export default function Recepcion() {
                     <option value="pesado_particular">Pesado Particular</option>
                     <option value="pesado_publico">Pesado Público</option>
                     <option value="moto">Motocicleta</option>
+                    {(motocarroEnabled || esTipoMotocarro(formData.tipo_vehiculo)) && (
+                      <>
+                        <option value="motocarro_particular">Motocarro Particular</option>
+                        <option value="motocarro_publico">Motocarro Público</option>
+                      </>
+                    )}
                     <option value="pruebas_auditoria">Pruebas de Auditoría (sin cobro)</option>
                   </select>
                 </div>
@@ -3675,7 +3771,7 @@ export default function Recepcion() {
                 No se pudo verificar reinspección de la placa. Usa «Reintentar» arriba antes de registrar.
               </div>
             )}
-            <div className="flex gap-4 mt-6">
+            <div className="flex flex-col lg:flex-row gap-3 mt-6">
               <button
                 type="submit"
                 disabled={
@@ -3687,7 +3783,7 @@ export default function Recepcion() {
                       (reinspeccionConsultaEstado === 'loading' ||
                         reinspeccionConsultaEstado === 'error')))
                 }
-                className="flex-1 btn-pos btn-primary disabled:opacity-50 flex items-center justify-center gap-2"
+                className="w-full lg:flex-1 btn-pos btn-primary disabled:opacity-50 flex items-center justify-center gap-2"
               >
                 {(registrarMutation.isLoading || editarMutation.isLoading) ? (
                   <span>{modoEdicion ? 'Actualizando...' : 'Registrando...'}</span>
@@ -3702,19 +3798,19 @@ export default function Recepcion() {
                 <button
                   type="button"
                   onClick={cancelarEdicion}
-                  className="btn-pos btn-secondary flex items-center gap-2"
+                  className="w-full lg:w-auto btn-pos btn-secondary text-sm py-2.5 flex items-center justify-center gap-2"
                 >
-                  <X className="w-5 h-5" />
+                  <X className="w-4 h-4" />
                   Cancelar
                 </button>
               ) : (
                 <button
                   type="button"
-                  onClick={resetForm}
-                  className="btn-pos btn-secondary flex items-center gap-2"
+                  onClick={pedirConfirmacionLimpiar}
+                  className="w-full lg:w-auto px-4 py-2.5 rounded-xl text-sm font-medium text-slate-600 bg-white border border-slate-200 hover:bg-slate-50 flex items-center justify-center gap-2"
                 >
-                  <RotateCcw className="w-5 h-5" />
-                  Limpiar
+                  <RotateCcw className="w-4 h-4" />
+                  Limpiar formulario
                 </button>
               )}
             </div>
@@ -4097,7 +4193,7 @@ export default function Recepcion() {
                   <div className="flex justify-between items-start mb-2">
                     <div>
                       <p className="text-2xl font-bold text-slate-900">{vehiculo.placa}</p>
-                      <p className="text-sm text-slate-600 capitalize">{vehiculo.tipo_vehiculo}</p>
+                      <p className="text-sm text-slate-600">{etiquetaTipoVehiculo(vehiculo.tipo_vehiculo)}</p>
                     </div>
                     <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
                       vehiculo.estado === 'registrado' ? 'bg-yellow-100 text-yellow-800' :
@@ -4280,6 +4376,48 @@ export default function Recepcion() {
         )}
         </ErrorBoundary>
       </div>
+
+      {mostrarConfirmLimpiar && (
+        <div
+          className="fixed inset-0 z-[95] flex items-center justify-center bg-black/50 p-4"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="confirm-limpiar-titulo"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setMostrarConfirmLimpiar(false);
+          }}
+        >
+          <div className="w-full max-w-md rounded-2xl bg-white shadow-2xl border border-slate-200 p-5">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-6 h-6 text-amber-600 mt-0.5 shrink-0" />
+              <div className="min-w-0">
+                <h4 id="confirm-limpiar-titulo" className="text-base font-bold text-slate-900">
+                  ¿Limpiar el formulario?
+                </h4>
+                <p className="text-sm text-slate-700 mt-1">
+                  Se borran placa, cliente, fotos y formato de esta pantalla. No se puede deshacer.
+                </p>
+              </div>
+            </div>
+            <div className="mt-5 flex flex-col sm:flex-row gap-2 sm:justify-end">
+              <button
+                type="button"
+                onClick={() => setMostrarConfirmLimpiar(false)}
+                className="w-full sm:w-auto btn-pos btn-primary py-2.5 text-sm"
+              >
+                Seguir editando
+              </button>
+              <button
+                type="button"
+                onClick={confirmarLimpiarFormulario}
+                className="w-full sm:w-auto px-4 py-2.5 rounded-xl text-sm font-medium text-slate-700 bg-white border border-slate-300 hover:bg-slate-50"
+              >
+                Sí, limpiar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {mostrarModalReinspeccion && reinspeccionInfo && (
         <div className="fixed inset-0 z-[95] flex items-center justify-center bg-black/50 p-4">

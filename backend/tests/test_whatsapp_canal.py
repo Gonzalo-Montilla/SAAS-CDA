@@ -388,6 +388,8 @@ def test_asistente_clasifica_sin_inventar_precio():
     assert clasificar_intencion("moto 2018", last_intent=INTENT_PRECIO) == INTENT_PRECIO
     assert clasificar_intencion("esto es un reclamo, me cobraron de más") == INTENT_HUMANO
     assert extraer_tipo_y_ano("cuánto vale la moto 2018") == ("moto", 2018)
+    assert extraer_tipo_y_ano("cuánto vale el motocarro 2020") == ("motocarro_particular", 2020)
+    assert extraer_tipo_y_ano("motocarro publico 2019") == ("motocarro_publico", 2019)
     payload = {
         "entry": [
             {

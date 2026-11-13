@@ -13,7 +13,7 @@ class TarifaCreate(BaseModel):
     ano_vigencia: int = Field(ge=2020, le=2050)
     vigencia_inicio: date
     vigencia_fin: date
-    tipo_vehiculo: str = Field(pattern="^(moto|liviano_particular|liviano_publico|pesado_particular|pesado_publico|pruebas_auditoria)$")
+    tipo_vehiculo: str = Field(pattern="^(moto|liviano_particular|liviano_publico|pesado_particular|pesado_publico|motocarro_particular|motocarro_publico|pruebas_auditoria)$")
     antiguedad_min: int = Field(ge=0)
     antiguedad_max: Optional[int] = None
     sucursal_id: Optional[UUID] = None

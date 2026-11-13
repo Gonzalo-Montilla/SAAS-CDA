@@ -191,6 +191,8 @@ def _tipo_preventiva_label(vehiculo: VehiculoProceso) -> str:
         if isinstance(datos_tecnicos, dict):
             clase_raw = str(datos_tecnicos.get("clase_vehiculo") or "").strip().lower()
 
+    if "motocarro" in clase_raw:
+        return "MOTOCARRO"
     if "moto" in clase_raw:
         return "MOTOCICLETA"
     if any(token in clase_raw for token in ("camion", "camión", "pesado", "bus", "tracto", "volqueta")):

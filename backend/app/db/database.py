@@ -65,6 +65,7 @@ def ensure_tenant_baseline_schema(db):
                 next_billing_at TIMESTAMP WITHOUT TIME ZONE,
                 last_payment_at TIMESTAMP WITHOUT TIME ZONE,
                 nomina_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                motocarro_enabled BOOLEAN NOT NULL DEFAULT FALSE,
                 sarlaft_enabled BOOLEAN NOT NULL DEFAULT FALSE,
                 sarlaft_mode VARCHAR(20) NOT NULL DEFAULT 'manual',
                 created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL DEFAULT NOW(),
@@ -92,6 +93,29 @@ def ensure_tenant_baseline_schema(db):
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS next_billing_at TIMESTAMP WITHOUT TIME ZONE"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS last_payment_at TIMESTAMP WITHOUT TIME ZONE"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS nomina_enabled BOOLEAN"))
+    db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS motocarro_enabled BOOLEAN"))
+    # Una sola vez: filas NULL (columna recién creada) con tarifas de motocarro nacen encendidas.
+    # No reescribir FALSE en arranques posteriores: el switch SaaS debe poder apagarse.
+    db.execute(
+        text(
+            """
+            DO $$
+            BEGIN
+              IF to_regclass('public.tarifas') IS NOT NULL THEN
+                UPDATE tenants t
+                SET motocarro_enabled = TRUE
+                WHERE t.motocarro_enabled IS NULL
+                  AND EXISTS (
+                    SELECT 1
+                    FROM tarifas tf
+                    WHERE tf.tenant_id = t.id
+                      AND LOWER(TRIM(tf.tipo_vehiculo)) LIKE 'motocarro%'
+                  );
+              END IF;
+            END $$;
+            """
+        )
+    )
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS sarlaft_enabled BOOLEAN"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS sarlaft_mode VARCHAR(20)"))
     db.execute(text("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS documentos_quota_mb INTEGER"))
@@ -110,6 +134,7 @@ def ensure_tenant_baseline_schema(db):
     db.execute(text("UPDATE tenants SET demo_ends_at = COALESCE(demo_ends_at, NOW() + INTERVAL '15 day')"))
     db.execute(text("UPDATE tenants SET billing_cycle_days = COALESCE(billing_cycle_days, 30)"))
     db.execute(text("UPDATE tenants SET nomina_enabled = COALESCE(nomina_enabled, FALSE)"))
+    db.execute(text("UPDATE tenants SET motocarro_enabled = COALESCE(motocarro_enabled, FALSE)"))
     db.execute(text("UPDATE tenants SET sarlaft_enabled = COALESCE(sarlaft_enabled, FALSE)"))
     db.execute(text("UPDATE tenants SET sarlaft_mode = COALESCE(NULLIF(sarlaft_mode, ''), 'manual')"))
     db.execute(text("UPDATE tenants SET pos_receipt_enabled = COALESCE(pos_receipt_enabled, FALSE)"))
@@ -126,6 +151,8 @@ def ensure_tenant_baseline_schema(db):
     db.execute(text("ALTER TABLE tenants ALTER COLUMN sedes_totales SET NOT NULL"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN billing_cycle_days SET NOT NULL"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN nomina_enabled SET NOT NULL"))
+    db.execute(text("ALTER TABLE tenants ALTER COLUMN motocarro_enabled SET DEFAULT FALSE"))
+    db.execute(text("ALTER TABLE tenants ALTER COLUMN motocarro_enabled SET NOT NULL"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN sarlaft_enabled SET NOT NULL"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN sarlaft_mode SET NOT NULL"))
     db.execute(text("ALTER TABLE tenants ALTER COLUMN pos_receipt_enabled SET NOT NULL"))

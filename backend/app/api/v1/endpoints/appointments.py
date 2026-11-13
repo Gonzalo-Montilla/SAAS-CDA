@@ -19,6 +19,7 @@ from app.core.deps import get_active_sucursal_id, get_agendamiento_or_admin, get
 from app.models.appointment import Appointment
 from app.models.sucursal import Sucursal
 from app.models.tenant import Tenant
+from app.services.motocarro_alcance import exigir_motocarro_habilitado
 from app.models.usuario import Usuario
 from app.services.tarifas_resolver import resolver_tarifa_vigente
 from app.services.whatsapp_tenant import enviar_aviso_cita, enviar_aviso_cita_recordatorio
@@ -333,6 +334,8 @@ def _humanize_service(tipo_vehiculo: str) -> str:
         "pesado": "Revisión técnico-mecánica vehículo pesado",
         "pesado_particular": "Revisión técnico-mecánica vehículo pesado particular",
         "pesado_publico": "Revisión técnico-mecánica vehículo pesado público",
+        "motocarro_particular": "Revisión técnico-mecánica motocarro particular",
+        "motocarro_publico": "Revisión técnico-mecánica motocarro público",
         "preventiva": "Servicio preventiva",
         "pruebas_auditoria": "Pruebas de auditoría",
     }
@@ -736,6 +739,7 @@ def book_public_appointment(
     db: Session = Depends(get_db),
 ):
     tenant = _get_tenant_or_404(db, tenant_slug)
+    exigir_motocarro_habilitado(tenant, payload.tipo_vehiculo)
     sede_id = _resolve_public_sucursal_id(db, tenant.id, payload.sucursal_id)
     target_date = _parse_date(payload.fecha)
     target_time = _parse_time(payload.hora)
@@ -866,6 +870,7 @@ def create_internal_appointment(
     tenant = db.query(Tenant).filter(Tenant.id == current_user.tenant_id).first()
     if not tenant:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Tenant no encontrado")
+    exigir_motocarro_habilitado(tenant, payload.tipo_vehiculo)
 
     appointment = Appointment(
         tenant_id=current_user.tenant_id,

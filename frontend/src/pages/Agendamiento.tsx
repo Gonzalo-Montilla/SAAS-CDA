@@ -58,6 +58,7 @@ export default function Agendamiento() {
   const location = useLocation();
   const { user } = useAuth();
   const tenantUser = user && 'tenant_id' in user ? (user as Usuario) : null;
+  const motocarroEnabled = Boolean(tenantUser?.tenant_motocarro_enabled);
   const queryClient = useQueryClient();
   const [fecha, setFecha] = useState(todayIso);
   const [statusFilter, setStatusFilter] = useState('');
@@ -474,6 +475,12 @@ export default function Agendamiento() {
                     <option value="liviano_publico">Liviano público</option>
                     <option value="pesado_particular">Pesado particular</option>
                     <option value="pesado_publico">Pesado público</option>
+                    {motocarroEnabled && (
+                      <>
+                        <option value="motocarro_particular">Motocarro particular</option>
+                        <option value="motocarro_publico">Motocarro público</option>
+                      </>
+                    )}
                     <option value="preventiva">Preventiva</option>
                   </select>
                 </div>

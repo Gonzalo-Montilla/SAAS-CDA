@@ -251,6 +251,7 @@ export default function SaaSBackoffice() {
   const [tenantCoreNominaEnabled, setTenantCoreNominaEnabled] = useState(false);
   const [tenantCoreExogenaEnabled, setTenantCoreExogenaEnabled] = useState(false);
   const [tenantCoreSarlaftEnabled, setTenantCoreSarlaftEnabled] = useState(false);
+  const [tenantCoreMotocarroEnabled, setTenantCoreMotocarroEnabled] = useState(false);
   const [tenantCoreSarlaftMode, setTenantCoreSarlaftMode] = useState<'manual' | 'api'>('manual');
   /** Vacío = default global; "0" = ilimitado; número = MB custom */
   const [tenantCoreDocumentosQuotaMb, setTenantCoreDocumentosQuotaMb] = useState('');
@@ -722,6 +723,7 @@ export default function SaaSBackoffice() {
     setTenantCoreNominaEnabled(Boolean(profile.nomina_enabled));
     setTenantCoreExogenaEnabled(Boolean(profile.exogena_enabled));
     setTenantCoreSarlaftEnabled(Boolean(profile.sarlaft_enabled));
+    setTenantCoreMotocarroEnabled(Boolean(profile.motocarro_enabled));
     setTenantCoreSarlaftMode((profile.sarlaft_mode === 'api' ? 'api' : 'manual') as 'manual' | 'api');
     setTenantCoreDocumentosQuotaMb(
       profile.documentos_quota_mb === null || profile.documentos_quota_mb === undefined
@@ -833,6 +835,7 @@ export default function SaaSBackoffice() {
         nomina_enabled: tenantCoreNominaEnabled,
         exogena_enabled: tenantCoreExogenaEnabled,
         sarlaft_enabled: tenantCoreSarlaftEnabled,
+        motocarro_enabled: tenantCoreMotocarroEnabled,
         sarlaft_mode: tenantCoreSarlaftMode,
       });
     },
@@ -4384,6 +4387,30 @@ export default function SaaSBackoffice() {
                                     />
                                   </button>
                                 </label>
+                                <label className="md:col-span-2 flex items-center justify-between rounded-lg border border-slate-200 bg-white px-3 py-2">
+                                  <div>
+                                    <p className="text-sm font-semibold text-slate-800">Inspección de motocarro</p>
+                                    <p className="text-xs text-slate-500">
+                                      Controla si el CDA inspecciona motocarros (Recepción y formato legal).
+                                    </p>
+                                  </div>
+                                  <button
+                                    type="button"
+                                    role="switch"
+                                    aria-checked={tenantCoreMotocarroEnabled}
+                                    onClick={() => tenantCoreEditMode && setTenantCoreMotocarroEnabled((prev) => !prev)}
+                                    disabled={!tenantCoreEditMode}
+                                    className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition ${
+                                      tenantCoreMotocarroEnabled ? 'bg-emerald-600' : 'bg-slate-300'
+                                    } ${tenantCoreEditMode ? 'cursor-pointer' : 'cursor-not-allowed opacity-60'}`}
+                                  >
+                                    <span
+                                      className={`inline-block h-5 w-5 transform rounded-full bg-white transition ${
+                                        tenantCoreMotocarroEnabled ? 'translate-x-5' : 'translate-x-1'
+                                      }`}
+                                    />
+                                  </button>
+                                </label>
                                 <label className="md:col-span-2 flex flex-col gap-1">
                                   <span className="text-xs font-medium uppercase tracking-wide text-slate-500">Modo SARLAFT</span>
                                   <select
@@ -4430,6 +4457,7 @@ export default function SaaSBackoffice() {
                                           setTenantCoreNominaEnabled(Boolean(profile.nomina_enabled));
                                           setTenantCoreExogenaEnabled(Boolean(profile.exogena_enabled));
                                           setTenantCoreSarlaftEnabled(Boolean(profile.sarlaft_enabled));
+                                          setTenantCoreMotocarroEnabled(Boolean(profile.motocarro_enabled));
                                           setTenantCoreSarlaftMode((profile.sarlaft_mode === 'api' ? 'api' : 'manual') as 'manual' | 'api');
                                         }
                                         setTenantCoreError('');
@@ -4512,6 +4540,18 @@ export default function SaaSBackoffice() {
                                   <p className="text-[11px] text-slate-500">
                                     Modo: {(tenantProfileQuery.data.sarlaft_mode || 'manual').toUpperCase()}
                                   </p>
+                                </div>
+                                <div className="space-y-1.5">
+                                  <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Motocarro</p>
+                                  <span
+                                    className={`inline-flex rounded-full px-2.5 py-1 text-xs font-semibold ${
+                                      tenantProfileQuery.data.motocarro_enabled
+                                        ? 'border border-emerald-200 bg-emerald-50 text-emerald-800'
+                                        : 'border border-amber-200 bg-amber-50 text-amber-800'
+                                    }`}
+                                  >
+                                    {tenantProfileQuery.data.motocarro_enabled ? 'Inspecciona' : 'No inspecciona'}
+                                  </span>
                                 </div>
                                 <div className="space-y-1">
                                   <p className="text-[11px] font-medium uppercase tracking-wide text-slate-500">Sucursales totales</p>

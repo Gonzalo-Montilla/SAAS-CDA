@@ -283,6 +283,8 @@ function TarifasRTM({
                     liviano_publico: 'Liviano Público',
                     pesado_particular: 'Pesado Particular',
                     pesado_publico: 'Pesado Público',
+                    motocarro_particular: 'Motocarro Particular',
+                    motocarro_publico: 'Motocarro Público',
                     pruebas_auditoria: 'Pruebas de Auditoría',
                   }[tarifa.tipo_vehiculo] || tarifa.tipo_vehiculo;
 
@@ -546,6 +548,8 @@ function ModalTarifa({
                 <option value="liviano_publico">Liviano Público</option>
                 <option value="pesado_particular">Pesado Particular</option>
                 <option value="pesado_publico">Pesado Público</option>
+                <option value="motocarro_particular">Motocarro Particular</option>
+                <option value="motocarro_publico">Motocarro Público</option>
                 <option value="pruebas_auditoria">Pruebas de Auditoría</option>
               </select>
             </div>

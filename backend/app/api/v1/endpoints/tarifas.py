@@ -13,6 +13,8 @@ from app.core.deps import get_db, get_current_user, get_contador_or_admin
 from app.core.sucursal_scope import assert_sucursal_in_tenant, assert_user_may_operate_sucursal
 from app.models.usuario import Usuario, RolEnum
 from app.models.tarifa import Tarifa, ComisionSOAT
+from app.models.tenant import Tenant
+from app.services.motocarro_alcance import activar_motocarro_en_tenant, es_tipo_motocarro
 from app.schemas.tarifa import (
     TarifaCreate,
     TarifaUpdate,
@@ -212,6 +214,9 @@ def crear_tarifa(
     )
     
     db.add(nueva_tarifa)
+    if es_tipo_motocarro(tarifa_data.tipo_vehiculo):
+        tenant = db.query(Tenant).filter(Tenant.id == admin.tenant_id).first()
+        activar_motocarro_en_tenant(tenant)
     db.commit()
     db.refresh(nueva_tarifa)
     

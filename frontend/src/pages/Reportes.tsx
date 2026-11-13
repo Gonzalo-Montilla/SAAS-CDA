@@ -18,6 +18,7 @@ import { useBrand } from '../contexts/BrandContext';
 import { useToast } from '../contexts/ToastContext';
 import type { Usuario } from '../types';
 import { formatCOP } from '../utils/formatNumber';
+import { etiquetaTipoVehiculo } from '../utils/formatTipoVehiculo';
 import {
   addCalendarDaysYmd,
   addCalendarMonthsYmd,
@@ -2997,7 +2998,7 @@ export default function ReportesPage() {
                     <td className="px-3 py-2">{t.hora_registro}</td>
                     <td className="px-3 py-2 text-slate-600">{t.sede ?? '—'}</td>
                     <td className="px-3 py-2 font-mono">{t.placa}</td>
-                    <td className="px-3 py-2">{t.tipo_vehiculo}</td>
+                    <td className="px-3 py-2">{etiquetaTipoVehiculo(t.tipo_vehiculo)}</td>
                     <td className="px-3 py-2">{t.cliente}</td>
                     <td className="px-3 py-2">{t.documento}</td>
                     <td className="px-3 py-2 text-right">{formatCOP(t.valor_rtm)}</td>

@@ -648,6 +648,8 @@ def _humanize_service(tipo_vehiculo: str) -> str:
         "liviano_particular": "Revisión técnico-mecánica vehículo liviano particular",
         "liviano_publico": "Revisión técnico-mecánica vehículo liviano público",
         "pesado": "Revisión técnico-mecánica vehículo pesado",
+        "motocarro_particular": "Revisión técnico-mecánica motocarro particular",
+        "motocarro_publico": "Revisión técnico-mecánica motocarro público",
         "preventiva": "Servicio preventiva",
     }
     return mapping.get(normalized, normalized.replace("_", " ").title() or "Revisión técnico-mecánica")

@@ -79,6 +79,8 @@ export interface Usuario {
   tenant_exogena_enabled?: boolean;
   /** Switch por tenant para habilitar o bloquear SARLAFT. */
   tenant_sarlaft_enabled?: boolean;
+  /** Switch por tenant: el CDA inspecciona motocarros. */
+  tenant_motocarro_enabled?: boolean;
 }
 
 export interface SaaSUser {
@@ -117,6 +119,7 @@ export interface SaaSTenantSummary {
   nomina_enabled: boolean;
   exogena_enabled: boolean;
   sarlaft_enabled: boolean;
+  motocarro_enabled?: boolean;
   sarlaft_mode: 'manual' | 'api' | string;
   /** null = default global; 0 = ilimitado; >0 = MB de este CDA */
   documentos_quota_mb?: number | null;

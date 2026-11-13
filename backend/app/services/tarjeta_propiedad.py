@@ -13,6 +13,8 @@ TIPOS_FISICOS = {
     "liviano_publico",
     "pesado_particular",
     "pesado_publico",
+    "motocarro_particular",
+    "motocarro_publico",
 }
 
 
@@ -75,6 +77,9 @@ def sugerir_tipo_vehiculo(clase: str | None, servicio: str | None) -> str | None
     if "PREVENTIVA" in clase_u or "PREVENTIVA" in servicio_u:
         return None
     publico = "PUBLIC" in servicio_u
+    # MOTOCARRO contiene "MOTO"; detectarlo antes de motocicleta.
+    if "MOTOCARRO" in clase_u:
+        return "motocarro_publico" if publico else "motocarro_particular"
     if "MOTO" in clase_u:
         return "moto"
     # CAMIONETA contiene "CAMION"; tratarla como liviano antes del pesado.

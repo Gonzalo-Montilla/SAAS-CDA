@@ -21,6 +21,7 @@ from app.models.whatsapp import (
     TenantWhatsAppMensaje,
     TenantWhatsAppSettings,
 )
+from app.services.motocarro_alcance import es_tipo_motocarro, tenant_inspecciona_motocarro
 from app.services.tarifas_resolver import resolver_tarifa_vigente
 from app.services.whatsapp_tenant import _cda, _enviar_con_row, creds_listas, enlace_agendar_publico
 from app.utils.nombres import formatear_nombre_comercial
@@ -313,7 +314,9 @@ def clasificar_intencion(texto: str, last_intent: str | None = None) -> str:
 def extraer_tipo_y_ano(texto: str) -> tuple[str | None, int | None]:
     t = (texto or "").lower()
     tipo = None
-    if "moto" in t or "motocicleta" in t:
+    if "motocarro" in t:
+        tipo = "motocarro_publico" if "público" in t or "publico" in t else "motocarro_particular"
+    elif "moto" in t or "motocicleta" in t:
         tipo = "moto"
     elif "pesado" in t or "camion" in t or "camión" in t:
         tipo = "pesado_publico" if "público" in t or "publico" in t else "pesado_particular"
@@ -467,6 +470,11 @@ def _texto_precio(db: Session, tenant: Tenant, texto: str, url: str) -> str:
             f"Con gusto. Para decirle el valor en {nombre} le pido el tipo de vehículo "
             f"(moto, liviano o pesado, particular o público) y el año modelo. "
             f"Es aproximado y se confirma en caja. También puede verlo al agendar: {url}"
+        )
+    if es_tipo_motocarro(tipo) and not tenant_inspecciona_motocarro(tenant):
+        return (
+            f"En {nombre} no tengo esa tarifa a la mano para ese tipo y año. "
+            f"Agende aquí y en caja se lo confirman: {url}"
         )
     tarifa = resolver_tarifa_vigente(
         db,

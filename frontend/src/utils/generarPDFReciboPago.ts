@@ -1,6 +1,7 @@
 import { jsPDF } from 'jspdf';
 import { cargarLogoCDAConDimensiones } from './logoBase64';
 import { formatCOP } from './formatNumber';
+import { etiquetaTipoVehiculoMayus } from './formatTipoVehiculo';
 
 interface DatosReciboPagoPDF {
   placa: string;
@@ -109,7 +110,7 @@ export async function generarPDFReciboPagoParaEnvio(datos: DatosReciboPagoPDF): 
   doc.setFontSize(10);
   doc.setFont('helvetica', 'normal');
   y = addText(`Placa: ${datos.placa}`, leftMargin, y, { fontSize: 12, bold: true });
-  y = addText(`Tipo: ${datos.tipoVehiculo.toUpperCase()}`, leftMargin, y);
+  y = addText(`Tipo: ${etiquetaTipoVehiculoMayus(datos.tipoVehiculo)}`, leftMargin, y);
   
   if (datos.marca) {
     y = addText(`Marca: ${datos.marca}`, leftMargin, y);

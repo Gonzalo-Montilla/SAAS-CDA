@@ -48,6 +48,7 @@ export async function patchSaasTenantCoreData(
     nomina_enabled?: boolean | null;
     exogena_enabled?: boolean | null;
     sarlaft_enabled?: boolean | null;
+    motocarro_enabled?: boolean | null;
     sarlaft_mode?: 'manual' | 'api' | null;
     /** null = volver al default global; 0 = ilimitado; >0 = MB custom */
     documentos_quota_mb?: number | null;

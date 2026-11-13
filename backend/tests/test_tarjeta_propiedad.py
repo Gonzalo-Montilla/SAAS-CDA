@@ -19,10 +19,13 @@ def test_placa_y_tipo_desde_clase():
     assert normalizar_placa("vqw-06g") == "VQW06G"
     assert normalizar_placa("AB") is None
     assert sugerir_tipo_vehiculo("MOTOCICLETA", "PARTICULAR") == "moto"
+    assert sugerir_tipo_vehiculo("MOTOCARRO", "PARTICULAR") == "motocarro_particular"
+    assert sugerir_tipo_vehiculo("MOTOCARRO DE CARGA", "PUBLICO") == "motocarro_publico"
     assert sugerir_tipo_vehiculo("AUTOMOVIL", "PARTICULAR") == "liviano_particular"
     assert sugerir_tipo_vehiculo("CAMIONETA", "PUBLICO") == "liviano_publico"
     assert sugerir_tipo_vehiculo("CAMION", "PARTICULAR") == "pesado_particular"
     assert sugerir_tipo_vehiculo("preventiva", "PARTICULAR") is None
+    assert normalizar_placa("106AIQ") == "106AIQ"
 
 
 def test_normalizar_lectura_yamaha_fixture():

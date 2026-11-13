@@ -107,6 +107,9 @@ def _suggest_tipo_vehiculo(clasificacion: str | None, tipo_servicio: str | None)
     clase = (clasificacion or "").upper()
     servicio = (tipo_servicio or "").upper()
 
+    if "MOTOCARRO" in clase:
+        is_public = "PUBLIC" in servicio or "PÚBLIC" in servicio
+        return ("motocarro_publico" if is_public else "motocarro_particular"), "high"
     if "MOTO" in clase:
         return "moto", "high"
 

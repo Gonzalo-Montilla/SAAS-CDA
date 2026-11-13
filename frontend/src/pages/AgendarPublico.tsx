@@ -12,6 +12,7 @@ type PublicBranding = {
   logo_url?: string | null;
   color_primario?: string;
   color_secundario?: string;
+  motocarro_enabled?: boolean;
 };
 
 const todayIso = new Date().toISOString().slice(0, 10);
@@ -325,6 +326,12 @@ export default function AgendarPublico() {
                       <option value="liviano_publico">Liviano público</option>
                       <option value="pesado_particular">Pesado particular</option>
                       <option value="pesado_publico">Pesado público</option>
+                      {Boolean(brandingQuery.data?.motocarro_enabled) && (
+                        <>
+                          <option value="motocarro_particular">Motocarro particular</option>
+                          <option value="motocarro_publico">Motocarro público</option>
+                        </>
+                      )}
                       <option value="preventiva">Preventiva</option>
                     </select>
                   </div>

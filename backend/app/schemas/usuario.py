@@ -94,6 +94,10 @@ class UsuarioResponse(BaseModel):
         default=False,
         description="Indica si el módulo SARLAFT está habilitado para el tenant.",
     )
+    tenant_motocarro_enabled: bool = Field(
+        default=False,
+        description="Indica si el CDA inspecciona motocarros (alcance RTM).",
+    )
 
     model_config = ConfigDict(from_attributes=True)
 
